@@ -1,0 +1,75 @@
+﻿@page "/application"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Client.Pages.Application.SystemVariables
+@using Hamstix.Haby.Shared
+@using Hamstix.Haby.Shared.Api.WebUi.v1.RegistryStatuses
+@using System.Text.Json.Nodes
+@inject HttpClient Http
+
+<PageTitle>Application</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+@if (_status == null)
+{
+    <p>Loading ...</p>
+}
+else
+{
+    <h3>Registry status: <b>@_status.Status</b></h3>
+    @if (_status.Status == RegStatuses.Error)
+    {
+        <p>Error: <i>@_status.Message</i></p>
+    }
+    <h4>Registry info</h4>
+    <p>
+        <span>Version: @_status.Version</span>
+        <span>Public Api Version: @_status.ApiVersion</span>
+        <span>Db schema initialized: @_status.DbSchemaInitialized</span>
+        <span>Environment: @_status.Environment</span>
+    </p>
+
+    @if (_status.Status == RegStatuses.NotInitialized
+      || _status.Status == RegStatuses.Error)
+    {
+        <button class="btn btn-primary" @onclick="InitializeRegistry">Initialize</button>
+    }
+
+    <SystemVariablesComponent></SystemVariablesComponent>
+
+    <AlertComponent @ref="_alertComponent"></AlertComponent>
+}
+
+@code {
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Application", true)
+        };
+
+    RegStatusViewModel? _status;
+
+    AlertComponent _alertComponent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _status = await Http.GetFromJsonAsync<RegStatusViewModel>(
+            "api/webui/haby/v1/status");
+    }
+
+    async Task InitializeRegistry()
+    {
+        var response = await Http.PostAsJsonAsync<object>("api/webui/haby/v1/initialize", new object());
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadFromJsonAsync<JsonObject>();
+            var message = error?["message"]?.GetValue<string>() ?? string.Empty;
+            _alertComponent.SetError(message);
+            return;
+        }
+        _status = await response.Content.ReadFromJsonAsync<RegStatusViewModel>();
+
+        _alertComponent.ResetStatus();
+    }
+}

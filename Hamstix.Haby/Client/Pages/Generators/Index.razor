@@ -1,0 +1,71 @@
+﻿@page "/generators"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Generators
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
+@inject HttpClient Http
+
+<PageTitle>Generators</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+<NavLink class="btn" href="generators/add">
+    <span class="oi oi-plus"></span>
+</NavLink>
+
+@if (_generators == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Options</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var generator in _generators.OrderBy(x => x.Name))
+            {
+                <tr>
+                    <td>
+                        <NavLink href=@($"generators/{generator.Id}")>@generator.Name</NavLink>
+                    </td>
+                    <td>@generator.Description</td>
+                    <td>
+                        <button class="btn"
+                        @onclick="@(() => RemoveGenerator(generator))"
+                        @onclick:preventDefault="true">
+                            <span class="oi oi-trash"></span>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    List<GeneratorPreviewViewModel>? _generators;
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Generators", true)
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _generators = await Http.GetFromJsonAsync<List<GeneratorPreviewViewModel>>(
+          "api/webui/haby/v1/generators");
+    }
+
+    async Task RemoveGenerator(GeneratorPreviewViewModel generator)
+    {
+        await Http.DeleteAsync($"api/webui/haby/v1/generators/{generator.Id}");
+        _generators?.Remove(generator);
+    }
+}

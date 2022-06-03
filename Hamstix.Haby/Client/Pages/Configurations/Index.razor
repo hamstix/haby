@@ -1,0 +1,55 @@
+﻿@page "/configurations"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Keys
+@inject HttpClient Http
+
+<PageTitle>Configurations</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+@if (_configuratoinUnits == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var cu in _configuratoinUnits.OrderBy(x => x.Name))
+            {
+                <tr>
+                    <td>
+                        <NavLink href=@($"configurations/{cu.Name}/keys")>@cu.Name</NavLink>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    ConfigurationUnitPreviewViewModel[]? _configuratoinUnits;
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Configurations", true)
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadCrumbs = new()
+            {
+                new BreadCrumbItem("Configurations", true)
+            };
+
+        _configuratoinUnits = await Http.GetFromJsonAsync<ConfigurationUnitPreviewViewModel[]>(
+          $"api/webui/haby/v1/configuration");
+    }
+}

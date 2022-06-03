@@ -1,0 +1,36 @@
+﻿@using Hamstix.Haby.Client.Models
+@if (_status != MessageStatuses.None)
+{
+    <div class="alert alert-@(_status == MessageStatuses.Success ? "success" : "danger")" role="alert">
+        @_message
+    </div>
+}
+
+@code {
+    MessageStatuses _status { get; set; } = MessageStatuses.None;
+    string _message { get; set; } = string.Empty;
+
+    public void SetStatus(MessageStatuses status, string message)
+    {
+        _status = status;
+        _message = message;
+    }
+
+    public void SetError(string message)
+    {
+        _status = MessageStatuses.Error;
+        _message = message;
+    }
+
+    public void SetSuccess(string message)
+    {
+        _status = MessageStatuses.Success;
+        _message = message;
+    }
+
+    public void ResetStatus()
+    {
+        _status = MessageStatuses.None;
+        _message = string.Empty;
+    }
+}

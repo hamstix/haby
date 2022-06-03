@@ -1,0 +1,74 @@
+﻿@page "/generators/add"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Components.Toast
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Generators
+@using System.Text.Json.Nodes
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+@inject ToastService ToastService
+
+<PageTitle>Add new Generator</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+<h1>Add new Generator</h1>
+
+
+<EditForm Model="@_postModel" OnValidSubmit="@HandleValidSubmit">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <div class="mb-3">
+        <label for="name" class="form-label">Name</label>
+        <InputText class="form-control" id="name" @bind-Value="_postModel.Name" />
+    </div>
+    <div class="mb-3">
+        <label for="template" class="form-label">Json Template</label>
+        <InputText class="form-control" id="template" @bind-Value="_postModel.Template" />
+    </div>
+    <div class="mb-3">
+        <label for="description" class="form-label">Description</label>
+        <InputTextArea class="form-control" id="description" @bind-Value="_postModel.Description" cols=60 rows=5 />
+    </div>
+
+    <button class="btn btn-primary" type="submit">Create</button>
+</EditForm>
+
+<AlertComponent @ref="_alertComponent"></AlertComponent>
+
+@code {
+    GeneratorPostViewModel _postModel = new();
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Generators", false, "/generators"),
+            new BreadCrumbItem("Create new generator", true),
+        };
+
+    AlertComponent _alertComponent;
+
+    async Task HandleValidSubmit()
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/webui/haby/v1/generators", _postModel);
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await response.Content.ReadFromJsonAsync<JsonObject>();
+                var message = error["message"]?.GetValue<string>() ?? string.Empty;
+                _alertComponent.SetError(message);
+                return;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<GeneratorViewModel>();
+            _alertComponent.ResetStatus();
+
+            if (result is not null)
+                NavigationManager.NavigateTo($"generators/{result.Id}");
+        }
+        catch (Exception e)
+        {
+            _alertComponent.SetError(e.Message);
+        }
+    }
+}

@@ -1,0 +1,108 @@
+﻿@page "/configurations/{ConfigurationUnitName}/keys/{Key}/edit"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Keys
+@using System.Text.Json.Nodes
+@inject HttpClient Http
+
+<PageTitle>Configurations</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+@if (_putModel == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <EditForm Model="@_putModel" OnValidSubmit="@Save">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label for="configuration" class="form-label">Configuration</label>
+            <InputTextArea class="form-control" id="configuration" @bind-Value="_putModel.Configuration" cols=60 rows=5 />
+        </div>
+
+        <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn btn-danger" type="button" @onclick="Cancel">Cancel</button>
+        <button class="btn btn-danger" type="button" @onclick="Regenerate">Regenerate</button>
+    </EditForm>
+}
+
+<AlertComponent @ref="_alertComponent"></AlertComponent>
+
+@code {
+    [Parameter]
+    public string ConfigurationUnitName { get; set; }
+
+    [Parameter]
+    public string Key { get; set; }
+
+    ConfigurationCodeViewModel? _originalStruct;
+    ConfigurationCodePutViewModel? _putModel;
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Configurations", false),
+            new BreadCrumbItem(string.Empty, false),
+            new BreadCrumbItem(string.Empty, false)
+        };
+
+    AlertComponent _alertComponent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadCrumbs = new()
+            {
+                new BreadCrumbItem("Configurations", false),
+                new BreadCrumbItem(ConfigurationUnitName, false),
+                new BreadCrumbItem(Key, true)
+            };
+
+        _originalStruct = await Http.GetFromJsonAsync<ConfigurationCodeViewModel>(
+          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config");
+        _putModel = CreatePutModel(_originalStruct);
+    }
+
+    async Task Save()
+    {
+        var response = await Http.PutAsJsonAsync(
+          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config",
+          _putModel);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadFromJsonAsync<JsonObject>();
+            var message = error["message"]?.GetValue<string>() ?? string.Empty;
+            _alertComponent.SetError(message);
+            return;
+        }
+        var result = await response.Content.ReadFromJsonAsync<ConfigurationCodeViewModel>();
+        _originalStruct = result;
+
+        _putModel = CreatePutModel(result);
+        _alertComponent.ResetStatus();
+    }
+
+    void Cancel()
+    {
+        _putModel = CreatePutModel(_originalStruct);
+    }
+
+    async Task Regenerate()
+    {
+        await Http.DeleteAsync(
+          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config");
+
+        _originalStruct = await Http.GetFromJsonAsync<ConfigurationCodeViewModel>(
+            $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config");
+
+        _putModel = CreatePutModel(_originalStruct);
+    }
+
+    ConfigurationCodePutViewModel CreatePutModel(ConfigurationCodeViewModel service) =>
+    new()
+        {
+            Configuration = service.Configuration.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
+        };
+}

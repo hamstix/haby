@@ -1,0 +1,68 @@
+﻿@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits.Variables
+@using System.Text.Json.Nodes
+@inject HttpClient Http
+
+<h4>Saved variables</h4>
+
+@if (_variables == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Key</th>
+                <th>Service</th>
+                <th>Name</th>
+                <th>Value</th>
+                <th>Options</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var variable in _variables.OrderBy(x => x.Key).ThenBy(x => x.Service.Name).ThenBy(x => x.Name))
+            {
+                <tr>
+                    <td>@variable.Key</td>
+                    <td>@variable.Service.Name</td>
+                    <td>@variable.Name</td>
+                    <td>@variable.Value.ToJsonString()</td>
+                    <td><button class="btn" @onclick="@(() => RemoveConstraint(variable))" @onclick:preventDefault="true"><span class="oi oi-trash"></span></button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter]
+    public long СuId { get; set; }
+
+    List<ConfigurationUnitVariableViewModel>? _variables;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadVariables();
+    }
+
+    public async Task Refresh()
+    {
+        await LoadVariables();
+        StateHasChanged();
+    }
+
+    async Task LoadVariables()
+    {
+        _variables = await Http.GetFromJsonAsync<List<ConfigurationUnitVariableViewModel>>(
+          $"api/webui/haby/v1/configuration-units/{СuId}/variables");
+    }
+
+    async Task RemoveConstraint(ConfigurationUnitVariableViewModel variable)
+    {
+        await Http.DeleteAsync($"api/webui/haby/v1/configuration-units/{СuId}/variables?name={variable.Name}&key={variable.Key}&serviceId={variable.Service.Id}");
+        _variables?.Remove(variable);
+    }
+}

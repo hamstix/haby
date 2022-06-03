@@ -1,0 +1,81 @@
+﻿@page "/configuration-units"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
+@inject HttpClient Http
+
+<PageTitle>Services</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+<NavLink class="btn" href="configuration-units/add">
+    <span class="oi oi-plus"></span>
+</NavLink>
+
+@if (_configurationUnits == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Version</th>
+                <th>Template</th>
+                <th>Options</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var cu in _configurationUnits.OrderBy(x => x.Name))
+            {
+                <tr>
+                    <td>
+                        <NavLink href=@($"configuration-units/{cu.Id}")>@cu.Name</NavLink>
+                    </td>
+                    <td>@cu.Version</td>
+                    <td>@CutString(cu.Template.ToJsonString())</td>
+                    <td>
+                        <button class="btn"
+                        @onclick="@(() => RemoveCu(cu))"
+                        @onclick:preventDefault="true">
+                            <span class="oi oi-trash"></span>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    List<ConfigurationUnitPreviewViewModel>? _configurationUnits;
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Configuration units", true)
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _configurationUnits = await Http.GetFromJsonAsync<List<ConfigurationUnitPreviewViewModel>>(
+          "api/webui/haby/v1/configuration-units");
+    }
+
+    public string CutString(string value)
+    {
+        const int maxLength = 20;
+        if (value.Length <= maxLength)
+            return value;
+
+        return value.Substring(0, maxLength);
+    }
+
+    async Task RemoveCu(ConfigurationUnitPreviewViewModel cu)
+    {
+        await Http.DeleteAsync($"api/webui/haby/v1/configuration-units/{cu.Id}");
+        _configurationUnits?.Remove(cu);
+    }
+}

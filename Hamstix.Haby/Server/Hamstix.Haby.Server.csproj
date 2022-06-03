@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Fluid.Core" Version="2.2.15" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="6.0.5" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="6.0.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Monq.Core.MvcExtensions" Version="3.1.0" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="6.0.4" />
+    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="11.0.0" />
+    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" Version="6.2.0" />
+    <PackageReference Include="Monq.Core.HttpClientExtensions" Version="5.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Client\Hamstix.Haby.Client.csproj" />
+    <ProjectReference Include="..\PluginsCore\Hamstix.Haby.Shared.PluginsCore.csproj" />
+    <ProjectReference Include="..\Plugins\PostgreSql12\Hamstix.Haby.Plugins.PostgreSql12.csproj" />
+    <ProjectReference Include="..\Shared\Hamstix.Haby.Shared.csproj" />
+  </ItemGroup>
+
+
+</Project>

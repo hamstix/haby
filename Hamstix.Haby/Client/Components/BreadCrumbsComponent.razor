@@ -1,0 +1,24 @@
+﻿@using Hamstix.Haby.Client.Models
+
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        @foreach (var item in BreadCrumbs)
+        {
+            @if (string.IsNullOrEmpty(item.Uri))
+            {
+                <li class="breadcrumb-item@(item.IsActive ? " active": " ")" aria-current="page">@item.Name</li>
+            }
+            else
+            {
+                 <li class="breadcrumb-item@(item.IsActive ? " active": " ")" aria-current="page">
+                     <NavLink href="@item.Uri">@item.Name</NavLink>
+                 </li>
+            }
+        }
+    </ol>
+</nav>
+
+@code {
+    [Parameter]
+    public IEnumerable<BreadCrumbItem> BreadCrumbs { get; set; } = Enumerable.Empty<Hamstix.Haby.Client.Models.BreadCrumbItem>();
+}

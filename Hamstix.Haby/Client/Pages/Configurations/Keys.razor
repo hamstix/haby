@@ -1,0 +1,59 @@
+﻿@page "/configurations/{ConfigurationUnitName}/keys"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Keys
+@inject HttpClient Http
+
+<PageTitle>Configurations</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+@if (_keys == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var key in _keys.OrderBy(x => x.Name))
+            {
+                <tr>
+                    <td>
+                        <NavLink href=@($"configurations/{ConfigurationUnitName}/keys/{key.Name}/edit")>@key.Name</NavLink>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter]
+    public string ConfigurationUnitName { get; set; }
+
+    ConfigurationKeyPreviewViewModel[]? _keys;
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Configurations", false),
+            new BreadCrumbItem(string.Empty, false)
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadCrumbs = new()
+            {
+                new BreadCrumbItem("Configurations", false),
+                new BreadCrumbItem(ConfigurationUnitName, true)
+            };
+
+        _keys = await Http.GetFromJsonAsync<Hamstix.Haby.Shared.Api.WebUi.v1.Keys.ConfigurationKeyPreviewViewModel[]>(
+          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys");
+    }
+}

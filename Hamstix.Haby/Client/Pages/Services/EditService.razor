@@ -1,0 +1,113 @@
+﻿@page "/services/{id:long}"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Plugins
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
+@using System.Text.Json.Nodes
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+
+<PageTitle>Edit Service "@_originalStruct?.Name"</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+@if (_putModel == null || _plugins == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <h1>Edit Service "@_originalStruct.Name"</h1>
+
+    <EditForm Model="@_putModel" OnValidSubmit="@Save">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label for="name" class="form-label">Name</label>
+            <InputText class="form-control" id="name" @bind-Value="_putModel.Name" />
+        </div>
+        <div class="mb-3">
+            <label for="pluginId" class="form-label">Registered Plugin</label>
+            <InputSelect class="form-select" id="pluginId" @bind-Value="_putModel.PluginName">
+                <option value="@AppConstants.NonePluginSelected">@AppConstants.NonePluginSelected</option>
+                @foreach (var plugin in _plugins)
+                {
+                <option value="@plugin.Name">@plugin.Name</option>
+                }
+        </InputSelect>
+    </div>
+    <div class="mb-3">
+        <label for="jsonConfig" class="form-label">Json Config</label>
+        <InputTextArea class="form-control" id="jsonConfig" @bind-Value="_putModel.JsonConfig" cols=60 rows=5 />
+    </div>
+    <div class="mb-3">
+        <label for="template" class="form-label">Template</label>
+        <InputTextArea class="form-control" id="template" @bind-Value="_putModel.Template" cols=60 rows=5 />
+    </div>
+
+    <button class="btn btn-primary" type="submit">Save</button>
+    <button class="btn btn-danger" type="button" @onclick="Cancel">Cancel</button>
+</EditForm>
+
+    <AlertComponent @ref="_alertComponent"></AlertComponent>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    PluginPreviewViewModel[]? _plugins;
+    ServiceViewModel? _originalStruct;
+    ServicePutViewModel? _putModel;
+
+    List<BreadCrumbItem> _breadCrumbs = new();
+
+    AlertComponent _alertComponent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _plugins = await Http.GetFromJsonAsync<Hamstix.Haby.Shared.Api.WebUi.v1.Plugins.PluginPreviewViewModel[]>("api/webui/haby/v1/plugins");
+        _originalStruct = await Http.GetFromJsonAsync<ServiceViewModel>($"api/webui/haby/v1/services/{Id}");
+        _putModel = CreatePutModel(_originalStruct);
+
+        _breadCrumbs = new()
+            {
+                new BreadCrumbItem("Services", false, "/services"),
+                new BreadCrumbItem(_originalStruct.Name, true),
+            };
+    }
+
+    async Task Save()
+    {
+        if (_putModel.PluginName == AppConstants.NonePluginSelected)
+            _putModel.PluginName = null;
+        var response = await Http.PutAsJsonAsync($"api/webui/haby/v1/services/{Id}", _putModel);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadFromJsonAsync<JsonObject>();
+            var message = error?["message"]?.GetValue<string>() ?? string.Empty;
+            _alertComponent.SetError(message);
+            return;
+        }
+        var result = await response.Content.ReadFromJsonAsync<ServiceViewModel>();
+        _originalStruct = result;
+
+        _putModel = CreatePutModel(result);
+        _alertComponent.ResetStatus();
+    }
+
+    void Cancel()
+    {
+        _putModel = CreatePutModel(_originalStruct);
+    }
+
+        ServicePutViewModel CreatePutModel(ServiceViewModel service) =>
+        new()
+            {
+                Name = service.Name,
+                JsonConfig = service.JsonConfig.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
+                Template = service.Template,
+                PluginName = service.Plugin?.Name ?? "None"
+            };
+}

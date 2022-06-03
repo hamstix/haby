@@ -1,0 +1,76 @@
+﻿@page "/configuration-units/add"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Components.Toast
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Plugins
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
+@using System.Text.Json.Nodes
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+@inject ToastService ToastService
+
+<PageTitle>Add new Service</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+<h1>Add new Configuration unit</h1>
+
+
+<EditForm Model="@_postModel" OnValidSubmit="@HandleValidSubmit">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <div class="mb-3">
+        <label for="name" class="form-label">Name</label>
+        <InputText class="form-control" id="name" @bind-Value="_postModel.Name" />
+    </div>
+    <div class="mb-3">
+        <label for="version" class="form-label">Version</label>
+        <InputText class="form-control" id="version" @bind-Value="_postModel.Version" />
+    </div>
+    <div class="mb-3">
+        <label for="template" class="form-label">Json Template</label>
+        <InputTextArea class="form-control" id="template" @bind-Value="_postModel.Template" cols=60 rows=5 />
+    </div>
+
+    <button class="btn btn-primary" type="submit">Create</button>
+</EditForm>
+
+<AlertComponent @ref="_alertComponent"></AlertComponent>
+
+@code {
+    ConfigurationUnitPostViewModel _postModel = new();
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Configuration units", false, "/configuration-units"),
+            new BreadCrumbItem("Create new configuration unit", true),
+        };
+
+    AlertComponent _alertComponent;
+
+    async Task HandleValidSubmit()
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/webui/haby/v1/configuration-units", _postModel);
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await response.Content.ReadFromJsonAsync<JsonObject>();
+                var message = error["message"]?.GetValue<string>() ?? string.Empty;
+                _alertComponent.SetError(message);
+                return;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<ConfigurationUnitViewModel>();
+            _alertComponent.ResetStatus();
+
+            if (result is not null)
+                NavigationManager.NavigateTo($"configuration-units/{result.Id}");
+        }
+        catch (Exception e)
+        {
+            _alertComponent.SetError(e.Message);
+        }
+    }
+}

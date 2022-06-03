@@ -1,0 +1,79 @@
+﻿@page "/services"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
+@inject HttpClient Http
+
+<PageTitle>Services</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+<NavLink class="btn" href="services/add">
+    <span class="oi oi-plus"></span>
+</NavLink>
+
+@if (_services == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Plugin</th>
+                <th>Json config</th>
+                <th>Options</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var service in _services.OrderBy(x => x.Name))
+            {
+                <tr>
+                    <td>
+                        <NavLink href=@($"services/{service.Id}")>@service.Name</NavLink>
+                    </td>
+                    <td>@(service.Plugin?.Name ?? AppConstants.NonePluginSelected)</td>
+                    <td>@CutString(service.JsonConfig.ToJsonString())</td>
+                    <td>
+                        <button class="btn"
+                        @onclick="@(() => RemoveService(service))"
+                        @onclick:preventDefault="true">
+                            <span class="oi oi-trash"></span>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    List<ServicePreviewViewModel>? _services;
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Services", true)
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _services = await Http.GetFromJsonAsync<List<ServicePreviewViewModel>>("api/webui/haby/v1/services");
+    }
+
+    public string CutString(string value)
+    {
+        const int maxLength = 20;
+        if (value.Length <= maxLength)
+            return value;
+
+        return value.Substring(0, maxLength);
+    }
+
+    async Task RemoveService(ServicePreviewViewModel service)
+    {
+        await Http.DeleteAsync($"api/webui/haby/v1/services/{service.Id}");
+        _services?.Remove(service);
+    }
+}

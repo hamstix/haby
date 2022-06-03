@@ -1,0 +1,15 @@
+﻿@using Hamstix.Haby.Client.Components.Toast
+@inherits LayoutComponentBase
+
+<div class="page">
+    <ToastBase></ToastBase>
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
