@@ -44,7 +44,7 @@ Template example:
 
 ### Configure Configuration Unit (CU)
 
-Json temaplate example:
+Json template example:
 ```json
 [
   {
@@ -82,9 +82,9 @@ In a specified input string, replaces all strings that match a specified regular
 - [generator template]
 
 ##### Parameters
-*input*: The string to search for a match.
-*pattern*: The regular expression pattern to match.
-*replacement*: The replacement string.
+- *input*: The string to search for a match.
+- *pattern*: The regular expression pattern to match.
+- *replacement*: The replacement string.
 
 ##### Example
 ```
@@ -102,12 +102,12 @@ Generates random password string.
 - [generator template]
 
 ##### Parameters
-*requiredLength*: The required password length.
-*requiredUniqueChars*: The required unique chars count in the result password.
-*requireDigit*: If set to *true* digits will be used in password.
-*requireNonAlphanumeric*: If set to *true* the password will include non alphanumeric symbols.
-*requireLowercase*: If set to *true* the password will contain lowercased characters.
-*requireUppercase*: If set to *true* the password will contain uppercased characters.
+- *requiredLength*: The required password length.
+- *requiredUniqueChars*: The required unique chars count in the result password.
+- *requireDigit*: If set to *true* digits will be used in password.
+- *requireNonAlphanumeric*: If set to *true* the password will include non alphanumeric symbols.
+- *requireLowercase*: If set to *true* the password will contain lowercased characters.
+- *requireUppercase*: If set to *true* the password will contain uppercased characters.
 
 ##### Example
 ```
@@ -126,8 +126,8 @@ variable value and then store result in the Configuration unit at Service variab
 - [service template]
 
 ##### Parameters
-*generatorName*: The configured generator by name.
-*variableName*: The variable name that will be store generated value for the Configuration unit at Service.
+- *generatorName*: The configured generator by name.
+- *variableName*: The variable name that will be store generated value for the Configuration unit at Service.
 
 ##### Example
 ```
@@ -266,7 +266,7 @@ Service template example for RabbitMQCoreClient library with correct comma symbl
       "AutoDelete": false
     }
     {% endif %}
-    {% if exchanges %}, {% endif %}
+    {% if exchanges and defaultExchange.enabled %}, {% endif %}
     {% for i in (0..exchanges.size-1) %}
       {% assign exchange = exchanges[i] %}
       {% if exchange != exchanges.last %}
