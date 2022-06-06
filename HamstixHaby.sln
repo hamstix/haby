@@ -20,6 +20,16 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		README.md = README.md
 	EndProjectSection
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.RabbitMQ", "Hamstix.Haby\Plugins\RabbitMQ\Hamstix.Haby.Plugins.RabbitMQ.csproj", "{FA37582C-3E97-4EC6-94A6-191B5D3DA6DD}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.ArangoDb", "Hamstix.Haby\Plugins\ArangoDb\Hamstix.Haby.Plugins.ArangoDb.csproj", "{BF0E7220-0F1D-4879-B075-0657C9CAED34}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.K8s", "Hamstix.Haby\Plugins\K8s\Hamstix.Haby.Plugins.K8s.csproj", "{AF86C8E2-044C-4633-963F-920504A86A20}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.IdentityServer4EFApiResource", "Hamstix.Haby\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFApiResource.csproj", "{C24ED38F-351C-4D25-A8C9-714CACC100B2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hamstix.Haby.Plugins.ClickHouseHttp", "Hamstix.Haby\Plugins\ClickHouseHttp\Hamstix.Haby.Plugins.ClickHouseHttp.csproj", "{10607154-4A75-49FE-9642-2F66F760A66D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -46,12 +56,37 @@ Global
 		{F3DA8765-1B06-4096-8C2F-20F3AFE99867}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F3DA8765-1B06-4096-8C2F-20F3AFE99867}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F3DA8765-1B06-4096-8C2F-20F3AFE99867}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FA37582C-3E97-4EC6-94A6-191B5D3DA6DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FA37582C-3E97-4EC6-94A6-191B5D3DA6DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FA37582C-3E97-4EC6-94A6-191B5D3DA6DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FA37582C-3E97-4EC6-94A6-191B5D3DA6DD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BF0E7220-0F1D-4879-B075-0657C9CAED34}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BF0E7220-0F1D-4879-B075-0657C9CAED34}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BF0E7220-0F1D-4879-B075-0657C9CAED34}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BF0E7220-0F1D-4879-B075-0657C9CAED34}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AF86C8E2-044C-4633-963F-920504A86A20}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AF86C8E2-044C-4633-963F-920504A86A20}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AF86C8E2-044C-4633-963F-920504A86A20}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AF86C8E2-044C-4633-963F-920504A86A20}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C24ED38F-351C-4D25-A8C9-714CACC100B2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C24ED38F-351C-4D25-A8C9-714CACC100B2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C24ED38F-351C-4D25-A8C9-714CACC100B2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C24ED38F-351C-4D25-A8C9-714CACC100B2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{10607154-4A75-49FE-9642-2F66F760A66D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{10607154-4A75-49FE-9642-2F66F760A66D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{10607154-4A75-49FE-9642-2F66F760A66D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{10607154-4A75-49FE-9642-2F66F760A66D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{12E3DD92-F63E-46CF-BCDE-55B6FEB176BE} = {1FFAF132-F481-41DE-8BF2-C2B81E195A44}
+		{FA37582C-3E97-4EC6-94A6-191B5D3DA6DD} = {1FFAF132-F481-41DE-8BF2-C2B81E195A44}
+		{BF0E7220-0F1D-4879-B075-0657C9CAED34} = {1FFAF132-F481-41DE-8BF2-C2B81E195A44}
+		{AF86C8E2-044C-4633-963F-920504A86A20} = {1FFAF132-F481-41DE-8BF2-C2B81E195A44}
+		{C24ED38F-351C-4D25-A8C9-714CACC100B2} = {1FFAF132-F481-41DE-8BF2-C2B81E195A44}
+		{10607154-4A75-49FE-9642-2F66F760A66D} = {1FFAF132-F481-41DE-8BF2-C2B81E195A44}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {08B81E8B-FF34-4EA7-8F36-EF43DEDE631E}

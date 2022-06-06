@@ -138,14 +138,30 @@ variable value and then store result in the Configuration unit at Service variab
 
 ### PostgreSql 12+
 
-Create service "PostgreSql". Json configuration supports variables:
+PostgreSql12 plugin on the "configuration" stage:
+- creates ROLE, reading role name from the stored variable "username".
+- creates DATABASE, reading database name from the stored variable "database".
+- grants "username" as owner of the "database".
+
+All this manipulations plugin makes from the connection string created from service variables.
+Supported variables are listed below. If the variables is specified then it will appear in the connection string of the ROOT user, not in the CU template.
+If you want to use this variables in the CU template, you must specify them at the service template.
+
+*@NOTE:* to properly create the database and ROLE you must provide values for the variables:
+- _username_ - the ROLE name,
+- _password_ - the ROLE password,
+- _database_ - the database name.
+
+This variables can be generated from the `generate` function in the service template or be configured at the CU template at the `"service": {}` key.
+
+Json configuration supports variables:
 
 - rootUser [string][required]
 - rootPassword [string][required]
 - host [string][required]
 - rootDatabase [string]
 - port [int]
-- sslMode [enum: ]
+- sslMode [enum]
 - trustServerCertificate [bool]
 - sslCertificate [string]
 - sslKey [string]
@@ -156,12 +172,163 @@ Create service "PostgreSql". Json configuration supports variables:
 - kerberosServiceName [string]
 - timeout [int]
 
-Service template example
+Service json configuration example
+```json
+{
+  "host": "db-server.local",
+  "rootUser": "pg_management_user",
+  "rootPassword": "ne6DrabojAivSrki"
+}
+```
 
+Service template example
 ```
 {
   "DefaultConnection": {
     "ConnectionString": "Host={{host}};Username={{generate('username', 'username')}};Password={{generate('password', 'password')}};Database={{generate('database', 'database')}};{{otherParams}}"
+  }
+}
+```
+
+### RabbitMQ
+
+RabbitMQ plugin on the "configuration" stage:
+- creates rabbitmq user.
+
+All this manipulations plugin makes from the connection string created from service variables.
+
+*@NOTE:* to properly create the user you must provide values for the variables:
+- _username_ - the ROLE name,
+- _password_ - the ROLE password.
+- _database_ - the database name.
+
+This variables can be generated from the `generate` function in the service template or be configured at the CU template at the `"service": {}` key.
+
+Json configuration supports variables:
+
+- rootUser [string][required]
+- rootPassword [string][required]
+- host [string][required]
+- disableSslVerification [bool]
+- configureGrant[string] - default is ".*". The configure grant that the `username` will be assigned.
+- writeGrant[string] - default is ".*". The write grant that the `username` will be assigned.
+- readGrant[string] - default is ".*". The read grant that the `username` will be assigned.
+
+Service json configuration example
+```json
+{
+  "host": "rabbimq-server.local",
+  "rootUser": "rabbitmq_manager",
+  "rootPassword": "ne6DrabojAivSrki",
+  "defaultExchange":{
+    "enabled": true,
+    "name": "direct_exchange"
+  }
+}
+```
+
+Feel free to make your own templates. If you want to use DI ready library, you can try [RabbitMQCoreClient](https://github.com/MONQDL/RabbitMQCoreClient).
+Service template example for RabbitMQCoreClient library with correct comma symblol in arrays.
+```
+{
+  "HostName": "{{host}}",
+  "UserName": "{{generate('username', 'username')}}",
+  "Password": "{{generate('password', 'password')}}",
+  "DefaultTtl": {% if defaultTtl %} {{defaultTtl}} {% else %} 5 {% endif %},
+  "PrefetchCount": {% if prefetchCount %} {{prefetchCount}} {% else %} 1 {% endif %},
+  "Queues": [
+    {% for i in (0..queues.size-1) %}
+      {% assign queue = queues[i] %}
+      {% if queue != queues.last %}
+        {{ queue }},
+      {% else %}
+        {{ queue }}
+      {% endif %}
+    {% endfor %}
+  ],
+  "Subscriptions": [
+    {% for i in (0..subscriptions.size-1) %}
+      {% assign subscription = subscriptions[i] %}
+      {% if subscription != subscriptions.last %}
+        {{ subscription }},
+      {% else %}
+        {{ subscription }}
+      {% endif %}
+    {% endfor %}
+  ],
+  "Exchanges": [
+    {% if defaultExchange.enabled %}
+    {
+      "Name": "{{ defaultExchange.name }}",
+      "IsDefault": true,
+      "Type": "direct",
+      "Durable": true,
+      "AutoDelete": false
+    }
+    {% endif %}
+    {% if exchanges %}, {% endif %}
+    {% for i in (0..exchanges.size-1) %}
+      {% assign exchange = exchanges[i] %}
+      {% if exchange != exchanges.last %}
+        {{ exchange }},
+      {% else %}
+        {{ exchange }}
+      {% endif %}
+    {% endfor %}
+  ]
+}
+```
+
+### ArangoDb
+
+ArangoDb plugin on the "configuration" stage:
+- creates DATABASE and user, who can access to that database, reading database name and user from the stored variable "database", "username" and "password".
+
+All this manipulations plugin makes from the connection string created from service variables.
+Supported variables are listed below. If the variables is specified then it will appear in the connection string of the ROOT user, not in the CU template.
+If you want to use this variables in the CU template, you must specify them at the service template.
+
+*@NOTE:* to properly create the database and ROLE you must provide values for the variables:
+- _username_ - the ROLE name,
+- _password_ - the ROLE password,
+- _database_ - the database name.
+
+This variables can be generated from the `generate` function in the service template or be configured at the CU template at the `"service": {}` key.
+
+Json configuration supports variables:
+
+- rootUser [string][required]
+- rootPassword [string][required]
+- host [string][required]
+- disableSslVerification [bool]
+
+Service json configuration example
+```json
+{
+  "host": "db-server.local",
+  "rootUser": "arango_root_user",
+  "rootPassword": "ne6DrabojAivSrki"
+}
+```
+
+Service template example
+```
+{
+  "Default": {
+    "SystemDatabaseCredential": {
+      "UserName": "{{rootUser}}",
+      "Password": "{{rootPassword}}"
+    },
+    "Logger": {
+      "Aql": true,
+      "LogOnlyLightOperations": true
+    },
+    "Url": "{{host}}",
+    "Database": "{{generate('database', 'database')}}",
+    "Credential": {
+      "UserName": "{{generate('username', 'username')}}",
+      "Password": "{{generate('password', 'password')}}"
+    }
   }
 }
 ```

@@ -28,21 +28,23 @@ builder.Services
     .AddDefaultExceptionHandlers();
 
 builder.Services.AddHttpClient();
-builder.Services.AddHttpClient(Hamstix.Haby.Server.Configuration.AppConstants.Configuration.DisableSslVerification).ConfigurePrimaryHttpMessageHandler(() =>
-{
-    return new HttpClientHandler
-    {
-        ClientCertificateOptions = ClientCertificateOption.Manual,
-        ServerCertificateCustomValidationCallback =
-            (httpRequestMessage, cert, certChain, policyErrors) => true
-    };
-});
+builder.Services.AddHttpClient(Hamstix.Haby.Shared.PluginsCore.Constants.DisableSslVerification)
+    .ConfigurePrimaryHttpMessageHandler(() =>
+        {
+            return new HttpClientHandler
+            {
+                ClientCertificateOptions = ClientCertificateOption.Manual,
+                ServerCertificateCustomValidationCallback =
+                    (httpRequestMessage, cert, certChain, policyErrors) => true
+            };
+        });
 
 builder.Services.AddAutoMapper(typeof(Program));
 
 builder.Services.RegisterPlugins(builder.Configuration);
 
 builder.Services.AddTransient<ICuConfigurator, CuConfigurator>();
+builder.Services.AddTransient<IForeignKeyConfigurator, ForeignKeyConfigurator>();
 builder.Services.AddTransient<IServiceConfigurator, ServiceConfigurator>();
 builder.Services.AddTransient<ISchemaInitializer, DefaultSchemaInitializer>();
 

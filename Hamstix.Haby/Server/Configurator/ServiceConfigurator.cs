@@ -16,7 +16,7 @@ namespace Hamstix.Haby.Server.Configurator
             _pluginsService = pluginsService;
         }
 
-        public async Task<ConfigurationResult> Configure(Models.Service service, JsonNode renderedTemplate)
+        public async Task<ConfigurationResult> Configure(Models.Service service, JsonNode renderedTemplate, JsonObject variables)
         {
             var pluginsService = new Service(service.Id, service.Name, service.JsonConfig.CloneJsonNode().AsObject())
             {
@@ -39,7 +39,7 @@ namespace Hamstix.Haby.Server.Configurator
 
             try
             {
-                await strategy.Configure(pluginsService, renderedTemplate, new CancellationTokenSource().Token);
+                await strategy.Configure(pluginsService, renderedTemplate, variables, new CancellationTokenSource().Token);
                 result.Status = ConfigurationResultStatuses.Ok;
             }
             catch (Exception e)

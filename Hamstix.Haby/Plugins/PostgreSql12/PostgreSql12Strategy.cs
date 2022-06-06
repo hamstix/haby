@@ -7,8 +7,9 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
 {
     public class PostgreSql12Strategy : IStrategy
     {
-        const string TmplDefaultConnectionKey = "DefaultConnection";
-        const string TmplConnectionStringKey = "ConnectionString";
+        const string CuUsernameKey = "username";
+        const string CuPasswordKey = "password";
+        const string CuDatabaseKey = "database";
 
         const string ServiceRootUserKey = "rootUser";
         const string ServiceRootPasswordKey = "rootPassword";
@@ -26,65 +27,43 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
         const string ServiceKerberosServiceNameKey = "kerberosServiceName";
         const string ServiceTimeoutKey = "timeout";
 
-        public async Task Configure(Service service, JsonNode renderedTemplate, CancellationToken cancellationToken)
+        public async Task Configure(Service service, JsonNode renderedTemplate, JsonObject variables, CancellationToken cancellationToken)
         {
-            var connectionString = ExtractConnectionString(renderedTemplate);
-            if (connectionString is null)
-                throw new ConfiguratorException($"The rendered template " +
-                    $"at service {service.Name} does not contain the key \"{TmplDefaultConnectionKey}\":\"{TmplConnectionStringKey}\"");
+            CheckRequiredVariables(variables);
 
-            var builder = new NpgsqlConnectionStringBuilder(connectionString);
-
-            if (!CheckConnectionStringHasAllRequiredFields(builder))
-                throw new ConfiguratorException($"The connection string from the rendered template " +
-                    $"at service {service.Name} does not contain " +
-                    $"required fields \"Database\" or \"Username\" or \"Password\".");
-
-            await CreateUserAndDatabase(service, builder, cancellationToken);
+            await CreateUserAndDatabase(service, variables, cancellationToken);
         }
 
-        public async Task UnConfigure(Service service, JsonNode renderedTemplate, CancellationToken cancellationToken)
+        public async Task UnConfigure(Service service, JsonNode renderedTemplate, JsonObject variables, CancellationToken cancellationToken)
         {
-            var connectionString = ExtractConnectionString(renderedTemplate);
-            if (connectionString is null)
-                throw new ConfiguratorException($"The rendered template " +
-                    $"at service {service.Name} does not contain the key \"{TmplDefaultConnectionKey}\":\"{TmplConnectionStringKey}\"");
+            CheckRequiredVariables(variables);
 
-            var builder = new NpgsqlConnectionStringBuilder(connectionString);
-
-            if (!CheckConnectionStringHasAllRequiredFields(builder))
-                throw new ConfiguratorException($"The connection string from the rendered template " +
-                    $"at service {service.Name} does not contain " +
-                    $"required fields \"Database\" or \"Username\" or \"Password\".");
-
-            await DropUserAndDatabase(service, builder, cancellationToken);
+            await DropUserAndDatabase(service, variables, cancellationToken);
         }
 
-        string? ExtractConnectionString(JsonNode renderedTemplate) => 
-            renderedTemplate[TmplDefaultConnectionKey]?[TmplConnectionStringKey]?.GetValue<string>();
-
-        /// <summary>
-        /// Checks that the login, password and database name fields are filled in.
-        /// </summary>
-        /// <returns></returns>
-        public bool CheckConnectionStringHasAllRequiredFields(NpgsqlConnectionStringBuilder builder) => 
-            !string.IsNullOrEmpty(builder.Database)
-                && !string.IsNullOrEmpty(builder.Username)
-                && !string.IsNullOrEmpty(builder.Password);
+        static void CheckRequiredVariables(JsonObject variables)
+        {
+            if (!variables.ContainsKey(CuUsernameKey))
+                throw new ConfiguratorException($"Can't find variable {CuUsernameKey}.");
+            if (!variables.ContainsKey(CuPasswordKey))
+                throw new ConfiguratorException($"Can't find variable {CuPasswordKey}.");
+            if (!variables.ContainsKey(CuDatabaseKey))
+                throw new ConfiguratorException($"Can't find variable {CuDatabaseKey}.");
+        }
 
         /// <summary>
         /// Create the new user, password, database and claim owner grants to the user.
         /// </summary>
         /// <param name="service">Service.</param>
-        /// <param name="userBuilder">The Npgsql builder with user data.</param>
+        /// <param name="variables">The variables from the configurator.</param>
         /// <param name="cancellationToken">CancellationToken.</param>
         /// <returns></returns>
-        async Task CreateUserAndDatabase(Service service, NpgsqlConnectionStringBuilder userBuilder, CancellationToken cancellationToken)
+        async Task CreateUserAndDatabase(Service service, JsonObject variables, CancellationToken cancellationToken)
         {
-            var userName = userBuilder.Username;
-            var databaseName = userBuilder.Database;
-            var password = userBuilder.Password;
-            var rootBuilder = BuildRootConnectionString(service);
+            var userName = variables[CuUsernameKey]!.GetValue<string>();
+            var databaseName = variables[CuDatabaseKey]!.GetValue<string>();
+            var password = variables[CuPasswordKey]!.GetValue<string>();
+            var rootBuilder = BuildRootConnectionString(service, variables);
 
             // Create connection to database server.
             using (var connection = new NpgsqlConnection(rootBuilder.ConnectionString))
@@ -122,11 +101,11 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
             }
         }
 
-        async Task DropUserAndDatabase(Service service, NpgsqlConnectionStringBuilder userBuilder, CancellationToken cancellationToken)
+        async Task DropUserAndDatabase(Service service, JsonObject variables, CancellationToken cancellationToken)
         {
-            var userName = userBuilder.Username;
-            var databaseName = userBuilder.Database;
-            var rootBuilder = BuildRootConnectionString(service);
+            var userName = variables[CuUsernameKey]!.GetValue<string>();
+            var databaseName = variables[CuDatabaseKey]!.GetValue<string>();
+            var rootBuilder = BuildRootConnectionString(service, variables);
 
             // Create connection to database server.
             using (var connection = new NpgsqlConnection(rootBuilder.ConnectionString))
@@ -147,11 +126,11 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
             }
         }
 
-        static NpgsqlConnectionStringBuilder BuildRootConnectionString(Service service)
+        static NpgsqlConnectionStringBuilder BuildRootConnectionString(Service service, JsonObject variables)
         {
-            var rootUser = service.JsonConfig[ServiceRootUserKey]?.GetValue<string>();
-            var rootPassword = service.JsonConfig[ServiceRootPasswordKey]?.GetValue<string>();
-            var host = service.JsonConfig[ServiceHostKey]?.GetValue<string>();
+            var rootUser = variables[ServiceRootUserKey]?.GetValue<string>();
+            var rootPassword = variables[ServiceRootPasswordKey]?.GetValue<string>();
+            var host = variables[ServiceHostKey]?.GetValue<string>();
 
             if (rootUser is null || rootPassword is null || host is null)
                 throw new ConfiguratorException($"The service \"{service.Name}\" must contains at least" +

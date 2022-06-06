@@ -1,13 +1,11 @@
 ﻿using Fluid;
 using Fluid.Values;
 using Hamstix.Haby.Server.Configuration;
+using Hamstix.Haby.Server.Extensions;
+using Hamstix.Haby.Server.Models;
 using Hamstix.Haby.Shared.PluginsCore.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Nodes;
-using Hamstix.Haby.Server.Extensions;
-using Hamstix.Haby.Server.Models;
-using System.Text.RegularExpressions;
-using Hamstix.Haby.Server.Helpers;
 
 namespace Hamstix.Haby.Server.Configurator
 {
@@ -26,13 +24,18 @@ namespace Hamstix.Haby.Server.Configurator
         readonly HabbyContext _context;
         readonly ILogger<CuConfigurator> _log;
         readonly IServiceConfigurator _serviceConfigurator;
+        readonly IForeignKeyConfigurator _foreignKeyConfigurator;
 
         List<Service> _services;
         List<SystemVariable> _systemVariables;
         List<Generator> _generators;
 
-        public CuConfigurator(HabbyContext context, IServiceConfigurator serviceConfigurator, ILogger<CuConfigurator> log)
+        public CuConfigurator(HabbyContext context,
+            IServiceConfigurator serviceConfigurator,
+            IForeignKeyConfigurator foreignKeyConfigurator,
+            ILogger<CuConfigurator> log)
         {
+            _foreignKeyConfigurator = foreignKeyConfigurator;
             _serviceConfigurator = serviceConfigurator;
             _log = log;
             _context = context;
@@ -86,7 +89,8 @@ namespace Hamstix.Haby.Server.Configurator
             return resultStatuses;
         }
 
-        public async Task<ConfigurationUnitKeyResult?> ConfigureConfigurationUnitTemplateKey(ConfigurationUnit cu, JsonObject ConfigrationUnitTemplateKey)
+        public async Task<ConfigurationUnitKeyResult?> ConfigureConfigurationUnitTemplateKey(
+            ConfigurationUnit cu, JsonObject ConfigrationUnitTemplateKey)
         {
             var keyName = ConfigrationUnitTemplateKey[AppsettingsKey]?.GetValue<string>();
 
@@ -97,7 +101,7 @@ namespace Hamstix.Haby.Server.Configurator
             }
 
             var resultStatus = new ConfigurationUnitKeyResult(keyName);
-            
+
             var servicesObject = ConfigrationUnitTemplateKey[CuServicesKey]?.AsObject();
             if (servicesObject is not null)
             {
@@ -142,29 +146,53 @@ namespace Hamstix.Haby.Server.Configurator
                 var configurationUnitAtService = cu.Services.FirstOrDefault(x => x.ServiceId == service.Id) ??
                     new ConfigurationUnitAtService(cu, service, configurationKey);
 
-                JsonNode renderedTemplate;
-
                 var cuServiceFromKeyValue = cuServiceNode.Value?[CuServiceFromKeyKey]?.GetValue<string>();
+                var systemVariables = GetSystemVariables(cu);
+                var serviceVariables = GetServiceVariables(service);
+
+                JsonNode renderedTemplate;
+                JsonObject savedVariables;
+                JsonObject cuVariables;
+                JsonObject joinedVariables;
 
                 if (cuServiceFromKeyValue is not null)
                 {
                     // Trying to read configuration from the other cu key.
                     // If this option is enabled, then the key template will be fully replaced by the cu key reference.
-                    renderedTemplate = await GetForeignKeyFromCu(cu, serviceName, cuServiceFromKeyValue);
+                    var foreignKeyCuAtService = await _foreignKeyConfigurator.GetCuForeignKey(
+                        cu, serviceName, cuServiceFromKeyValue);
+
+                    if (foreignKeyCuAtService is null)
+                    {
+                        renderedTemplate = new JsonObject();
+                        savedVariables = new JsonObject();
+                        cuVariables = new JsonObject();
+                    }
+                    else
+                    {
+                        renderedTemplate = foreignKeyCuAtService.RenderedTemplateJson?.CloneJsonNode()?.AsObject() ?? new JsonObject();
+                        savedVariables = foreignKeyCuAtService.Variables.GetSavedVariables();
+
+                        var cuForeignServiceNode = foreignKeyCuAtService.ConfigurationUnit.GetCuServiceNode(configurationKey, serviceName);
+                        var cuServiceVariablesObject = cuForeignServiceNode?[CuServiceVariablesKey]?.AsObject();
+                        cuVariables = GetConfigurationUnitVariables(cuServiceVariablesObject);
+                    }
+                    joinedVariables = systemVariables
+                            .Merge(serviceVariables)
+                            .Merge(savedVariables)
+                            .Merge(cuVariables);
                 }
                 else
                 {
                     var cuServiceVariablesObject = cuServiceNode.Value?[CuServiceVariablesKey]?.AsObject();
 
                     // Read all variables.
-                    var systemVariables = GetSystemVariables(cu);
-                    var serviceVariables = GetServiceVariables(service);
-                    var savedVariables = GetSavedVariables(configurationUnitAtService.Variables);
-                    var cuVariables = GetConfigurationUnitVariables(cuServiceVariablesObject);
+                    savedVariables = configurationUnitAtService.Variables.GetSavedVariables();
+                    cuVariables = GetConfigurationUnitVariables(cuServiceVariablesObject);
 
                     try
                     {
-                        var joinedVariables = systemVariables
+                        joinedVariables = systemVariables
                             .Merge(serviceVariables)
                             .Merge(savedVariables)
                             .Merge(cuVariables);
@@ -179,85 +207,13 @@ namespace Hamstix.Haby.Server.Configurator
                     }
                 }
 
-                var result = await TryConfigureAtService(service, renderedTemplate);
+                var result = await TryConfigureAtService(service, renderedTemplate, joinedVariables);
                 if (result.Status == Shared.PluginsCore.ConfigurationResultStatuses.Ok)
                     configurationUnitAtService.RenderedTemplateJson = renderedTemplate;
 
                 resultStatuses.Add(result);
             }
             return resultStatuses;
-        }
-
-        /// <summary>
-        /// Get the key configuration from the other key or other configuration unit key.
-        /// </summary>
-        /// <param name="cu">Configuration unit.</param>
-        /// <param name="serviceName">Configuration unit key service node. Example: "PostgreSql": {}.</param>
-        /// <param name="cuServiceFromKeyValue">The value of the "fomrKey" propery.</param>
-        /// <returns></returns>
-        /// <exception cref="NotImplementedException"></exception>
-        async Task<JsonObject> GetForeignKeyFromCu(ConfigurationUnit cu, string serviceName, string cuServiceFromKeyValue)
-        {
-            var emptyResult = new JsonObject();
-            var splittedKey = cuServiceFromKeyValue.Split("/", StringSplitOptions.RemoveEmptyEntries);
-            if (splittedKey.Length == 0)
-            {
-                _log.LogWarning("The key {ServiceName} has field \"fromKey\" but the key is empty.", serviceName);
-                return emptyResult;
-            }
-
-            // The key is from the same configuration unit template.
-            // And it must be processed earlier in the loop.
-            if (splittedKey.Length == 1)
-            {
-                var key = splittedKey[0];
-
-                var foreignKeyService = cu.Services.FirstOrDefault(x => x.Service.Name == serviceName && x.Key == key);
-                if (foreignKeyService is null)
-                {
-                    _log.LogWarning("The key {ServiceName} has field \"fromKey\"=\"{Key}\" " +
-                        "but the key is not present in the configuration unit template.",
-                            serviceName, key);
-                    return emptyResult;
-                }
-                return foreignKeyService.RenderedTemplateJson?.CloneJsonNode()?.AsObject() ?? emptyResult;
-            }
-
-            // The key is from the foreign configuration unit.
-            if (splittedKey.Length == 2)
-            {
-                var foreignCuName = splittedKey[0];
-                var foreignKey = splittedKey[1];
-
-                var foreignKeyService = await _context
-                    .ConfigurationUnitsAtServices
-                    .FirstOrDefaultAsync(x => x.Service.Name == serviceName
-                        && x.ConfigurationUnit.Name == foreignCuName
-                        && x.Key == foreignKey);
-                if (foreignKeyService is null)
-                {
-                    _log.LogWarning("The key {ServiceName} has field \"fromKey\"=\"{Key}\" " +
-                        "but the key is not present in the configuration unit template of the cu {ConfigurationUnitName}.",
-                            serviceName,
-                            cuServiceFromKeyValue,
-                            foreignCuName);
-                    return emptyResult;
-                }
-
-                return foreignKeyService.RenderedTemplateJson?.AsObject()?.CloneJsonNode()?.AsObject() ?? emptyResult;
-            }
-
-            if (splittedKey.Length > 2)
-            {
-                _log.LogWarning("The key {ServiceName} has field \"fromKey\"=\"{Key}\" " +
-                        "but the key contains more then 2 values splitted by \"/\". " +
-                        "Currently the service is not supported such path.",
-                            serviceName,
-                            cuServiceFromKeyValue);
-                return emptyResult;
-            }
-
-            return emptyResult;
         }
 
         JsonNode RenderServiceTemplate(Service service,
@@ -272,36 +228,6 @@ namespace Hamstix.Haby.Server.Configurator
 
             // Render Liquid template.
             var template = _parser.Parse(serviceTemplate);
-
-            var regex = new FunctionValue((args, context) =>
-            {
-                var input = args.At(0).ToStringValue();
-                var pattern = args.At(1).ToStringValue();
-                var replacement = args.At(2).ToStringValue();
-
-                var result = Regex.Replace(input, pattern, replacement);
-
-                return new ValueTask<FluidValue>(new StringValue(result));
-            });
-
-            var password = new FunctionValue((args, context) =>
-            {
-                var requiredLenght = (int)args.At(0).ToNumberValue();
-                var requiredUniqueChars = (int)args.At(1).ToNumberValue();
-                var requireDigits = args.At(2).ToBooleanValue();
-                var requireNonAlphanumeric = args.At(3).ToBooleanValue();
-                var requireLowercase = args.At(4).ToBooleanValue();
-                var requireUppercase = args.At(5).ToBooleanValue();
-
-                var result = PasswordGenerator.Generate(requiredLenght,
-                               requiredUniqueChars,
-                               requireDigits,
-                               requireNonAlphanumeric,
-                               requireLowercase,
-                               requireUppercase);
-
-                return new ValueTask<FluidValue>(new StringValue(result));
-            });
 
             var generate = new FunctionValue((args, context) =>
                 {
@@ -321,8 +247,7 @@ namespace Hamstix.Haby.Server.Configurator
                         var generatorTemplate = _parser.Parse(generator.Template);
 
                         var generatorContext = new TemplateContext(variables);
-                        generatorContext.SetValue("regexReplace", regex);
-                        generatorContext.SetValue("password", password);
+                        generatorContext.SetCommonFunctions();
                         var generatedVariable = generatorTemplate.Render(generatorContext);
 
                         // Generate new variable.
@@ -334,9 +259,8 @@ namespace Hamstix.Haby.Server.Configurator
                 });
 
             var context = new TemplateContext(variables);
+            context.SetCommonFunctions();
             context.SetValue("generate", generate);
-            context.SetValue("regexReplace", regex);
-            context.SetValue("password", password);
 
             return JsonNode.Parse(template.Render(context));
         }
@@ -381,16 +305,6 @@ namespace Hamstix.Haby.Server.Configurator
         }
 
         static JsonObject GetServiceVariables(Service service) => service.JsonConfig;
-
-        static JsonObject GetSavedVariables(IEnumerable<Variable> variables)
-        {
-            var result = new JsonObject();
-            foreach (var variable in variables)
-            {
-                result.Add(variable.Name, variable.Value);
-            }
-            return result;
-        }
 
         JsonObject GetConfigurationUnitVariables(JsonObject? cuVariables)
         {
@@ -444,9 +358,9 @@ namespace Hamstix.Haby.Server.Configurator
             }
         }
 
-        async Task<Shared.PluginsCore.ConfigurationResult> TryConfigureAtService(Service service, JsonNode renderedTemplate)
-        {
-            return await _serviceConfigurator.Configure(service, renderedTemplate);
-        }
+        async Task<Shared.PluginsCore.ConfigurationResult> TryConfigureAtService(Service service,
+            JsonNode renderedTemplate,
+            JsonObject variables) =>
+            await _serviceConfigurator.Configure(service, renderedTemplate, variables);
     }
 }
