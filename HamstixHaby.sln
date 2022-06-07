@@ -26,9 +26,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.Arango
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.K8s", "Hamstix.Haby\Plugins\K8s\Hamstix.Haby.Plugins.K8s.csproj", "{AF86C8E2-044C-4633-963F-920504A86A20}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.IdentityServer4EFApiResource", "Hamstix.Haby\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFApiResource.csproj", "{C24ED38F-351C-4D25-A8C9-714CACC100B2}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource", "Hamstix.Haby\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource.csproj", "{C24ED38F-351C-4D25-A8C9-714CACC100B2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hamstix.Haby.Plugins.ClickHouseHttp", "Hamstix.Haby\Plugins\ClickHouseHttp\Hamstix.Haby.Plugins.ClickHouseHttp.csproj", "{10607154-4A75-49FE-9642-2F66F760A66D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.ClickHouse", "Hamstix.Haby\Plugins\ClickHouse\Hamstix.Haby.Plugins.ClickHouse.csproj", "{10607154-4A75-49FE-9642-2F66F760A66D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

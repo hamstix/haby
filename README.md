@@ -333,5 +333,125 @@ Service template example
 }
 ```
 
+### ClickHouse
+
+ClickHouse plugin on the "configuration" stage:
+- creates user, reading user name and password from the stored variables "username" and "password".
+- creates DATABASE, reading database name from the stored variable "database".
+- grants "username" privileges to the "database" from the variable "privilege". If the variable is not set. The "ALL" privileges will be granted.
+
+All this manipulations plugin makes from the connection string created from service variables.
+Supported variables are listed below. If the variables is specified then it will appear in the connection string of the ROOT user, not in the CU template.
+If you want to use this variables in the CU template, you must specify them at the service template.
+
+*@NOTE:* to properly create the database and ROLE you must provide values for the variables:
+- _username_ - the ROLE name,
+- _password_ - the ROLE password,
+- _database_ - the database name.
+
+This variables can be generated from the `generate` function in the service template or be configured at the CU template at the `"service": {}` key.
+
+Json configuration supports variables:
+
+- rootUser [string][required]
+- rootPassword [string][required]
+- host [string][required]
+- privilege [string]
+- disableSslVerification [bool]
+
+Service json configuration example
+```json
+{
+  "host": "db-server.local",
+  "rootUser": "arango_root_user",
+  "rootPassword": "ne6DrabojAivSrki"
+}
+```
+
+Service template example
+```
+{
+  "DefaultConnection": {
+    "ConnectionString": "Host={{host}};Username={{generate('username', 'username')}};Password={{generate('password', 'password')}};Database={{generate('database', 'database')}};{{otherParams}}"
+  }
+}
+```
+
+### IdentityServer4 EF PgSql ApiResource
+
+Plugin adds secrets to the Client or ApiResource of the Identity4 Entity Framework PostgreSql database context.
+
+Plugin on the "configuration" stage:
+- if varialbe `client.enabled`, adds secret to the ClientSecrets table reading password from the stored variables "clientPassword".
+- if varialbe `apiResource.enabled` adds secret to the ApiResourceSecrets table reading password from the stored variables "apiResourcePassword".
+
+All this manipulations plugin makes from the connection string created from service variables.
+Supported variables are listed below. If the variables is specified then it will appear in the connection string of the ROOT user, not in the CU template.
+If you want to use this variables in the CU template, you must specify them at the service template.
+
+*@NOTE:* to properly create secrets you must provide values for the variables:
+- _resource_ - the name that will be writen to the `Description` column,
+- _clientPassword_ - the password that will be writen to the ClientSecrets table,
+- _apiResourcePassword_ - the password that will be writen to the ApiResourceSecrets table.
+
+This variables can be generated from the `generate` function in the service template or be configured at the CU template at the `"service": {}` key.
+
+Json configuration supports variables:
+
+- rootUser [string][required]
+- rootPassword [string][required]
+- host [string][required]
+- rootDatabase [string]
+- port [int]
+- sslMode [enum]
+- trustServerCertificate [bool]
+- sslCertificate [string]
+- sslKey [string]
+- sslPassword [string]
+- rootCertificate [string]
+- checkCertificateRevocation [bool]
+- integratedSecurity [bool]
+- kerberosServiceName [string]
+- timeout [int]
+
+Service json configuration example
+```json
+{
+  "host": "db-server.local",
+  "rootUser": "pg_management_user",
+  "rootPassword": "ne6DrabojAivSrki",
+  "apiEndpoint": "https://identity",
+  "requireHttpsMetadata": true,
+  "client": {
+    "enabled": false,
+    "login": "client"
+  },
+  "apiResource": {
+    "enabled": false,
+    "login": "api"
+  }
+}
+```
+
+Service template example
+```
+{
+  "AuthenticationEndpoint": "{{ apiEndpoint }}",
+  "RequireHttpsMetadata": {% if requireHttpsMetadata %} {{requireHttpsMetadata}} {% else %} false {% endif %},
+  {% if apiResource.enabled %}
+  "ApiResource": {
+    "Login": "{{ apiResource.login }}",
+    "Password": "{{ apiResourcePassword }}"
+  },
+  {% endif %}
+  {% if client.enabled %}
+  "Client": { 
+    "Login": "{{ client.login }}",
+    "Password": "{{ clientPassword }}"
+  },
+  {% endif %}
+}
+```
+
 ## How to develop plugin handlers
 WIP

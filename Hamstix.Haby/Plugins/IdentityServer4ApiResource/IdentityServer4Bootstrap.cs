@@ -6,7 +6,7 @@ namespace Hamstix.Haby.Plugins.IdentityServer4EFApiResource
 {
     public class IdentityServer4Bootstrap : IPluginBootstrap
     {
-        public Plugin Plugin => new Plugin("IdentityServer4EFApiResource")
+        public Plugin Plugin => new Plugin("IdentityServer4EFPgSqlApiResource")
         {
             StrategyType = typeof(IdentityServer4Strategy)
         };

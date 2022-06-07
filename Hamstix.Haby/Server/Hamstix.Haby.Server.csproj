@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AutoMapper" Version="11.0.1" />
     <PackageReference Include="Fluid.Core" Version="2.2.15" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="6.0.5" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="6.0.5">
@@ -24,7 +25,7 @@
     <ProjectReference Include="..\Client\Hamstix.Haby.Client.csproj" />
     <ProjectReference Include="..\PluginsCore\Hamstix.Haby.Shared.PluginsCore.csproj" />
     <ProjectReference Include="..\Plugins\ArangoDb\Hamstix.Haby.Plugins.ArangoDb.csproj" />
-    <ProjectReference Include="..\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFApiResource.csproj" />
+    <ProjectReference Include="..\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource.csproj" />
     <ProjectReference Include="..\Plugins\K8s\Hamstix.Haby.Plugins.K8s.csproj" />
     <ProjectReference Include="..\Plugins\PostgreSql12\Hamstix.Haby.Plugins.PostgreSql12.csproj" />
     <ProjectReference Include="..\Plugins\RabbitMQ\Hamstix.Haby.Plugins.RabbitMQ.csproj" />
