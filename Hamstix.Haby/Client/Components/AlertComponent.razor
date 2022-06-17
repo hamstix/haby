@@ -20,17 +20,20 @@
     {
         _status = MessageStatuses.Error;
         _message = message;
+        StateHasChanged();
     }
 
     public void SetSuccess(string message)
     {
         _status = MessageStatuses.Success;
         _message = message;
+        StateHasChanged();
     }
 
     public void ResetStatus()
     {
         _status = MessageStatuses.None;
         _message = string.Empty;
+        StateHasChanged();
     }
 }

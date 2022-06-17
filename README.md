@@ -209,7 +209,7 @@ Json configuration supports variables:
 - rootUser [string][required]
 - rootPassword [string][required]
 - host [string][required]
-- disableSslVerification [bool]
+- disableSslVerification [bool] - if true, the https sertificate will be trusted event if it is not.
 - configureGrant[string] - default is ".*". The configure grant that the `username` will be assigned.
 - writeGrant[string] - default is ".*". The write grant that the `username` will be assigned.
 - readGrant[string] - default is ".*". The read grant that the `username` will be assigned.
@@ -300,7 +300,7 @@ Json configuration supports variables:
 - rootUser [string][required]
 - rootPassword [string][required]
 - host [string][required]
-- disableSslVerification [bool]
+- disableSslVerification [bool] - if true, the https sertificate will be trusted event if it is not.
 
 Service json configuration example
 ```json
@@ -357,7 +357,7 @@ Json configuration supports variables:
 - rootPassword [string][required]
 - host [string][required]
 - privilege [string]
-- disableSslVerification [bool]
+- disableSslVerification [bool] - if true, the https sertificate will be trusted event if it is not.
 
 Service json configuration example
 ```json
@@ -451,6 +451,111 @@ Service template example
   },
   {% endif %}
 }
+```
+
+### Kubernetes v1.23
+
+Plugin registers and drops Kubernetes resources.
+
+The main goal of this plugin that you can create multiple Kubernetes resources for one CU.
+
+In the Service template you must specify objects with different k8s templates. For example
+```
+{
+  "myDeployment": {
+    // Contains kubernetes deployment liquid template.
+  },
+  "myIngress": {
+    // Contains ingress deployment liquid template.
+  },
+  "rootIngress": {
+    // Contains ingress deployment liquid template.
+  }
+}
+
+In the CU configuration you can specify what templates will be generated as objects with keys that are the Service template resource keys. 
+You MUST specify the "handler" variable with handler name that the plugin supports. This handler can be `deployment` or `ingress` or other supported.
+Example:
+```json
+[
+  {
+    "key": "appsettings.json",
+    "services": {
+      "K8s": {
+        "variables": {
+          "myDeployment": {
+            "handler": "deployment"
+          },
+          "myIngress": {
+            "handler": "ingress"
+          }
+        }
+      }
+    }
+  }
+]
+
+*Supported handler names*
+
+- `deployment` - the Kubernetes Deployment.
+- `ingress` - the Kubernetes Ingress.
+- `service` - the Kubernetes Service.
+
+*@NOTE:* to properly create resources secrets you must provide values for the variables:
+- _resource_ - the name of the kubernetes resource.
+
+This variables can be generated from the `generate` function in the service template or be configured at the CU template at the `"service": {}` key.
+
+Json configuration supports variables:
+
+- host [string][required] - the Kubernetes http(s) endpoint.
+- namespace [string][required] - the Kubernetes namespace.
+- rootAccessToken [string][required] - the Kubernetes access token.
+- disableSslVerification [bool] - if true, the https sertificate will be trusted event if it is not.
+
+Service json configuration example
+```json
+{
+  "host": "api.k8s.local",
+  "namespace": "production",
+  "rootAccessToken": "ne6DrabojAivSrki"
+}
+```
+
+Service template example
+```
+{
+  "myDeployment": {
+    // Contains kubernetes deployment liquid template.
+  },
+  "myIngress": {
+    // Contains ingress deployment liquid template.
+  },
+  "rootIngress": {
+    // Contains ingress deployment liquid template.
+  }
+}
+```
+
+Microservice configuration example
+```json
+[
+  {
+    "key": "appsettings.json",
+    "services": {
+      "K8s": {
+        "variables": {
+          "myDeployment": {
+            "handler": "deployment"
+          },
+          "myIngress": {
+            "handler": "ingress"
+          }
+        }
+      }
+    }
+  }
+]
 ```
 
 ## How to develop plugin handlers

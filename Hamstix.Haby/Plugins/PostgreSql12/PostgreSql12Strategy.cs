@@ -64,6 +64,7 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
             var databaseName = variables[CuDatabaseKey]!.GetValue<string>();
             var password = variables[CuPasswordKey]!.GetValue<string>();
             var rootBuilder = BuildRootConnectionString(service, variables);
+            var rootUser = variables[ServiceRootUserKey]?.GetValue<string>();
 
             // Create connection to database server.
             using (var connection = new NpgsqlConnection(rootBuilder.ConnectionString))
@@ -88,7 +89,15 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
                 if (result is null)
                 {
                     createCommand = connection.CreateCommand();
-                    createCommand.CommandText = $"CREATE DATABASE {databaseName} WITH ENCODING='UTF-8' OWNER={userName};";
+                    createCommand.CommandText = $"CREATE DATABASE {databaseName} WITH ENCODING='UTF-8';";
+                    await createCommand.ExecuteNonQueryAsync(cancellationToken);
+
+                    createCommand = connection.CreateCommand();
+                    createCommand.CommandText = $"GRANT \"{userName}\" TO {rootUser};";
+                    await createCommand.ExecuteNonQueryAsync(cancellationToken);
+
+                    createCommand = connection.CreateCommand();
+                    createCommand.CommandText = $"ALTER DATABASE {databaseName} OWNER TO {userName};";
                     await createCommand.ExecuteNonQueryAsync(cancellationToken);
 
                     // Grant database owner to user.
@@ -107,18 +116,27 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
             var databaseName = variables[CuDatabaseKey]!.GetValue<string>();
             var rootBuilder = BuildRootConnectionString(service, variables);
 
+            var userBuilder = BuildUserConnectionString(service, variables);
+
             // Create connection to database server.
-            using (var connection = new NpgsqlConnection(rootBuilder.ConnectionString))
+            // Connection string from the user.
+            using (var connection = new NpgsqlConnection(userBuilder.ConnectionString))
             {
+                // TODO: Drop opened sessions.
                 await connection.OpenAsync(cancellationToken);
 
                 // Drop the database.
                 var createCommand = connection.CreateCommand();
                 createCommand.CommandText = $"DROP DATABASE {databaseName};";
                 await createCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
 
+            // Connection string from the management.
+            using (var connection = new NpgsqlConnection(rootBuilder.ConnectionString))
+            {
+                await connection.OpenAsync(cancellationToken);
                 // Drop the role.
-                createCommand = connection.CreateCommand();
+                var createCommand = connection.CreateCommand();
                 createCommand.CommandText = $"DROP ROLE {userName};";
                 await createCommand.ExecuteNonQueryAsync(cancellationToken);
 
@@ -127,6 +145,60 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
         }
 
         static NpgsqlConnectionStringBuilder BuildRootConnectionString(Service service, JsonObject variables)
+        {
+            var rootUser = variables[ServiceRootUserKey]?.GetValue<string>();
+            var rootPassword = variables[ServiceRootPasswordKey]?.GetValue<string>();
+            var host = variables[ServiceHostKey]?.GetValue<string>();
+
+            if (rootUser is null || rootPassword is null || host is null)
+                throw new ConfiguratorException($"The service \"{service.Name}\" must contains at least" +
+                    $"\"{ServiceRootUserKey}\", \"{ServiceRootPasswordKey}\", \"{ServiceHostKey}\" " +
+                    $"keys in the Json configuration.");
+
+            var port = service.JsonConfig[ServicePortKey]?.GetValue<int>() ?? 5432;
+            var rootDatabase = service.JsonConfig[ServiceRootDatabaseKey]?.GetValue<string>() ?? "postgres";
+            var sslMode = service.JsonConfig[ServiceSslModeKey]?.GetValue<SslMode>();
+            var trustServerCertificate = service.JsonConfig[ServiceTrustServerCertificateKey]?.GetValue<bool>();
+            var sslCertificate = service.JsonConfig[ServiceSslCertificateKey]?.GetValue<string>();
+            var sslKey = service.JsonConfig[ServiceSslKeyKey]?.GetValue<string>();
+            var sslPassword = service.JsonConfig[ServiceSslPasswordKey]?.GetValue<string>();
+            var rootCertificate = service.JsonConfig[ServiceRootCertificateKey]?.GetValue<string>();
+            var checkCertificateRevocation = service.JsonConfig[ServiceCheckCertificateRevocationKey]?.GetValue<bool>();
+            var integratedSecurity = service.JsonConfig[ServiceIntegratedSecurityKey]?.GetValue<bool>();
+            var kerberosServiceName = service.JsonConfig[ServiceKerberosServiceNameKey]?.GetValue<string>();
+            var timeout = service.JsonConfig[ServiceTimeoutKey]?.GetValue<int>();
+
+            var rootBuilder = new NpgsqlConnectionStringBuilder();
+            rootBuilder.Username = rootUser;
+            rootBuilder.Password = rootPassword;
+            rootBuilder.Host = host;
+            rootBuilder.Port = port;
+            rootBuilder.Database = rootDatabase;
+            if (sslMode is not null)
+                rootBuilder.SslMode = sslMode.Value;
+            if (trustServerCertificate is not null)
+                rootBuilder.TrustServerCertificate = trustServerCertificate.Value;
+            if (sslCertificate is not null)
+                rootBuilder.SslCertificate = sslCertificate;
+            if (sslKey is not null)
+                rootBuilder.SslKey = sslKey;
+            if (sslPassword is not null)
+                rootBuilder.SslPassword = sslPassword;
+            if (rootCertificate is not null)
+                rootBuilder.RootCertificate = rootCertificate;
+            if (checkCertificateRevocation is not null)
+                rootBuilder.CheckCertificateRevocation = checkCertificateRevocation.Value;
+            if (integratedSecurity is not null)
+                rootBuilder.IntegratedSecurity = integratedSecurity.Value;
+            if (kerberosServiceName is not null)
+                rootBuilder.KerberosServiceName = kerberosServiceName;
+            if (timeout is not null)
+                rootBuilder.Timeout = timeout.Value;
+
+            return rootBuilder;
+        }
+
+        static NpgsqlConnectionStringBuilder BuildUserConnectionString(Service service, JsonObject variables)
         {
             var rootUser = variables[ServiceRootUserKey]?.GetValue<string>();
             var rootPassword = variables[ServiceRootPasswordKey]?.GetValue<string>();

@@ -25,8 +25,9 @@
     <ProjectReference Include="..\Client\Hamstix.Haby.Client.csproj" />
     <ProjectReference Include="..\PluginsCore\Hamstix.Haby.Shared.PluginsCore.csproj" />
     <ProjectReference Include="..\Plugins\ArangoDb\Hamstix.Haby.Plugins.ArangoDb.csproj" />
+    <ProjectReference Include="..\Plugins\ClickHouse\Hamstix.Haby.Plugins.ClickHouse.csproj" />
     <ProjectReference Include="..\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource.csproj" />
-    <ProjectReference Include="..\Plugins\K8s\Hamstix.Haby.Plugins.K8s.csproj" />
+    <ProjectReference Include="..\Plugins\K8s_1_23\Hamstix.Haby.Plugins.K8s_1_23.csproj" />
     <ProjectReference Include="..\Plugins\PostgreSql12\Hamstix.Haby.Plugins.PostgreSql12.csproj" />
     <ProjectReference Include="..\Plugins\RabbitMQ\Hamstix.Haby.Plugins.RabbitMQ.csproj" />
     <ProjectReference Include="..\Shared\Hamstix.Haby.Shared.csproj" />

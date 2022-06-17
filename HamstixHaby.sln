@@ -24,7 +24,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.Rabbit
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.ArangoDb", "Hamstix.Haby\Plugins\ArangoDb\Hamstix.Haby.Plugins.ArangoDb.csproj", "{BF0E7220-0F1D-4879-B075-0657C9CAED34}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.K8s", "Hamstix.Haby\Plugins\K8s\Hamstix.Haby.Plugins.K8s.csproj", "{AF86C8E2-044C-4633-963F-920504A86A20}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.K8s_1_23", "Hamstix.Haby\Plugins\K8s_1_23\Hamstix.Haby.Plugins.K8s_1_23.csproj", "{AF86C8E2-044C-4633-963F-920504A86A20}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource", "Hamstix.Haby\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource.csproj", "{C24ED38F-351C-4D25-A8C9-714CACC100B2}"
 EndProject

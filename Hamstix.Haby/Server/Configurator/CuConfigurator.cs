@@ -338,7 +338,8 @@ namespace Hamstix.Haby.Server.Configurator
             JsonObject jsonConfiguration = new JsonObject();
             foreach (var cuAtService in cu.Services)
             {
-                jsonConfiguration.Add(cuAtService.Service.Name, cuAtService.RenderedTemplateJson.CloneJsonNode());
+                if (cuAtService.RenderedTemplateJson is not null)
+                    jsonConfiguration.Add(cuAtService.Service.Name, cuAtService.RenderedTemplateJson.CloneJsonNode());
             }
 
             foreach (var cuParameter in cu.Parameters)
