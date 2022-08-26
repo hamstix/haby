@@ -1,6 +1,4 @@
-﻿using System.Threading.Tasks;
-
-namespace Hamstix.Haby.Server.Services
+﻿namespace Hamstix.Haby.Server.Services
 {
     public interface ISchemaInitializer
     {

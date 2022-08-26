@@ -1,8 +1,8 @@
-﻿using AutoMapper;
-using AutoMapper.QueryableExtensions;
-using Hamstix.Haby.Server.Configuration;
+﻿using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Server.Models;
 using Hamstix.Haby.Shared.Api.WebUi.v1.Generators;
+using Mapster;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Monq.Core.MvcExtensions.Validation;
@@ -10,19 +10,17 @@ using Monq.Core.MvcExtensions.ViewModels;
 
 namespace Hamstix.Haby.Server.Controllers.Webui.v1
 {
+    [Authorize]
     [Route("[area]/generators")]
     public class GeneratorsWebUiController : WebUiV1Controller
     {
         readonly HabbyContext _context;
-        readonly IMapper _mapper;
 
         public GeneratorsWebUiController(
-            HabbyContext context,
-            IMapper mapper
+            HabbyContext context
             )
         {
             _context = context;
-            _mapper = mapper;
         }
 
         /// <summary>
@@ -34,7 +32,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
         {
             var generators = await _context.Generators
                 .AsNoTracking()
-                .ProjectTo<GeneratorPreviewViewModel>(_mapper.ConfigurationProvider)
+                .ProjectToType<GeneratorPreviewViewModel>()
                 .ToListAsync();
 
             return generators;
@@ -50,7 +48,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
         {
             var generator = await _context
                 .Generators
-                .ProjectTo<GeneratorViewModel>(_mapper.ConfigurationProvider)
+                .ProjectToType<GeneratorViewModel>()
                 .FirstOrDefaultAsync(x => x.Id == id);
 
             if (generator is null)
@@ -79,7 +77,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
             _context.Generators.Add(generator);
             await _context.SaveChangesAsync();
 
-            return _mapper.Map<GeneratorViewModel>(generator);
+            return generator.Adapt<GeneratorViewModel>();
         }
 
         /// <summary>
@@ -105,7 +103,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
 
             await _context.SaveChangesAsync();
 
-            return _mapper.Map<GeneratorViewModel>(generator);
+            return generator.Adapt<GeneratorViewModel>();
         }
     }
 }

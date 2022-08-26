@@ -7,14 +7,14 @@ namespace Hamstix.Haby.Shared.PluginsCore
     /// </summary>
     public interface IStrategy
     {
-        Task Configure(Service service, 
-            JsonNode renderedTemplate, 
-            JsonObject variables, 
+        Task Configure(Service service,
+            JsonNode renderedTemplate,
+            JsonObject variables,
             CancellationToken cancellationToken);
 
-        Task UnConfigure(Service service, 
-            JsonNode renderedTemplate, 
-            JsonObject variables, 
+        Task UnConfigure(Service service,
+            JsonNode renderedTemplate,
+            JsonObject variables,
             CancellationToken cancellationToken);
     }
 }

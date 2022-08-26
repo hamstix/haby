@@ -1,0 +1,57 @@
+﻿@page "/login"
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared
+@inject Hamstix.Haby.Client.Services.ILocalStorage LocalStorage
+@inject Hamstix.Haby.Client.Services.IAuthenticationService AuthenticationService
+@inject NavigationManager NavigationManager
+@attribute [AllowAnonymous]
+
+<PageTitle>Log in</PageTitle>
+
+@if (_model == null)
+{
+    <p>Loading ...</p>
+}
+else
+{
+    <div>Welcome to Haby</div>
+    <EditForm Model="@_model" OnValidSubmit="@HandleValidSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <div class="mb-3">
+            <label for="token" class="form-label">Log in with a token</label>
+            <InputText class="form-control" id="name" @bind-Value="_model.Token" />
+        </div>
+
+        <button class="btn btn-primary" type="submit">Log in</button>
+    </EditForm>
+    <AlertComponent @ref="_alertComponent"></AlertComponent>
+}
+
+@code {
+    AclModel? _model;
+
+    AlertComponent _alertComponent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await LocalStorage.GetStringAsync("token");
+        _model = new AclModel { Token = result };
+    }
+
+    async Task HandleValidSubmit()
+    {
+        _alertComponent.ResetStatus();
+        var result = await AuthenticationService.Login(_model);
+        if (!result.IsAuthSuccessful)
+        {
+            _alertComponent.SetError(result.Message);
+        }
+        else
+        {
+            _alertComponent.ResetStatus();
+            NavigationManager.NavigateTo("/");
+        }
+    }
+}

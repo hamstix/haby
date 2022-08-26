@@ -1,11 +1,14 @@
+using Hamstix.Haby.Server.Authentication;
+using Hamstix.Haby.Server.Configuration;
+using Hamstix.Haby.Server.Configurator;
+using Hamstix.Haby.Server.DependencyInjection;
+using Hamstix.Haby.Server.Extensions;
+using Hamstix.Haby.Server.Services;
+using Hamstix.Haby.Server.Services.Impl;
+using Mapster;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Monq.Core.HttpClientExtensions.Exceptions;
-using Hamstix.Haby.Server.DependencyInjection;
-using Hamstix.Haby.Server.Extensions;
-using Hamstix.Haby.Server.Configurator;
-using Hamstix.Haby.Server.Services;
-using Hamstix.Haby.Server.Services.Impl;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,7 +42,11 @@ builder.Services.AddHttpClient(Hamstix.Haby.Shared.PluginsCore.Constants.Disable
             };
         });
 
-builder.Services.AddAutoMapper(typeof(Program));
+TypeAdapterConfig.GlobalSettings.Scan(AppDomain.CurrentDomain.GetAssemblies());
+
+builder.Services.AddAuthentication(AppConstants.AuthenticationSchemeName)
+                .AddScheme<HabyAuthenticationOptions, HabyAuthenticationHandler>(AppConstants.AuthenticationSchemeName, null);
+builder.Services.AddSingleton<HabyAuthenticationManager>();
 
 builder.Services.RegisterPlugins(builder.Configuration);
 

@@ -11,9 +11,9 @@ namespace Hamstix.Haby.Plugins.K8s_1_23
             JsonObject resourceTemplate,
             CancellationToken cancellationToken);
 
-        Task DropResource(Kubernetes client, 
-            string resource, 
-            string @namespace, 
+        Task DropResource(Kubernetes client,
+            string resource,
+            string @namespace,
             CancellationToken token);
     }
 }

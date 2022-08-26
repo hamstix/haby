@@ -1,10 +1,10 @@
-﻿using AutoMapper;
-using AutoMapper.QueryableExtensions;
-using Hamstix.Haby.Server.Configuration;
+﻿using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Server.Models;
 using Hamstix.Haby.Server.Services;
 using Hamstix.Haby.Shared.Api.WebUi.v1.Plugins;
 using Hamstix.Haby.Shared.Api.WebUi.v1.Services;
+using Mapster;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Monq.Core.MvcExtensions.Validation;
@@ -13,22 +13,20 @@ using System.Text.Json.Nodes;
 
 namespace Hamstix.Haby.Server.Controllers.Webui.v1
 {
+    [Authorize]
     [Route("[area]/services")]
     public class ServicesWebUiController : WebUiV1Controller
     {
         readonly HabbyContext _context;
-        readonly IMapper _mapper;
         readonly IPluginsService _pluginsService;
 
         public ServicesWebUiController(
             HabbyContext context,
-            IMapper mapper,
             IPluginsService pluginsService
             )
         {
             _pluginsService = pluginsService;
             _context = context;
-            _mapper = mapper;
         }
 
         /// <summary>
@@ -40,7 +38,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
         {
             var services = await _context.Services
                 .AsNoTracking()
-                .ProjectTo<ServicePreviewViewModel>(_mapper.ConfigurationProvider)
+                .ProjectToType<ServicePreviewViewModel>()
                 .ToListAsync();
 
             return services;
@@ -54,7 +52,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
             if (service is null)
                 return NotFound(new ErrorResponseViewModel($"The service id {id} is not found."));
 
-            return _mapper.Map<ServiceViewModel>(service);
+            return service.Adapt<ServiceViewModel>();
         }
 
         /// <summary>
@@ -97,7 +95,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
             _context.Services.Add(service);
             await _context.SaveChangesAsync();
 
-            return _mapper.Map<ServiceViewModel>(service);
+            return service.Adapt<ServiceViewModel>();
         }
 
         /// <summary>
@@ -142,7 +140,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
 
             await _context.SaveChangesAsync();
 
-            return _mapper.Map<ServiceViewModel>(service);
+            return service.Adapt<ServiceViewModel>();
         }
 
         [HttpDelete("{id}")]
@@ -175,10 +173,10 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
 
             var resultPlugins = plugins.Where(x => !usedPlugins.Contains(x.Name)).ToList();
 
-            return _mapper.Map<List<PluginPreviewViewModel>>(resultPlugins);
+            return resultPlugins.Adapt<List<PluginPreviewViewModel>>();
         }
 
-        async Task<bool> PluginAvailiable(string pluginName, Service service) => 
+        async Task<bool> PluginAvailiable(string pluginName, Service service) =>
             !await _context
                 .Services
                 .AnyAsync(x => x.PluginName == pluginName && x.Id != service.Id);

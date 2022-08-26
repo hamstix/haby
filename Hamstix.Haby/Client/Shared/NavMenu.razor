@@ -1,4 +1,9 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
+﻿@using Hamstix.Haby.Client.Services
+@attribute [Authorize]
+@inject IAuthenticationService Auth
+@inject NavigationManager Navigation
+
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">Hamstix.Haby</a>
         <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
@@ -9,31 +14,47 @@
 
 <div class="@NavMenuCssClass" @onclick="ToggleNavMenu">
     <nav class="flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="services">
-                <span class="oi oi-list-rich" aria-hidden="true"></span> Services
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="generators">
-                <span class="oi oi-list-rich" aria-hidden="true"></span> Generators
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="configuration-units">
-                <span class="oi oi-list-rich" aria-hidden="true"></span> CUs
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="configurations">
-                <span class="oi oi-list-rich" aria-hidden="true"></span> Configurations
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="application">
-                <span class="oi oi-list-rich" aria-hidden="true"></span> Application
-            </NavLink>
-        </div>
+        <AuthorizeView>
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="services">
+                        <span class="oi oi-list-rich" aria-hidden="true"></span> Services
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="generators">
+                        <span class="oi oi-list-rich" aria-hidden="true"></span> Generators
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="configuration-units">
+                        <span class="oi oi-list-rich" aria-hidden="true"></span> CUs
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="configurations">
+                        <span class="oi oi-list-rich" aria-hidden="true"></span> Configurations
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="application">
+                        <span class="oi oi-list-rich" aria-hidden="true"></span> Application
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <div class="nav-link" @onclick="Logout">
+                        <span class="oi oi-list-rich" aria-hidden="true"></span> Logout
+                    </div>
+                </div>
+            </Authorized>
+            <NotAuthorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="login">
+                        <span class="oi oi-list-rich" aria-hidden="true"></span> Log in
+                    </NavLink>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
     </nav>
 </div>
 
@@ -45,5 +66,11 @@
     private void ToggleNavMenu()
     {
         collapseNavMenu = !collapseNavMenu;
+    }
+
+    async Task Logout()
+    {
+        await Auth.Logout();
+        Navigation.NavigateTo($"/login");
     }
 }

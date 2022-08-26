@@ -3,6 +3,7 @@
 @using Hamstix.Haby.Shared.Api.WebUi.v1.Generators
 @using System.Text.Json.Nodes
 @using Hamstix.Haby.Shared.Api.WebUi.v1.Keys
+@using Hamstix.Haby.Shared.Api.WebUi.v1.SystemVariables
 @inject HttpClient Http
 @inject NavigationManager NavigationManager
 
@@ -69,7 +70,7 @@ else
 
     JsonSystemVariablesPutViewModel CreatePutModel(JsonSystemVariablesViewModel service) =>
     new()
-        {
-            Configuration = service.Configuration.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
-        };
+    {
+        Configuration = service.Configuration.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
+    };
 }

@@ -30,7 +30,7 @@ namespace Hamstix.Haby.Server.Models
         /// <summary>
         /// List of configuration unit keys.
         /// </summary>
-        public ICollection<ConfigurationKey> Keys { get; private set; } = 
+        public ICollection<ConfigurationKey> Keys { get; private set; } =
             new List<ConfigurationKey>();
 
         /// <summary>
@@ -41,13 +41,13 @@ namespace Hamstix.Haby.Server.Models
         /// <summary>
         /// The list of all services the configuration unit is configured for.
         /// </summary>
-        public ICollection<ConfigurationUnitAtService> Services { get; private set; } = 
+        public ICollection<ConfigurationUnitAtService> Services { get; private set; } =
             new List<ConfigurationUnitAtService>();
 
         /// <summary>
         /// List of all parameters for the configuration unit.
         /// </summary>
-        public ICollection<ConfigurationUnitParameter> Parameters { get; private set; } = 
+        public ICollection<ConfigurationUnitParameter> Parameters { get; private set; } =
             new List<ConfigurationUnitParameter>();
 
         private ConfigurationUnit() { } // EF.

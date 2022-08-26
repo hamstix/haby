@@ -1,11 +1,13 @@
 ﻿using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Shared;
 using Hamstix.Haby.Shared.Api.WebUi.v1.RegistryStatuses;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Hamstix.Haby.Server.Controllers.Webui.v1
 {
+    [Authorize]
     [Route("[area]")]
     public class RegistryStatusWebUiController : WebUiV1Controller
     {

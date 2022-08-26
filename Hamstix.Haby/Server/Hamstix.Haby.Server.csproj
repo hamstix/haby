@@ -7,18 +7,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AutoMapper" Version="11.0.1" />
     <PackageReference Include="Fluid.Core" Version="2.2.15" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="6.0.5" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="6.0.5">
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="6.0.8" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="6.0.8">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Monq.Core.MvcExtensions" Version="3.1.0" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="6.0.4" />
-    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="11.0.0" />
-    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" Version="6.2.0" />
-    <PackageReference Include="Monq.Core.HttpClientExtensions" Version="5.1.1" />
+    <PackageReference Include="Monq.Core.MvcExtensions" Version="3.1.2" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="6.0.6" />
+    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" Version="6.4.0" />
+    <PackageReference Include="Monq.Core.HttpClientExtensions" Version="5.2.0" />
+    <PackageReference Include="Mapster" Version="7.4.0-pre03" />
   </ItemGroup>
 
   <ItemGroup>

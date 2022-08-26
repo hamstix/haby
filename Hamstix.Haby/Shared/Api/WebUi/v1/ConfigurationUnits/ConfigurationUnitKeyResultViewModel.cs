@@ -1,7 +1,4 @@
-﻿using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits.Variables;
-using Hamstix.Haby.Shared.PluginsCore;
-
-namespace Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
+﻿namespace Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
 {
     public class ConfigurationUnitKeyResultViewModel
     {

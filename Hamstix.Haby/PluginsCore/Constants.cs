@@ -1,6 +1,6 @@
 ﻿namespace Hamstix.Haby.Shared.PluginsCore
 {
-    public class Constants
+    public static class Constants
     {
         /// <summary>
         /// The name of the Http Client with disables Ssl verification.

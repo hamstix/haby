@@ -28,7 +28,7 @@ namespace Hamstix.Haby.Plugins.K8s_1_23
             {
                 existedEntity = await GetExistedEntity(client, resource, @namespace, cancellationToken);
             }
-            catch(k8s.Autorest.HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            catch (k8s.Autorest.HttpOperationException e) when (e.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 existedEntity = null;
             }

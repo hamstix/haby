@@ -13,7 +13,7 @@ namespace Hamstix.Haby.Server.Extensions
         /// <returns></returns>
         public static JsonObject Merge(this JsonObject left, JsonObject? right)
         {
-            if (right is null) 
+            if (right is null)
                 return left;
             var result = JsonNode.Parse(left.ToJsonString()).AsObject(); // Clone json object.
 
@@ -31,10 +31,10 @@ namespace Hamstix.Haby.Server.Extensions
         }
 
         public static JsonNode CloneJsonNode(this JsonNode? jsonNode) => jsonNode switch
-                    {
-                        JsonObject jO => JsonNode.Parse(jO.ToJsonString()),
-                        JsonArray jA => JsonNode.Parse(jA.ToJsonString()),
-                        JsonValue jV => JsonValue.Create(jV.GetValue<object>())
-                    };
-}
+        {
+            JsonObject jO => JsonNode.Parse(jO.ToJsonString()),
+            JsonArray jA => JsonNode.Parse(jA.ToJsonString()),
+            JsonValue jV => JsonValue.Create(jV.GetValue<object>())
+        };
+    }
 }

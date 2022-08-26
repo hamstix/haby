@@ -1,6 +1,7 @@
 ﻿using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Server.Extensions;
-using Hamstix.Haby.Shared.Api.WebUi.v1.Keys;
+using Hamstix.Haby.Shared.Api.WebUi.v1.SystemVariables;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Monq.Core.MvcExtensions.ViewModels;
@@ -8,6 +9,7 @@ using System.Text.Json.Nodes;
 
 namespace Hamstix.Haby.Server.Controllers.Webui.v1
 {
+    [Authorize]
     [Route("[area]/application/system-variables/json")]
     public class SystemVariablesJsonWebUiController : WebUiV1Controller
     {

@@ -5,7 +5,7 @@
     {
         public static class EnvVariables
         {
-            public const string PgConnectionString = "REGISTRY_PG_CONN";
+            public const string PgConnectionString = "HABY_PG_CONN";
             public const string SecureToken = "SECURE_TOKEN";
         }
 
@@ -20,5 +20,7 @@
         /// The current version of the API. Change super carefully!
         /// </summary>
         public static readonly Version CurrentApiVersion = new Version(1, 0, 0);
+
+        public const string AuthenticationSchemeName = "HabyAuth";
     }
 }

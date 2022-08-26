@@ -1,23 +1,22 @@
-﻿using AutoMapper;
-using Hamstix.Haby.Server.Services;
+﻿using Hamstix.Haby.Server.Services;
 using Hamstix.Haby.Shared.Api.WebUi.v1.Plugins;
+using Mapster;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Hamstix.Haby.Server.Controllers.Webui.v1
 {
+    [Authorize]
     [Route("[area]/plugins")]
     public class PluginsWebUiController : WebUiV1Controller
     {
         readonly IPluginsService _pluginsService;
-        readonly IMapper _mapper;
 
         public PluginsWebUiController(
-            IPluginsService pluginsService,
-            IMapper mapper
+            IPluginsService pluginsService
             )
         {
             _pluginsService = pluginsService;
-            _mapper = mapper;
         }
 
         /// <summary>
@@ -29,7 +28,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
         {
             var plugins = _pluginsService.Plugins.ToList();
 
-            return _mapper.Map<List<PluginPreviewViewModel>>(plugins);
+            return plugins.Adapt<List<PluginPreviewViewModel>>();
         }
     }
 }

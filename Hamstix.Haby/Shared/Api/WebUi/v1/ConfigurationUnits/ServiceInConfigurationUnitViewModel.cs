@@ -1,7 +1,4 @@
-﻿using System;
-using System.Linq;
-
-namespace Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits.Variables
+﻿namespace Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
 {
     public class ServiceInConfigurationUnitViewModel
     {

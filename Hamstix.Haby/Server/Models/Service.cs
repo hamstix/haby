@@ -35,7 +35,7 @@ namespace Hamstix.Haby.Server.Models
         /// <summary>
         /// Список микросервисов для сервиса.
         /// </summary>
-        public IEnumerable<ConfigurationUnitAtService> ConfigurationUnits { get; private set; } = 
+        public IEnumerable<ConfigurationUnitAtService> ConfigurationUnits { get; private set; } =
             new List<ConfigurationUnitAtService>();
 
         private Service() // For serializers.

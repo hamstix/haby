@@ -1,10 +1,10 @@
-﻿using AutoMapper;
-using AutoMapper.QueryableExtensions;
-using Hamstix.Haby.Server.Configuration;
+﻿using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Server.Configurator;
 using Hamstix.Haby.Server.Models;
 using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits;
 using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits.Variables;
+using Mapster;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Monq.Core.MvcExtensions.Validation;
@@ -13,22 +13,20 @@ using System.Text.Json.Nodes;
 
 namespace Hamstix.Haby.Server.Controllers.Webui.v1
 {
+    [Authorize]
     [Route("[area]/configuration-units")]
     public class ConfigurationUnitsWebUiController : WebUiV1Controller
     {
         readonly HabbyContext _context;
-        readonly IMapper _mapper;
         readonly ICuConfigurator _configurator;
 
         public ConfigurationUnitsWebUiController(
             HabbyContext context,
-            IMapper mapper,
             ICuConfigurator configurator
             )
         {
             _configurator = configurator;
             _context = context;
-            _mapper = mapper;
         }
 
         /// <summary>
@@ -40,7 +38,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
         {
             var configurationUnits = await _context.ConfigurationUnits
                 .AsNoTracking()
-                .ProjectTo<ConfigurationUnitPreviewViewModel>(_mapper.ConfigurationProvider)
+                .ProjectToType<ConfigurationUnitPreviewViewModel>()
                 .ToListAsync();
 
             return configurationUnits;
@@ -54,12 +52,12 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
             if (configurationUnit is null)
                 return NotFound(new ErrorResponseViewModel($"The configuration unit id {id} is not found."));
 
-            return _mapper.Map<ConfigurationUnitViewModel>(configurationUnit);
+            return configurationUnit.Adapt<ConfigurationUnitViewModel>();
         }
 
         [HttpPost]
         [ValidateActionParameters]
-        public async Task<ActionResult<ConfigurationUnitViewModel>> Add( 
+        public async Task<ActionResult<ConfigurationUnitViewModel>> Add(
             [FromBody] ConfigurationUnitPutViewModel value)
         {
             if (await _context.ConfigurationUnits.AnyAsync(x => x.Name == value.Name.Trim()))
@@ -84,12 +82,12 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
 
             await _context.SaveChangesAsync();
 
-            return _mapper.Map<ConfigurationUnitViewModel>(cu);
+            return cu.Adapt<ConfigurationUnitViewModel>();
         }
 
         [HttpPut("{id}")]
         [ValidateActionParameters]
-        public async Task<ActionResult<ConfigurationUnitViewModel>> Update(long id, 
+        public async Task<ActionResult<ConfigurationUnitViewModel>> Update(long id,
             [FromBody] ConfigurationUnitPutViewModel value)
         {
             var configurationUnit = await _context.ConfigurationUnits.FirstOrDefaultAsync(x => x.Id == id);
@@ -115,7 +113,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
 
             await _context.SaveChangesAsync();
 
-            return _mapper.Map<ConfigurationUnitViewModel>(configurationUnit);
+            return configurationUnit.Adapt<ConfigurationUnitViewModel>();
         }
 
         [HttpDelete("{id}")]
@@ -143,8 +141,8 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
 
             var result = new ConfigurationUnitResultsViewModel
             {
-                ConfigurationUnit = _mapper.Map<ConfigurationUnitViewModel>(configurationUnit),
-                Results = _mapper.Map<IEnumerable<ConfigurationUnitKeyResultViewModel>>(results)
+                ConfigurationUnit = configurationUnit.Adapt<ConfigurationUnitViewModel>(),
+                Results = results.Adapt<IEnumerable<ConfigurationUnitKeyResultViewModel>>()
             };
 
             return result;
@@ -161,7 +159,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
                 .Include(x => x.ConfigurationUnitAtService)
                     .ThenInclude(x => x.Service)
                 .Where(x => x.ConfigurationUnitId == id)
-                .ProjectTo<ConfigurationUnitVariableViewModel>(_mapper.ConfigurationProvider)
+                .ProjectToType<ConfigurationUnitVariableViewModel>()
                 .ToListAsync();
         }
 

@@ -5,7 +5,7 @@ namespace Hamstix.Haby.Server.Models
     public class ConfigurationUnitKeyResult
     {
         public string Key { get; private set; }
-        public IEnumerable<Shared.PluginsCore.ConfigurationResult> Results { get; set; } = 
+        public IEnumerable<Shared.PluginsCore.ConfigurationResult> Results { get; set; } =
             Enumerable.Empty<Shared.PluginsCore.ConfigurationResult>();
 
         public ConfigurationUnitKeyResult(string key)
@@ -13,7 +13,7 @@ namespace Hamstix.Haby.Server.Models
             Key = key;
         }
 
-        public ConfigurationUnitKeyResult(string key, IEnumerable<ConfigurationResult> results) 
+        public ConfigurationUnitKeyResult(string key, IEnumerable<ConfigurationResult> results)
             : this(key)
         {
             Results = results;

@@ -1,8 +1,8 @@
-﻿using AutoMapper;
-using AutoMapper.QueryableExtensions;
-using Hamstix.Haby.Server.Configuration;
+﻿using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits;
 using Hamstix.Haby.Shared.Api.WebUi.v1.Keys;
+using Mapster;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Monq.Core.MvcExtensions.ViewModels;
@@ -10,19 +10,17 @@ using System.Text.Json.Nodes;
 
 namespace Hamstix.Haby.Server.Controllers.Webui.v1
 {
+    [Authorize]
     [Route("[area]/configuration")]
     public class ConfigurationWebUiController : WebUiV1Controller
     {
         readonly HabbyContext _context;
-        readonly IMapper _mapper;
 
         public ConfigurationWebUiController(
-            HabbyContext context,
-            IMapper mapper
+            HabbyContext context
             )
         {
             _context = context;
-            _mapper = mapper;
         }
 
         [HttpGet]
@@ -31,7 +29,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
             return await _context
                 .ConfigurationUnits
                 .AsNoTracking()
-                .ProjectTo<ConfigurationUnitPreviewViewModel>(_mapper.ConfigurationProvider)
+                .ProjectToType<ConfigurationUnitPreviewViewModel>()
                 .ToListAsync();
         }
 
@@ -43,7 +41,7 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
                 .AsNoTracking()
                 .Where(x => x.Name == configurationUnitName)
                 .SelectMany(x => x.Keys)
-                .ProjectTo<ConfigurationKeyPreviewViewModel>(_mapper.ConfigurationProvider)
+                .ProjectToType<ConfigurationKeyPreviewViewModel>()
                 .ToListAsync();
         }
 
@@ -102,7 +100,6 @@ namespace Hamstix.Haby.Server.Controllers.Webui.v1
 
             if (configuration is null)
                 return BadRequest(new ErrorResponseViewModel("The configuration key is not found."));
-
 
             configuration.Configuration = new JsonObject();
             await _context.SaveChangesAsync();

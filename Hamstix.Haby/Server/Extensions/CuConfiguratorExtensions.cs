@@ -15,7 +15,7 @@ namespace Hamstix.Haby.Server.Extensions
             return result;
         }
 
-        public static JsonObject? GetCuServiceNode(this ConfigurationUnit cu, string configurationKey, string serviceName) => 
+        public static JsonObject? GetCuServiceNode(this ConfigurationUnit cu, string configurationKey, string serviceName) =>
             cu.Template[configurationKey]?[serviceName]?.AsObject();
     }
 }
