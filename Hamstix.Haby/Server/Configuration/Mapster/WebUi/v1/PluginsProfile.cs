@@ -1,4 +1,4 @@
-﻿using Hamstix.Haby.Shared.Api.WebUi.v1.Plugins;
+﻿using Hamstix.Haby.Shared.Grpc.Plugins;
 using Hamstix.Haby.Shared.PluginsCore;
 using Mapster;
 
@@ -9,6 +9,6 @@ public class PluginsProfile : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
-        config.NewConfig<Plugin, PluginPreviewViewModel>();
+        config.NewConfig<Plugin, PluginModel>();
     }
 }

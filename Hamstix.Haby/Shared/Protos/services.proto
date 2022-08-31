@@ -1,0 +1,87 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/wrappers.proto";
+
+option csharp_namespace = "Hamstix.Haby.Shared.Grpc.Services";
+
+package habyGrpc;
+
+service ServicesService {
+  // Get all configured services.
+  rpc GetAll (GetAllRequest) returns (GetAllResponse);
+  // Get service by Id.
+  rpc GetById (GetByIdRequest) returns (ServiceModel);
+  // Create new service.
+  rpc Create (CreateRequest) returns (ServiceModel);
+  // Do full service udpate.
+  rpc Update (UpdateRequest) returns (ServiceModel);
+  // Delete service.
+  rpc Delete (DeleteRequest) returns (google.protobuf.Empty);
+}
+
+message GetAllRequest {
+  google.protobuf.FieldMask FieldMask = 1;
+}
+
+message GetAllResponse {
+  repeated ServiceModel Services = 1;
+}
+
+message GetByIdRequest {
+  int64 Id = 1;
+  google.protobuf.FieldMask FieldMask = 2;
+}
+
+message CreateRequest {
+  // The service name.
+  string Name = 1;
+  // The service Json configuration.
+  string JsonConfig = 2;
+  // The template, that will be generated as service configuration for the microservice.
+  google.protobuf.StringValue Template = 3;
+  // The Plugin to be used as default configurator for the service.
+  // If Null, no plugins is used for the service.
+  google.protobuf.StringValue PluginName = 4;
+}
+
+message UpdateRequest {
+  int64 Id = 1;
+  ServiceUpdateModel Service = 2;
+}
+
+message DeleteRequest {
+  int64 Id = 1;
+}
+
+message ServiceUpdateModel {
+  // The service name.
+  string Name = 1;
+  // The service Json configuration.
+  string JsonConfig = 2;
+  // The template, that will be generated as service configuration for the microservice.
+  google.protobuf.StringValue Template = 3;
+  // The Plugin to be used as default configurator for the service.
+  // If Null, no plugins is used for the service.
+  google.protobuf.StringValue PluginName = 4;
+}
+
+message ServiceModel {
+  // The service Id.
+  int64 Id = 1;
+  // The service name.
+  string Name = 2;
+  // Plugin that can be used at service.
+  PluginInServiceModel Plugin = 3;
+  // The service Json configuration.
+  google.protobuf.Struct JsonConfig = 4;
+  // The template, that will be generated as service configuration for the configuration unit.
+  google.protobuf.StringValue Template = 5;
+}
+
+message PluginInServiceModel {
+  // Plugin name.
+  string Name = 1;
+}

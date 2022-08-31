@@ -22,7 +22,7 @@ namespace Hamstix.Haby.Server.Models
         /// <summary>
         /// The configuration unit generated configuration.
         /// </summary>
-        public JsonNode Configuration { get; set; } = new JsonObject();
+        public JsonObject Configuration { get; set; } = new JsonObject();
 
         public ConfigurationKey(string name, ConfigurationUnit cu)
         {

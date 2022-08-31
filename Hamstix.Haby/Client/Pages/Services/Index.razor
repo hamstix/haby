@@ -1,8 +1,9 @@
 ﻿@page "/services"
 @using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Extensions
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.Services
+@inject Haby.Shared.Grpc.Services.ServicesService.ServicesServiceClient ServicesService
 
 <PageTitle>Services</PageTitle>
 
@@ -35,7 +36,7 @@ else
                         <NavLink href=@($"services/{service.Id}")>@service.Name</NavLink>
                     </td>
                     <td>@(service.Plugin?.Name ?? AppConstants.NonePluginSelected)</td>
-                    <td>@CutString(service.JsonConfig.ToJsonString())</td>
+                    <td>@CutString(service.JsonConfig.ToJsonObject().ToJsonString())</td>
                     <td>
                         <button class="btn"
                         @onclick="@(() => RemoveService(service))"
@@ -50,7 +51,7 @@ else
 }
 
 @code {
-    List<ServicePreviewViewModel>? _services;
+    List<ServiceModel>? _services;
 
     List<BreadCrumbItem> _breadCrumbs = new()
         {
@@ -59,7 +60,8 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _services = await Http.GetFromJsonAsync<List<ServicePreviewViewModel>>("api/webui/haby/v1/services");
+        var servicesResponse = await ServicesService.GetAllAsync(new GetAllRequest());
+        _services = servicesResponse.Services.ToList();
     }
 
     public string CutString(string value)
@@ -71,9 +73,9 @@ else
         return value.Substring(0, maxLength);
     }
 
-    async Task RemoveService(ServicePreviewViewModel service)
+    async Task RemoveService(ServiceModel service)
     {
-        await Http.DeleteAsync($"api/webui/haby/v1/services/{service.Id}");
+        await ServicesService.DeleteAsync(new DeleteRequest { Id = service.Id });
         _services?.Remove(service);
     }
 }

@@ -1,12 +1,11 @@
 ﻿@page "/configuration-units/{id:long}"
+@using Grpc.Core
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
 @using Hamstix.Haby.Client.Pages.ConfigurationUnits.Components
-@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Plugins
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
 @using System.Text.Json.Nodes
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.ConfigurationUnits
+@inject Haby.Shared.Grpc.ConfigurationUnits.ConfigurationUnitsService.ConfigurationUnitsServiceClient CusService
 @inject NavigationManager NavigationManager
 
 <PageTitle>Edit configuration unit "@_originalStruct?.Name"</PageTitle>
@@ -45,15 +44,15 @@ else
 
     <AlertComponent @ref="_alertComponent"></AlertComponent>
 
-    <VariablesComponent СuId="Id" @ref="VariablesComponent"></VariablesComponent>
+    <VariablesComponent CuId="Id" @ref="VariablesComponent"></VariablesComponent>
 }
 
 @code {
     [Parameter]
     public long Id { get; set; }
 
-    ConfigurationUnitViewModel? _originalStruct;
-    ConfigurationUnitPutViewModel? _putModel;
+    ConfigurationUnitModel? _originalStruct;
+    ConfigurationUnitUpdateModel? _putModel;
     AlertComponent _alertComponent;
 
     protected VariablesComponent VariablesComponent;
@@ -62,8 +61,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _originalStruct = await Http.GetFromJsonAsync<ConfigurationUnitViewModel>(
-          $"api/webui/haby/v1/configuration-units/{Id}");
+        _originalStruct = await CusService.GetByIdAsync(new GetByIdRequest { Id = Id });
         _putModel = CreatePutModel(_originalStruct);
 
         _breadCrumbs = new()
@@ -75,19 +73,19 @@ else
 
     async Task Save()
     {
-        var response = await Http.PutAsJsonAsync($"api/webui/haby/v1/configuration-units/{Id}", _putModel);
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var error = await response.Content.ReadFromJsonAsync<JsonObject>();
-            var message = error?["message"]?.GetValue<string>() ?? string.Empty;
-            _alertComponent.SetError(message);
+            var result = await CusService.UpdateAsync(new UpdateRequest { Id = Id, ConfigurationUnit = _putModel });
+            _originalStruct = result;
+
+            _putModel = CreatePutModel(result);
+            _alertComponent.SetSuccess("Saved");
+        }
+        catch (RpcException e)
+        {
+            _alertComponent.SetError(e.Status.Detail);
             return;
         }
-        var result = await response.Content.ReadFromJsonAsync<ConfigurationUnitViewModel>();
-        _originalStruct = result;
-
-        _putModel = CreatePutModel(result);
-        _alertComponent.SetSuccess("Saved");
     }
 
     void Cancel()
@@ -97,20 +95,22 @@ else
 
     async Task Reconfigure()
     {
-        var response = await Http.PostAsJsonAsync($"api/webui/haby/v1/configuration-units/{Id}/reconfigure", new object());
-        if (!response.IsSuccessStatusCode)
+        ReconfigurationResponse result;
+        try
         {
-            var error = await response.Content.ReadFromJsonAsync<JsonObject>();
-            var message = error["message"]?.GetValue<string>() ?? string.Empty;
-            _alertComponent.SetError(message);
+            result = await CusService.ReconfigureAsync(new ReconfigurationRequest { Id = Id });
+        }
+        catch (RpcException e)
+        {
+            _alertComponent.SetError(e.Status.Detail);
             return;
         }
-        var result = await response.Content.ReadFromJsonAsync<ConfigurationUnitResultsViewModel>();
-        if (result.Results.Any(x => x.Results.Any(r => r.Status == Haby.Shared.PluginsCore.ConfigurationResultStatuses.Failed)))
+
+        if (result.Results.Any(x => x.Results.Any(r => r.Status == ConfigurationResultStatuses.Failed)))
         {
             var errorResults = result
                .Results
-               .Where(x => x.Results.Any(r => r.Status == Haby.Shared.PluginsCore.ConfigurationResultStatuses.Failed))
+               .Where(x => x.Results.Any(r => r.Status == ConfigurationResultStatuses.Failed))
                .ToList();
             var message = System.Text.Json.JsonSerializer.Serialize(errorResults);
             _alertComponent.SetError(message);
@@ -122,11 +122,11 @@ else
         await VariablesComponent.Refresh();
     }
 
-    ConfigurationUnitPutViewModel CreatePutModel(ConfigurationUnitViewModel service) =>
+    ConfigurationUnitUpdateModel CreatePutModel(ConfigurationUnitModel cu) =>
     new()
         {
-            Name = service.Name,
-            Version = service.Version,
-            Template = service.Template.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
+            Name = cu.Name,
+            Version = cu.Version,
+            Template = cu.Template.ToJsonArray().ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
         };
 }

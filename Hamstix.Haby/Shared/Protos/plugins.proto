@@ -1,0 +1,29 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/field_mask.proto";
+
+option csharp_namespace = "Hamstix.Haby.Shared.Grpc.Plugins";
+
+package habyGrpc;
+
+service PluginsService {
+  // Get all registered plugins.
+  rpc GetAll(PluginsRequest) returns (PluginsResponse);
+}
+
+message PluginsRequest {
+  google.protobuf.FieldMask FieldMask = 1;
+  // Returns the list of the unused plugins.
+  bool ShowOnlyUnused = 2;
+}
+
+message PluginsResponse {
+  repeated PluginModel Plugins = 1;
+}
+
+message PluginModel {
+  // The Plugin name.
+  string Name = 1;
+}

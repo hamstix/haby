@@ -1,5 +1,5 @@
 ﻿using Hamstix.Haby.Server.Models;
-using Hamstix.Haby.Shared.Api.WebUi.v1.Keys;
+using Hamstix.Haby.Shared.Grpc.Configuration;
 using Mapster;
 
 namespace Hamstix.Haby.Server.Configuration.MapperProfiles.WebUi.v1;
@@ -9,6 +9,6 @@ public class ConfigurationKeysProfile : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
-        config.NewConfig<ConfigurationKey, ConfigurationKeyPreviewViewModel>();
+        config.NewConfig<ConfigurationKey, KeyModel>();
     }
 }

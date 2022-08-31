@@ -1,7 +1,7 @@
 ﻿@page "/login"
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared
+@using Hamstix.Haby.Shared.Grpc.System
 @inject Hamstix.Haby.Client.Services.ILocalStorage LocalStorage
 @inject Hamstix.Haby.Client.Services.IAuthenticationService AuthenticationService
 @inject NavigationManager NavigationManager
@@ -37,7 +37,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         var result = await LocalStorage.GetStringAsync("token");
-        _model = new AclModel { Token = result };
+        _model = new AclModel { Token = result ?? string.Empty };
     }
 
     async Task HandleValidSubmit()

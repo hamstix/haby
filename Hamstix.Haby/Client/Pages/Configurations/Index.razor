@@ -1,9 +1,8 @@
 ﻿@page "/configurations"
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Keys
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.ConfigurationUnits
+@inject Haby.Shared.Grpc.ConfigurationUnits.ConfigurationUnitsService.ConfigurationUnitsServiceClient CusService
 
 <PageTitle>Configurations</PageTitle>
 
@@ -35,7 +34,7 @@ else
 }
 
 @code {
-    ConfigurationUnitPreviewViewModel[]? _configuratoinUnits;
+    ConfigurationUnitModel[]? _configuratoinUnits;
 
     List<BreadCrumbItem> _breadCrumbs = new()
         {
@@ -49,7 +48,7 @@ else
                 new BreadCrumbItem("Configurations", true)
             };
 
-        _configuratoinUnits = await Http.GetFromJsonAsync<ConfigurationUnitPreviewViewModel[]>(
-          $"api/webui/haby/v1/configuration");
+        var response = await CusService.GetAllAsync(new GetAllRequest());
+        _configuratoinUnits = response.ConfigurationUnits.ToArray();
     }
 }

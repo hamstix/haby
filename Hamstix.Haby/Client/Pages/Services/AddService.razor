@@ -1,11 +1,13 @@
 ﻿@page "/services/add"
+@using Grpc.Core
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Components.Toast
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Plugins
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
 @using System.Text.Json.Nodes
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.Plugins
+@using Hamstix.Haby.Shared.Grpc.Services
+@inject Haby.Shared.Grpc.Plugins.PluginsService.PluginsServiceClient PluginsService
+@inject Haby.Shared.Grpc.Services.ServicesService.ServicesServiceClient ServicesService
 @inject NavigationManager NavigationManager
 @inject ToastService ToastService
 
@@ -34,28 +36,28 @@ else
                 <option value="@AppConstants.NonePluginSelected">@AppConstants.NonePluginSelected</option>
                 @foreach (var plugin in _plugins)
                 {
-                <option value="@plugin.Name">@plugin.Name</option>
+                    <option value="@plugin.Name">@plugin.Name</option>
                 }
-        </InputSelect>
-    </div>
-    <div class="mb-3">
-        <label for="jsonConfig" class="form-label">Json Config</label>
-        <InputTextArea class="form-control" id="jsonConfig" @bind-Value="_postModel.JsonConfig" cols=60 rows=5 />
-    </div>
-    <div class="mb-3">
-        <label for="template" class="form-label">Template</label>
-        <InputTextArea class="form-control" id="template" @bind-Value="_postModel.Template" cols=60 rows=5 />
-    </div>
+            </InputSelect>
+        </div>
+        <div class="mb-3">
+            <label for="jsonConfig" class="form-label">Json Config</label>
+            <InputTextArea class="form-control" id="jsonConfig" @bind-Value="_postModel.JsonConfig" cols=60 rows=5 />
+        </div>
+        <div class="mb-3">
+            <label for="template" class="form-label">Template</label>
+            <InputTextArea class="form-control" id="template" @bind-Value="_postModel.Template" cols=60 rows=5 />
+        </div>
 
-    <button class="btn btn-primary" type="submit">Create</button>
-</EditForm>
+        <button class="btn btn-primary" type="submit">Create</button>
+    </EditForm>
 
     <AlertComponent @ref="_alertComponent"></AlertComponent>
 }
 
 @code {
-    ServicePostViewModel _postModel = new();
-    PluginPreviewViewModel[]? _plugins;
+    CreateRequest _postModel = new();
+    PluginModel[]? _plugins;
 
     List<BreadCrumbItem> _breadCrumbs = new()
         {
@@ -67,34 +69,28 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _plugins = await Http.GetFromJsonAsync<Hamstix.Haby.Shared.Api.WebUi.v1.Plugins.PluginPreviewViewModel[]>(
-          "api/webui/haby/v1/services/plugins");
+        var pluginsResponse = await PluginsService.GetAllAsync(new PluginsRequest { ShowOnlyUnused = true });
+        _plugins = pluginsResponse.Plugins.ToArray();
     }
 
     async Task HandleValidSubmit()
     {
+        if (_postModel.PluginName == AppConstants.NonePluginSelected)
+            _postModel.PluginName = null;
+        ServiceModel result;
         try
         {
-            if (_postModel.PluginName == AppConstants.NonePluginSelected)
-                _postModel.PluginName = null;
-            var response = await Http.PostAsJsonAsync("api/webui/haby/v1/services", _postModel);
-            if (!response.IsSuccessStatusCode)
-            {
-                var error = await response.Content.ReadFromJsonAsync<JsonObject>();
-                var message = error["message"]?.GetValue<string>() ?? string.Empty;
-                _alertComponent.SetError(message);
-                return;
-            }
-
-            var result = await response.Content.ReadFromJsonAsync<ServiceViewModel>();
-            _alertComponent.ResetStatus();
-
-            if (result is not null)
-                NavigationManager.NavigateTo($"services/{result.Id}");
+            result = await ServicesService.CreateAsync(_postModel);
         }
-        catch (Exception e)
+        catch (RpcException e)
         {
-            _alertComponent.SetError(e.Message);
+            _alertComponent.SetError(e.Status.Detail);
+            return;
         }
+
+        _alertComponent.ResetStatus();
+
+        if (result is not null)
+            NavigationManager.NavigateTo($"services/{result.Id}");
     }
 }

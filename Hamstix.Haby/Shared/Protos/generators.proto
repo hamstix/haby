@@ -1,0 +1,75 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/wrappers.proto";
+
+option csharp_namespace = "Hamstix.Haby.Shared.Grpc.Generators";
+
+package habyGrpc;
+
+service GeneratorsService {
+  // Get all configured generators.
+  rpc GetAll (GetAllRequest) returns (GetAllResponse);
+  // Get generator by Id.
+  rpc GetById (GetByIdRequest) returns (GeneratorModel);
+  // Create new generator.
+  rpc Create (CreateRequest) returns (GeneratorModel);
+  // Do full generator udpate.
+  rpc Update (UpdateRequest) returns (GeneratorModel);
+  // Delete generator.
+  rpc Delete (DeleteRequest) returns (google.protobuf.Empty);
+}
+
+message GetAllRequest {
+  google.protobuf.FieldMask FieldMask = 1;
+}
+
+message GetAllResponse {
+  repeated GeneratorModel Generators = 1;
+}
+
+message GetByIdRequest {
+  int64 Id = 1;
+  google.protobuf.FieldMask FieldMask = 2;
+}
+
+message CreateRequest {
+  // The generator name.
+  string Name = 1;
+  // The generator description.
+  google.protobuf.StringValue Description = 2;
+  // The template of the generator.
+  string Template = 3;
+}
+
+message UpdateRequest {
+  int64 Id = 1;
+  GeneratorUpdateModel Generator = 2;
+}
+
+message DeleteRequest {
+  int64 Id = 1;
+}
+
+message GeneratorUpdateModel {
+  // The generator name.
+  string Name = 1;
+  // The generator description.
+  google.protobuf.StringValue Description = 2;
+  // The template of the generator.
+  google.protobuf.StringValue Template = 3;
+}
+
+message GeneratorModel {
+  // The generator Id.
+  int64 Id = 1;
+  // The generator name.
+  string Name = 2;
+  // The generator description.
+  google.protobuf.StringValue Description = 3;
+  // The template of the generator.
+  string Template = 4;
+}
+

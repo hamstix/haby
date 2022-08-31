@@ -1,5 +1,5 @@
 ﻿using Hamstix.Haby.Server.Models;
-using Hamstix.Haby.Shared.Api.WebUi.v1.Generators;
+using Hamstix.Haby.Shared.Grpc.Generators;
 using Mapster;
 
 namespace Hamstix.Haby.Server.Configuration.MapperProfiles.WebUi.v1;
@@ -9,7 +9,6 @@ public class GeneratorsProfile : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
-        config.NewConfig<Generator, GeneratorPreviewViewModel>();
-        config.NewConfig<Generator, GeneratorViewModel>();
+        config.NewConfig<Generator, GeneratorModel>();
     }
 }

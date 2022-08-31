@@ -17,8 +17,12 @@ public class InfrastructureProfile : IRegister
 
         config.NewConfig<JsonObject, Struct>()
             .MapWith(src => src.ToProtoStruct());
+        config.NewConfig<JsonArray, ListValue>()
+            .MapWith(src => src.ToProtoArray());
 
         config.NewConfig<JsonObject, Value>()
+            .MapWith(src => Value.Parser.ParseJson(src.ToJsonString(null)));
+        config.NewConfig<JsonNode, Value>()
             .MapWith(src => Value.Parser.ParseJson(src.ToJsonString(null)));
 
         config.NewConfig<JsonObject, JsonObject>()
@@ -39,7 +43,7 @@ public class InfrastructureProfile : IRegister
             .MapWith(timestamp => timestamp.ToDateTimeOffset());
         // Nullable  Datetime offset.
         config.NewConfig<DateTimeOffset?, Timestamp>()
-            .MapWith(dateTimeOffset => dateTimeOffset == null ? null : dateTimeOffset.Value.ToTimestamp());
+            .MapWith(dateTimeOffset => dateTimeOffset == null ? new Timestamp() : dateTimeOffset.Value.ToTimestamp());
         config.NewConfig<Timestamp, DateTimeOffset?>()
             .MapWith(timestamp =>
                 timestamp.ToDateTimeOffset() == DateTimeOffset.MinValue ? null : (Nullable<DateTimeOffset>)timestamp.ToDateTimeOffset());

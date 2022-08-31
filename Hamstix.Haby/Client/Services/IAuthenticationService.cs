@@ -1,4 +1,4 @@
-﻿using Hamstix.Haby.Shared;
+﻿using Hamstix.Haby.Shared.Grpc.System;
 
 namespace Hamstix.Haby.Client.Services
 {

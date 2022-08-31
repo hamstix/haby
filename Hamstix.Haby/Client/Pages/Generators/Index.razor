@@ -1,10 +1,8 @@
 ﻿@page "/generators"
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Generators
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Services
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.Generators
+@inject Haby.Shared.Grpc.Generators.GeneratorsService.GeneratorsServiceClient GeneratorsService
 
 <PageTitle>Generators</PageTitle>
 
@@ -50,7 +48,7 @@ else
 }
 
 @code {
-    List<GeneratorPreviewViewModel>? _generators;
+    List<GeneratorModel>? _generators;
 
     List<BreadCrumbItem> _breadCrumbs = new()
         {
@@ -59,13 +57,13 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _generators = await Http.GetFromJsonAsync<List<GeneratorPreviewViewModel>>(
-          "api/webui/haby/v1/generators");
+        var response = await GeneratorsService.GetAllAsync(new GetAllRequest());
+        _generators = response.Generators.ToList();
     }
 
-    async Task RemoveGenerator(GeneratorPreviewViewModel generator)
+    async Task RemoveGenerator(GeneratorModel generator)
     {
-        await Http.DeleteAsync($"api/webui/haby/v1/generators/{generator.Id}");
+        await GeneratorsService.DeleteAsync(new DeleteRequest { Id = generator.Id });
         _generators?.Remove(generator);
     }
 }

@@ -1,8 +1,8 @@
 ﻿@using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.ConfigurationUnits.Variables
 @using System.Text.Json.Nodes
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.ConfigurationUnits
+@inject Haby.Shared.Grpc.ConfigurationUnits.ConfigurationUnitsService.ConfigurationUnitsServiceClient CusService
 
 <h4>Saved variables</h4>
 
@@ -29,7 +29,7 @@ else
                     <td>@variable.Key</td>
                     <td>@variable.Service.Name</td>
                     <td>@variable.Name</td>
-                    <td>@variable.Value.ToJsonString()</td>
+                    <td>@variable.Value?.ToJsonNode()?.ToJsonString()</td>
                     <td><button class="btn" @onclick="@(() => RemoveConstraint(variable))" @onclick:preventDefault="true"><span class="oi oi-trash"></span></button></td>
                 </tr>
             }
@@ -39,9 +39,9 @@ else
 
 @code {
     [Parameter]
-    public long СuId { get; set; }
+    public long CuId { get; set; }
 
-    List<ConfigurationUnitVariableViewModel>? _variables;
+    List<ConfigurationUnitVariableModel>? _variables;
 
     protected override async Task OnInitializedAsync()
     {
@@ -56,13 +56,14 @@ else
 
     async Task LoadVariables()
     {
-        _variables = await Http.GetFromJsonAsync<List<ConfigurationUnitVariableViewModel>>(
-          $"api/webui/haby/v1/configuration-units/{СuId}/variables");
+        var response = await CusService.GetVariablesAsync(new GetVariablesRequest { Id = CuId });
+        _variables = response.Variables.ToList();
     }
 
-    async Task RemoveConstraint(ConfigurationUnitVariableViewModel variable)
+    async Task RemoveConstraint(ConfigurationUnitVariableModel variable)
     {
-        await Http.DeleteAsync($"api/webui/haby/v1/configuration-units/{СuId}/variables?name={variable.Name}&key={variable.Key}&serviceId={variable.Service.Id}");
+        await CusService.DeleteVariableAsync(
+          new DeleteVariableRequest { Id = CuId, Name = variable.Name, Key = variable.Key, ServiceId = variable.Service.Id });
         _variables?.Remove(variable);
     }
 }

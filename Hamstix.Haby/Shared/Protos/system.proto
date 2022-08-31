@@ -1,0 +1,63 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+option csharp_namespace = "Hamstix.Haby.Shared.Grpc.System";
+
+package habyGrpc;
+
+enum RegStatuses {
+  REG_STATUSES_INITIALIZED = 0;
+  REG_STATUSES_NOT_INITIALIZED = 1;
+  REG_STATUSES_ERROR = 2;
+}
+
+service SystemService {
+  // Check the AuthResultModel token.
+  rpc CheckAuthToken(AclModel) returns (AuthResultModel);
+  // Get system variables configuration.
+  rpc GetSystemVariables (google.protobuf.Empty) returns (SystemVariablesModel);
+  // Update system variables configuration.
+  rpc UpdateSystemVariables (UpdateSystemVariablesRequest) returns (SystemVariablesModel);
+}
+
+service SystemStatusService {
+  // Get Application status.
+  rpc GetApplicationStatus(google.protobuf.Empty) returns (ApplicationStatusModel);
+  // Initialize the Application database schema.
+  rpc InitializeSchema(google.protobuf.Empty) returns (ApplicationStatusModel);
+}
+
+message AclModel {
+  string Token = 1;
+}
+
+message AuthResultModel {
+  bool IsAuthSuccessful = 1;
+  string Message = 2;
+}
+
+message UpdateSystemVariablesRequest {
+  string Configuration = 1;
+}
+
+message SystemVariablesModel {
+  google.protobuf.Struct Configuration = 1;
+}
+
+message ApplicationStatusModel {
+  // Registry status.
+  RegStatuses Status = 1;
+  // Error message, if present.
+  string Message = 2;
+  // Registry version.
+  string Version = 3;
+  // Registry public Api verion.
+  string ApiVersion = 4;
+  // The flag indicates whether the database schema has been initialized. 
+  bool DbSchemaInitialized = 5;
+  // Gets or sets the name of the environment. The host automatically sets this property
+  // to the value of the "environment" key as specified in configuration.
+  string Environment = 6;
+}

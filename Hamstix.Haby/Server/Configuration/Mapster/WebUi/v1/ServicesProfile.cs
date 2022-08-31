@@ -1,5 +1,5 @@
 ﻿using Hamstix.Haby.Server.Models;
-using Hamstix.Haby.Shared.Api.WebUi.v1.Services;
+using Hamstix.Haby.Shared.Grpc.Services;
 using Mapster;
 
 namespace Hamstix.Haby.Server.Configuration.MapperProfiles.WebUi.v1;
@@ -9,11 +9,8 @@ public class ServicesProfile : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
-        config.NewConfig<Service, ServicePreviewViewModel>()
+        config.NewConfig<Service, ServiceModel>()
             .Map(dest => dest.Plugin, src => src.PluginName != null ?
-                new PluginInServiceViewModel { Name = src.PluginName } : null);
-        config.NewConfig<Service, ServiceViewModel>()
-            .Map(dest => dest.Plugin, src => src.PluginName != null ?
-                new PluginInServiceViewModel { Name = src.PluginName } : null);
+                new PluginInServiceModel { Name = src.PluginName } : null);
     }
 }

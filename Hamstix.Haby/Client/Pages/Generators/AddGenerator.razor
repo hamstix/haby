@@ -1,10 +1,11 @@
 ﻿@page "/generators/add"
+@using Grpc.Core
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Components.Toast
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Generators
 @using System.Text.Json.Nodes
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.Generators
+@inject Haby.Shared.Grpc.Generators.GeneratorsService.GeneratorsServiceClient GeneratorsService
 @inject NavigationManager NavigationManager
 @inject ToastService ToastService
 
@@ -37,7 +38,7 @@
 <AlertComponent @ref="_alertComponent"></AlertComponent>
 
 @code {
-    GeneratorPostViewModel _postModel = new();
+    CreateRequest _postModel = new();
 
     List<BreadCrumbItem> _breadCrumbs = new()
         {
@@ -51,24 +52,15 @@
     {
         try
         {
-            var response = await Http.PostAsJsonAsync("api/webui/haby/v1/generators", _postModel);
-            if (!response.IsSuccessStatusCode)
-            {
-                var error = await response.Content.ReadFromJsonAsync<JsonObject>();
-                var message = error["message"]?.GetValue<string>() ?? string.Empty;
-                _alertComponent.SetError(message);
-                return;
-            }
-
-            var result = await response.Content.ReadFromJsonAsync<GeneratorViewModel>();
+            var result = await GeneratorsService.CreateAsync(_postModel);
             _alertComponent.ResetStatus();
 
             if (result is not null)
                 NavigationManager.NavigateTo($"generators/{result.Id}");
         }
-        catch (Exception e)
+        catch (RpcException e)
         {
-            _alertComponent.SetError(e.Message);
+            _alertComponent.SetError(e.Status.Detail);
         }
     }
 }

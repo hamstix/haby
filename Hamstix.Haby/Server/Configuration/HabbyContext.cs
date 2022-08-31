@@ -80,7 +80,7 @@ namespace Hamstix.Haby.Server.Configuration
                 entity.Property(val => val.Configuration)
                     .HasConversion(val =>
                         val.ToJsonString(_jsonIntendedOptions),
-                        dbVal => JsonNode.Parse(dbVal, default(JsonNodeOptions), default(JsonDocumentOptions))
+                        dbVal => JsonNode.Parse(dbVal, default(JsonNodeOptions), default(JsonDocumentOptions))!.AsObject()
                     )
                     .HasColumnType("jsonb")
                     .HasDefaultValueSql("'{}'::jsonb")

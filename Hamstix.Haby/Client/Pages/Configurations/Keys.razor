@@ -1,8 +1,8 @@
 ﻿@page "/configurations/{ConfigurationUnitName}/keys"
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Keys
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.Configuration
+@inject Haby.Shared.Grpc.Configuration.ConfigurationService.ConfigurationServiceClient ConfigurationService
 
 <PageTitle>Configurations</PageTitle>
 
@@ -37,7 +37,7 @@ else
     [Parameter]
     public string ConfigurationUnitName { get; set; }
 
-    ConfigurationKeyPreviewViewModel[]? _keys;
+    KeyModel[]? _keys;
 
     List<BreadCrumbItem> _breadCrumbs = new()
         {
@@ -53,7 +53,7 @@ else
                 new BreadCrumbItem(ConfigurationUnitName, true)
             };
 
-        _keys = await Http.GetFromJsonAsync<Hamstix.Haby.Shared.Api.WebUi.v1.Keys.ConfigurationKeyPreviewViewModel[]>(
-          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys");
+        var response = await ConfigurationService.GetKeysAsync(new GetCUKeysRequest { CuName = ConfigurationUnitName });
+        _keys = response.Keys.ToArray();
     }
 }

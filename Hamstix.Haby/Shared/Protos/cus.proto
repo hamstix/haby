@@ -1,0 +1,133 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/wrappers.proto";
+
+option csharp_namespace = "Hamstix.Haby.Shared.Grpc.ConfigurationUnits";
+
+package habyGrpc;
+
+enum ConfigurationResultStatuses {
+  CONFIGURATION_RESULT_STATUSES_OK = 0;
+  CONFIGURATION_RESULT_STATUSES_FAILED = 1;
+}
+
+service ConfigurationUnitsService {
+  // Get all configured CUs.
+  rpc GetAll (GetAllRequest) returns (GetAllResponse);
+  // Get CU by Id.
+  rpc GetById (GetByIdRequest) returns (ConfigurationUnitModel);
+  // Create new CU.
+  rpc Create (CreateRequest) returns (ConfigurationUnitModel);
+  // Do full CU udpate.
+  rpc Update (UpdateRequest) returns (ConfigurationUnitModel);
+  // Delete CU.
+  rpc Delete (DeleteRequest) returns (google.protobuf.Empty);
+  // Reconfigure CU.
+  rpc Reconfigure (ReconfigurationRequest) returns (ReconfigurationResponse);
+  // Get CU saved variables.
+  rpc GetVariables (GetVariablesRequest) returns (GetVariablesResponse);
+  // Delete CU saved variable.
+  rpc DeleteVariable (DeleteVariableRequest) returns (google.protobuf.Empty);
+}
+
+message GetAllRequest {
+  google.protobuf.FieldMask FieldMask = 1;
+}
+
+message GetAllResponse {
+  repeated ConfigurationUnitModel ConfigurationUnits = 1;
+}
+
+message GetByIdRequest {
+  int64 Id = 1;
+  google.protobuf.FieldMask FieldMask = 2;
+}
+
+message CreateRequest {
+  // The CU name.
+  string Name = 1;
+  // The current configuration unit version.
+  string Version = 2;
+  // The configuration unit template.
+  string Template = 3;
+}
+
+message UpdateRequest {
+  int64 Id = 1;
+  ConfigurationUnitUpdateModel ConfigurationUnit = 2;
+}
+
+message DeleteRequest {
+  int64 Id = 1;
+}
+
+message ReconfigurationRequest {
+  int64 Id = 1;
+}
+
+message ReconfigurationResponse {
+  ConfigurationUnitModel ConfigurationUnit = 1;
+  repeated ReconfigurationKeyResultModel Results = 2;
+}
+
+message GetVariablesRequest {
+  int64 Id = 1;
+}
+
+message GetVariablesResponse {
+  repeated ConfigurationUnitVariableModel Variables = 1;
+}
+
+message DeleteVariableRequest {
+  int64 Id = 1;
+  string Name = 2;
+  string Key = 3;
+  int64 ServiceId = 4;
+}
+
+message ReconfigurationKeyResultModel {
+  string Key = 1;
+  repeated ReconfigurationResultModel Results = 2;
+}
+
+message ReconfigurationResultModel {
+  ServiceInCUModel Service = 1;
+  ConfigurationResultStatuses Status = 2;
+  google.protobuf.StringValue ErrorMessage = 3;
+}
+
+message ServiceInCUModel {
+  int64 Id = 1;
+  string Name = 2;
+}
+
+message ConfigurationUnitVariableModel {
+  string Key = 1;
+  ServiceInCUModel Service = 2;
+  string Name = 3;
+  google.protobuf.Value Value = 4;
+}
+
+message ConfigurationUnitUpdateModel {
+  // The CU name.
+  string Name = 1;
+  // The current configuration unit version.
+  string Version = 2;
+  // The configuration unit template.
+  string Template = 3;
+}
+
+message ConfigurationUnitModel {
+  // The CU Id.
+  int64 Id = 1;
+  // The CU name.
+  string Name = 2;
+  // The current configuration unit version.
+  string Version = 3;
+  // The configuration unit template.
+  google.protobuf.ListValue Template = 4;
+}
+

@@ -15,9 +15,11 @@
     </PackageReference>
     <PackageReference Include="Monq.Core.MvcExtensions" Version="3.1.2" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="6.0.6" />
-    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" Version="6.4.0" />
+    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" Version="6.4.1-rev-2964103574" />
     <PackageReference Include="Monq.Core.HttpClientExtensions" Version="5.2.0" />
     <PackageReference Include="Mapster" Version="7.4.0-pre03" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.48.0" />
+    <PackageReference Include="Grpc.AspNetCore.Web" Version="2.48.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,6 +33,5 @@
     <ProjectReference Include="..\Plugins\RabbitMQ\Hamstix.Haby.Plugins.RabbitMQ.csproj" />
     <ProjectReference Include="..\Shared\Hamstix.Haby.Shared.csproj" />
   </ItemGroup>
-
 
 </Project>

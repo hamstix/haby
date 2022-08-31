@@ -1,11 +1,12 @@
 ﻿@page "/application"
+@using Grpc.Core
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
 @using Hamstix.Haby.Client.Pages.Application.SystemVariables
 @using Hamstix.Haby.Shared
-@using Hamstix.Haby.Shared.Api.WebUi.v1.RegistryStatuses
 @using System.Text.Json.Nodes
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.System
+@inject Haby.Shared.Grpc.System.SystemStatusService.SystemStatusServiceClient SystemStatusService
 
 <PageTitle>Application</PageTitle>
 
@@ -31,7 +32,7 @@ else
     </p>
 
     @if (_status.Status == RegStatuses.NotInitialized
-      || _status.Status == RegStatuses.Error)
+     || _status.Status == RegStatuses.Error)
     {
         <button class="btn btn-primary" @onclick="InitializeRegistry">Initialize</button>
     }
@@ -47,28 +48,26 @@ else
             new BreadCrumbItem("Application", true)
         };
 
-    RegStatusViewModel? _status;
+    ApplicationStatusModel? _status;
 
     AlertComponent _alertComponent;
 
     protected override async Task OnInitializedAsync()
     {
-        _status = await Http.GetFromJsonAsync<RegStatusViewModel>(
-            "api/webui/haby/v1/status");
+        _status = await SystemStatusService.GetApplicationStatusAsync(new Google.Protobuf.WellKnownTypes.Empty());
     }
 
     async Task InitializeRegistry()
     {
-        var response = await Http.PostAsJsonAsync<object>("api/webui/haby/v1/initialize", new object());
-
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var error = await response.Content.ReadFromJsonAsync<JsonObject>();
-            var message = error?["message"]?.GetValue<string>() ?? string.Empty;
-            _alertComponent.SetError(message);
+            _status = await SystemStatusService.InitializeSchemaAsync(new Google.Protobuf.WellKnownTypes.Empty());
+        }
+        catch (RpcException e)
+        {
+            _alertComponent.SetError(e.Status.Detail);
             return;
         }
-        _status = await response.Content.ReadFromJsonAsync<RegStatusViewModel>();
 
         _alertComponent.ResetStatus();
     }

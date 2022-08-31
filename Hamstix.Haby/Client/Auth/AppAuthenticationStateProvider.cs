@@ -1,5 +1,6 @@
 ﻿using Hamstix.Haby.Client.Services;
 using Microsoft.AspNetCore.Components.Authorization;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 
@@ -10,9 +11,11 @@ namespace Hamstix.Haby.Client.Auth
         readonly ILocalStorage _localStorage;
         readonly AuthenticationState _anonymous;
         readonly HttpClient _httpClient;
+        readonly IHttpClientFactory _httpClientFactory;
 
-        public AppAuthenticationStateProvider(ILocalStorage localStorage, HttpClient httpClient)
+        public AppAuthenticationStateProvider(ILocalStorage localStorage, HttpClient httpClient, IHttpClientFactory httpClientFactory)
         {
+            _httpClientFactory = httpClientFactory;
             _httpClient = httpClient;
             _localStorage = localStorage;
             _anonymous = new AuthenticationState(new ClaimsPrincipal());
@@ -45,6 +48,7 @@ namespace Hamstix.Haby.Client.Auth
             var authState = Task.FromResult(new AuthenticationState(authenticatedUser));
             NotifyAuthenticationStateChanged(authState);
         }
+
         public void NotifyUserLogout()
         {
             var authState = Task.FromResult(_anonymous);

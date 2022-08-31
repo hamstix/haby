@@ -1,9 +1,10 @@
 ﻿@page "/configurations/{ConfigurationUnitName}/keys/{Key}/edit"
+@using Grpc.Core
 @using Hamstix.Haby.Client.Components
 @using Hamstix.Haby.Client.Models
-@using Hamstix.Haby.Shared.Api.WebUi.v1.Keys
 @using System.Text.Json.Nodes
-@inject HttpClient Http
+@using Hamstix.Haby.Shared.Grpc.Configuration
+@inject Haby.Shared.Grpc.Configuration.ConfigurationService.ConfigurationServiceClient ConfigurationService
 
 <PageTitle>Configurations</PageTitle>
 
@@ -39,8 +40,8 @@ else
     [Parameter]
     public string Key { get; set; }
 
-    ConfigurationCodeViewModel? _originalStruct;
-    ConfigurationCodePutViewModel? _putModel;
+    KeyConfigurationCodeModel? _originalStruct;
+    UpdateKeyConfigurationModel? _putModel;
 
     List<BreadCrumbItem> _breadCrumbs = new()
         {
@@ -60,28 +61,25 @@ else
                 new BreadCrumbItem(Key, true)
             };
 
-        _originalStruct = await Http.GetFromJsonAsync<ConfigurationCodeViewModel>(
-          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config");
+        _originalStruct = await ConfigurationService.GetKeyConfigurationAsync(new Haby.Shared.Grpc.Configuration.GetKeyConfigurationRequest { CuName = ConfigurationUnitName, KeyName = Key });
         _putModel = CreatePutModel(_originalStruct);
     }
 
     async Task Save()
     {
-        var response = await Http.PutAsJsonAsync(
-          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config",
-          _putModel);
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var error = await response.Content.ReadFromJsonAsync<JsonObject>();
-            var message = error["message"]?.GetValue<string>() ?? string.Empty;
-            _alertComponent.SetError(message);
+            _originalStruct = await ConfigurationService.UpdateKeyConfigurationAsync(
+              new UpdateKeyConfigurationRequest { CuName = ConfigurationUnitName, KeyName = Key, KeyConfiguration = _putModel });
+
+            _putModel = CreatePutModel(_originalStruct);
+            _alertComponent.SetSuccess("Saved");
+        }
+        catch (RpcException e)
+        {
+            _alertComponent.SetError(e.Status.Detail);
             return;
         }
-        var result = await response.Content.ReadFromJsonAsync<ConfigurationCodeViewModel>();
-        _originalStruct = result;
-
-        _putModel = CreatePutModel(result);
-        _alertComponent.ResetStatus();
     }
 
     void Cancel()
@@ -91,18 +89,17 @@ else
 
     async Task Regenerate()
     {
-        await Http.DeleteAsync(
-          $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config");
-
-        _originalStruct = await Http.GetFromJsonAsync<ConfigurationCodeViewModel>(
-            $"api/webui/haby/v1/configuration/{ConfigurationUnitName}/keys/{Key}/config");
+        await ConfigurationService.RegenerateKeyConfigAsync(new RegenerateKeyConfigRequest { CuName = ConfigurationUnitName, KeyName = Key });
+        
+        _originalStruct = await ConfigurationService.UpdateKeyConfigurationAsync(
+              new UpdateKeyConfigurationRequest { CuName = ConfigurationUnitName, KeyName = Key, KeyConfiguration = _putModel });
 
         _putModel = CreatePutModel(_originalStruct);
     }
 
-    ConfigurationCodePutViewModel CreatePutModel(ConfigurationCodeViewModel service) =>
+    UpdateKeyConfigurationModel CreatePutModel(KeyConfigurationCodeModel service) =>
     new()
         {
-            Configuration = service.Configuration.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
+            Configuration = service.Configuration.ToJsonObject().ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
         };
 }

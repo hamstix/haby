@@ -36,7 +36,7 @@ namespace Hamstix.Haby.Server.Models
         /// <summary>
         /// The configuration unit template.
         /// </summary>
-        public JsonNode Template { get; set; } = new JsonArray();
+        public JsonArray Template { get; set; } = new JsonArray();
 
         /// <summary>
         /// The list of all services the configuration unit is configured for.

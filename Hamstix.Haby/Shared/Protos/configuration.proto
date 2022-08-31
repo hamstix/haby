@@ -1,0 +1,55 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/wrappers.proto";
+
+option csharp_namespace = "Hamstix.Haby.Shared.Grpc.Configuration";
+
+package habyGrpc;
+
+service ConfigurationService {
+  rpc GetKeys (GetCUKeysRequest) returns (GetCUKeysResponse);
+  rpc GetKeyConfiguration (GetKeyConfigurationRequest) returns (KeyConfigurationCodeModel);
+  rpc UpdateKeyConfiguration (UpdateKeyConfigurationRequest) returns (KeyConfigurationCodeModel);
+  // Regenerate the default configuration unit template.
+  rpc RegenerateKeyConfig (RegenerateKeyConfigRequest) returns (KeyConfigurationCodeModel);
+}
+
+message GetCUKeysRequest {
+  string CuName = 1;
+  google.protobuf.FieldMask FieldMask = 2;
+}
+
+message GetCUKeysResponse {
+  repeated KeyModel Keys = 1;
+}
+
+message GetKeyConfigurationRequest {
+  string CuName = 1;
+  string KeyName = 2;
+}
+
+message UpdateKeyConfigurationRequest {
+  string CuName = 1;
+  string KeyName = 2;
+  UpdateKeyConfigurationModel KeyConfiguration = 3;
+}
+
+message RegenerateKeyConfigRequest {
+  string CuName = 1;
+  string KeyName = 2;
+}
+
+message UpdateKeyConfigurationModel {
+  string Configuration = 1;
+}
+
+message KeyModel {
+  string Name = 1;
+}
+
+message KeyConfigurationCodeModel {
+  google.protobuf.Struct Configuration = 1;
+}
