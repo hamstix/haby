@@ -1,0 +1,122 @@
+﻿@page "/organization-units/catalog/{*pageRoute}"
+@using Grpc.Core
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Grpc.OrganizationUnits
+@inject Haby.Shared.Grpc.OrganizationUnits.OrganizationUnitsService.OrganizationUnitsServiceClient OuService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Organization Units</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+<NavLink class="btn" href="@($"organization-units/add?parents={PageRoute}")">
+    <span class="oi oi-plus"></span>
+</NavLink>
+
+@if (_ous == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Options</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var ou in _ous.OrderBy(x => x.Name))
+            {
+                <tr>
+                    <td>
+                        <NavLink href=@(PageRoute is null ? $"organization-units/catalog/{ou.Name}"
+                         : $"organization-units/catalog/{PageRoute}/{ou.Name}")>@ou.Name</NavLink>
+                    </td>
+                    <td>
+                        <button class="btn"
+                        @onclick="@(() => EditOu(ou))"
+                        @onclick:preventDefault="true">
+                            <span class="oi oi-wrench"></span>
+                        </button>
+                        <button class="btn"
+                        @onclick="@(() => RemoveOu(ou))"
+                        @onclick:preventDefault="true">
+                            <span class="oi oi-trash"></span>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+<AlertComponent @ref="_alertComponent"></AlertComponent>
+
+@code {
+    [Parameter]
+    public string? PageRoute { get; set; }
+
+    List<OrganizationUnitModel>? _ous;
+
+    List<BreadCrumbItem> _breadCrumbs = new();
+
+    AlertComponent _alertComponent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadCrumbs.Clear();
+        var request = new GetOusByPathRequest();
+        if (PageRoute is not null)
+        {
+            var splittedRoute = PageRoute.Split("/", StringSplitOptions.RemoveEmptyEntries);
+
+            if (splittedRoute.Any())
+                request.OUs.AddRange(splittedRoute);
+
+            _breadCrumbs.Add(new BreadCrumbItem("Organization units", false, "organization-units/catalog"));
+            string? route = null;
+            foreach (var routeItem in splittedRoute)
+            {
+                if (splittedRoute.First() == routeItem)
+                    route = routeItem;
+                else
+                    route = route + "/" + routeItem;
+                _breadCrumbs.Add(new BreadCrumbItem(routeItem, splittedRoute.Last() == routeItem,
+                  $"organization-units/catalog/{route}"));
+            }
+        }
+        else
+        {
+            _breadCrumbs.Add(new BreadCrumbItem("Organization units", true, "organization-units/catalog"));
+        }
+
+        try
+        {
+            var response = await OuService.GetOusByPathAsync(request);
+            _ous = response.OrganizationUnits.ToList();
+        }
+        catch (RpcException ex)
+        {
+            _alertComponent.SetError(ex.Status.Detail);
+            return;
+        }
+    }
+
+    async Task RemoveOu(OrganizationUnitModel ou)
+    {
+        await OuService.DeleteAsync(new DeleteRequest { Id = ou.Id });
+        _ous?.Remove(ou);
+    }
+
+    void EditOu(OrganizationUnitModel ou)
+    {
+        NavigationManager.NavigateTo($"organization-units/{ou.Id}");
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await OnInitializedAsync();
+    }
+}

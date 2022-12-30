@@ -1,8 +1,7 @@
-﻿namespace Hamstix.Haby.Server.Models
+﻿namespace Hamstix.Haby.Server.Models;
+
+public enum VariableTypes
 {
-    public enum VariableTypes
-    {
-        Service,
-        ConfigurationUnit
-    }
+    Service,
+    ConfigurationUnit
 }

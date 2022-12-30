@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net7.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -10,6 +10,7 @@
     <None Remove="Protos\configuration.proto" />
     <None Remove="Protos\cus.proto" />
     <None Remove="Protos\generators.proto" />
+    <None Remove="Protos\ous.proto" />
     <None Remove="Protos\plugins.proto" />
     <None Remove="Protos\services.proto" />
     <None Remove="Protos\system.proto" />
@@ -17,9 +18,9 @@
 
   <ItemGroup>
     <PackageReference Include="Monq.Models.Abstractions" Version="4.0.1" />
-    <PackageReference Include="Google.Protobuf" Version="3.21.4" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.48.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.47.0">
+    <PackageReference Include="Google.Protobuf" Version="3.21.12" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.50.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.51.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -35,6 +36,7 @@
 
   <ItemGroup>
     <Protobuf Include="Protos\configuration.proto" />
+    <Protobuf Include="Protos\ous.proto" />
     <Protobuf Include="Protos\generators.proto" />
     <Protobuf Include="Protos\cus.proto" />
     <Protobuf Include="Protos\services.proto" />

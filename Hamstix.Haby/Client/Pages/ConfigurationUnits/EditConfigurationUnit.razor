@@ -6,13 +6,14 @@
 @using System.Text.Json.Nodes
 @using Hamstix.Haby.Shared.Grpc.ConfigurationUnits
 @inject Haby.Shared.Grpc.ConfigurationUnits.ConfigurationUnitsService.ConfigurationUnitsServiceClient CusService
+@inject Haby.Shared.Grpc.OrganizationUnits.OrganizationUnitsService.OrganizationUnitsServiceClient OuService
 @inject NavigationManager NavigationManager
 
 <PageTitle>Edit configuration unit "@_originalStruct?.Name"</PageTitle>
 
 <BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
 
-@if (_putModel == null)
+@if (_putModel == null || _organizationUnits == null)
 {
     <p><em>Loading...</em></p>
 }
@@ -37,6 +38,17 @@ else
             <InputTextArea class="form-control" id="template" @bind-Value="_putModel.Template" cols=60 rows=5 />
         </div>
 
+        <div class="mb-3">
+            <label for="pluginId" class="form-label">Organization Unit</label>
+            <InputSelect class="form-select" id="OrganizationUnitId" @bind-Value="_putModel.OuId">
+                <option value="@AppConstants.NoneOrganizationUnitSelectedId">@AppConstants.NoneOrganizationUnitSelected</option>
+                @foreach (var ou in _organizationUnits)
+                {
+                    <option value="@ou.Id">@ou.FullName</option>
+                }
+            </InputSelect>
+        </div>
+
         <button class="btn btn-primary" type="submit">Save</button>
         <button class="btn btn-danger" type="button" @onclick="Cancel">Cancel</button>
         <button class="btn btn-danger" type="button" @onclick="Reconfigure">Reconfigure</button>
@@ -51,6 +63,8 @@ else
     [Parameter]
     public long Id { get; set; }
 
+    Haby.Shared.Grpc.OrganizationUnits.FlattenedOrganizationUnitModel[]? _organizationUnits;
+
     ConfigurationUnitModel? _originalStruct;
     ConfigurationUnitUpdateModel? _putModel;
     AlertComponent _alertComponent;
@@ -63,6 +77,9 @@ else
     {
         _originalStruct = await CusService.GetByIdAsync(new GetByIdRequest { Id = Id });
         _putModel = CreatePutModel(_originalStruct);
+
+        var response = await OuService.GetAllFlattenedAsync(new Haby.Shared.Grpc.OrganizationUnits.GetAllFlattenedRequest());
+        _organizationUnits = response.OrganizationUnits.ToArray();
 
         _breadCrumbs = new()
             {
@@ -128,5 +145,6 @@ else
             Name = cu.Name,
             Version = cu.Version,
             Template = cu.Template.ToJsonArray().ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }),
+            OuId = cu.OrganizationUnit?.Id
         };
 }

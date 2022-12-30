@@ -3,6 +3,7 @@ using System;
 using Hamstix.Haby.Server.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,10 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Hamstix.Haby.Server.Migrations
 {
     [DbContext(typeof(HabbyContext))]
-    partial class HabbyContextModelSnapshot : ModelSnapshot
+    [Migration("20220928084131_m006_Add_Organization_Units_table")]
+    partial class m006_Add_Organization_Units_table
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -39,7 +41,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasKey("ConfigurationUnitId", "Name");
 
-                    b.ToTable("ConfigurationKeys", (string)null);
+                    b.ToTable("ConfigurationKeys");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.ConfigurationUnit", b =>
@@ -76,7 +78,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasIndex("OrganizationUnitId");
 
-                    b.ToTable("ConfigurationUnits", (string)null);
+                    b.ToTable("ConfigurationUnits");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.ConfigurationUnitAtService", b =>
@@ -99,7 +101,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasIndex("ConfigurationUnitId");
 
-                    b.ToTable("ConfigurationUnitsAtServices", (string)null);
+                    b.ToTable("ConfigurationUnitsAtServices");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.ConfigurationUnitParameter", b =>
@@ -121,7 +123,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasKey("ConfigurationUnitId", "Name", "Key");
 
-                    b.ToTable("ConfigurationUnitParameters", (string)null);
+                    b.ToTable("ConfigurationUnitParameters");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.Generator", b =>
@@ -148,7 +150,7 @@ namespace Hamstix.Haby.Server.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Generators", (string)null);
+                    b.ToTable("Generators");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.OrganizationUnit", b =>
@@ -170,10 +172,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasIndex("ParentId");
 
-                    b.HasIndex("Name", "ParentId")
-                        .IsUnique();
-
-                    b.ToTable("OrganizationUnits", (string)null);
+                    b.ToTable("OrganizationUnits");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.RegConfiguration", b =>
@@ -188,7 +187,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasKey("Key");
 
-                    b.ToTable("RegConfiguration", (string)null);
+                    b.ToTable("RegConfiguration");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.Service", b =>
@@ -218,7 +217,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Services", (string)null);
+                    b.ToTable("Services");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.SystemVariable", b =>
@@ -241,7 +240,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("SystemVariables", (string)null);
+                    b.ToTable("SystemVariables");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.Variable", b =>
@@ -269,7 +268,7 @@ namespace Hamstix.Haby.Server.Migrations
 
                     b.HasKey("ServiceId", "ConfigurationUnitId", "Key", "Name");
 
-                    b.ToTable("Variables", (string)null);
+                    b.ToTable("Variables");
                 });
 
             modelBuilder.Entity("Hamstix.Haby.Server.Models.ConfigurationKey", b =>
@@ -327,7 +326,7 @@ namespace Hamstix.Haby.Server.Migrations
                     b.HasOne("Hamstix.Haby.Server.Models.OrganizationUnit", "Parent")
                         .WithMany("Children")
                         .HasForeignKey("ParentId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Parent");
                 });

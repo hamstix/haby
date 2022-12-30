@@ -23,6 +23,7 @@ else
             <tr>
                 <th>Name</th>
                 <th>Version</th>
+                <th>OU</th>
                 <th>Template</th>
                 <th>Options</th>
             </tr>
@@ -35,6 +36,7 @@ else
                         <NavLink href=@($"configuration-units/{cu.Id}")>@cu.Name</NavLink>
                     </td>
                     <td>@cu.Version</td>
+                    <td>@cu.OrganizationUnit?.Name</td>
                     <td>@CutString(cu.Template.ToJsonArray().ToJsonString())</td>
                     <td>
                         <button class="btn"

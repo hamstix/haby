@@ -1,0 +1,93 @@
+﻿syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/wrappers.proto";
+
+option csharp_namespace = "Hamstix.Haby.Shared.Grpc.OrganizationUnits";
+
+package habyGrpc;
+
+service OrganizationUnitsService {
+  // Get all OUs.
+  rpc GetAll (GetAllRequest) returns (GetAllResponse);
+  // Get OU by Id.
+  rpc GetById (GetByIdRequest) returns (OrganizationUnitModel);
+  // Create new OU.
+  rpc Create (CreateRequest) returns (OrganizationUnitModel);
+  // Do full OU udpate.
+  rpc Update (UpdateRequest) returns (OrganizationUnitModel);
+  // Delete OU.
+  rpc Delete (DeleteRequest) returns (google.protobuf.Empty);
+  // Get OUs by path.
+  rpc GetOusByPath (GetOusByPathRequest) returns (GetOusByPathResponse);
+  // Get All OUs flattened by hierarchy.
+  rpc GetAllFlattened (GetAllFlattenedRequest) returns (GetAllFlattenedResponse);
+}
+
+message GetAllRequest {
+  google.protobuf.FieldMask FieldMask = 1;
+}
+
+message GetAllResponse {
+  repeated OrganizationUnitModel OrganizationUnits = 1;
+}
+
+message GetOusByPathRequest {
+  google.protobuf.FieldMask FieldMask = 1;
+  repeated string OUs = 2;
+}
+
+message GetOusByPathResponse {
+  repeated OrganizationUnitModel OrganizationUnits = 1;
+}
+
+message GetAllFlattenedRequest {
+  google.protobuf.FieldMask FieldMask = 1;
+}
+
+message GetAllFlattenedResponse {
+  repeated FlattenedOrganizationUnitModel OrganizationUnits = 1;
+}
+
+message GetByIdRequest {
+  int64 Id = 1;
+  google.protobuf.FieldMask FieldMask = 2;
+}
+
+message CreateRequest {
+  // The OU name.
+  string Name = 1;
+  google.protobuf.StringValue Parents = 2;
+}
+
+message UpdateRequest {
+  int64 Id = 1;
+  OrganizationUnitUpdateModel OrganizationUnit = 2;
+}
+
+message DeleteRequest {
+  int64 Id = 1;
+}
+
+message OrganizationUnitUpdateModel {
+  // The OU name.
+  string Name = 1;
+}
+
+message OrganizationUnitModel {
+  // The OU Id.
+  int64 Id = 1;
+  // The OU name.
+  string Name = 2;
+}
+
+message FlattenedOrganizationUnitModel {
+  // The OU Id.
+  int64 Id = 1;
+  // The OU name.
+  string FullName = 2;
+}
+
+

@@ -8,11 +8,8 @@ using Hamstix.Haby.Server.Services;
 using Hamstix.Haby.Server.Services.Impl;
 using Mapster;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
-using Monq.Core.BasicDotNetMicroservice.GrpcInterceptors;
 using Monq.Core.HttpClientExtensions.Exceptions;
-using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,14 +34,14 @@ builder.Services
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient(Hamstix.Haby.Shared.PluginsCore.Constants.DisableSslVerification)
     .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new HttpClientHandler
         {
-            return new HttpClientHandler
-            {
-                ClientCertificateOptions = ClientCertificateOption.Manual,
-                ServerCertificateCustomValidationCallback =
-                    (httpRequestMessage, cert, certChain, policyErrors) => true
-            };
-        });
+            ClientCertificateOptions = ClientCertificateOption.Manual,
+            ServerCertificateCustomValidationCallback =
+                (httpRequestMessage, cert, certChain, policyErrors) => true
+        };
+    });
 
 builder.Services.AddGrpc(options =>
 {
@@ -65,7 +62,8 @@ builder.Services.AddCors(setupAction =>
 TypeAdapterConfig.GlobalSettings.Scan(AppDomain.CurrentDomain.GetAssemblies());
 
 builder.Services.AddAuthentication(AppConstants.AuthenticationSchemeName)
-                .AddScheme<HabyAuthenticationOptions, HabyAuthenticationHandler>(AppConstants.AuthenticationSchemeName, null);
+                .AddScheme<HabyAuthenticationOptions, HabyAuthenticationHandler>(
+                    AppConstants.AuthenticationSchemeName, null);
 builder.Services.AddSingleton<HabyAuthenticationManager>();
 
 builder.Services.RegisterPlugins(builder.Configuration);
@@ -95,6 +93,8 @@ app.UseStaticFiles();
 
 app.UseCors();
 app.UseRouting();
+
+
 app.UseGrpcWeb(new GrpcWebOptions
 {
     DefaultEnabled = true
@@ -102,17 +102,14 @@ app.UseGrpcWeb(new GrpcWebOptions
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapRazorPages();
-app.UseEndpoints(e =>
-{
-    e.MapControllers();
-    e.MapGrpcService<SystemGrpcService>().EnableGrpcWeb();
-    e.MapGrpcService<SystemStatusGrpcService>().EnableGrpcWeb();
-    e.MapGrpcService<PluginsGrpcService>().EnableGrpcWeb();
-    e.MapGrpcService<ServicesGrpcService>().EnableGrpcWeb();
-    e.MapGrpcService<GeneratorsGrpcService>().EnableGrpcWeb();
-    e.MapGrpcService<ConfigurationUnitsGrpcService>().EnableGrpcWeb();
-    e.MapGrpcService<ConfigurationGrpcService>().EnableGrpcWeb();
-});
+app.MapGrpcService<SystemGrpcService>().EnableGrpcWeb();
+app.MapGrpcService<SystemStatusGrpcService>().EnableGrpcWeb();
+app.MapGrpcService<PluginsGrpcService>().EnableGrpcWeb();
+app.MapGrpcService<ServicesGrpcService>().EnableGrpcWeb();
+app.MapGrpcService<GeneratorsGrpcService>().EnableGrpcWeb();
+app.MapGrpcService<ConfigurationUnitsGrpcService>().EnableGrpcWeb();
+app.MapGrpcService<ConfigurationGrpcService>().EnableGrpcWeb();
+app.MapGrpcService<OrganizationUnitsGrpcService>().EnableGrpcWeb();
 app.MapFallbackToFile("index.html");
 
 app.Run();

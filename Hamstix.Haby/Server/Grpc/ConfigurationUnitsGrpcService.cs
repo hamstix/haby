@@ -29,8 +29,10 @@ public class ConfigurationUnitsGrpcService : ConfigurationUnitsService.Configura
 
     public override async Task<GetAllResponse> GetAll(GetAllRequest request, ServerCallContext context)
     {
-        var configurationUnits = await _context.ConfigurationUnits
+        var configurationUnits = await _context
+                .ConfigurationUnits
                 .AsNoTracking()
+                .Include(x => x.OrganizationUnit)
                 .ToListAsync();
 
         var response = configurationUnits.ApplyFieldMask<ConfigurationUnit, GetAllResponse, ConfigurationUnitModel>(
@@ -41,7 +43,11 @@ public class ConfigurationUnitsGrpcService : ConfigurationUnitsService.Configura
 
     public override async Task<ConfigurationUnitModel> GetById(GetByIdRequest request, ServerCallContext context)
     {
-        var configurationUnit = await _context.ConfigurationUnits.FirstOrDefaultAsync(x => x.Id == request.Id);
+        var configurationUnit = await _context
+            .ConfigurationUnits
+            .AsNoTracking()
+            .Include(x => x.OrganizationUnit)
+            .FirstOrDefaultAsync(x => x.Id == request.Id);
 
         if (configurationUnit is null)
             throw new RpcException(new Status(StatusCode.NotFound, $"The configuration unit id {request.Id} is not found."));
@@ -71,6 +77,15 @@ public class ConfigurationUnitsGrpcService : ConfigurationUnitsService.Configura
             Template = jsonObject
         };
 
+        if (request.OuId is not null)
+        {
+            var ou = await _context.OrganizationUnits.FirstOrDefaultAsync(x => x.Id == request.OuId);
+            if (ou is null)
+                throw new RpcException(new Status(StatusCode.FailedPrecondition,
+                    $"The organization unit id {request.OuId} is not found."));
+            ou.ConfigurationUnits.Add(cu);
+        }
+
         _context.ConfigurationUnits.Add(cu);
 
         await _context.SaveChangesAsync();
@@ -80,7 +95,10 @@ public class ConfigurationUnitsGrpcService : ConfigurationUnitsService.Configura
 
     public override async Task<ConfigurationUnitModel> Update(UpdateRequest request, ServerCallContext context)
     {
-        var configurationUnit = await _context.ConfigurationUnits.FirstOrDefaultAsync(x => x.Id == request.Id);
+        var configurationUnit = await _context
+            .ConfigurationUnits
+            .Include(x => x.OrganizationUnit)
+            .FirstOrDefaultAsync(x => x.Id == request.Id);
 
         if (configurationUnit is null)
             throw new RpcException(new Status(StatusCode.NotFound,
@@ -103,6 +121,19 @@ public class ConfigurationUnitsGrpcService : ConfigurationUnitsService.Configura
         configurationUnit.Template = jsonObject;
         configurationUnit.Name = request.ConfigurationUnit.Name;
         configurationUnit.Version = request.ConfigurationUnit.Version;
+
+        if (request.ConfigurationUnit.OuId != configurationUnit.OrganizationUnitId)
+        {
+            configurationUnit.ResetOrganizationUnit();
+            if (request.ConfigurationUnit.OuId is not null)
+            {
+                var ou = await _context.OrganizationUnits.FirstOrDefaultAsync(x => x.Id == request.ConfigurationUnit.OuId);
+                if (ou is null)
+                    throw new RpcException(new Status(StatusCode.FailedPrecondition,
+                        $"The organization unit id {request.ConfigurationUnit.OuId} is not found."));
+                ou.ConfigurationUnits.Add(configurationUnit);
+            }
+        }
 
         await _context.SaveChangesAsync();
 

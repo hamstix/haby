@@ -6,38 +6,57 @@
 @using System.Text.Json.Nodes
 @using Hamstix.Haby.Shared.Grpc.ConfigurationUnits
 @inject Haby.Shared.Grpc.ConfigurationUnits.ConfigurationUnitsService.ConfigurationUnitsServiceClient CusService
+@inject Haby.Shared.Grpc.OrganizationUnits.OrganizationUnitsService.OrganizationUnitsServiceClient OuService
 @inject NavigationManager NavigationManager
 @inject ToastService ToastService
 
-<PageTitle>Add new Service</PageTitle>
+<PageTitle>Add new Configuration unit</PageTitle>
 
 <BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
 
 <h1>Add new Configuration unit</h1>
 
+@if (_organizationUnits == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
 
-<EditForm Model="@_postModel" OnValidSubmit="@HandleValidSubmit">
-    <DataAnnotationsValidator />
-    <ValidationSummary />
-    <div class="mb-3">
-        <label for="name" class="form-label">Name</label>
-        <InputText class="form-control" id="name" @bind-Value="_postModel.Name" />
-    </div>
-    <div class="mb-3">
-        <label for="version" class="form-label">Version</label>
-        <InputText class="form-control" id="version" @bind-Value="_postModel.Version" />
-    </div>
-    <div class="mb-3">
-        <label for="template" class="form-label">Json Template</label>
-        <InputTextArea class="form-control" id="template" @bind-Value="_postModel.Template" cols=60 rows=5 />
-    </div>
+    <EditForm Model="@_postModel" OnValidSubmit="@HandleValidSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <div class="mb-3">
+            <label for="name" class="form-label">Name</label>
+            <InputText class="form-control" id="name" @bind-Value="_postModel.Name" />
+        </div>
+        <div class="mb-3">
+            <label for="version" class="form-label">Version</label>
+            <InputText class="form-control" id="version" @bind-Value="_postModel.Version" />
+        </div>
+        <div class="mb-3">
+            <label for="template" class="form-label">Json Template</label>
+            <InputTextArea class="form-control" id="template" @bind-Value="_postModel.Template" cols=60 rows=5 />
+        </div>
+        <div class="mb-3">
+            <label for="pluginId" class="form-label">Organization Unit</label>
+            <InputSelect class="form-select" id="OrganizationUnitId" @bind-Value="_postModel.OuId">
+                <option value="@AppConstants.NoneOrganizationUnitSelectedId">@AppConstants.NoneOrganizationUnitSelected</option>
+                @foreach (var ou in _organizationUnits)
+                {
+                    <option value="@ou.Id">@ou.FullName</option>
+                }
+            </InputSelect>
+        </div>
 
-    <button class="btn btn-primary" type="submit">Create</button>
-</EditForm>
+        <button class="btn btn-primary" type="submit">Create</button>
+    </EditForm>
+}
 
 <AlertComponent @ref="_alertComponent"></AlertComponent>
 
 @code {
+    Haby.Shared.Grpc.OrganizationUnits.FlattenedOrganizationUnitModel[]? _organizationUnits;
     CreateRequest _postModel = new();
 
     List<BreadCrumbItem> _breadCrumbs = new()
@@ -48,6 +67,12 @@
 
     AlertComponent _alertComponent;
 
+    protected override async Task OnInitializedAsync()
+    {
+        var response = await OuService.GetAllFlattenedAsync(new Haby.Shared.Grpc.OrganizationUnits.GetAllFlattenedRequest());
+        _organizationUnits = response.OrganizationUnits.ToArray();
+    }
+
     async Task HandleValidSubmit()
     {
         try
@@ -56,7 +81,7 @@
             _alertComponent.ResetStatus();
 
             if (result is not null)
-                NavigationManager.NavigateTo($"generators/{result.Id}");
+                NavigationManager.NavigateTo($"configuration-units/{result.Id}");
         }
         catch (RpcException e)
         {

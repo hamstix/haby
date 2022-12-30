@@ -10,6 +10,7 @@ namespace Hamstix.Haby.Server.Configuration
     public class HabbyContext : DbContext
     {
         public DbSet<ConfigurationUnit> ConfigurationUnits => Set<ConfigurationUnit>();
+        public DbSet<OrganizationUnit> OrganizationUnits => Set<OrganizationUnit>();
         public DbSet<ConfigurationKey> ConfigurationKeys => Set<ConfigurationKey>();
         public DbSet<ConfigurationUnitParameter> ConfigurationUnitParameters => Set<ConfigurationUnitParameter>();
         public DbSet<ConfigurationUnitAtService> ConfigurationUnitsAtServices => Set<ConfigurationUnitAtService>();
@@ -137,6 +138,31 @@ namespace Hamstix.Haby.Server.Configuration
             modelBuilder.Entity<ConfigurationUnitParameter>(entity =>
             {
                 entity.HasKey(x => new { x.ConfigurationUnitId, x.Name, x.Key });
+            });
+
+            modelBuilder.Entity<OrganizationUnit>(entity =>
+            {
+                entity.HasKey(x => x.Id);
+
+                entity.Property(val => val.Id)
+                    .ValueGeneratedOnAdd();
+
+                entity.Property(val => val.Name)
+                    .IsRequired();
+
+                entity.HasIndex(x => new { x.Name, x.ParentId })
+                    .IsUnique()
+                    .HasFilter(null);
+
+                entity.HasMany(x => x.Children)
+                    .WithOne(x => x.Parent)
+                    .HasForeignKey(x => x.ParentId)
+                    .IsRequired(false)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasMany(x => x.ConfigurationUnits)
+                    .WithOne(x => x.OrganizationUnit)
+                    .IsRequired(false);
             });
 
             modelBuilder.Entity<RegConfiguration>(entity =>

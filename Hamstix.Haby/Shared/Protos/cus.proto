@@ -53,6 +53,8 @@ message CreateRequest {
   string Version = 2;
   // The configuration unit template.
   string Template = 3;
+  // The Organization Unit Id.
+  google.protobuf.Int64Value OuId = 4;
 }
 
 message UpdateRequest {
@@ -118,6 +120,8 @@ message ConfigurationUnitUpdateModel {
   string Version = 2;
   // The configuration unit template.
   string Template = 3;
+  // The Organization Unit Id.
+  google.protobuf.Int64Value OuId = 4;
 }
 
 message ConfigurationUnitModel {
@@ -129,5 +133,14 @@ message ConfigurationUnitModel {
   string Version = 3;
   // The configuration unit template.
   google.protobuf.ListValue Template = 4;
+  // The Organization Unit whitch the CU belongs. Can be null.
+  OrganizationUnitInCUModel OrganizationUnit = 5;
+}
+
+message OrganizationUnitInCUModel {
+  // The OU Id.
+  int64 Id = 1;
+  // The OU name.
+  string Name = 2;
 }
 

@@ -1,0 +1,63 @@
+﻿@page "/organization-units/add"
+@using Grpc.Core
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Components.Toast
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Grpc.OrganizationUnits
+@inject Haby.Shared.Grpc.OrganizationUnits.OrganizationUnitsService.OrganizationUnitsServiceClient OuService
+@inject NavigationManager NavigationManager
+@inject ToastService ToastService
+
+<PageTitle>Add new Organization unit</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+<h1>Add new Organization unit</h1>
+
+
+<EditForm Model="@_postModel" OnValidSubmit="@HandleValidSubmit">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <div class="mb-3">
+        <label for="name" class="form-label">Name</label>
+        <InputText class="form-control" id="name" @bind-Value="_postModel.Name" />
+    </div>
+
+    <button class="btn btn-primary" type="submit">Create</button>
+</EditForm>
+
+<AlertComponent @ref="_alertComponent"></AlertComponent>
+
+@code {
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "parents")]
+    public string? Parents { get; set; }
+
+    CreateRequest _postModel = new();
+
+    List<BreadCrumbItem> _breadCrumbs = new()
+        {
+            new BreadCrumbItem("Organization units", false, "/organization-units/catalog"),
+            new BreadCrumbItem("Create new Organization unit", true),
+        };
+
+    AlertComponent _alertComponent;
+
+    async Task HandleValidSubmit()
+    {
+        try
+        {
+            if (Parents is not null)
+                _postModel.Parents = Parents;
+            var result = await OuService.CreateAsync(_postModel);
+            _alertComponent.ResetStatus();
+
+            if (result is not null)
+                NavigationManager.NavigateTo($"organization-units/catalog/{Parents}");
+        }
+        catch (RpcException e)
+        {
+            _alertComponent.SetError(e.Status.Detail);
+        }
+    }
+}

@@ -1,0 +1,86 @@
+﻿@page "/organization-units/{id:long}"
+@using Grpc.Core
+@using Hamstix.Haby.Client.Components
+@using Hamstix.Haby.Client.Models
+@using Hamstix.Haby.Shared.Grpc.OrganizationUnits
+@inject Haby.Shared.Grpc.OrganizationUnits.OrganizationUnitsService.OrganizationUnitsServiceClient OuService
+@inject NavigationManager NavigationManager
+
+<PageTitle>Edit configuration unit "@_originalStruct?.Name"</PageTitle>
+
+<BreadCrumbsComponent BreadCrumbs="_breadCrumbs"></BreadCrumbsComponent>
+
+@if (_putModel == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <h1>Edit Organization unit "@_originalStruct.Name"</h1>
+
+    <EditForm Model="@_putModel" OnValidSubmit="@Save">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label for="name" class="form-label">Name</label>
+            <InputText class="form-control" id="name" @bind-Value="_putModel.Name" />
+        </div>
+
+        <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn btn-danger" type="button" @onclick="Cancel">Cancel</button>
+    </EditForm>
+
+    <AlertComponent @ref="_alertComponent"></AlertComponent>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    OrganizationUnitModel? _originalStruct;
+    OrganizationUnitUpdateModel? _putModel;
+    AlertComponent _alertComponent;
+
+    List<BreadCrumbItem> _breadCrumbs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _originalStruct = await OuService.GetByIdAsync(new GetByIdRequest { Id = Id });
+        _putModel = CreatePutModel(_originalStruct);
+
+        _breadCrumbs = new()
+            {
+                new BreadCrumbItem("Organization units", false, "/organization-units/catalog"),
+                new BreadCrumbItem(_originalStruct.Name, true),
+            };
+    }
+
+    async Task Save()
+    {
+        try
+        {
+            var result = await OuService.UpdateAsync(new UpdateRequest { Id = Id, OrganizationUnit = _putModel });
+            _originalStruct = result;
+
+            _putModel = CreatePutModel(result);
+            _alertComponent.SetSuccess("Saved");
+        }
+        catch (RpcException e)
+        {
+            _alertComponent.SetError(e.Status.Detail);
+            return;
+        }
+    }
+
+    void Cancel()
+    {
+        _putModel = CreatePutModel(_originalStruct);
+    }
+
+    OrganizationUnitUpdateModel CreatePutModel(OrganizationUnitModel ou) =>
+    new()
+        {
+            Name = ou.Name,
+        };
+}

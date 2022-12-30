@@ -6,6 +6,7 @@ using Hamstix.Haby.Client.Services;
 using Hamstix.Haby.Shared.Grpc.Configuration;
 using Hamstix.Haby.Shared.Grpc.ConfigurationUnits;
 using Hamstix.Haby.Shared.Grpc.Generators;
+using Hamstix.Haby.Shared.Grpc.OrganizationUnits;
 using Hamstix.Haby.Shared.Grpc.Plugins;
 using Hamstix.Haby.Shared.Grpc.Services;
 using Hamstix.Haby.Shared.Grpc.System;
@@ -39,6 +40,7 @@ builder.Services.AddGrpcPreConfiguredClient<PluginsService.PluginsServiceClient>
 builder.Services.AddGrpcPreConfiguredClient<ServicesService.ServicesServiceClient>(new Uri(builder.HostEnvironment.BaseAddress));
 builder.Services.AddGrpcPreConfiguredClient<GeneratorsService.GeneratorsServiceClient>(new Uri(builder.HostEnvironment.BaseAddress));
 builder.Services.AddGrpcPreConfiguredClient<ConfigurationUnitsService.ConfigurationUnitsServiceClient>(new Uri(builder.HostEnvironment.BaseAddress));
+builder.Services.AddGrpcPreConfiguredClient<OrganizationUnitsService.OrganizationUnitsServiceClient>(new Uri(builder.HostEnvironment.BaseAddress));
 builder.Services.AddGrpcPreConfiguredClient<ConfigurationService.ConfigurationServiceClient>(new Uri(builder.HostEnvironment.BaseAddress));
 
 await builder.Build().RunAsync();
