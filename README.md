@@ -1,14 +1,14 @@
 # Hamstix Haby
 
 Haby is an open source system for creating and managing application configurations. 
-It provided mechanisms fot automaticly creating application accounts in the services (such as databases), 
-creating and updating resources in the Kubernetes, and managing created aplication configurations.
+It provided mechanisms fot automatically creating application accounts in the services (such as databases), 
+creating and updating resources in the Kubernetes, and managing created application configurations.
 
 Haby provides several key features:
 
-- **Creating application accounts** - Haby provides mechanics to make handlers for creating and managing application accounts in the services. If the system is built by the microservice pattern, then Haby can automaticly handle microservice account management.
-- **Application templates** - Haby can automaticly create configurations using application and service configuration templates. It uses Liquid templates, and provides flexibility to make application configuration relating to multiple environments.
-- **Easy embedding** - Haby can be easaly embeding at the SaaS applications or the microservice environments. The simple HTTP API makes it easy to use Haby at UIless environments.
+- **Creating application accounts** - Haby provides mechanics to make handlers for creating and managing application accounts in the services. If the system is built by the microservice pattern, then Haby can automatically handle microservice account management.
+- **Application templates** - Haby can automatically create configurations using application and service configuration templates. It uses Liquid templates, and provides flexibility to make application configuration relating to multiple environments.
+- **Easy embedding** - Haby can be easily embedding at the SaaS applications or the microservice environments. The simple HTTP API makes it easy to use Haby at UIless environments.
 
 Haby runs on Linux, macOS, FreeBSD, and Windows and includes an webassembly browser based UI.
 
