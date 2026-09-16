@@ -7,7 +7,7 @@ dotnet restore .\HamstixHaby.slnx --artifacts-path .\.artifacts
 dotnet build .\HamstixHaby.slnx --no-restore --artifacts-path .\.artifacts
 ```
 
-The pinned-SDK baseline build succeeds with 48 warnings and no errors. These are existing issues,
+The pinned-SDK clean build succeeds with 96 warnings and no errors. These are existing issues,
 not failures introduced by the M0 test package:
 
 - `NETSDK1138`: the current `net7.0` target is out of support. The target-framework migration

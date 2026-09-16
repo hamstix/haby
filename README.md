@@ -18,6 +18,11 @@ Install the .NET SDK selected by [`global.json`](global.json). The first M0 base
 .NET 10 SDK to build the existing .NET 7 projects; upgrading their target frameworks belongs
 to M1.
 
+Shared compiler settings are defined in [`Directory.Build.props`](Directory.Build.props), and
+NuGet package versions are managed centrally in
+[`Directory.Packages.props`](Directory.Packages.props). Project files declare only the packages
+they consume and keep package-specific asset metadata locally.
+
 From the repository root, restore, build and test the solution with a clean artifacts directory:
 
 ```powershell

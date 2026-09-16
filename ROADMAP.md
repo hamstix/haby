@@ -72,7 +72,7 @@ Objective: make the current repository safely buildable and testable before rede
 - [x] Add an LTS `global.json` and document the required SDK.
 - [x] Restore and build the existing solution in a clean checkout.
 - [x] Record all warnings and distinguish existing defects from migration defects.
-- [ ] Add `Directory.Build.props` and central package management if it reduces duplication without changing behavior.
+- [x] Add `Directory.Build.props` and central package management if it reduces duplication without changing behavior.
 - [ ] Create test projects for server/application logic and plugin contracts.
 - [x] Add smoke tests for every existing gRPC service.
 - [x] Add focused regression tests for configuration rendering and saved generated variables.
