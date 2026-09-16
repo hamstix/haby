@@ -92,6 +92,7 @@ Exit criteria:
 Objective: move to a supported platform and remove organization-specific dependencies from the public product.
 
 - [ ] Migrate all projects to .NET 10.
+- [ ] Switch CI to the .NET 10 runtime only and remove the temporary .NET 7 SDK installation.
 - [ ] Upgrade gRPC, EF Core, Npgsql, Fluid and Kubernetes client dependencies.
 - [ ] Replace externally owned field-mask helpers with OSS-owned contracts and utilities.
 - [ ] Replace private web, hosting and HTTP-client infrastructure with ASP.NET Core and OpenTelemetry equivalents owned by Haby or the platform.
