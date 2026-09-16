@@ -58,6 +58,23 @@ public class ServiceConfiguratorTests
         Assert.Contains(plugin.Name, exception.Message);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("MissingPlugin")]
+    public async Task Configure_ReturnsDefaultResultWhenPluginCannotBeSelected(string? pluginName)
+    {
+        var service = CreateService();
+        service.PluginName = pluginName;
+        var sut = new ServiceConfigurator(
+            new PluginsService(Array.Empty<Plugin>()),
+            new StrategyServiceProvider(null));
+
+        var result = await sut.Configure(service, new JsonObject(), new JsonObject());
+
+        Assert.Equal(default, result.Status);
+        Assert.Null(result.ErrorMessage);
+    }
+
     static ServiceConfigurator CreateConfigurator(IStrategy strategy) =>
         new(
             new PluginsService(new[] { CreatePlugin() }),

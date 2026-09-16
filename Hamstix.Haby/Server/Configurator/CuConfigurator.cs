@@ -77,12 +77,27 @@ namespace Hamstix.Haby.Server.Configurator
             var cuTemplateKeys = cu.Template.AsArray();
 
             var resultStatuses = new List<ConfigurationUnitKeyResult>();
+            var configuredKeys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var cuTemplateKey in cuTemplateKeys)
             {
                 var keyResult = await ConfigureConfigurationUnitTemplateKey(cu, cuTemplateKey?.AsObject() ?? new JsonObject());
                 if (keyResult is not null)
+                {
                     resultStatuses.Add(keyResult);
+                    configuredKeys.Add(keyResult.Key);
+                }
             }
+
+            var staleParameters = cu.Parameters
+                .Where(parameter => !configuredKeys.Contains(parameter.Key))
+                .ToList();
+            _context.ConfigurationUnitParameters.RemoveRange(staleParameters);
+
+            var configurationKeys = await _context.ConfigurationKeys
+                .Where(key => key.ConfigurationUnitId == cu.Id)
+                .ToListAsync();
+            _context.ConfigurationKeys.RemoveRange(
+                configurationKeys.Where(key => !configuredKeys.Contains(key.Name)));
 
             await _context.SaveChangesAsync();
 
@@ -268,6 +283,7 @@ namespace Hamstix.Haby.Server.Configurator
         void ConfigureParameters(ConfigurationUnit cu, JsonArray parametersObject, string key)
         {
             var dbParameters = cu.Parameters;
+            var configuredParameterNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var parameter in parametersObject)
             {
                 var name = parameter[CuParamaterNameKey]?.GetValue<string>();
@@ -277,14 +293,24 @@ namespace Hamstix.Haby.Server.Configurator
                 if (value is null)
                     continue;
 
+                configuredParameterNames.Add(name);
+
                 var dbParameter = dbParameters.FirstOrDefault(x => x.Name == name && x.Key == key);
                 // Adding new parameter.
                 if (dbParameter is null)
                     cu.Parameters.Add(new ConfigurationUnitParameter(name, key)
                     {
-                        Value = value
+                        Value = value.CloneJsonNode()
                     });
+                else
+                    dbParameter.Value = value.CloneJsonNode();
             }
+
+            var staleParameters = dbParameters
+                .Where(parameter => parameter.Key == key &&
+                    !configuredParameterNames.Contains(parameter.Name))
+                .ToList();
+            _context.ConfigurationUnitParameters.RemoveRange(staleParameters);
         }
 
         JsonObject GetSystemVariables(ConfigurationUnit cu)
@@ -336,13 +362,13 @@ namespace Hamstix.Haby.Server.Configurator
         async Task UpdateConfigurationKey(ConfigurationUnit cu, string key)
         {
             JsonObject jsonConfiguration = new JsonObject();
-            foreach (var cuAtService in cu.Services)
+            foreach (var cuAtService in cu.Services.Where(service => service.Key == key))
             {
                 if (cuAtService.RenderedTemplateJson is not null)
                     jsonConfiguration.Add(cuAtService.Service.Name, cuAtService.RenderedTemplateJson.CloneJsonNode());
             }
 
-            foreach (var cuParameter in cu.Parameters)
+            foreach (var cuParameter in cu.Parameters.Where(parameter => parameter.Key == key))
             {
                 jsonConfiguration.Add(cuParameter.Name, cuParameter.Value.CloneJsonNode());
             }

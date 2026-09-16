@@ -13,40 +13,43 @@ public class ConfigurationUnitsGrpcServiceTests
     [Fact]
     public async Task DeleteVariable_DeletesOnlyVariableOwnedByRequestedConfigurationUnit()
     {
-        await using var context = CreateContext();
-        var service = new Service("PostgreSql");
-        var requestedUnit = new ConfigurationUnit("requested", "1.0.0");
-        var otherUnit = new ConfigurationUnit("other", "1.0.0");
-        context.AddRange(service, otherUnit, requestedUnit);
-        await context.SaveChangesAsync();
-
-        AddVariable(otherUnit, service, "appsettings.json", "password", "other-value");
-        AddVariable(requestedUnit, service, "appsettings.json", "password", "requested-value");
-        await context.SaveChangesAsync();
-
-        var sut = new ConfigurationUnitsGrpcService(context, null!);
-
-        await sut.DeleteVariable(new DeleteVariableRequest
+        var database = new TestDatabase();
+        long requestedUnitId;
+        long otherUnitId;
+        long serviceId;
+        await using (var arrangeContext = database.CreateContext())
         {
-            Id = requestedUnit.Id,
-            ServiceId = service.Id,
-            Key = "appsettings.json",
-            Name = "password"
-        }, null!);
+            var service = new Service("PostgreSql");
+            var requestedUnit = new ConfigurationUnit("requested", "1.0.0");
+            var otherUnit = new ConfigurationUnit("other", "1.0.0");
+            arrangeContext.AddRange(service, otherUnit, requestedUnit);
+            await arrangeContext.SaveChangesAsync();
 
-        var remainingVariables = await context.Variables.AsNoTracking().ToListAsync();
+            AddVariable(otherUnit, service, "appsettings.json", "password", "other-value");
+            AddVariable(requestedUnit, service, "appsettings.json", "password", "requested-value");
+            await arrangeContext.SaveChangesAsync();
+            requestedUnitId = requestedUnit.Id;
+            otherUnitId = otherUnit.Id;
+            serviceId = service.Id;
+        }
+
+        await using (var actContext = database.CreateContext())
+        {
+            var sut = new ConfigurationUnitsGrpcService(actContext, null!);
+            await sut.DeleteVariable(new DeleteVariableRequest
+            {
+                Id = requestedUnitId,
+                ServiceId = serviceId,
+                Key = "appsettings.json",
+                Name = "password"
+            }, null!);
+        }
+
+        await using var assertContext = database.CreateContext();
+        var remainingVariables = await assertContext.Variables.AsNoTracking().ToListAsync();
         var remaining = Assert.Single(remainingVariables);
-        Assert.Equal(otherUnit.Id, remaining.ConfigurationUnitId);
+        Assert.Equal(otherUnitId, remaining.ConfigurationUnitId);
         Assert.Equal("other-value", remaining.Value.GetValue<string>());
-    }
-
-    static HabbyContext CreateContext()
-    {
-        var options = new DbContextOptionsBuilder<HabbyContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options;
-
-        return new HabbyContext(options);
     }
 
     static void AddVariable(

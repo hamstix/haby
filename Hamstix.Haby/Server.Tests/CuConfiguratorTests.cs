@@ -16,37 +16,43 @@ public class CuConfiguratorTests
     [Fact]
     public async Task Configure_RendersServiceTemplateWithConfigurationUnitVariables()
     {
-        await using var context = CreateContext();
-        var service = new Service("PostgreSql")
+        var database = new TestDatabase();
+        long configurationUnitId;
+        await using (var arrangeContext = database.CreateContext())
         {
-            Template = """{"connectionString":"Host={{ host }};Timeout={{ timeout }}"}"""
-        };
-        var configurationUnit = new ConfigurationUnit("orders", "1.0.0")
-        {
-            Template = JsonNode.Parse("""
-                [
-                  {
-                    "key": "appsettings.json",
-                    "services": {
-                      "PostgreSql": {
-                        "variables": {
-                          "host": "database.local",
-                          "timeout": 20
+            var service = new Service("PostgreSql")
+            {
+                Template = """{"connectionString":"Host={{ host }};Timeout={{ timeout }}"}"""
+            };
+            var configurationUnit = new ConfigurationUnit("orders", "1.0.0")
+            {
+                Template = JsonNode.Parse("""
+                    [
+                      {
+                        "key": "appsettings.json",
+                        "services": {
+                          "PostgreSql": {
+                            "variables": {
+                              "host": "database.local",
+                              "timeout": 20
+                            }
+                          }
                         }
                       }
-                    }
-                  }
-                ]
-                """)!.AsArray()
-        };
-        context.AddRange(service, configurationUnit);
-        await context.SaveChangesAsync();
+                    ]
+                    """)!.AsArray()
+            };
+            arrangeContext.AddRange(service, configurationUnit);
+            await arrangeContext.SaveChangesAsync();
+            configurationUnitId = configurationUnit.Id;
+        }
 
-        var sut = CreateConfigurator(context);
+        await ExecuteConfigure(database, configurationUnitId);
 
-        await sut.Configure(configurationUnit.Id);
-
-        var configuredService = await context.ConfigurationUnitsAtServices.SingleAsync();
+        await using var assertContext = database.CreateContext();
+        var configuredService = await assertContext.ConfigurationUnitsAtServices
+            .AsNoTracking()
+            .SingleAsync();
         Assert.Equal(
             "Host=database.local;Timeout=20",
             configuredService.RenderedTemplateJson!["connectionString"]!.GetValue<string>());
@@ -55,10 +61,10 @@ public class CuConfiguratorTests
     [Fact]
     public async Task Configure_ReusesSavedGeneratedVariable()
     {
-        var databaseName = Guid.NewGuid().ToString();
+        var database = new TestDatabase();
         long configurationUnitId;
 
-        await using (var context = CreateContext(databaseName))
+        await using (var arrangeContext = database.CreateContext())
         {
             var service = new Service("PostgreSql")
             {
@@ -77,26 +83,26 @@ public class CuConfiguratorTests
                     ]
                     """)!.AsArray()
             };
-            context.AddRange(service, configurationUnit, new Generator("username", "first-value"));
-            await context.SaveChangesAsync();
+            arrangeContext.AddRange(service, configurationUnit, new Generator("username", "first-value"));
+            await arrangeContext.SaveChangesAsync();
             configurationUnitId = configurationUnit.Id;
-
-            await CreateConfigurator(context).Configure(configurationUnitId);
         }
 
-        await using (var context = CreateContext(databaseName))
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using (var updateContext = database.CreateContext())
         {
-            var generator = await context.Generators.SingleAsync();
+            var generator = await updateContext.Generators.SingleAsync();
             generator.Template = "second-value";
-            await context.SaveChangesAsync();
-
-            await CreateConfigurator(context).Configure(configurationUnitId);
+            await updateContext.SaveChangesAsync();
         }
 
-        await using (var context = CreateContext(databaseName))
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using (var assertContext = database.CreateContext())
         {
-            var savedVariable = await context.Variables.AsNoTracking().SingleAsync();
-            var configuredService = await context.ConfigurationUnitsAtServices.AsNoTracking().SingleAsync();
+            var savedVariable = await assertContext.Variables.AsNoTracking().SingleAsync();
+            var configuredService = await assertContext.ConfigurationUnitsAtServices.AsNoTracking().SingleAsync();
 
             Assert.Equal("first-value", savedVariable.Value.GetValue<string>());
             Assert.Equal(
@@ -105,6 +111,193 @@ public class CuConfiguratorTests
         }
     }
 
+    [Fact]
+    public async Task Configure_MergesVariablesFromLeastToMostSpecific()
+    {
+        var database = new TestDatabase();
+        long configurationUnitId;
+        await using (var arrangeContext = database.CreateContext())
+        {
+            var service = new Service("PostgreSql")
+            {
+                JsonConfig = new JsonObject
+                {
+                    ["priority"] = "service",
+                    ["serviceOnly"] = true
+                },
+                Template = """{"priority":"{{ priority }}","systemOnly":"{{ systemOnly }}","serviceOnly":"{{ serviceOnly }}","savedOnly":"{{ savedOnly }}","cuOnly":"{{ cuOnly }}"}"""
+            };
+            var configurationUnit = new ConfigurationUnit("orders", "1.0.0")
+            {
+                Template = JsonNode.Parse("""
+                    [{
+                      "key": "appsettings.json",
+                      "services": {
+                        "PostgreSql": {
+                          "variables": {
+                            "priority": "configuration-unit",
+                            "cuOnly": "cu"
+                          }
+                        }
+                      }
+                    }]
+                    """)!.AsArray()
+            };
+            arrangeContext.AddRange(
+                service,
+                configurationUnit,
+                new SystemVariable("priority", JsonValue.Create("system")!),
+                new SystemVariable("systemOnly", JsonValue.Create("system")!));
+            await arrangeContext.SaveChangesAsync();
+            var association = new ConfigurationUnitAtService(
+                configurationUnit,
+                service,
+                "appsettings.json");
+            association.AddVariable(new Variable(
+                "priority",
+                JsonValue.Create("saved")!,
+                VariableTypes.Service));
+            association.AddVariable(new Variable(
+                "savedOnly",
+                JsonValue.Create("saved")!,
+                VariableTypes.Service));
+            await arrangeContext.SaveChangesAsync();
+            configurationUnitId = configurationUnit.Id;
+        }
+
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using var assertContext = database.CreateContext();
+        var associationResult = await assertContext.ConfigurationUnitsAtServices
+            .AsNoTracking()
+            .SingleAsync();
+        var rendered = associationResult.RenderedTemplateJson!;
+        Assert.Equal("configuration-unit", rendered["priority"]!.GetValue<string>());
+        Assert.Equal("system", rendered["systemOnly"]!.GetValue<string>());
+        Assert.Equal("True", rendered["serviceOnly"]!.GetValue<string>());
+        Assert.Equal("saved", rendered["savedOnly"]!.GetValue<string>());
+        Assert.Equal("cu", rendered["cuOnly"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Configure_RendersEmptyValueWhenGeneratorDoesNotExist()
+    {
+        var database = new TestDatabase();
+        long configurationUnitId;
+        await using (var arrangeContext = database.CreateContext())
+        {
+            var service = new Service("PostgreSql")
+            {
+                Template = """{"password":"{{ generate('missing', 'databasePassword') }}"}"""
+            };
+            var configurationUnit = CreateConfigurationUnitWithService("PostgreSql");
+            arrangeContext.AddRange(service, configurationUnit);
+            await arrangeContext.SaveChangesAsync();
+            configurationUnitId = configurationUnit.Id;
+        }
+
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using var assertContext = database.CreateContext();
+        var configuredService = await assertContext.ConfigurationUnitsAtServices
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal(string.Empty, configuredService.RenderedTemplateJson!["password"]!.GetValue<string>());
+        Assert.Empty(await assertContext.Variables.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Configure_UpdatesParametersAndGeneratedConfigurationKey()
+    {
+        var database = new TestDatabase();
+        long configurationUnitId;
+        await using (var arrangeContext = database.CreateContext())
+        {
+            var configurationUnit = new ConfigurationUnit("orders", "1.0.0")
+            {
+                Template = CreateParameterTemplate("first")
+            };
+            arrangeContext.Add(configurationUnit);
+            await arrangeContext.SaveChangesAsync();
+            configurationUnitId = configurationUnit.Id;
+        }
+
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using (var updateContext = database.CreateContext())
+        {
+            var configurationUnit = await updateContext.ConfigurationUnits
+                .SingleAsync(unit => unit.Id == configurationUnitId);
+            configurationUnit.Template = CreateParameterTemplate("second");
+            await updateContext.SaveChangesAsync();
+        }
+
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using var assertContext = database.CreateContext();
+        var parameter = await assertContext.ConfigurationUnitParameters.AsNoTracking().SingleAsync();
+        var key = await assertContext.ConfigurationKeys.AsNoTracking().SingleAsync();
+        Assert.Equal("second", parameter.Value.GetValue<string>());
+        Assert.Equal("second", key.Configuration["endpoint"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Configure_RemovesParametersAndConfigurationKeysMissingFromTemplate()
+    {
+        var database = new TestDatabase();
+        long configurationUnitId;
+        await using (var arrangeContext = database.CreateContext())
+        {
+            var configurationUnit = new ConfigurationUnit("orders", "1.0.0")
+            {
+                Template = CreateParameterTemplate("first")
+            };
+            arrangeContext.Add(configurationUnit);
+            await arrangeContext.SaveChangesAsync();
+            configurationUnitId = configurationUnit.Id;
+        }
+
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using (var updateContext = database.CreateContext())
+        {
+            var configurationUnit = await updateContext.ConfigurationUnits
+                .SingleAsync(unit => unit.Id == configurationUnitId);
+            configurationUnit.Template = new JsonArray();
+            await updateContext.SaveChangesAsync();
+        }
+
+        await ExecuteConfigure(database, configurationUnitId);
+
+        await using var assertContext = database.CreateContext();
+        Assert.Empty(await assertContext.ConfigurationUnitParameters.AsNoTracking().ToListAsync());
+        Assert.Empty(await assertContext.ConfigurationKeys.AsNoTracking().ToListAsync());
+    }
+
+    static ConfigurationUnit CreateConfigurationUnitWithService(string serviceName) =>
+        new("orders", "1.0.0")
+        {
+            Template = JsonNode.Parse($$"""
+                [{
+                  "key": "appsettings.json",
+                  "services": {
+                    "{{serviceName}}": {}
+                  }
+                }]
+                """)!.AsArray()
+        };
+
+    static JsonArray CreateParameterTemplate(string value) =>
+        JsonNode.Parse($$"""
+            [{
+              "key": "appsettings.json",
+              "parameters": [{
+                "name": "endpoint",
+                "value": "{{value}}"
+              }]
+            }]
+            """)!.AsArray();
+
     static CuConfigurator CreateConfigurator(HabbyContext context) =>
         new(
             context,
@@ -112,13 +305,10 @@ public class CuConfiguratorTests
             new ForeignKeyConfigurator(context, NullLogger<CuConfigurator>.Instance),
             NullLogger<CuConfigurator>.Instance);
 
-    static HabbyContext CreateContext(string? databaseName = null)
+    static async Task ExecuteConfigure(TestDatabase database, long configurationUnitId)
     {
-        var options = new DbContextOptionsBuilder<HabbyContext>()
-            .UseInMemoryDatabase(databaseName ?? Guid.NewGuid().ToString())
-            .Options;
-
-        return new HabbyContext(options);
+        await using var actContext = database.CreateContext();
+        await CreateConfigurator(actContext).Configure(configurationUnitId);
     }
 
     sealed class SuccessfulServiceConfigurator : IServiceConfigurator
