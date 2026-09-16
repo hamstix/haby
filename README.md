@@ -227,7 +227,7 @@ Service json configuration example
 }
 ```
 
-Feel free to make your own templates. If you want to use DI ready library, you can try [RabbitMQCoreClient](https://github.com/MONQDL/RabbitMQCoreClient).
+Feel free to make your own templates or adapt this example to the RabbitMQ client used by your application.
 Service template example for RabbitMQCoreClient library with correct comma symblol in arrays.
 ```
 {
