@@ -14,6 +14,7 @@
     <File Path="README.md" />
   </Folder>
   <Project Path="Hamstix.Haby/Client/Hamstix.Haby.Client.csproj" />
+  <Project Path="Hamstix.Haby/PluginsCore.Tests/Hamstix.Haby.Shared.PluginsCore.Tests.csproj" />
   <Project Path="Hamstix.Haby/PluginsCore/Hamstix.Haby.Shared.PluginsCore.csproj" />
   <Project Path="Hamstix.Haby/Server.Tests/Hamstix.Haby.Server.Tests.csproj" />
   <Project Path="Hamstix.Haby/Server/Hamstix.Haby.Server.csproj" />

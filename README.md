@@ -33,8 +33,9 @@ dotnet format .\HamstixHaby.slnx --verify-no-changes --severity warn
 git diff --check
 ```
 
-The unit tests use an isolated in-memory database and do not require PostgreSQL or other
-external infrastructure. Known baseline warnings are tracked in
+The server tests use an isolated in-memory database, and the plugin contract tests validate
+every standard bootstrap without contacting external services. Neither test project requires
+PostgreSQL or other external infrastructure. Known baseline warnings are tracked in
 [`docs/baseline-warnings.md`](docs/baseline-warnings.md).
 
 ## How to install
