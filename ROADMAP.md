@@ -69,16 +69,16 @@ The server is the composition root. Domain and application projects must not ref
 
 Objective: make the current repository safely buildable and testable before redesigning it.
 
-- [ ] Add an LTS `global.json` and document the required SDK.
-- [ ] Restore and build the existing solution in a clean checkout.
-- [ ] Record all warnings and distinguish existing defects from migration defects.
-- [ ] Add `Directory.Build.props` and central package management if it reduces duplication without changing behavior.
-- [ ] Create test projects for server/application logic and plugin contracts.
-- [ ] Add smoke tests for every existing gRPC service.
-- [ ] Add focused regression tests for configuration rendering and saved generated variables.
-- [ ] Add a regression test proving that variable deletion is scoped by configuration-unit ID.
-- [ ] Add CI for restore, build, test, formatting and `git diff --check`.
-- [ ] Add basic contribution and local-development documentation.
+- [x] Add an LTS `global.json` and document the required SDK.
+- [x] Restore and build the existing solution in a clean checkout.
+- [x] Record all warnings and distinguish existing defects from migration defects.
+- [x] Add `Directory.Build.props` and central package management if it reduces duplication without changing behavior.
+- [x] Create test projects for server/application logic and plugin contracts.
+- [x] Add smoke tests for every existing gRPC service.
+- [x] Add focused regression tests for configuration rendering and saved generated variables.
+- [x] Add a regression test proving that variable deletion is scoped by configuration-unit ID.
+- [x] Add CI for restore, build, test, formatting and `git diff --check`.
+- [x] Add basic contribution and local-development documentation.
 
 Exit criteria:
 
@@ -92,6 +92,7 @@ Exit criteria:
 Objective: move to a supported platform and remove organization-specific dependencies from the public product.
 
 - [ ] Migrate all projects to .NET 10.
+- [ ] Switch CI to the .NET 10 runtime only and remove the temporary .NET 7 SDK installation.
 - [ ] Upgrade gRPC, EF Core, Npgsql, Fluid and Kubernetes client dependencies.
 - [ ] Replace externally owned field-mask helpers with OSS-owned contracts and utilities.
 - [ ] Replace private web, hosting and HTTP-client infrastructure with ASP.NET Core and OpenTelemetry equivalents owned by Haby or the platform.

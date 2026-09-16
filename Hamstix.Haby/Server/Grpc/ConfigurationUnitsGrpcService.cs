@@ -198,7 +198,10 @@ public class ConfigurationUnitsGrpcService : ConfigurationUnitsService.Configura
 
         var variable = await _context
             .Variables
-            .FirstOrDefaultAsync(x => x.Name == request.Name && x.ServiceId == request.ServiceId && x.Key == request.Key);
+            .FirstOrDefaultAsync(x => x.ConfigurationUnitId == request.Id
+                && x.Name == request.Name
+                && x.ServiceId == request.ServiceId
+                && x.Key == request.Key);
         if (variable is not null)
         {
             _context.Variables.Remove(variable);

@@ -29,6 +29,8 @@ User instructions override this file. A more specific nested `AGENTS.md`, if add
 5. Run `git diff --check` and inspect the final diff and Git status.
 6. Report code failures separately from environment, restore, network or permission blockers.
 
+For persisted EF Core behavior, follow the database-test isolation rules in [CONTRIBUTING.md](CONTRIBUTING.md): arrange, act and assert with separate `DbContext` instances unless tracking behavior is explicitly under test.
+
 Use the solution-level commands documented in [CONTRIBUTING.md](CONTRIBUTING.md). If restore or build cannot complete, do not claim that the code failed without a final compiler or test result proving it.
 
 ## Architecture constraints

@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/plugins/">
+    <Project Path="Hamstix.Haby/Plugins/ArangoDb/Hamstix.Haby.Plugins.ArangoDb.csproj" />
+    <Project Path="Hamstix.Haby/Plugins/ClickHouse/Hamstix.Haby.Plugins.ClickHouse.csproj" />
+    <Project Path="Hamstix.Haby/Plugins/IdentityServer4ApiResource/Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource.csproj" />
+    <Project Path="Hamstix.Haby/Plugins/K8s_1_23/Hamstix.Haby.Plugins.K8s_1_23.csproj" />
+    <Project Path="Hamstix.Haby/Plugins/PostgreSql12/Hamstix.Haby.Plugins.PostgreSql12.csproj" />
+    <Project Path="Hamstix.Haby/Plugins/RabbitMQ/Hamstix.Haby.Plugins.RabbitMQ.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="Hamstix.Haby/Client/Hamstix.Haby.Client.csproj" />
+  <Project Path="Hamstix.Haby/PluginsCore.Tests/Hamstix.Haby.Shared.PluginsCore.Tests.csproj" />
+  <Project Path="Hamstix.Haby/PluginsCore/Hamstix.Haby.Shared.PluginsCore.csproj" />
+  <Project Path="Hamstix.Haby/Server.Tests/Hamstix.Haby.Server.Tests.csproj" />
+  <Project Path="Hamstix.Haby/Server/Hamstix.Haby.Server.csproj" />
+  <Project Path="Hamstix.Haby/Shared/Hamstix.Haby.Shared.csproj" />
+</Solution>

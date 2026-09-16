@@ -68,6 +68,8 @@ Run narrower project or filtered tests first when that gives faster feedback, bu
 
 Integration tests that need external infrastructure must be explicitly identifiable and documented. Unit tests must not silently depend on a developer's PostgreSQL, Kubernetes, RabbitMQ or other local service.
 
+For tests that exercise persisted EF Core behavior, use separate `DbContext` instances for arranging data, invoking the system under test and verifying the result. Dispose each context before opening the next one, and prefer `AsNoTracking()` for verification queries when tracking behavior is not under test. This prevents the change tracker, identity map and navigation fix-up from hiding query or persistence defects. A test may intentionally share a context only when the unit-of-work or tracking behavior itself is the subject of the test; make that intent explicit in the test name or setup.
+
 ## Code and architecture expectations
 
 - Keep domain and application logic independent from hosting, persistence, UI and plugin implementations.

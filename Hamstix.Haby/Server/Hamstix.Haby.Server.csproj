@@ -1,25 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <PropertyGroup>
-    <TargetFramework>net7.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-  </PropertyGroup>
-
   <ItemGroup>
-    <PackageReference Include="Fluid.Core" Version="2.3.1" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="7.0.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="7.0.1">
+    <PackageReference Include="Fluid.Core" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Monq.Core.MvcExtensions" Version="3.2.0" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="7.0.1" />
-    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" Version="6.5.3" />
-    <PackageReference Include="Monq.Core.HttpClientExtensions" Version="5.3.0" />
-    <PackageReference Include="Mapster" Version="7.4.0-pre03" />
-    <PackageReference Include="Grpc.AspNetCore" Version="2.50.0" />
-    <PackageReference Include="Grpc.AspNetCore.Web" Version="2.50.0" />
+    <PackageReference Include="Monq.Core.MvcExtensions" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" />
+    <PackageReference Include="Monq.Core.HttpClientExtensions" />
+    <PackageReference Include="Mapster" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.AspNetCore.Web" />
   </ItemGroup>
 
   <ItemGroup>
