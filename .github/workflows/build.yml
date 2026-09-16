@@ -17,10 +17,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up .NET SDK
+      - name: Set up .NET SDKs
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          # Required to run the current net7.0 testhost until the M1 migration.
+          dotnet-version: 7.0.x
 
       - name: Restore
         run: dotnet restore ./HamstixHaby.slnx --artifacts-path ./.artifacts
