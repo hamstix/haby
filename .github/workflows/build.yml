@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore ./HamstixHaby.sln --artifacts-path ./.artifacts
+
+      - name: Build
+        run: dotnet build ./HamstixHaby.sln --no-restore --artifacts-path ./.artifacts
+
+      - name: Test
+        run: dotnet test ./HamstixHaby.sln --no-build --artifacts-path ./.artifacts
+
+      - name: Verify formatting
+        run: dotnet format ./HamstixHaby.sln --verify-no-changes --severity warn
+
+      - name: Verify generated diff
+        run: git diff --check --exit-code

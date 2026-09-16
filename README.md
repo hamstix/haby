@@ -12,6 +12,26 @@ Haby provides several key features:
 
 Haby runs on Linux, macOS, FreeBSD, and Windows and includes an webassembly browser based UI.
 
+## Development
+
+Install the .NET SDK selected by [`global.json`](global.json). The first M0 baseline uses the
+.NET 10 SDK to build the existing .NET 7 projects; upgrading their target frameworks belongs
+to M1.
+
+From the repository root, restore, build and test the solution with a clean artifacts directory:
+
+```powershell
+dotnet restore .\HamstixHaby.sln --artifacts-path .\.artifacts
+dotnet build .\HamstixHaby.sln --no-restore --artifacts-path .\.artifacts
+dotnet test .\HamstixHaby.sln --no-build --artifacts-path .\.artifacts
+dotnet format .\HamstixHaby.sln --verify-no-changes --severity warn
+git diff --check
+```
+
+The unit tests use an isolated in-memory database and do not require PostgreSQL or other
+external infrastructure. Known baseline warnings are tracked in
+[`docs/baseline-warnings.md`](docs/baseline-warnings.md).
+
 ## How to install
 
 You can install Haby by several ways:

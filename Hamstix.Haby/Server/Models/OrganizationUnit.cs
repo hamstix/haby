@@ -18,8 +18,8 @@ public class OrganizationUnit
     /// <summary>
     /// The child organization units related to the current organization unit.
     /// </summary>
-    public ICollection<OrganizationUnit> Children { get; private set; } 
-        = new List<OrganizationUnit>();
+    public ICollection<OrganizationUnit> Children { get; private set; } =
+        new List<OrganizationUnit>();
 
     /// <summary>
     /// The parent organization unit. If null - then the organization unit is the root.
@@ -34,8 +34,8 @@ public class OrganizationUnit
     /// <summary>
     /// The list of the configuration units, that is belongs to the current organization unit.
     /// </summary>
-    public ICollection<ConfigurationUnit> ConfigurationUnits { get; private set; } 
-        = new List<ConfigurationUnit>();
+    public ICollection<ConfigurationUnit> ConfigurationUnits { get; private set; } =
+        new List<ConfigurationUnit>();
 
     private OrganizationUnit() { } // EF.
 
