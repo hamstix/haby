@@ -21,10 +21,10 @@ to M1.
 From the repository root, restore, build and test the solution with a clean artifacts directory:
 
 ```powershell
-dotnet restore .\HamstixHaby.sln --artifacts-path .\.artifacts
-dotnet build .\HamstixHaby.sln --no-restore --artifacts-path .\.artifacts
-dotnet test .\HamstixHaby.sln --no-build --artifacts-path .\.artifacts
-dotnet format .\HamstixHaby.sln --verify-no-changes --severity warn
+dotnet restore .\HamstixHaby.slnx --artifacts-path .\.artifacts
+dotnet build .\HamstixHaby.slnx --no-restore --artifacts-path .\.artifacts
+dotnet test .\HamstixHaby.slnx --no-build --artifacts-path .\.artifacts
+dotnet format .\HamstixHaby.slnx --verify-no-changes --severity warn
 git diff --check
 ```
 

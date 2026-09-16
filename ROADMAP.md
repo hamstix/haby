@@ -74,7 +74,7 @@ Objective: make the current repository safely buildable and testable before rede
 - [x] Record all warnings and distinguish existing defects from migration defects.
 - [ ] Add `Directory.Build.props` and central package management if it reduces duplication without changing behavior.
 - [ ] Create test projects for server/application logic and plugin contracts.
-- [ ] Add smoke tests for every existing gRPC service.
+- [x] Add smoke tests for every existing gRPC service.
 - [x] Add focused regression tests for configuration rendering and saved generated variables.
 - [x] Add a regression test proving that variable deletion is scoped by configuration-unit ID.
 - [x] Add CI for restore, build, test, formatting and `git diff --check`.

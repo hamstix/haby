@@ -3,8 +3,8 @@
 The initial M0 build was captured on September 16, 2026 with .NET SDK 10.0.401.
 
 ```powershell
-dotnet restore .\HamstixHaby.sln --artifacts-path .\.artifacts
-dotnet build .\HamstixHaby.sln --no-restore --artifacts-path .\.artifacts
+dotnet restore .\HamstixHaby.slnx --artifacts-path .\.artifacts
+dotnet build .\HamstixHaby.slnx --no-restore --artifacts-path .\.artifacts
 ```
 
 The pinned-SDK baseline build succeeds with 48 warnings and no errors. These are existing issues,

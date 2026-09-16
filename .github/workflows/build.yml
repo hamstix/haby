@@ -23,16 +23,16 @@ jobs:
           global-json-file: global.json
 
       - name: Restore
-        run: dotnet restore ./HamstixHaby.sln --artifacts-path ./.artifacts
+        run: dotnet restore ./HamstixHaby.slnx --artifacts-path ./.artifacts
 
       - name: Build
-        run: dotnet build ./HamstixHaby.sln --no-restore --artifacts-path ./.artifacts
+        run: dotnet build ./HamstixHaby.slnx --no-restore --artifacts-path ./.artifacts
 
       - name: Test
-        run: dotnet test ./HamstixHaby.sln --no-build --artifacts-path ./.artifacts
+        run: dotnet test ./HamstixHaby.slnx --no-build --artifacts-path ./.artifacts
 
       - name: Verify formatting
-        run: dotnet format ./HamstixHaby.sln --verify-no-changes --severity warn
+        run: dotnet format ./HamstixHaby.slnx --verify-no-changes --severity warn
 
       - name: Verify generated diff
         run: git diff --check --exit-code
