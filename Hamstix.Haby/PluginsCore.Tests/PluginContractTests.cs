@@ -1,6 +1,5 @@
 using Hamstix.Haby.Plugins.ArangoDb;
 using Hamstix.Haby.Plugins.ClickHouseHttp;
-using Hamstix.Haby.Plugins.IdentityServer4EFApiResource;
 using Hamstix.Haby.Plugins.K8s_1_23;
 using Hamstix.Haby.Plugins.PostgreSql12;
 using Hamstix.Haby.Plugins.RabbitMQ;
@@ -16,7 +15,6 @@ public class PluginContractTests
     {
         yield return new object[] { new ArangoDbBootstrap() };
         yield return new object[] { new ClickHouseBootstrap() };
-        yield return new object[] { new IdentityServer4Bootstrap() };
         yield return new object[] { new K8s123Bootstrap() };
         yield return new object[] { new PostgreSql12Bootstrap() };
         yield return new object[] { new RabbitMQBootstrap() };

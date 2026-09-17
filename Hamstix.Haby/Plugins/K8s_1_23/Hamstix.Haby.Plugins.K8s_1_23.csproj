@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <PackageReference Include="KubernetesClient" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

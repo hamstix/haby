@@ -23,7 +23,6 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
         const string ServiceSslPasswordKey = "sslPassword";
         const string ServiceRootCertificateKey = "rootCertificate";
         const string ServiceCheckCertificateRevocationKey = "checkCertificateRevocation";
-        const string ServiceIntegratedSecurityKey = "integratedSecurity";
         const string ServiceKerberosServiceNameKey = "kerberosServiceName";
         const string ServiceTimeoutKey = "timeout";
 
@@ -164,7 +163,6 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
             var sslPassword = service.JsonConfig[ServiceSslPasswordKey]?.GetValue<string>();
             var rootCertificate = service.JsonConfig[ServiceRootCertificateKey]?.GetValue<string>();
             var checkCertificateRevocation = service.JsonConfig[ServiceCheckCertificateRevocationKey]?.GetValue<bool>();
-            var integratedSecurity = service.JsonConfig[ServiceIntegratedSecurityKey]?.GetValue<bool>();
             var kerberosServiceName = service.JsonConfig[ServiceKerberosServiceNameKey]?.GetValue<string>();
             var timeout = service.JsonConfig[ServiceTimeoutKey]?.GetValue<int>();
 
@@ -188,8 +186,6 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
                 rootBuilder.RootCertificate = rootCertificate;
             if (checkCertificateRevocation is not null)
                 rootBuilder.CheckCertificateRevocation = checkCertificateRevocation.Value;
-            if (integratedSecurity is not null)
-                rootBuilder.IntegratedSecurity = integratedSecurity.Value;
             if (kerberosServiceName is not null)
                 rootBuilder.KerberosServiceName = kerberosServiceName;
             if (timeout is not null)
@@ -218,7 +214,6 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
             var sslPassword = service.JsonConfig[ServiceSslPasswordKey]?.GetValue<string>();
             var rootCertificate = service.JsonConfig[ServiceRootCertificateKey]?.GetValue<string>();
             var checkCertificateRevocation = service.JsonConfig[ServiceCheckCertificateRevocationKey]?.GetValue<bool>();
-            var integratedSecurity = service.JsonConfig[ServiceIntegratedSecurityKey]?.GetValue<bool>();
             var kerberosServiceName = service.JsonConfig[ServiceKerberosServiceNameKey]?.GetValue<string>();
             var timeout = service.JsonConfig[ServiceTimeoutKey]?.GetValue<int>();
 
@@ -242,8 +237,6 @@ namespace Hamstix.Haby.Plugins.PostgreSql12
                 rootBuilder.RootCertificate = rootCertificate;
             if (checkCertificateRevocation is not null)
                 rootBuilder.CheckCertificateRevocation = checkCertificateRevocation.Value;
-            if (integratedSecurity is not null)
-                rootBuilder.IntegratedSecurity = integratedSecurity.Value;
             if (kerberosServiceName is not null)
                 rootBuilder.KerberosServiceName = kerberosServiceName;
             if (timeout is not null)

@@ -7,13 +7,15 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Monq.Core.MvcExtensions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="Monq.Core.BasicDotNetMicroservice" />
-    <PackageReference Include="Monq.Core.HttpClientExtensions" />
     <PackageReference Include="Mapster" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.AspNetCore.Web" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,7 +23,6 @@
     <ProjectReference Include="..\PluginsCore\Hamstix.Haby.Shared.PluginsCore.csproj" />
     <ProjectReference Include="..\Plugins\ArangoDb\Hamstix.Haby.Plugins.ArangoDb.csproj" />
     <ProjectReference Include="..\Plugins\ClickHouse\Hamstix.Haby.Plugins.ClickHouse.csproj" />
-    <ProjectReference Include="..\Plugins\IdentityServer4ApiResource\Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource.csproj" />
     <ProjectReference Include="..\Plugins\K8s_1_23\Hamstix.Haby.Plugins.K8s_1_23.csproj" />
     <ProjectReference Include="..\Plugins\PostgreSql12\Hamstix.Haby.Plugins.PostgreSql12.csproj" />
     <ProjectReference Include="..\Plugins\RabbitMQ\Hamstix.Haby.Plugins.RabbitMQ.csproj" />

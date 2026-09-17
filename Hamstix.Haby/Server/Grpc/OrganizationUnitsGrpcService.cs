@@ -145,8 +145,7 @@ public class OrganizationUnitsGrpcService : OrganizationUnitsService.Organizatio
         {
             if (request.FieldMask is not null)
             {
-                var mergedReply = new FlattenedOrganizationUnitModel();
-                request.FieldMask.Merge(item, mergedReply);
+                response.OrganizationUnits.Add(request.FieldMask.ApplyTo(item));
             }
             else
                 response.OrganizationUnits.Add(item);

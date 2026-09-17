@@ -91,14 +91,14 @@ Exit criteria:
 
 Objective: move to a supported platform and remove organization-specific dependencies from the public product.
 
-- [ ] Migrate all projects to .NET 10.
-- [ ] Switch CI to the .NET 10 runtime only and remove the temporary .NET 7 SDK installation.
-- [ ] Upgrade gRPC, EF Core, Npgsql, Fluid and Kubernetes client dependencies.
-- [ ] Replace externally owned field-mask helpers with OSS-owned contracts and utilities.
-- [ ] Replace private web, hosting and HTTP-client infrastructure with ASP.NET Core and OpenTelemetry equivalents owned by Haby or the platform.
-- [ ] Replace obsolete IdentityServer4 integration with a neutral plugin boundary; keep product-specific implementations outside the public repository.
-- [ ] Enable nullable and analyzer warnings consistently.
-- [ ] Add dependency and license scanning.
+- [x] Migrate all projects to .NET 10.
+- [x] Switch CI to the .NET 10 runtime only and remove the temporary .NET 7 SDK installation.
+- [x] Upgrade gRPC, EF Core, Npgsql, Fluid and Kubernetes client dependencies.
+- [x] Replace externally owned field-mask helpers with OSS-owned contracts and utilities.
+- [x] Replace private web, hosting and HTTP-client infrastructure with ASP.NET Core and OpenTelemetry equivalents owned by Haby or the platform.
+- [x] Replace obsolete IdentityServer4 integration with a neutral plugin boundary; keep product-specific implementations outside the public repository.
+- [x] Enable nullable and analyzer warnings consistently.
+- [x] Add dependency and license scanning.
 
 Exit criteria:
 

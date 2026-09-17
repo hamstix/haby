@@ -1,7 +1,7 @@
 ﻿using Google.Protobuf.Collections;
 using Google.Protobuf.WellKnownTypes;
 using Mapster;
-using Monq.Core.BasicDotNetMicroservice.Extensions;
+using Hamstix.Haby.Server.Extensions;
 using System.Text.Json.Nodes;
 
 namespace Hamstix.Haby.Server.Configuration.Mapster;

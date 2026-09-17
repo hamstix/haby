@@ -17,12 +17,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up .NET SDKs
+      - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          # Required to run the current net7.0 testhost until the M1 migration.
-          dotnet-version: 7.0.x
 
       - name: Restore
         run: dotnet restore ./HamstixHaby.slnx --artifacts-path ./.artifacts
@@ -33,8 +31,27 @@ jobs:
       - name: Test
         run: dotnet test ./HamstixHaby.slnx --no-build --artifacts-path ./.artifacts
 
+      - name: Audit vulnerable dependencies
+        run: |
+          dotnet package list --project ./HamstixHaby.slnx --vulnerable --include-transitive --format json > dependency-audit.json
+          jq -e '[.. | objects | select(has("severity"))] | length == 0' dependency-audit.json
+
       - name: Verify formatting
         run: dotnet format ./HamstixHaby.slnx --verify-no-changes --severity warn
 
       - name: Verify generated diff
         run: git diff --check --exit-code
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Review dependency licenses and vulnerabilities
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-1.0, AGPL-3.0

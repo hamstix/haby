@@ -7,9 +7,9 @@ using Hamstix.Haby.Server.Grpc;
 using Hamstix.Haby.Server.Services;
 using Hamstix.Haby.Server.Services.Impl;
 using Mapster;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Monq.Core.HttpClientExtensions.Exceptions;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,14 +22,16 @@ var connectionString = builder.Configuration.ReadPgConnectionString();
 builder.Services
     .AddDbContext<HabbyContext>(options => options.UseNpgsql(connectionString));
 
-builder.Services
-    .AddGlobalExceptionFilter()
-    .AddExceptionHandler<ResponseException>(ex =>
-        new ObjectResult(System.Text.Json.JsonSerializer.Deserialize<object>(ex.ResponseData))
-        {
-            StatusCode = (int)ex.StatusCode
-        })
-    .AddDefaultExceptionHandlers();
+builder.Services.AddProblemDetails();
+builder.Services.AddHealthChecks();
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation())
+    .WithMetrics(metrics => metrics
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRuntimeInstrumentation());
 
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient(Hamstix.Haby.Shared.PluginsCore.Constants.DisableSslVerification)
@@ -101,6 +103,7 @@ app.UseGrpcWeb(new GrpcWebOptions
 });
 app.UseAuthentication();
 app.UseAuthorization();
+app.MapHealthChecks("/health");
 app.MapRazorPages();
 app.MapGrpcService<SystemGrpcService>().EnableGrpcWeb();
 app.MapGrpcService<SystemStatusGrpcService>().EnableGrpcWeb();

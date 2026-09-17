@@ -21,9 +21,8 @@ namespace Hamstix.Haby.Server.Authentication
             IOptionsMonitor<HabyAuthenticationOptions> options,
             ILoggerFactory loggerFactory,
             UrlEncoder encoder,
-            ISystemClock clock,
             HabyAuthenticationManager authManager)
-            : base(options, loggerFactory, encoder, clock)
+            : base(options, loggerFactory, encoder)
         {
             _authManager = authManager;
         }

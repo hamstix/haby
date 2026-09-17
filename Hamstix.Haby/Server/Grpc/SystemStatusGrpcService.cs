@@ -4,6 +4,7 @@ using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Shared.Grpc.System;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using System.Reflection;
 
 namespace Hamstix.Haby.Server.Grpc;
 
@@ -85,7 +86,7 @@ public class SystemStatusGrpcService : SystemStatusService.SystemStatusServiceBa
     {
         var model = new ApplicationStatusModel
         {
-            Version = Monq.Core.BasicDotNetMicroservice.Helpers.MicroserviceInfo.GetEntryPointAssembleVersion(),
+            Version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown",
             Status = RegStatuses.NotInitialized,
             DbSchemaInitialized = await _schemaInitializer.IsSchemaInitialized(),
             Environment = _env.EnvironmentName.ToLower(),

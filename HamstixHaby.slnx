@@ -2,7 +2,6 @@
   <Folder Name="/plugins/">
     <Project Path="Hamstix.Haby/Plugins/ArangoDb/Hamstix.Haby.Plugins.ArangoDb.csproj" />
     <Project Path="Hamstix.Haby/Plugins/ClickHouse/Hamstix.Haby.Plugins.ClickHouse.csproj" />
-    <Project Path="Hamstix.Haby/Plugins/IdentityServer4ApiResource/Hamstix.Haby.Plugins.IdentityServer4EFPgSqlApiResource.csproj" />
     <Project Path="Hamstix.Haby/Plugins/K8s_1_23/Hamstix.Haby.Plugins.K8s_1_23.csproj" />
     <Project Path="Hamstix.Haby/Plugins/PostgreSql12/Hamstix.Haby.Plugins.PostgreSql12.csproj" />
     <Project Path="Hamstix.Haby/Plugins/RabbitMQ/Hamstix.Haby.Plugins.RabbitMQ.csproj" />

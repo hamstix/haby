@@ -1,4 +1,4 @@
-﻿using ClickHouse.Client.ADO;
+using ClickHouse.Driver.ADO;
 using Dapper;
 using Hamstix.Haby.Shared.PluginsCore;
 using Hamstix.Haby.Shared.PluginsCore.Exceptions;

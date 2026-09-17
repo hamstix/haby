@@ -1,8 +1,6 @@
 ﻿using Google.Protobuf.WellKnownTypes;
 using Google.Protobuf;
 using Mapster;
-using IdentityModel.Client;
-using Hamstix.Haby.Shared.Grpc.Services;
 
 namespace Hamstix.Haby.Server.Extensions;
 
@@ -21,7 +19,7 @@ public static class FieldMaskResultExtensions
     public static TResponse ApplyFieldMask<TSource, TResponse, TResponseItem>(this ICollection<TSource> list, FieldMask? fieldMask,
         Action<TResponse, TResponseItem> addFieldAction)
         where TResponse : class, new()
-        where TResponseItem : class, IMessage, new()
+        where TResponseItem : class, IMessage<TResponseItem>, new()
     {
         var response = new TResponse();
         foreach (var item in list)
@@ -29,9 +27,7 @@ public static class FieldMaskResultExtensions
             var mappedItem = item.Adapt<TResponseItem>();
             if (fieldMask is not null)
             {
-                var mergedReply = new TResponseItem();
-                fieldMask.Merge(mappedItem, mergedReply);
-                addFieldAction(response, mergedReply);
+                addFieldAction(response, fieldMask.ApplyTo(mappedItem));
             }
             else
                 addFieldAction(response, mappedItem);
@@ -40,15 +36,13 @@ public static class FieldMaskResultExtensions
     }
 
     public static TResponse ApplyFieldMask<TSource, TResponse>(this TSource item, FieldMask? fieldMask)
-        where TResponse : class, IMessage, new()
+        where TResponse : class, IMessage<TResponse>, new()
     {
         var result = item.Adapt<TResponse>();
 
         if (fieldMask is not null)
         {
-            var mergedReply = new TResponse();
-            fieldMask.Merge(result, mergedReply);
-            return mergedReply;
+            return fieldMask.ApplyTo(result);
         }
         else
             return result;

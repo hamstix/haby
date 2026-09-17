@@ -1,5 +1,4 @@
 ﻿using Grpc.Core;
-using Hamstix.Haby.Client.Extensions;
 using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Server.Configurator;
 using Hamstix.Haby.Server.Extensions;

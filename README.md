@@ -194,7 +194,6 @@ Json configuration supports variables:
 - sslPassword [string]
 - rootCertificate [string]
 - checkCertificateRevocation [bool]
-- integratedSecurity [bool]
 - kerberosServiceName [string]
 - timeout [int]
 
@@ -403,81 +402,12 @@ Service template example
 }
 ```
 
-### IdentityServer4 EF PgSql ApiResource
+### Identity provider integrations
 
-Plugin adds secrets to the Client or ApiResource of the Identity4 Entity Framework PostgreSql database context.
-
-Plugin on the "configuration" stage:
-- if varialbe `client.enabled`, adds secret to the ClientSecrets table reading password from the stored variables "clientPassword".
-- if varialbe `apiResource.enabled` adds secret to the ApiResourceSecrets table reading password from the stored variables "apiResourcePassword".
-
-All this manipulations plugin makes from the connection string created from service variables.
-Supported variables are listed below. If the variables is specified then it will appear in the connection string of the ROOT user, not in the CU template.
-If you want to use this variables in the CU template, you must specify them at the service template.
-
-*@NOTE:* to properly create secrets you must provide values for the variables:
-- _resource_ - the name that will be writen to the `Description` column,
-- _clientPassword_ - the password that will be writen to the ClientSecrets table,
-- _apiResourcePassword_ - the password that will be writen to the ApiResourceSecrets table.
-
-This variables can be generated from the `generate` function in the service template or be configured at the CU template at the `"service": {}` key.
-
-Json configuration supports variables:
-
-- rootUser [string][required]
-- rootPassword [string][required]
-- host [string][required]
-- rootDatabase [string]
-- port [int]
-- sslMode [enum]
-- trustServerCertificate [bool]
-- sslCertificate [string]
-- sslKey [string]
-- sslPassword [string]
-- rootCertificate [string]
-- checkCertificateRevocation [bool]
-- integratedSecurity [bool]
-- kerberosServiceName [string]
-- timeout [int]
-
-Service json configuration example
-```json
-{
-  "host": "db-server.local",
-  "rootUser": "pg_management_user",
-  "rootPassword": "ne6DrabojAivSrki",
-  "apiEndpoint": "https://identity",
-  "requireHttpsMetadata": true,
-  "client": {
-    "enabled": false,
-    "login": "client"
-  },
-  "apiResource": {
-    "enabled": false,
-    "login": "api"
-  }
-}
-```
-
-Service template example
-```
-{
-  "AuthenticationEndpoint": "{{ apiEndpoint }}",
-  "RequireHttpsMetadata": {% if requireHttpsMetadata %} {{requireHttpsMetadata}} {% else %} false {% endif %},
-  {% if apiResource.enabled %}
-  "ApiResource": {
-    "Login": "{{ apiResource.login }}",
-    "Password": "{{ apiResourcePassword }}"
-  },
-  {% endif %}
-  {% if client.enabled %}
-  "Client": { 
-    "Login": "{{ client.login }}",
-    "Password": "{{ clientPassword }}"
-  },
-  {% endif %}
-}
-```
+Haby OSS does not embed an IdentityServer-specific database integration. Identity
+providers can be integrated by a downstream, build-time plugin implementing the
+transport-neutral `IPluginBootstrap` and `IStrategy` contracts. Provider-specific
+packages, schemas and credential conventions stay outside this repository.
 
 ### Kubernetes v1.23
 

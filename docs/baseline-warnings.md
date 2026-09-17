@@ -19,3 +19,7 @@ not failures introduced by the M0 test package:
 M0 keeps these warnings visible instead of suppressing them. New code is expected not to add
 warnings, and CI runs the same restore, build, test and formatting checks documented in the
 README.
+
+M1 supersedes the target-framework item above by moving every project to `net10.0`. The other
+entries remain a historical record of the M0 baseline and are not a description of current
+build output.
