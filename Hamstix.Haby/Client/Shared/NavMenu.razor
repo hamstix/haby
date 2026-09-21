@@ -76,6 +76,6 @@
     async Task Logout()
     {
         await Auth.Logout();
-        Navigation.NavigateTo($"/login");
+        Navigation.NavigateTo("/login", forceLoad: true);
     }
 }

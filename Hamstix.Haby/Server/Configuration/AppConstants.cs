@@ -22,5 +22,7 @@
         public static readonly Version CurrentApiVersion = new Version(1, 0, 0);
 
         public const string AuthenticationSchemeName = "HabyAuth";
+        public const string CookieAuthenticationSchemeName = "HabyCookie";
+        public const string SmartAuthenticationSchemeName = "HabySmart";
     }
 }

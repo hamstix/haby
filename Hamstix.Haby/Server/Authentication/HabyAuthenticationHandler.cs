@@ -39,10 +39,7 @@ namespace Hamstix.Haby.Server.Authentication
                 return _unauthorized;
 
             var token = headerValue[0][BearerPrefix.Length..];
-            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(_authManager.SecureToken))
-                return _unauthorized;
-
-            if (token != _authManager.SecureToken)
+            if (!_authManager.ValidateToken(token))
                 return _unauthorized;
 
             var identity = new ClaimsIdentity(Array.Empty<Claim>(), Scheme.Name);

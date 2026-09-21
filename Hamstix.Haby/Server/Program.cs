@@ -1,4 +1,6 @@
+using Hamstix.Haby.Client.Extensions;
 using Hamstix.Haby.Server.Authentication;
+using Hamstix.Haby.Server.Components;
 using Hamstix.Haby.Server.Configuration;
 using Hamstix.Haby.Server.Configurator;
 using Hamstix.Haby.Server.DependencyInjection;
@@ -7,16 +9,62 @@ using Hamstix.Haby.Server.Grpc;
 using Hamstix.Haby.Server.Services;
 using Hamstix.Haby.Server.Services.Impl;
 using Mapster;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllersWithViews();
-builder.Services.AddRazorPages();
+builder.Services.AddRazorComponents()
+    .AddInteractiveWebAssemblyComponents();
+
+builder.Services.AddCascadingAuthenticationState();
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = AppConstants.SmartAuthenticationSchemeName;
+    options.DefaultAuthenticateScheme = AppConstants.SmartAuthenticationSchemeName;
+    options.DefaultChallengeScheme = AppConstants.SmartAuthenticationSchemeName;
+    options.DefaultSignInScheme = AppConstants.CookieAuthenticationSchemeName;
+})
+.AddPolicyScheme(AppConstants.SmartAuthenticationSchemeName, null, options =>
+{
+    options.ForwardDefaultSelector = context =>
+        context.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? AppConstants.AuthenticationSchemeName
+            : AppConstants.CookieAuthenticationSchemeName;
+})
+.AddCookie(AppConstants.CookieAuthenticationSchemeName, options =>
+{
+    options.Cookie.Name = "Haby.Auth";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.LoginPath = "/login";
+    options.Events.OnRedirectToLogin = context =>
+    {
+        if (!context.Request.Path.StartsWithSegments("/auth")
+            && HttpMethods.IsGet(context.Request.Method)
+            && context.Request.GetTypedHeaders().Accept?.Any(header =>
+                header.MediaType.Value?.Contains("text/html", StringComparison.OrdinalIgnoreCase) == true) == true)
+        {
+            context.Response.Redirect(context.RedirectUri);
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        }
+
+        return Task.CompletedTask;
+    };
+})
+.AddScheme<HabyAuthenticationOptions, HabyAuthenticationHandler>(
+    AppConstants.AuthenticationSchemeName, null);
+builder.Services.AddAuthorization();
 
 var connectionString = builder.Configuration.ReadPgConnectionString();
 builder.Services
@@ -47,7 +95,6 @@ builder.Services.AddHttpClient(Hamstix.Haby.Shared.PluginsCore.Constants.Disable
 
 builder.Services.AddGrpc(options =>
 {
-    //options.Interceptors.Add<DownstreamHttpRequestInterceptor>();
     options.EnableDetailedErrors = true;
     options.MaxReceiveMessageSize = 2 * 1024 * 1024; // 2 MB
     options.MaxSendMessageSize = 5 * 1024 * 1024; // 5 MB
@@ -63,9 +110,6 @@ builder.Services.AddCors(setupAction =>
 
 TypeAdapterConfig.GlobalSettings.Scan(AppDomain.CurrentDomain.GetAssemblies());
 
-builder.Services.AddAuthentication(AppConstants.AuthenticationSchemeName)
-                .AddScheme<HabyAuthenticationOptions, HabyAuthenticationHandler>(
-                    AppConstants.AuthenticationSchemeName, null);
 builder.Services.AddSingleton<HabyAuthenticationManager>();
 
 builder.Services.RegisterPlugins(builder.Configuration);
@@ -90,12 +134,12 @@ else
     app.UseExceptionHandler("/Error");
 }
 
-app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
+app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+
+app.MapStaticAssets();
 
 app.UseCors();
 app.UseRouting();
-
 
 app.UseGrpcWeb(new GrpcWebOptions
 {
@@ -103,8 +147,32 @@ app.UseGrpcWeb(new GrpcWebOptions
 });
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
 app.MapHealthChecks("/health");
-app.MapRazorPages();
+app.MapPost("/auth/login", async (
+    Hamstix.Haby.Shared.Grpc.System.AclModel request,
+    HabyAuthenticationManager authenticationManager,
+    HttpContext context) =>
+{
+    if (!authenticationManager.ValidateToken(request.Token))
+        return Results.Unauthorized();
+
+    var identity = new ClaimsIdentity(
+        [new Claim(ClaimTypes.Name, "Haby user")],
+        AppConstants.CookieAuthenticationSchemeName);
+    await context.SignInAsync(
+        AppConstants.CookieAuthenticationSchemeName,
+        new ClaimsPrincipal(identity));
+
+    return Results.NoContent();
+}).AllowAnonymous();
+app.MapPost("/auth/logout", async (HttpContext context) =>
+{
+    await context.SignOutAsync(AppConstants.CookieAuthenticationSchemeName);
+    return Results.NoContent();
+}).AllowAnonymous();
+app.MapGet("/auth/user", () => Results.NoContent())
+    .RequireAuthorization();
 app.MapGrpcService<SystemGrpcService>().EnableGrpcWeb();
 app.MapGrpcService<SystemStatusGrpcService>().EnableGrpcWeb();
 app.MapGrpcService<PluginsGrpcService>().EnableGrpcWeb();
@@ -113,6 +181,9 @@ app.MapGrpcService<GeneratorsGrpcService>().EnableGrpcWeb();
 app.MapGrpcService<ConfigurationUnitsGrpcService>().EnableGrpcWeb();
 app.MapGrpcService<ConfigurationGrpcService>().EnableGrpcWeb();
 app.MapGrpcService<OrganizationUnitsGrpcService>().EnableGrpcWeb();
-app.MapFallbackToFile("index.html");
+
+app.MapRazorComponents<App>()
+    .AddInteractiveWebAssemblyRenderMode()
+    .AddAdditionalAssemblies(typeof(Hamstix.Haby.Client.Routes).Assembly);
 
 app.Run();
