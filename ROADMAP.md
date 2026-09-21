@@ -12,7 +12,7 @@ Haby OSS owns:
 
 - configuration units, applications, environments and external services;
 - configuration templates, rendering, validation and revisions;
-- generated values and references to secrets;
+- generated values, encrypted secret versions and references to secrets;
 - provisioning and configuration publication abstractions;
 - PostgreSQL persistence and database migrations;
 - versioned REST and gRPC APIs;
@@ -37,6 +37,7 @@ Generic improvements should be proposed upstream. A downstream source mirror mus
 - Keep domain logic independent from ASP.NET Core, EF Core, UI and plugin implementations.
 - Treat provisioning as an idempotent, retryable operation, not as a side effect of a request handler.
 - Never store plaintext secrets in logs, operation results or ordinary configuration documents.
+- Store managed secret payloads encrypted in PostgreSQL by default, keep key-encryption keys outside the database and exchange only SecretRefs across domain boundaries.
 - Keep PostgreSQL as the default source of truth. Kubernetes support is an integration and an optional deployment mode, not the only storage model.
 - Use semantic versioning for public contracts and plugin abstractions.
 - Use MudBlazor for standard UI components; implement only Haby-specific UX components locally.
@@ -116,6 +117,8 @@ Objective: separate Haby's domain from hosting and make extensions a supported p
 - [ ] Split plugin responsibilities into provisioning, validation, publishing and optional commands.
 - [ ] Add plugin metadata: ID, version, compatible Haby API range, capabilities and configuration schema.
 - [ ] Support plugin settings validation and secret-field declarations.
+- [ ] Define Secret, immutable SecretVersion, SecretRef, ownership and sensitivity independently from generated values and rendered documents.
+- [ ] Define transport- and persistence-neutral `ISecretStore` and `IKeyEncryptionProvider` contracts with cancellation and redaction invariants.
 - [ ] Define `IHabyModule` or an equivalent compile-time module registration API for DI and optional REST/gRPC endpoints.
 - [ ] Package contracts and abstractions as versioned NuGet packages.
 - [ ] Keep trusted plugins composed at build time initially; postpone arbitrary runtime DLL loading.
@@ -124,7 +127,8 @@ Exit criteria:
 
 - an external sample plugin can be developed without referencing Haby.Server;
 - plugin compatibility failures are detected during startup;
-- plugin configuration can be validated before execution.
+- plugin configuration can be validated before execution;
+- plugins can produce and consume SecretRefs without returning plaintext through generated-value or diagnostic contracts.
 
 ### M3 — Reliable operations and reconciliation
 
@@ -134,6 +138,10 @@ Objective: prevent request failures from leaving unknown external state.
 - [ ] Add idempotency keys, retries, timeouts and cancellation.
 - [ ] Add leases so multiple Haby replicas cannot execute the same operation concurrently.
 - [ ] Persist structured per-step results without leaking secrets.
+- [ ] Implement the default encrypted PostgreSQL secret store with per-version DEKs, AES-256-GCM payload encryption and externally supplied versioned KEKs.
+- [ ] Add durable KEK rotation and DEK rewrap operations that retain old keys until verification completes.
+- [ ] Model secret rotation separately from key rotation and reconcile affected resources and workloads.
+- [ ] Audit secret writes, resolutions, rotations and deletions without recording values.
 - [ ] Add `validate`, `plan`, `apply`, `reconcile` and `rollback` workflows.
 - [ ] Define deletion policies: retain, orphan or deprovision external resources.
 - [ ] Add compensation where safe and reconciliation where compensation is impossible.
@@ -144,7 +152,9 @@ Exit criteria:
 
 - restarting Haby does not lose in-progress operations;
 - repeated application of the same desired state is safe;
-- partial external failures are visible and recoverable.
+- partial external failures are visible and recoverable;
+- a PostgreSQL backup does not disclose secret plaintext without the separately managed key ring;
+- key rotation can resume safely after interruption.
 
 ### M4 — Public API and security
 
@@ -156,6 +166,8 @@ Objective: provide stable automation contracts suitable for third-party clients.
 - [ ] Add OIDC authentication.
 - [ ] Add service-account/API-key authentication for automation.
 - [ ] Add role- and scope-based authorization.
+- [ ] Add write-only secret mutation APIs and separate permissions for create, replace, rotate and delete operations.
+- [ ] Ensure list, read, export and diagnostic APIs return secret metadata and references but never plaintext.
 - [ ] Add rate limits and request-size limits.
 - [ ] Add structured validation errors and stable error codes.
 - [ ] Add export/import and supported break-glass patch/rollback commands.
@@ -165,7 +177,8 @@ Exit criteria:
 
 - administrative and read-only access can be separated;
 - clients do not depend on database structure;
-- public contract changes are checked in CI.
+- public contract changes are checked in CI;
+- ordinary API clients cannot retrieve secret plaintext or accidentally overwrite an unchanged secret.
 
 ### M5 — Administration UI
 
@@ -178,6 +191,9 @@ Objective: replace the prototype Bootstrap UI with a maintainable administration
 - [ ] Integrate a code editor for JSON and Liquid templates with formatting, validation and diff.
 - [ ] Add plan/apply and operation-status pages.
 - [ ] Add configuration revision history and rollback UX.
+- [ ] Add write-only secret inputs that preserve existing values when unrelated settings change.
+- [ ] Show secret presence, backend, version, ownership, provenance and rotation status without returning the value to the browser.
+- [ ] Add explicit replace and rotate workflows with impact preview and confirmation.
 - [ ] Add keyboard navigation and accessibility checks.
 - [ ] Add bUnit tests for Haby-owned components and critical flows.
 
@@ -187,7 +203,8 @@ Exit criteria:
 
 - no locally maintained generic table, modal or toast implementation remains;
 - dangerous operations require explicit confirmation and show their scope;
-- template errors are visible before apply.
+- template errors are visible before apply;
+- existing secrets never round-trip through UI forms as plaintext.
 
 ### M6 — Standard plugins and delivery channels
 
@@ -201,6 +218,8 @@ Objective: provide a useful product-neutral distribution.
 - [ ] ConfigMap and Secret publication.
 - [ ] Generic HTTP/webhook publication.
 - [ ] Optional Consul publisher only if it can remain product-neutral.
+- [ ] Add external `ISecretStore` and `IKeyEncryptionProvider` adapters only when deployment requirements justify them, with OpenBao/Vault KV and Transit as initial candidates.
+- [ ] Keep dynamic leased credentials behind a separate capability if a supported provider requires them.
 - [ ] Integration-test containers for supported external systems.
 - [ ] Plugin compatibility and upgrade documentation.
 
@@ -208,7 +227,8 @@ Exit criteria:
 
 - every supported plugin has idempotency and integration tests;
 - failures are represented through the common operation model;
-- plugin-specific secrets are redacted consistently.
+- plugin-specific secrets are redacted consistently;
+- the same SecretRef model works with encrypted PostgreSQL and at least one external adapter without changing domain contracts.
 
 ### M7 — Kubernetes operator mode
 
@@ -270,7 +290,7 @@ Definition of done for the first work package:
 - ADR-003: Compile-time trusted plugin composition before dynamic loading.
 - ADR-004: REST and gRPC public contract strategy.
 - ADR-005: Background operation and reconciliation model.
-- ADR-006: Secret storage and redaction model.
+- [ADR-006](docs/adr/0006-secret-storage-and-encryption.md): Secret storage, envelope encryption and external provider boundary.
 - ADR-007: MudBlazor as the UI component foundation.
 - ADR-008: Scope and ownership of Kubernetes operator mode.
 
@@ -279,6 +299,8 @@ Definition of done for the first work package:
 - Exact compatibility with product-specific administration clients.
 - A writable long-lived downstream fork of the OSS repository.
 - Dynamic installation of untrusted plugin assemblies.
+- External secret-store implementations before the encrypted PostgreSQL model and provider-neutral contracts are validated.
+- Dynamic credential leasing and renewal before durable secret and operation lifecycles are established.
 - Using Kubernetes/etcd as the only Haby database.
 - Reproducing every legacy Registry service provider before the core operation model is reliable.
 - A visual redesign before build, tests and domain boundaries are stable.
