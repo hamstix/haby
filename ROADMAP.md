@@ -10,9 +10,11 @@ The immediate goal is to establish a stable OSS core that downstream distributio
 
 Haby OSS owns:
 
-- configuration units, applications, environments and external services;
-- configuration templates, rendering, validation and revisions;
-- generated values and references to secrets;
+- folders, applications, components and environments;
+- versioned application manifests, validation and source provenance;
+- provider instances, resources, bindings and lifecycle policies;
+- configuration documents, rendering, revisions and publication;
+- generated values, encrypted secret versions, observed resource state and references to secrets;
 - provisioning and configuration publication abstractions;
 - PostgreSQL persistence and database migrations;
 - versioned REST and gRPC APIs;
@@ -35,8 +37,13 @@ Generic improvements should be proposed upstream. A downstream source mirror mus
 - Keep each pull request limited to one architectural step.
 - Prefer migrations and compatibility adapters over flag-day rewrites.
 - Keep domain logic independent from ASP.NET Core, EF Core, UI and plugin implementations.
+- Use stable persisted identities. Names, repository locations and folder paths are mutable metadata.
+- Keep source declarations, operator overrides, generated state and rendered outputs separate.
+- Keep folders organizational. Moving an application must not change its configuration or external resource identity.
+- Prefer explicit resource bindings and document paths over implicit JSON merging or copying rendered configuration.
 - Treat provisioning as an idempotent, retryable operation, not as a side effect of a request handler.
 - Never store plaintext secrets in logs, operation results or ordinary configuration documents.
+- Store managed secret payloads encrypted in PostgreSQL by default, keep key-encryption keys outside the database and exchange only SecretRefs across domain boundaries.
 - Keep PostgreSQL as the default source of truth. Kubernetes support is an integration and an optional deployment mode, not the only storage model.
 - Use semantic versioning for public contracts and plugin abstractions.
 - Use MudBlazor for standard UI components; implement only Haby-specific UX components locally.
@@ -106,36 +113,72 @@ Exit criteria:
 - all projects target .NET 10;
 - baseline and regression tests pass.
 
-### M2 — Stable domain and plugin SDK
+### M2 — Stable domain, application manifest and plugin SDK
 
-Objective: separate Haby's domain from hosting and make extensions a supported public surface.
+Objective: establish the application and resource model before replacing the current configurator and make extensions a supported public surface.
 
-- [ ] Define domain terminology and invariants in an ADR.
+- [ ] Accept the [application-manifest proposal](docs/architecture/application-manifest.md) and record its domain terminology and invariants in an ADR.
+- [ ] Replace `OrganizationUnit`, `ConfigurationUnit` and overloaded configuration-key terminology with Folder, Application, Component and Configuration document concepts.
+- [ ] Introduce Provider instance, Resource and Binding as distinct concepts.
+- [ ] Introduce immutable persisted IDs and optimistic concurrency tokens; keep names, repository metadata and folder paths mutable.
+- [ ] Introduce immutable manifest revisions with application version, source repository and source revision metadata.
+- [ ] Define the versioned `haby.json` application manifest and publish its JSON Schema.
+- [ ] Separate Component identity from Configuration document names and delivery paths.
+- [ ] Keep folders organizational and make configuration or policy inheritance explicit rather than path-based.
+- [ ] Introduce Application sets with static membership or label selectors for reusable cross-cutting targeting.
+- [ ] Introduce versioned Configuration profiles and explicit Profile assignments for global and group configuration.
+- [ ] Define deterministic profile precedence, JSON Merge Patch and JSON Patch behavior, collision detection and per-path provenance.
+- [ ] Model typed parameter definitions and defaults separately from scoped operator overrides and their provenance.
+- [ ] Model generated values, secret references, external IDs and observed state separately from rendered documents.
+- [ ] Replace `fromKey` configuration copying with explicit bindings from multiple components to one resource.
+- [ ] Require explicit bindings before resource outputs can contribute to a component's configuration document.
 - [ ] Separate domain models from EF Core entities and transport models where necessary.
-- [ ] Introduce stable IDs and optimistic concurrency tokens.
-- [ ] Split plugin responsibilities into provisioning, validation, publishing and optional commands.
-- [ ] Add plugin metadata: ID, version, compatible Haby API range, capabilities and configuration schema.
+- [ ] Split plugin responsibilities into resource provisioning, configuration rendering, publication, provider health checks and resource-scoped commands.
+- [ ] Accept the [workload-identity proposal](docs/architecture/workload-identity.md) and define a transport-neutral `IWorkloadIdentityAuthenticator` contract.
+- [ ] Define transient identity evidence, normalized authenticated workload subjects and stable redacted failure codes without hosting, persistence or Kubernetes dependencies.
+- [ ] Register workload identity authenticators explicitly at build time and select them through trusted provider configuration.
+- [ ] Add plugin metadata: ID, version, compatible Haby API range, capabilities, resource types and versioned schemas.
 - [ ] Support plugin settings validation and secret-field declarations.
+- [ ] Define Secret, immutable SecretVersion, SecretRef, ownership and sensitivity independently from generated values and rendered documents.
+- [ ] Define transport- and persistence-neutral `ISecretStore` and `IKeyEncryptionProvider` contracts with cancellation and redaction invariants.
 - [ ] Define `IHabyModule` or an equivalent compile-time module registration API for DI and optional REST/gRPC endpoints.
 - [ ] Package contracts and abstractions as versioned NuGet packages.
 - [ ] Keep trusted plugins composed at build time initially; postpone arbitrary runtime DLL loading.
 
 Exit criteria:
 
+- `haby.json` can represent several components, several documents per component, shared resources and component-specific resources;
+- application rename and folder moves preserve persisted identity and resource ownership;
+- changing a manifest default does not overwrite an operator override;
+- one profile revision can apply globally or to several overlapping Application sets without copying its content;
+- component configuration can override a shared profile with deterministic, inspectable provenance;
+- resources not explicitly bound to a document cannot leak into its rendered output;
 - an external sample plugin can be developed without referencing Haby.Server;
 - plugin compatibility failures are detected during startup;
-- plugin configuration can be validated before execution.
+- plugin and application configuration can be validated before execution;
+- workload identity can be authenticated through a fake adapter without exposing credentials or granting application permissions;
+- plugins can produce and consume SecretRefs without returning plaintext through generated-value or diagnostic contracts.
 
 ### M3 — Reliable operations and reconciliation
 
 Objective: prevent request failures from leaving unknown external state.
 
 - [ ] Model provisioning as persisted operations with explicit states.
+- [ ] Reconcile Resource desired state against observed state through the owning plugin.
 - [ ] Add idempotency keys, retries, timeouts and cancellation.
 - [ ] Add leases so multiple Haby replicas cannot execute the same operation concurrently.
 - [ ] Persist structured per-step results without leaking secrets.
+- [ ] Implement the default encrypted PostgreSQL secret store with per-version DEKs, AES-256-GCM payload encryption and externally supplied versioned KEKs.
+- [ ] Add durable KEK rotation and DEK rewrap operations that retain old keys until verification completes.
+- [ ] Model secret rotation separately from key rotation and reconcile affected resources and workloads.
+- [ ] Audit secret writes, resolutions, rotations and deletions without recording values.
+- [ ] Add a generated-value store with stable ownership and get-or-create semantics outside Liquid rendering.
+- [ ] Plan and apply Configuration-profile revision rollouts using the same operation history as application revisions.
+- [ ] Add targeted operational overrides with reason, author, expiration and automatic rollback.
 - [ ] Add `validate`, `plan`, `apply`, `reconcile` and `rollback` workflows.
 - [ ] Define deletion policies: retain, orphan or deprovision external resources.
+- [ ] Apply removal of applications, components and resources through plans instead of database cascades alone.
+- [ ] Separate desired replica count from temporary workload suspension and operational scaling overrides.
 - [ ] Add compensation where safe and reconciliation where compensation is impossible.
 - [ ] Add an operation history and audit log.
 - [ ] Add OpenTelemetry traces, metrics, health and readiness checks.
@@ -144,7 +187,9 @@ Exit criteria:
 
 - restarting Haby does not lose in-progress operations;
 - repeated application of the same desired state is safe;
-- partial external failures are visible and recoverable.
+- partial external failures are visible and recoverable;
+- a PostgreSQL backup does not disclose secret plaintext without the separately managed key ring;
+- key rotation can resume safely after interruption.
 
 ### M4 — Public API and security
 
@@ -155,7 +200,14 @@ Objective: provide stable automation contracts suitable for third-party clients.
 - [ ] Generate and publish API clients.
 - [ ] Add OIDC authentication.
 - [ ] Add service-account/API-key authentication for automation.
+- [ ] Map authenticated workload subjects to persisted Workloads and authorize exact Configuration-document revisions.
+- [ ] Add a workload pull endpoint with audit, rate limiting and replay-aware policies.
+- [ ] Add optional hashed, one-time Delivery grants only if the pull protocol requires a second request.
 - [ ] Add role- and scope-based authorization.
+- [ ] Add write-only secret mutation APIs and separate permissions for create, replace, rotate and delete operations.
+- [ ] Ensure list, read, export and diagnostic APIs return secret metadata and references but never plaintext.
+- [ ] Add separate permissions for shared-profile changes, broad target selectors and break-glass overrides.
+- [ ] Add authorization, confirmation and audit rules for plugin resource commands.
 - [ ] Add rate limits and request-size limits.
 - [ ] Add structured validation errors and stable error codes.
 - [ ] Add export/import and supported break-glass patch/rollback commands.
@@ -165,7 +217,8 @@ Exit criteria:
 
 - administrative and read-only access can be separated;
 - clients do not depend on database structure;
-- public contract changes are checked in CI.
+- public contract changes are checked in CI;
+- ordinary API clients cannot retrieve secret plaintext or accidentally overwrite an unchanged secret.
 
 ### M5 — Administration UI
 
@@ -177,7 +230,15 @@ Objective: replace the prototype Bootstrap UI with a maintainable administration
 - [ ] Add reusable domain components: page header, entity table, status badge, form actions and destructive-action confirmation.
 - [ ] Integrate a code editor for JSON and Liquid templates with formatting, validation and diff.
 - [ ] Add plan/apply and operation-status pages.
+- [ ] Show manifest defaults, operator overrides, effective values and provenance separately.
+- [ ] Add profile impact preview showing every affected application, component, document and JSON path.
+- [ ] Add temporary multi-target diagnostic overrides with visible expiration.
+- [ ] Show components, managed resources, bindings, workloads and configuration documents as distinct views.
+- [ ] Add suspend/resume controls that preserve the desired workload scale.
 - [ ] Add configuration revision history and rollback UX.
+- [ ] Add write-only secret inputs that preserve existing values when unrelated settings change.
+- [ ] Show secret presence, backend, version, ownership, provenance and rotation status without returning the value to the browser.
+- [ ] Add explicit replace and rotate workflows with impact preview and confirmation.
 - [ ] Add keyboard navigation and accessibility checks.
 - [ ] Add bUnit tests for Haby-owned components and critical flows.
 
@@ -187,28 +248,35 @@ Exit criteria:
 
 - no locally maintained generic table, modal or toast implementation remains;
 - dangerous operations require explicit confirmation and show their scope;
-- template errors are visible before apply.
+- template errors are visible before apply;
+- existing secrets never round-trip through UI forms as plaintext.
 
-### M6 — Standard plugins and delivery channels
+### M6 — Standard resource providers and delivery channels
 
 Objective: provide a useful product-neutral distribution.
 
-- [ ] PostgreSQL provisioning.
-- [ ] RabbitMQ provisioning.
-- [ ] Redis ACL provisioning.
-- [ ] S3-compatible configuration.
-- [ ] Kubernetes resource publication.
+- [ ] PostgreSQL database and principal resources, configuration renderers and scoped commands.
+- [ ] RabbitMQ principal, queue, exchange and binding resources plus operational commands.
+- [ ] Redis ACL and logical database resources where the target supports them.
+- [ ] S3-compatible bucket and credential resources.
+- [ ] Kubernetes workload and networking resources with standard profiles.
+- [ ] Kubernetes TokenReview workload identity adapter with audience and Pod-bound identity validation.
+- [ ] Kubernetes init-container pull with explicit projected ServiceAccount tokens and pinned configuration revisions.
 - [ ] ConfigMap and Secret publication.
 - [ ] Generic HTTP/webhook publication.
 - [ ] Optional Consul publisher only if it can remain product-neutral.
+- [ ] Add external `ISecretStore` and `IKeyEncryptionProvider` adapters only when deployment requirements justify them, with OpenBao/Vault KV and Transit as initial candidates.
+- [ ] Keep dynamic leased credentials behind a separate capability if a supported provider requires them.
 - [ ] Integration-test containers for supported external systems.
 - [ ] Plugin compatibility and upgrade documentation.
 
 Exit criteria:
 
 - every supported plugin has idempotency and integration tests;
+- every resource type exposes versioned desired-state and output schemas;
 - failures are represented through the common operation model;
-- plugin-specific secrets are redacted consistently.
+- plugin-specific secrets are redacted consistently;
+- the same SecretRef model works with encrypted PostgreSQL and at least one external adapter without changing domain contracts.
 
 ### M7 — Kubernetes operator mode
 
@@ -219,6 +287,7 @@ Objective: add Kubernetes-native reconciliation without making Kubernetes the ma
 - [ ] Use `.spec`, `.status`, conditions, observed generation and finalizers correctly.
 - [ ] Add leader election and scoped RBAC.
 - [ ] Add controller reconciliation tests.
+- [ ] Reuse the Application, Resource, Binding and operation semantics instead of introducing a second Kubernetes-only domain model.
 - [ ] Document GitOps ownership and drift behavior.
 - [ ] Add export/import and disaster-recovery procedures.
 - [ ] Evaluate a limited PostgreSQL-free single-cluster profile only after the operator is stable.
@@ -242,49 +311,59 @@ Objective: publish a supportable first modern Haby release.
 - [ ] Public roadmap, issue templates and contribution guide.
 - [ ] End-to-end installation test from an empty environment.
 
-## First work package
+## Next architecture work package
 
-The first implementation session should complete only a narrow baseline package. Do not start the plugin redesign or UI migration in the same change.
+The first M2 implementation should establish names and contracts without replacing the complete configurator in one change.
 
-1. Inspect the clean Git status, SDK selection and current package restore state.
-2. Reproduce the existing build using a writable, clean artifacts directory.
-3. Add `global.json` for .NET 10 only after confirming the installed stable SDK.
-4. Add initial test projects without changing production behavior.
-5. Lock configuration rendering and generated-variable persistence with focused tests.
-6. Add a failing regression test for cross-CU variable deletion.
-7. Fix that defect with the smallest scoped production change.
-8. Run build, tests and `git diff --check`.
-9. Record remaining baseline failures separately; do not hide them inside the migration.
+1. Accept the domain terminology and manifest invariants in an ADR.
+2. Define transport- and persistence-independent records for Application, Component, Resource, Binding, Configuration document, Secret, SecretVersion, SecretRef and authenticated workload identity.
+3. Define the first `haby.json` JSON Schema with stable local IDs and typed parameter definitions.
+4. Add parser and semantic-validation tests for shared resources, separate resources, explicit configuration exposure, profile layering and operator overrides.
+5. Define `IWorkloadIdentityAuthenticator`, its evidence/result contracts and an in-memory fake with tests for cancellation, stable failures and credential redaction.
+6. Define `ISecretStore` and `IKeyEncryptionProvider` contracts with in-memory fakes and tests proving that domain, manifest and diagnostic models exchange references rather than plaintext.
+7. Keep the existing API and configurator behind compatibility adapters until the new model has focused replacement and reconciliation tests.
 
-Definition of done for the first work package:
+Definition of done for this work package:
 
-- focused regression tests pass;
-- the solution has a reproducible build command;
-- no unrelated production refactoring is included;
-- all remaining warnings or blocked checks are explicitly documented.
+- domain naming no longer depends on Consul keys or Kubernetes objects;
+- the manifest parser is deterministic and side-effect free;
+- workload authentication contracts are independent from HTTP, gRPC, EF Core and Kubernetes client types;
+- authentication tests do not persist, log or return raw credentials;
+- secret contracts are independent from EF Core and vendor SDKs, and no ordinary domain or diagnostic contract carries plaintext;
+- focused tests and `git diff --check` pass.
 
 ## Decisions to record as ADRs
 
 - ADR-001: Public core and downstream distribution boundary.
 - ADR-002: PostgreSQL as the default source of truth.
-- ADR-003: Compile-time trusted plugin composition before dynamic loading.
+- ADR-003: Plugin composition and runtime strategy.
 - ADR-004: REST and gRPC public contract strategy.
 - ADR-005: Background operation and reconciliation model.
-- ADR-006: Secret storage and redaction model.
+- [ADR-006](docs/adr/0006-secret-storage-and-encryption.md): Secret storage, envelope encryption and external provider boundary.
 - ADR-007: MudBlazor as the UI component foundation.
 - ADR-008: Scope and ownership of Kubernetes operator mode.
+- ADR-009: Application, component, resource, binding and configuration-document model.
+- ADR-010: Versioned application manifest, override precedence and state ownership.
+- ADR-011: Reusable configuration profiles, target sets and deterministic composition.
+- ADR-012: Workload identity authentication and Kubernetes TokenReview.
 
 ## Out of scope for the first milestones
 
 - Exact compatibility with product-specific administration clients.
 - A writable long-lived downstream fork of the OSS repository.
 - Dynamic installation of untrusted plugin assemblies.
+- External secret-store implementations before the encrypted PostgreSQL model and provider-neutral contracts are validated.
+- Dynamic credential leasing and renewal before durable secret and operation lifecycles are established.
+- Runtime provider protocols and out-of-process plugin lifecycle management.
+- Configuration publisher implementations and the complete pull-delivery endpoint in the first M2 contract change.
+- Implicit configuration inheritance based on folder paths.
+- A first-class product or release aggregate before a many-to-many grouping use case is validated.
 - Using Kubernetes/etcd as the only Haby database.
 - Reproducing every legacy Registry service provider before the core operation model is reliable.
 - A visual redesign before build, tests and domain boundaries are stable.
 
 ## Prompt for the next development session
 
-Use the following request to start the first implementation session:
+Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`. Implement only the **First work package / M0 reproducible baseline**. Inspect the real repository state before editing. First reproduce the current build and add focused tests for configuration rendering, generated-variable persistence and the cross-CU `DeleteVariable` regression. Make the smallest production fix required by those tests. Do not begin the plugin redesign, MudBlazor migration or downstream compatibility layers. Validate with build, focused tests and `git diff --check`, and report any environmental blocker separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/workload-identity.md` and `docs/adr/0006-secret-storage-and-encryption.md`. Implement only the **Next architecture work package**. Start with the domain terminology ADR and side-effect-free manifest, workload-identity and secret-reference contracts, schema, parser and contract tests. Do not implement encrypted PostgreSQL storage yet, add the complete delivery endpoint or publisher implementations, replace persistence, execute plugin side effects, migrate the UI or add remote providers in the same change. Preserve the legacy configurator behind compatibility adapters, run focused tests and `git diff --check`, and report environmental blockers separately from code failures.
