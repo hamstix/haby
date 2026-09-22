@@ -11,7 +11,8 @@ The immediate goal is to establish a stable OSS core that downstream distributio
 Haby OSS owns:
 
 - folders, applications, components and environments;
-- versioned application manifests, validation and source provenance;
+- versioned application manifests, validation and portable release identity;
+- environment-specific application deployments and exact deployment change sets;
 - provider instances, resources, resource exports, bindings, workloads and lifecycle policies;
 - configuration documents, rendering, revisions and publication;
 - generated values, encrypted secret versions, observed resource state and references to secrets;
@@ -35,13 +36,15 @@ Generic improvements should be proposed upstream. A downstream source mirror mus
 
 - Lock existing behavior with focused tests before changing production code.
 - Keep each pull request limited to one architectural step.
-- Prefer migrations and compatibility adapters over flag-day rewrites.
+- Replace the unused prototype through small tested vertical slices; do not
+  preserve legacy contracts that have no deployed consumers.
 - Keep domain logic independent from ASP.NET Core, EF Core, UI and plugin implementations.
-- Use stable persisted identities. Names, repository locations and folder paths are mutable metadata.
+- Use stable persisted identities. Names, labels and folder paths are mutable metadata.
 - Keep source declarations, operator overrides, generated state and rendered outputs separate.
 - Keep folders organizational. Moving an application must not change its configuration or external resource identity.
 - Prefer explicit resource bindings and document paths over implicit JSON merging or copying rendered configuration.
 - Permit cross-application Resource consumption only through owner-controlled, versioned Resource exports.
+- Keep manifest import side-effect free and apply only exact, planned ChangeSet membership.
 - Treat provisioning as an idempotent, retryable operation, not as a side effect of a request handler.
 - Never store plaintext secrets in logs, operation results or ordinary configuration documents.
 - Store managed secret payloads encrypted in PostgreSQL by default, keep key-encryption keys outside the database and exchange only SecretRefs across domain boundaries.
@@ -123,8 +126,14 @@ Objective: establish the application and resource model before replacing the cur
 - [ ] Introduce Provider instance, Resource and Binding as distinct concepts.
 - [ ] Introduce Resource export as the only supported cross-application Resource-consumption boundary.
 - [ ] Introduce Workload as a separate domain entity whose manifest declaration is nested in exactly one Component.
-- [ ] Introduce immutable persisted IDs and optimistic concurrency tokens; keep names, repository metadata and folder paths mutable.
-- [ ] Introduce immutable manifest revisions with application version, source repository and source revision metadata.
+- [ ] Introduce immutable persisted IDs and optimistic concurrency tokens; keep names, labels and folder paths mutable.
+- [ ] Introduce immutable manifest revisions with a portable Application version and import audit metadata.
+- [x] Accept [ADR-010](docs/adr/0010-manifest-revisions-and-deployment-change-sets.md) for immutable imports, Environment deployments, generations and grouped apply.
+- [ ] Introduce ApplicationDeployment as the desired/applied state boundary for one Application in one Environment.
+- [ ] Introduce DeploymentChangeSet with exact revision membership, expected generations and a complete cross-Application dependency plan.
+- [ ] Keep ChangeSet planning non-mutating and atomically commit all target deployment generations before provider side effects.
+- [ ] Keep import, plan and apply as separate use cases while allowing one high-level CLI command to orchestrate them.
+- [ ] Persist only valid Manifest revisions and make `ApplicationId + ApplicationVersion` identify exactly one immutable declaration.
 - [ ] Define the versioned `haby.json` application manifest and publish its JSON Schema.
 - [ ] Implement metadata-based `System.Text.Json` source-generated manifest parsing with explicit discriminators and no reflection-based type discovery.
 - [ ] Separate Component identity from Configuration document names and delivery paths.
@@ -164,6 +173,10 @@ Exit criteria:
 - removing a Component preserves every Resource that remains explicitly declared;
 - Workloads have independent persisted identity and state while their manifest declarations are structurally contained by one Component;
 - removing a Component plans removal of its nested Workloads while preserving Resources that remain declared;
+- one Application can target different Manifest revisions in different Environments;
+- a ChangeSet freezes exact membership and becomes stale when a target deployment generation changes;
+- a stale ChangeSet performs no desired-state or provider mutation;
+- every member is validated and planned before the ChangeSet starts external side effects;
 - application rename and folder moves preserve persisted identity and resource ownership;
 - changing a manifest default does not overwrite an operator override;
 - one profile revision can apply globally or to several overlapping Application sets without copying its content;
@@ -181,6 +194,8 @@ Exit criteria:
 Objective: prevent request failures from leaving unknown external state.
 
 - [ ] Model provisioning as persisted operations with explicit states.
+- [ ] Execute DeploymentChangeSets as durable, resumable operations with per-member progress.
+- [ ] Support dependency-ordered stop-on-failure execution and make partial application explicit.
 - [ ] Reconcile Resource desired state against observed state through the owning plugin.
 - [ ] Reconcile Workload desired state through its dedicated reconciler while sharing the durable operation infrastructure.
 - [ ] Add idempotency keys, retries, timeouts and cancellation.
@@ -333,27 +348,31 @@ Objective: publish a supportable first modern Haby release.
 
 ## Next architecture work package
 
-The first M2 implementation should establish names and contracts without replacing the complete configurator in one change.
+The first M2 implementation is **M2.1 — Manifest foundation**. It establishes a
+side-effect-free vertical slice and does not combine manifest parsing with
+plugin execution, workload authentication or secret storage.
 
-1. Accept the domain terminology and manifest invariants in an ADR.
-2. Define transport- and persistence-independent records for Application, Component, Resource, Resource export, Binding, Configuration document, Workload, Secret, SecretVersion, SecretRef and authenticated workload identity.
-3. Define the first `haby.json` JSON Schema with kebab-case local IDs, typed discriminated references, versioned Resource and Workload types and typed parameter definitions.
-4. Add source-generated parser and semantic-validation tests for local and cross-application bindings, shared and separate resources, declaration-driven Resource lifecycle, nested Workload declarations and lifecycle, exact structured Profile revision references, JSON/YAML Document projections, explicit configuration exposure, profile layering and operator overrides.
-5. Define `IWorkloadIdentityAuthenticator`, its evidence/result contracts and an in-memory fake with tests for cancellation, stable failures and credential redaction.
-6. Define `ISecretStore` and `IKeyEncryptionProvider` contracts with in-memory fakes and tests proving that domain, manifest and diagnostic models exchange references rather than plaintext.
-7. Keep the existing API and configurator behind compatibility adapters until the new model has focused replacement and reconciliation tests.
+1. Introduce transport- and persistence-independent project boundaries for Domain, Manifest and Application code.
+2. Define IDs and records for Application, ManifestRevision, ApplicationDeployment, DeploymentChangeSet, Component, Resource, Resource export, Binding, Configuration document and Workload.
+3. Define source-generated import-envelope and `haby.json` DTOs plus the first checked-in JSON Schema.
+4. Implement deterministic parsing and import-time validation with stable error codes and JSON paths.
+5. Add semantic tests for IDs, references, Resource lifecycle, nested Workloads, exact Profile revision references and JSON/YAML Document projections.
+6. Define portable Application-version references, local revision references, normalized-declaration equality and idempotent version imports through in-memory repositories and focused tests.
+7. Define ChangeSet membership, expected-generation and stale-plan contracts without executing plugin side effects.
+8. Remove legacy types only when their new vertical slice is covered; do not build permanent compatibility adapters or prototype-data migrations.
 
 Definition of done for this work package:
 
 - domain naming no longer depends on Consul keys or Kubernetes objects;
 - the manifest parser is deterministic and side-effect free;
 - manifest parsing uses explicit `System.Text.Json` source-generated metadata and does not rely on shape-guessing converters or runtime type discovery;
+- invalid imports do not create Manifest revisions, repeated equivalent imports of one Application version return the same revision, and changed content under that version is rejected;
+- declaration identities remain portable while managed Resource and Workload instance identities include Environment scope;
+- ChangeSets store exact revision membership rather than dynamic selectors;
+- plans bind to expected deployment generations and expose a stable stale-plan failure;
 - Workloads are accepted only inside Components and need no `componentRef` in the manifest contract;
 - direct cross-application Resource references and deletion of actively exported Resources are rejected before side effects;
 - removing a Component does not remove a still-declared Resource, and an unused declared Resource produces a warning;
-- workload authentication contracts are independent from HTTP, gRPC, EF Core and Kubernetes client types;
-- authentication tests do not persist, log or return raw credentials;
-- secret contracts are independent from EF Core and vendor SDKs, and no ordinary domain or diagnostic contract carries plaintext;
 - focused tests and `git diff --check` pass.
 
 ## Decisions to record as ADRs
@@ -367,13 +386,15 @@ Definition of done for this work package:
 - ADR-007: MudBlazor as the UI component foundation.
 - ADR-008: Scope and ownership of Kubernetes operator mode.
 - [ADR-009](docs/adr/0009-application-manifest-domain-model.md): Application, Component, Resource, Resource export, Binding, Workload and Configuration-document model.
-- ADR-010: Versioned application manifest, override precedence and state ownership.
+- [ADR-010](docs/adr/0010-manifest-revisions-and-deployment-change-sets.md): Immutable Manifest revisions, Application deployments, state ownership and Deployment change sets.
 - ADR-011: Reusable configuration profiles, target sets and deterministic composition.
 - ADR-012: Workload identity authentication and Kubernetes TokenReview.
 
 ## Out of scope for the first milestones
 
 - Exact compatibility with product-specific administration clients.
+- Compatibility with the unused prototype database, protobuf API or configurator contracts.
+- Migration of prototype data or preservation of its EF migration history.
 - A writable long-lived downstream fork of the OSS repository.
 - Dynamic installation of untrusted plugin assemblies.
 - External secret-store implementations before the encrypted PostgreSQL model and provider-neutral contracts are validated.
@@ -390,4 +411,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/architecture/workload-identity.md` and `docs/adr/0006-secret-storage-and-encryption.md`. Implement only the **Next architecture work package**. Start with side-effect-free manifest, workload-identity and secret-reference contracts, schema, parser and contract tests. Do not implement encrypted PostgreSQL storage yet, add the complete delivery endpoint or publisher implementations, replace persistence, execute plugin side effects, migrate the UI or add remote providers in the same change. Preserve the legacy configurator behind compatibility adapters, run focused tests and `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md` and `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement workload identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

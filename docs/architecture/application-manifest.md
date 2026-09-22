@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Target milestone: M2
-- Decision record: [ADR-009](../adr/0009-application-manifest-domain-model.md)
+- Decision records: [ADR-009](../adr/0009-application-manifest-domain-model.md),
+  [ADR-010](../adr/0010-manifest-revisions-and-deployment-change-sets.md)
 
 ## Purpose
 
@@ -42,6 +43,8 @@ simple manifest for the common case.
 | Configuration profile | A reusable, versioned configuration fragment such as common observability or logging defaults | Common configuration copied between hierarchy levels |
 | Profile assignment | An explicit relationship that applies a profile revision to an environment, application set or target selector | Implicit folder-based inheritance |
 | Manifest revision | An immutable imported revision of an application declaration with source and version metadata | The mutable template and previous-version pair |
+| Application deployment | The desired and applied state of one Application in one Environment, tracked by generation | Implicit installation state mixed into a configuration unit |
+| Deployment change set | An exact, planned group of Application-deployment changes for one Environment | Sequential best-effort application updates selected at execution time |
 
 `Component` is the recommended replacement for *nanoservice*. It describes the
 source-level relationship without claiming that every part is an independently
@@ -73,7 +76,8 @@ Environment
   |- Provider instance aliases
   |- Parameter overrides
   |- Operational overrides
-  `- Applied application revision
+  |- Application deployment -> desired/applied Manifest revision
+  `- Deployment change set -> exact deployment/revision membership
 
 Application set
   `- Static application membership or label selector
@@ -110,8 +114,12 @@ must not assume that folder paths represent environments.
 - A resource is owned by the Application whose `spec.resources` collection
   declares it. The manifest does not contain `ownerRef`; ownership is structural
   and cannot be redirected to a Component or another Application.
-- Repository URL, commit, branch and package version are source metadata, not
-  identity.
+- Resource and Workload declarations are portable. Their managed instances are
+  scoped by Environment and receive separate immutable persisted IDs.
+- `metadata.id` is the stable Application identity, and `applicationVersion`
+  identifies one immutable declaration within that Application. Repository URL,
+  commit, branch, pipeline and source path are private producer provenance, not
+  portable Haby identity.
 - Generated external names and external object IDs are persisted as resource
   state. Renaming or moving an application does not regenerate them.
 - Changing a stable local ID means replacement unless an explicit migration or
@@ -129,27 +137,90 @@ application manifest, not a rendering template. The short product-specific name
 is easy to discover and avoids collisions with generic files named
 `template.json` or `manifest.json`.
 
-The manifest contains a schema version and a stable application ID. Version and
-source revision are supplied by CI as import metadata so that the manifest does
-not duplicate a version maintained elsewhere.
+The manifest contains a schema version and a stable application ID. The
+Application version is supplied by the producer as import metadata so that the
+manifest does not duplicate a version maintained elsewhere. Repository, commit,
+pipeline and source-path details are private producer provenance and are not part
+of the portable import contract delivered to an installation.
 
 A CI import conceptually contains:
 
 ```json
 {
-  "applicationId": "com.example.automation",
-  "version": "2.4.0",
-  "source": {
-    "repository": "https://example.invalid/platform/automation.git",
-    "revision": "0123456789abcdef"
-  },
+  "applicationVersion": "3.4.6-rev.1042",
   "manifest": {}
 }
 ```
 
-The operation is an idempotent import of a manifest revision. Applying the
-revision is a separate policy or operation so installations can choose automatic
-apply, approval, scheduling or plan-only behavior.
+The Application ID is read from `manifest.metadata.id` and is not duplicated in
+the import envelope. The manifest is a structured JSON value rather than an
+opaque copy of the original file bytes. The operation is an idempotent import of
+a valid immutable Manifest revision. Applying the revision is a separate
+operation so installations can choose automatic apply, approval, scheduling or
+plan-only behavior.
+
+Within one Application, each `applicationVersion` identifies exactly one
+immutable declaration. Reimporting the same version and an equivalent normalized
+declaration returns the existing revision. Reusing the same version with a
+different declaration is a conflict. A new version creates a new Haby revision
+even if its declaration is semantically equivalent. Development pipelines can
+enforce this rule with versions such as `3.4.6-rev.1042`, while customer release
+bundles pin the exact Application versions selected for delivery.
+
+Haby may compute an internal deterministic fingerprint of the normalized
+declaration for efficient comparison, but the client does not supply a manifest
+digest and the fingerprint is not the revision identity. SHA-256 values for
+physical manifest files belong to a future release-bundle format, not to this
+import envelope.
+
+## Revision and deployment lifecycle
+
+The declaration and its `ApplicationId + ApplicationVersion` reference are
+portable, while the ManifestRevision ID and monotonic revision number are local
+to one Haby installation. Import has no Environment side effects. A revision is
+created only after core, semantic and plugin-schema validation succeeds. Invalid
+imports return stable error codes and JSON paths but are not stored as revisions.
+
+`ApplicationDeployment` relates one Application to one Environment. It records
+the desired Manifest revision, a desired generation, the last successfully
+applied generation and optimistic concurrency state. The same Application can
+therefore run different revisions in different Environments.
+
+Changing the desired manifest or another effective input increments generation.
+A plan records the exact generation and input fingerprint; apply rejects a stale
+plan if any target deployment changes before execution.
+
+A `DeploymentChangeSet` freezes a group update for exactly one Environment. A
+release bundle identifies portable `ApplicationId + ApplicationVersion` pairs;
+after import, Haby resolves them to exact local Manifest revision references and
+expected deployment generations. The persisted ChangeSet contains those local
+references, not a dynamic label selector. A CLI or release tool resolves a
+selector against the incoming bundle before creating the ChangeSet.
+
+Creating and planning a ChangeSet do not mutate ApplicationDeployment desired
+state. When apply starts, Haby checks every expected generation (or expected
+absence for a new deployment) and atomically commits all target desired revisions
+and new generations in its own PostgreSQL transaction before external side
+effects. If that check fails, the plan is stale and no provider work starts.
+After the desired-state commit, partial external failure remains visible and the
+operation can resume toward the committed target.
+
+The normal high-level workflow is:
+
+```text
+resolve bundle membership
+  -> validate and import every Manifest revision
+  -> create DeploymentChangeSet
+  -> resolve Environment dependencies and plan the complete set
+  -> show impact and request approval
+  -> apply through a durable operation
+```
+
+All members are validated and the cross-Application dependency graph is planned
+before external side effects. Apply is resumable and idempotent but is not an
+ACID transaction across providers; partial progress remains visible after a
+failure. See [ADR-010](../adr/0010-manifest-revisions-and-deployment-change-sets.md)
+for state ownership, rollback and idempotency rules.
 
 ## Manifest invariants
 
@@ -896,8 +967,10 @@ in the Haby application layer.
 
 The database keeps the following records separate:
 
-- application identity and mutable display metadata;
-- immutable manifest revisions and source provenance;
+- application identity and operator-owned folder placement;
+- immutable manifest revisions, Application versions and import audit metadata;
+- Application deployments with desired/applied generations and concurrency;
+- Deployment change sets with exact membership, plans and input fingerprints;
 - parameter and operational overrides with provenance;
 - application sets, configuration-profile revisions and profile assignments;
 - provider instances, Secret metadata, encrypted Secret versions and SecretRefs;
@@ -913,9 +986,10 @@ must not be collapsed into one semi-final JSON document.
 
 ## Reconciliation and deletion
 
-Importing a manifest computes a difference against the last applied revision.
-Changes are represented as a plan before side effects occur. Apply is idempotent
-and persists progress per resource.
+Importing a manifest only validates and stores an immutable revision. Planning a
+DeploymentChangeSet computes differences against the applied generations and
+current observed state. Apply is idempotent and persists progress per Resource,
+Workload and Application deployment.
 
 Removing a component, Workload, Binding, Resource export or Resource is not
 equivalent to deleting a row. Active cross-application consumers are included in
@@ -953,6 +1027,7 @@ deletion must never bypass plugin deprovisioning and lifecycle policy.
 | Scale-to-zero forgets the previous replica count | Desired replicas and suspension are separate fields |
 | Some provider output must not reach the application | Only explicit bindings contribute to configuration documents |
 | Registry behavior is hard to debug | Immutable revisions, plans, operation history and separated state make each transition inspectable |
+| A release updates several dependent applications sequentially | One Deployment change set freezes exact membership, plans cross-Application dependencies and starts side effects only after complete validation |
 
 ## Deferred decisions
 
