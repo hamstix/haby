@@ -12,7 +12,7 @@ Haby OSS owns:
 
 - folders, applications, components and environments;
 - versioned application manifests, validation and source provenance;
-- provider instances, resources, bindings and lifecycle policies;
+- provider instances, resources, resource exports, bindings, workloads and lifecycle policies;
 - configuration documents, rendering, revisions and publication;
 - generated values, encrypted secret versions, observed resource state and references to secrets;
 - provisioning and configuration publication abstractions;
@@ -41,6 +41,7 @@ Generic improvements should be proposed upstream. A downstream source mirror mus
 - Keep source declarations, operator overrides, generated state and rendered outputs separate.
 - Keep folders organizational. Moving an application must not change its configuration or external resource identity.
 - Prefer explicit resource bindings and document paths over implicit JSON merging or copying rendered configuration.
+- Permit cross-application Resource consumption only through owner-controlled, versioned Resource exports.
 - Treat provisioning as an idempotent, retryable operation, not as a side effect of a request handler.
 - Never store plaintext secrets in logs, operation results or ordinary configuration documents.
 - Store managed secret payloads encrypted in PostgreSQL by default, keep key-encryption keys outside the database and exchange only SecretRefs across domain boundaries.
@@ -117,23 +118,33 @@ Exit criteria:
 
 Objective: establish the application and resource model before replacing the current configurator and make extensions a supported public surface.
 
-- [ ] Accept the [application-manifest proposal](docs/architecture/application-manifest.md) and record its domain terminology and invariants in an ADR.
+- [x] Accept the [application-manifest proposal](docs/architecture/application-manifest.md) and record its domain terminology and invariants in [ADR-009](docs/adr/0009-application-manifest-domain-model.md).
 - [ ] Replace `OrganizationUnit`, `ConfigurationUnit` and overloaded configuration-key terminology with Folder, Application, Component and Configuration document concepts.
 - [ ] Introduce Provider instance, Resource and Binding as distinct concepts.
+- [ ] Introduce Resource export as the only supported cross-application Resource-consumption boundary.
+- [ ] Introduce Workload as a separate domain entity whose manifest declaration is nested in exactly one Component.
 - [ ] Introduce immutable persisted IDs and optimistic concurrency tokens; keep names, repository metadata and folder paths mutable.
 - [ ] Introduce immutable manifest revisions with application version, source repository and source revision metadata.
 - [ ] Define the versioned `haby.json` application manifest and publish its JSON Schema.
+- [ ] Implement metadata-based `System.Text.Json` source-generated manifest parsing with explicit discriminators and no reflection-based type discovery.
 - [ ] Separate Component identity from Configuration document names and delivery paths.
+- [ ] Define a format-neutral structured Configuration tree with SecretRef placeholders, JSON Pointer composition and deterministic JSON and YAML serializers.
+- [ ] Keep raw text documents separate from structured documents and reject Document projections for raw text.
 - [ ] Keep folders organizational and make configuration or policy inheritance explicit rather than path-based.
 - [ ] Introduce Application sets with static membership or label selectors for reusable cross-cutting targeting.
 - [ ] Introduce versioned Configuration profiles and explicit Profile assignments for global and group configuration.
+- [ ] Represent Profile assignment references as structured `{ profileId, revision }` values pinned to exact immutable revisions.
 - [ ] Define deterministic profile precedence, JSON Merge Patch and JSON Patch behavior, collision detection and per-path provenance.
 - [ ] Model typed parameter definitions and defaults separately from scoped operator overrides and their provenance.
 - [ ] Model generated values, secret references, external IDs and observed state separately from rendered documents.
 - [ ] Replace `fromKey` configuration copying with explicit bindings from multiple components to one resource.
 - [ ] Require explicit bindings before resource outputs can contribute to a component's configuration document.
+- [ ] Require typed `local-resource` or `application-export` Binding targets and reject direct cross-application Resource references.
+- [ ] Track Resource-export consumers and block incompatible owner-side deletion until an impact-visible plan is approved.
+- [ ] Keep Resource lifecycle declaration-driven: Component removal must not implicitly remove a Resource that remains in `spec.resources`.
+- [ ] Warn when a change removes the last known consumer from a still-declared Resource rather than deleting it.
 - [ ] Separate domain models from EF Core entities and transport models where necessary.
-- [ ] Split plugin responsibilities into resource provisioning, configuration rendering, publication, provider health checks and resource-scoped commands.
+- [ ] Split plugin responsibilities into resource provisioning, workload reconciliation, configuration rendering, publication, provider health checks and resource-scoped commands.
 - [ ] Accept the [workload-identity proposal](docs/architecture/workload-identity.md) and define a transport-neutral `IWorkloadIdentityAuthenticator` contract.
 - [ ] Define transient identity evidence, normalized authenticated workload subjects and stable redacted failure codes without hosting, persistence or Kubernetes dependencies.
 - [ ] Register workload identity authenticators explicitly at build time and select them through trusted provider configuration.
@@ -147,11 +158,17 @@ Objective: establish the application and resource model before replacing the cur
 
 Exit criteria:
 
-- `haby.json` can represent several components, several documents per component, shared resources and component-specific resources;
+- `haby.json` can represent several components, several documents per component, shared resources and resources bound to only one component;
+- local IDs use kebab-case and all polymorphic manifest alternatives deserialize through explicit source-generated contracts;
+- one Component can consume an authorized export from another Application without acquiring lifecycle control over the exported Resource;
+- removing a Component preserves every Resource that remains explicitly declared;
+- Workloads have independent persisted identity and state while their manifest declarations are structurally contained by one Component;
+- removing a Component plans removal of its nested Workloads while preserving Resources that remain declared;
 - application rename and folder moves preserve persisted identity and resource ownership;
 - changing a manifest default does not overwrite an operator override;
 - one profile revision can apply globally or to several overlapping Application sets without copying its content;
 - component configuration can override a shared profile with deterministic, inspectable provenance;
+- the same renderer and Document projection can produce semantically equivalent JSON and YAML documents;
 - resources not explicitly bound to a document cannot leak into its rendered output;
 - an external sample plugin can be developed without referencing Haby.Server;
 - plugin compatibility failures are detected during startup;
@@ -165,6 +182,7 @@ Objective: prevent request failures from leaving unknown external state.
 
 - [ ] Model provisioning as persisted operations with explicit states.
 - [ ] Reconcile Resource desired state against observed state through the owning plugin.
+- [ ] Reconcile Workload desired state through its dedicated reconciler while sharing the durable operation infrastructure.
 - [ ] Add idempotency keys, retries, timeouts and cancellation.
 - [ ] Add leases so multiple Haby replicas cannot execute the same operation concurrently.
 - [ ] Persist structured per-step results without leaking secrets.
@@ -178,6 +196,7 @@ Objective: prevent request failures from leaving unknown external state.
 - [ ] Add `validate`, `plan`, `apply`, `reconcile` and `rollback` workflows.
 - [ ] Define deletion policies: retain, orphan or deprovision external resources.
 - [ ] Apply removal of applications, components and resources through plans instead of database cascades alone.
+- [ ] Order Component and Resource removal so Workloads stop, consumer access is revoked and exports are checked before a Resource deletion policy runs.
 - [ ] Separate desired replica count from temporary workload suspension and operational scaling overrides.
 - [ ] Add compensation where safe and reconciliation where compensation is impossible.
 - [ ] Add an operation history and audit log.
@@ -204,6 +223,7 @@ Objective: provide stable automation contracts suitable for third-party clients.
 - [ ] Add a workload pull endpoint with audit, rate limiting and replay-aware policies.
 - [ ] Add optional hashed, one-time Delivery grants only if the pull protocol requires a second request.
 - [ ] Add role- and scope-based authorization.
+- [ ] Authorize cross-application Resource-export consumption independently from export declaration.
 - [ ] Add write-only secret mutation APIs and separate permissions for create, replace, rotate and delete operations.
 - [ ] Ensure list, read, export and diagnostic APIs return secret metadata and references but never plaintext.
 - [ ] Add separate permissions for shared-profile changes, broad target selectors and break-glass overrides.
@@ -228,7 +248,7 @@ Objective: replace the prototype Bootstrap UI with a maintainable administration
 - [ ] Introduce MudBlazor and a Haby theme.
 - [ ] Replace the navigation shell, forms, tables, dialogs and notifications.
 - [ ] Add reusable domain components: page header, entity table, status badge, form actions and destructive-action confirmation.
-- [ ] Integrate a code editor for JSON and Liquid templates with formatting, validation and diff.
+- [ ] Integrate a code editor for JSON, YAML and Liquid templates with formatting, validation and diff.
 - [ ] Add plan/apply and operation-status pages.
 - [ ] Show manifest defaults, operator overrides, effective values and provenance separately.
 - [ ] Add profile impact preview showing every affected application, component, document and JSON path.
@@ -316,9 +336,9 @@ Objective: publish a supportable first modern Haby release.
 The first M2 implementation should establish names and contracts without replacing the complete configurator in one change.
 
 1. Accept the domain terminology and manifest invariants in an ADR.
-2. Define transport- and persistence-independent records for Application, Component, Resource, Binding, Configuration document, Secret, SecretVersion, SecretRef and authenticated workload identity.
-3. Define the first `haby.json` JSON Schema with stable local IDs and typed parameter definitions.
-4. Add parser and semantic-validation tests for shared resources, separate resources, explicit configuration exposure, profile layering and operator overrides.
+2. Define transport- and persistence-independent records for Application, Component, Resource, Resource export, Binding, Configuration document, Workload, Secret, SecretVersion, SecretRef and authenticated workload identity.
+3. Define the first `haby.json` JSON Schema with kebab-case local IDs, typed discriminated references, versioned Resource and Workload types and typed parameter definitions.
+4. Add source-generated parser and semantic-validation tests for local and cross-application bindings, shared and separate resources, declaration-driven Resource lifecycle, nested Workload declarations and lifecycle, exact structured Profile revision references, JSON/YAML Document projections, explicit configuration exposure, profile layering and operator overrides.
 5. Define `IWorkloadIdentityAuthenticator`, its evidence/result contracts and an in-memory fake with tests for cancellation, stable failures and credential redaction.
 6. Define `ISecretStore` and `IKeyEncryptionProvider` contracts with in-memory fakes and tests proving that domain, manifest and diagnostic models exchange references rather than plaintext.
 7. Keep the existing API and configurator behind compatibility adapters until the new model has focused replacement and reconciliation tests.
@@ -327,6 +347,10 @@ Definition of done for this work package:
 
 - domain naming no longer depends on Consul keys or Kubernetes objects;
 - the manifest parser is deterministic and side-effect free;
+- manifest parsing uses explicit `System.Text.Json` source-generated metadata and does not rely on shape-guessing converters or runtime type discovery;
+- Workloads are accepted only inside Components and need no `componentRef` in the manifest contract;
+- direct cross-application Resource references and deletion of actively exported Resources are rejected before side effects;
+- removing a Component does not remove a still-declared Resource, and an unused declared Resource produces a warning;
 - workload authentication contracts are independent from HTTP, gRPC, EF Core and Kubernetes client types;
 - authentication tests do not persist, log or return raw credentials;
 - secret contracts are independent from EF Core and vendor SDKs, and no ordinary domain or diagnostic contract carries plaintext;
@@ -342,7 +366,7 @@ Definition of done for this work package:
 - [ADR-006](docs/adr/0006-secret-storage-and-encryption.md): Secret storage, envelope encryption and external provider boundary.
 - ADR-007: MudBlazor as the UI component foundation.
 - ADR-008: Scope and ownership of Kubernetes operator mode.
-- ADR-009: Application, component, resource, binding and configuration-document model.
+- [ADR-009](docs/adr/0009-application-manifest-domain-model.md): Application, Component, Resource, Resource export, Binding, Workload and Configuration-document model.
 - ADR-010: Versioned application manifest, override precedence and state ownership.
 - ADR-011: Reusable configuration profiles, target sets and deterministic composition.
 - ADR-012: Workload identity authentication and Kubernetes TokenReview.
@@ -366,4 +390,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/workload-identity.md` and `docs/adr/0006-secret-storage-and-encryption.md`. Implement only the **Next architecture work package**. Start with the domain terminology ADR and side-effect-free manifest, workload-identity and secret-reference contracts, schema, parser and contract tests. Do not implement encrypted PostgreSQL storage yet, add the complete delivery endpoint or publisher implementations, replace persistence, execute plugin side effects, migrate the UI or add remote providers in the same change. Preserve the legacy configurator behind compatibility adapters, run focused tests and `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/architecture/workload-identity.md` and `docs/adr/0006-secret-storage-and-encryption.md`. Implement only the **Next architecture work package**. Start with side-effect-free manifest, workload-identity and secret-reference contracts, schema, parser and contract tests. Do not implement encrypted PostgreSQL storage yet, add the complete delivery endpoint or publisher implementations, replace persistence, execute plugin side effects, migrate the UI or add remote providers in the same change. Preserve the legacy configurator behind compatibility adapters, run focused tests and `git diff --check`, and report environmental blockers separately from code failures.

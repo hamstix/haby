@@ -1,7 +1,8 @@
-# Application manifest and domain model proposal
+# Application manifest and domain model
 
-- Status: Proposed
+- Status: Accepted
 - Target milestone: M2
+- Decision record: [ADR-009](../adr/0009-application-manifest-domain-model.md)
 
 ## Purpose
 
@@ -31,8 +32,10 @@ simple manifest for the common case.
 | Workload | An environment-specific deployment of a component, such as a Kubernetes Deployment, StatefulSet or Job | Kubernetes data embedded in a configuration key |
 | Configuration document | A named rendered document consumed by a component, such as `appsettings.json` | Configuration key when it was used as an output document |
 | Provider instance | A configured external system that Haby can manage, such as one PostgreSQL cluster or RabbitMQ broker | Service |
-| Resource | A desired and observed object managed through a provider instance, such as a database, principal, queue or Kubernetes workload | Configuration-unit-at-service association |
-| Binding | An explicit relationship through which a component consumes a resource and may expose selected resource outputs in a configuration document | `fromKey` and implicit JSON copying |
+| Resource | A desired and observed dependency managed through a provider instance, such as a database, principal, queue, bucket or network endpoint | Configuration-unit-at-service association |
+| Resource export | A stable, owner-controlled contract that permits another application to consume selected capabilities of a resource without exposing its internal declaration | Direct references to another application's configuration key or resource |
+| Binding | An explicit relationship through which a component consumes a local resource or another application's resource export and may project selected outputs into a configuration document | `fromKey` and implicit JSON copying |
+| Document projection | A format-neutral mapping that renders Binding outputs into a structured Configuration document at an explicit path | Implicit insertion of provider JSON into a configuration key |
 | Parameter definition | A typed input declared by an application manifest, including an optional default | Template parameter |
 | Parameter override | An operator-supplied value stored independently from the manifest default | A template parameter value overwritten during every update |
 | Application set | A named static membership or label selector used to target several applications without changing folder containment | Module-like operational grouping |
@@ -59,11 +62,12 @@ Folder
   `- Application
        |- Manifest revision
        |- Component
-       |    |- Workload
        |    |- Resource binding
-       |    `- Configuration document
-       `- Resource
-            `- Provider instance
+       |    |- Configuration document
+       |    `- Workload declaration
+       |- Resource
+       |    `- Provider instance
+       `- Resource export -> Resource
 
 Environment
   |- Provider instance aliases
@@ -95,8 +99,17 @@ must not assume that folder paths represent environments.
   immutable persisted IDs.
 - `metadata.id` in the manifest is a stable logical application ID and is not
   derived from a Git repository name.
-- Object keys such as `api`, `worker` and `mainDatabase` are stable manifest-local
-  IDs. Human-facing names are separate and mutable.
+- Object keys such as `api`, `worker` and `main-database` are stable
+  manifest-local IDs. All manifest-local IDs use lowercase kebab-case.
+  Human-facing names are separate and mutable.
+- A Workload local ID is unique within its containing Component. Its logical
+  declaration identity is Application ID, Component local ID and Workload local
+  ID; persisted state receives its own immutable Workload ID. Moving a Workload
+  declaration between Components is replacement unless an explicit migration
+  associates it with existing state.
+- A resource is owned by the Application whose `spec.resources` collection
+  declares it. The manifest does not contain `ownerRef`; ownership is structural
+  and cannot be redirected to a Component or another Application.
 - Repository URL, commit, branch and package version are source metadata, not
   identity.
 - Generated external names and external object IDs are persisted as resource
@@ -138,7 +151,32 @@ The operation is an idempotent import of a manifest revision. Applying the
 revision is a separate policy or operation so installations can choose automatic
 apply, approval, scheduling or plan-only behavior.
 
-## Proposed manifest shape
+## Manifest invariants
+
+The parser and semantic validator enforce these rules before persistence or
+plugin execution:
+
+- the document has exactly one Application identity in `metadata.id`;
+- every manifest-local collection key matches
+  `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`;
+- every local reference resolves within the same manifest and has the expected
+  target kind;
+- every Resource and Workload `type` includes an explicit contract version;
+- every Resource is owned by the declaring Application and has no overridable
+  `ownerRef`;
+- a Binding target has exactly one registered discriminator: `local-resource`
+  or `application-export`;
+- direct cross-application Resource references are invalid;
+- a Workload is declared inside exactly one Component and has no redundant
+  `componentRef`;
+- a Document projection references an existing Configuration document owned by the
+  consuming Component;
+- document declaration and document delivery remain separate concerns.
+
+Import is side-effect free. Schema and semantic errors are returned together
+where practical and use stable JSON paths and error codes.
+
+## Application manifest shape
 
 The initial schema remains JSON and retains Liquid for explicit value templates.
 JSON Schema validation occurs before semantic validation by plugins.
@@ -157,30 +195,35 @@ JSON Schema validation occurs before semantic validation by plugins.
   },
   "spec": {
     "parameters": {
-      "queryPrefix": {
+      "query-prefix": {
         "type": "string",
         "description": "Prefix used by application queries",
         "default": "{{ environment.name }}_"
       }
     },
     "resources": {
-      "mainDatabase": {
-        "type": "postgresql.database",
+      "main-database": {
+        "type": "postgresql.database/v1alpha1",
         "providerRef": "postgresql.primary",
-        "ownerRef": "application",
-        "desired": {},
+        "properties": {},
         "lifecycle": {
           "deletionPolicy": "retain"
         }
       },
-      "workerDatabase": {
-        "type": "postgresql.database",
+      "worker-database": {
+        "type": "postgresql.database/v1alpha1",
         "providerRef": "postgresql.primary",
-        "ownerRef": "component:worker",
-        "desired": {},
+        "properties": {},
         "lifecycle": {
           "deletionPolicy": "delete"
         }
+      }
+    },
+    "exports": {
+      "reporting-database": {
+        "resourceRef": "main-database",
+        "contract": "postgresql.connection/v1alpha1",
+        "accessProfile": "read-only"
       }
     },
     "components": {
@@ -188,12 +231,17 @@ JSON Schema validation occurs before semantic validation by plugins.
         "displayName": "API",
         "bindings": {
           "database": {
-            "resourceRef": "mainDatabase",
-            "configuration": {
-              "documentRef": "settings",
-              "path": "/PostgreSql",
-              "profile": "npgsql"
-            }
+            "target": {
+              "kind": "local-resource",
+              "resourceRef": "main-database"
+            },
+            "documentProjections": [
+              {
+                "documentRef": "settings",
+                "path": "/PostgreSql",
+                "rendererRef": "npgsql-connection/v1alpha1"
+              }
+            ]
           }
         },
         "documents": {
@@ -201,17 +249,16 @@ JSON Schema validation occurs before semantic validation by plugins.
             "fileName": "appsettings.json",
             "format": "json",
             "template": {
-              "QueryPrefix": "{{ parameters.queryPrefix }}"
-            },
-            "publish": true
+              "QueryPrefix": "{{ parameters['query-prefix'] }}"
+            }
           }
         },
         "workloads": {
           "main": {
-            "type": "kubernetes.workload",
+            "type": "kubernetes.workload/v1alpha1",
             "providerRef": "kubernetes.primary",
             "profile": "grpc-service",
-            "desired": {
+            "properties": {
               "replicas": 2,
               "suspended": false
             }
@@ -221,37 +268,46 @@ JSON Schema validation occurs before semantic validation by plugins.
       "worker": {
         "displayName": "Worker",
         "bindings": {
-          "sharedDatabase": {
-            "resourceRef": "mainDatabase",
-            "configuration": {
-              "documentRef": "settings",
-              "path": "/PostgreSql/Shared",
-              "profile": "npgsql"
-            }
+          "shared-database": {
+            "target": {
+              "kind": "local-resource",
+              "resourceRef": "main-database"
+            },
+            "documentProjections": [
+              {
+                "documentRef": "settings",
+                "path": "/PostgreSql/Shared",
+                "rendererRef": "npgsql-connection/v1alpha1"
+              }
+            ]
           },
-          "privateDatabase": {
-            "resourceRef": "workerDatabase",
-            "configuration": {
-              "documentRef": "settings",
-              "path": "/PostgreSql/Worker",
-              "profile": "npgsql"
-            }
+          "private-database": {
+            "target": {
+              "kind": "local-resource",
+              "resourceRef": "worker-database"
+            },
+            "documentProjections": [
+              {
+                "documentRef": "settings",
+                "path": "/PostgreSql/Worker",
+                "rendererRef": "npgsql-connection/v1alpha1"
+              }
+            ]
           }
         },
         "documents": {
           "settings": {
             "fileName": "appsettings-worker.json",
             "format": "json",
-            "template": {},
-            "publish": true
+            "template": {}
           }
         },
         "workloads": {
           "main": {
-            "type": "kubernetes.workload",
+            "type": "kubernetes.workload/v1alpha1",
             "providerRef": "kubernetes.primary",
             "profile": "worker",
-            "desired": {
+            "properties": {
               "replicas": 1,
               "suspended": false
             }
@@ -263,26 +319,183 @@ JSON Schema validation occurs before semantic validation by plugins.
 }
 ```
 
-The exact property names remain subject to implementation feedback, but the
-separation between resources, bindings, documents and workloads is an invariant.
+The alpha contract may still evolve through explicit schema revisions, but the
+separation between resources, exports, bindings, documents and workloads is an
+invariant. A Configuration document declaration describes materialization; its
+delivery is configured separately, so the manifest does not use a `publish`
+Boolean.
 
 `providerRef` is an environment-local alias. The same manifest can therefore use
 `postgresql.primary` in several environments while each environment resolves the
 alias to a different provider instance and administrator secret.
 
+### Serialization contract
+
+The manifest DTOs are designed for `System.Text.Json` source generation and
+Native AOT-friendly metadata generation. Core contract alternatives use an
+explicit discriminator and closed derived-type set instead of accepting several
+unrelated JSON shapes in one property.
+
+For example, `BindingTarget` has two forms:
+
+```csharp
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(LocalResourceBindingTarget), "local-resource")]
+[JsonDerivedType(typeof(ApplicationExportBindingTarget), "application-export")]
+public abstract record BindingTarget;
+
+public sealed record LocalResourceBindingTarget(
+    string ResourceRef) : BindingTarget;
+
+public sealed record ApplicationExportBindingTarget(
+    string ApplicationRef,
+    string ExportRef) : BindingTarget;
+
+[JsonSourceGenerationOptions(
+    GenerationMode = JsonSourceGenerationMode.Metadata,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(ApplicationManifest))]
+internal partial class ApplicationManifestJsonContext : JsonSerializerContext;
+```
+
+Metadata-based source generation is selected because `System.Text.Json`
+polymorphism is not supported by fast-path generation. Every derived type is
+registered explicitly. Unknown discriminator values, missing required members
+and unexpected properties are validation errors; the parser does not silently
+fall back to a base type.
+
+The same discriminated-contract approach applies to typed parameter definitions.
+`DocumentProjection` itself is a simple closed DTO containing `documentRef`,
+`path` and `rendererRef`; its target format comes from the referenced document,
+so it needs no discriminator. Manifest DTOs use concrete closed collections such
+as `Dictionary<string, T>` and `List<T>`, generic string-enum conversion, and no
+reflection-based type discovery or handwritten shape-guessing converters.
+
+Configuration document definitions are discriminated by `format`. The `json`
+and `yaml` variants contain a structured template, while the `text` variant
+contains a raw string template. This keeps their CLR contracts source-generated
+and prevents a raw text document from accidentally accepting structured-only
+features.
+
+Arbitrary JSON is limited to intentional extension boundaries:
+
+- `Resource.properties` and `Workload.properties`, validated against the versioned
+  plugin schema selected by `type`;
+- a structured Configuration document's `template`;
+- typed parameter defaults whose JSON token kind is checked against the
+  parameter definition.
+
+These values use `JsonElement`, not `object`, and are never used to choose a CLR
+type. The JSON Schema mirrors the same discriminators with `oneOf` branches so
+schema validation and deserialization agree.
+
 ### Resource sharing
 
 A resource is declared once and can be bound to multiple components. Components
-that bind `mainDatabase` receive the same managed database and credentials.
-Declaring `workerDatabase` creates a separate ownership and lifecycle boundary.
+that bind `main-database` receive the same managed resource. Declaring
+`worker-database` creates a separate resource and lifecycle boundary. Both are
+owned by the containing Application; a resource used by only one Component does
+not acquire Component ownership. Removing a Component therefore removes its
+bindings but does not implicitly delete a still-declared Resource.
+
 No component needs to guess a generated database name or copy a rendered JSON
-fragment from another component.
+fragment from another component. Shared infrastructure does not imply shared
+credentials: a provider may create a separate principal, grant and SecretRef for
+each Binding while retaining one physical database.
 
 Resource types may be atomic or provide a convenience aggregate. For example, a
 PostgreSQL plugin can model database, principal and grant as separate dependent
 resources when two components share one database but require different
 credentials. A standard database-with-owner profile can retain a short manifest
 for the common case without making that shortcut a core invariant.
+
+### Resource lifecycle and Component removal
+
+Resource lifecycle is declaration-driven. A Resource remains desired while its
+stable local ID remains in `spec.resources`, regardless of how many Components
+currently bind it. Removing a Component therefore never implicitly removes,
+orphans or deprovisions a Resource.
+
+Resource lifecycle does not support `ownerRef`, `lifecycle.componentRef`,
+`deleteWith` or another shortcut that makes a Resource disappear when a
+Component disappears. Such a shortcut would conflict with the still-present
+Resource declaration and could unexpectedly affect shared or externally
+exported Resources.
+
+When a Component is removed:
+
+- its nested Bindings are removed and consumer-specific access can be revoked;
+- its nested Workloads are included explicitly in the removal plan and are
+  stopped and deprovisioned before the Component record is removed;
+- Resources that remain in `spec.resources` continue to be reconciled;
+- when the change removes the last known Binding or export from a still-declared
+  Resource, the plan produces an inspectable unused-resource warning rather than
+  an implicit deletion.
+
+To remove a Component-specific Resource, the author removes both the Component
+and the Resource declaration explicitly. The plan orders the resulting work:
+
+1. stop and remove affected Workloads;
+2. remove Bindings and revoke consumer-specific access and secrets;
+3. verify that no Resource exports or other consumers remain;
+4. apply the Resource's `lifecycle.deletionPolicy`.
+
+The deletion policy answers only what happens after explicit Resource removal:
+`delete` deprovisions the external object, `orphan` leaves it externally and
+forgets Haby management after confirmation, and `retain` preserves the object
+and its managed record for an explicit later decision. It does not decide when
+the Resource leaves desired state.
+
+### Cross-application resource bindings
+
+A foreign Application cannot bind directly to another Application's local
+`resourceRef`. The owner must publish a stable Resource export. The export names
+the local Resource, a versioned output contract and an optional provider-defined
+access profile. It is the public compatibility boundary; the owner may replace
+or rename an internal Resource while retaining the same export contract through
+an explicit migration.
+
+A consuming Application uses a typed target:
+
+```json
+{
+  "target": {
+    "kind": "application-export",
+    "applicationRef": "com.example.storage",
+    "exportRef": "reporting-database"
+  },
+  "documentProjections": [
+    {
+      "documentRef": "settings",
+      "path": "/ReportingDatabase",
+      "rendererRef": "npgsql-connection/v1alpha1"
+    }
+  ]
+}
+```
+
+Cross-application consumption is read-only at the Haby control-plane level. The
+consumer may use the permitted export outputs but cannot change the Resource's
+desired state, provider, lifecycle, reconciliation or commands. This guarantee
+is implicit in `application-export`; it is not represented by an ambiguous
+`readOnly` Boolean.
+
+The export's provider-defined access profile describes permissions in the
+external system, such as a PostgreSQL read-only principal. Those permissions are
+separate from Haby control-plane rights. A consumer cannot request a stronger
+profile than the owner exported.
+
+Knowing an Application and export ID is not authorization. The environment's
+authorization policy must permit the consumer to use that export. Consumer
+allow-lists are installation policy rather than repository manifest content, so
+the same application declaration remains portable between installations.
+
+The owner Application remains the only lifecycle owner. Removing a consumer or
+its Binding revokes and removes only consumer-specific access state and secrets.
+Removing or incompatibly changing an export with active consumers is a planned,
+impact-visible operation. Removing the owning Resource or Application is blocked
+until those dependencies are resolved or an explicitly authorized destructive
+plan is approved.
 
 ### Configuration exposure
 
@@ -291,11 +504,69 @@ binding configuration. A Kubernetes workload with no such binding remains
 control-plane state and is never included in `appsettings.json`.
 
 The renderer profile belongs to a plugin or downstream distribution and converts
-typed resource outputs into a consumer-specific fragment. The final document is
-assembled at an explicit JSON Pointer path and validated. Two fragments targeting
-the same path are a validation error unless the document explicitly selects a
-versioned conflict policy. Haby must not discover visibility by merging every
-configured service into every output document.
+typed resource outputs into a consumer-specific, format-neutral structured
+fragment. The final document is assembled at an explicit JSON Pointer path and
+validated. Two fragments targeting the same path are a validation error unless
+the document explicitly selects a versioned conflict policy. Haby must not
+discover visibility by merging every configured service into every output
+document.
+
+### Structured JSON and YAML documents
+
+`json` and `yaml` Configuration documents share one structured configuration
+tree consisting of mappings with string keys, sequences, typed scalar values,
+null and internal typed SecretRef placeholders. A renderer returns this tree
+rather than serialized JSON or YAML text.
+Haby applies templates, profiles, overrides and Document projections to the tree
+and invokes the document-format serializer only after composition is complete.
+
+The `template` is represented with JSON syntax inside `haby.json` even when the
+output document is YAML. For example:
+
+```json
+{
+  "fileName": "appsettings.yaml",
+  "format": "yaml",
+  "template": {
+    "QueryPrefix": "{{ parameters['query-prefix'] }}"
+  }
+}
+```
+
+The same Document projection used for a JSON document can target this YAML
+document:
+
+```json
+{
+  "documentRef": "settings",
+  "path": "/PostgreSql",
+  "rendererRef": "npgsql-connection/v1alpha1"
+}
+```
+
+`path` uses JSON Pointer semantics over the shared tree; it does not address
+serialized text. The output serializer can therefore produce:
+
+```yaml
+QueryPrefix: production_
+PostgreSql:
+  DefaultConnection:
+    ConnectionString: "..."
+```
+
+Structured YAML is intentionally limited to the shared data model. It uses one
+YAML document, requires string mapping keys, rejects duplicate keys and custom
+tags, and does not preserve comments, anchors, aliases or source formatting.
+Serialization must preserve scalar types and quote ambiguous strings
+deterministically. SecretRef placeholders are Haby's internal revision data, not
+YAML tags; an authorized delivery operation resolves them during final
+materialization.
+
+A `text` Configuration document is a raw Liquid template rather than a
+structured tree. It is not eligible for `documentProjections`, JSON Pointer
+insertion, structured profile composition or JSON Merge Patch. Additional
+structured formats require an explicit serializer and compatibility decision;
+they are not inferred from a file extension.
 
 ### Parameters and overrides
 
@@ -371,7 +642,10 @@ Conceptually, one profile and assignment can look like this:
     "id": "observability-for-processing"
   },
   "spec": {
-    "profileRef": "observability-defaults@3",
+    "profileRef": {
+      "profileId": "observability-defaults",
+      "revision": 3
+    },
     "priority": 100,
     "targets": {
       "applicationSets": [
@@ -382,6 +656,16 @@ Conceptually, one profile and assignment can look like this:
   }
 }
 ```
+
+`profileRef` is a structured reference to one exact immutable profile revision.
+It maps directly to a source-generated `ProfileRevisionRef` contract with a
+string `profileId` and a positive integer `revision`; it is not parsed from a
+delimiter-based string such as `observability-defaults@3`.
+
+Assignments do not persist `latest`, ranges or other time-dependent selectors.
+An API or UI may help an operator choose the latest revision, but it resolves
+that choice to an exact revision before validation and persistence. This keeps
+planning, rollback and effective-configuration fingerprints reproducible.
 
 An application document can then override only the required nested value, such
 as `Serilog.MinimumLevel.Default`, while retaining the inherited exporter and
@@ -464,17 +748,35 @@ later requires an exact, versioned set of application revisions, Haby can add a
 
 ## Workloads and Kubernetes
 
-Kubernetes is a provider of workload and related resource types, not a special
-configuration-document merge mode.
+`Workload` is a separate domain entity, not a subtype of Resource and not a
+configuration-document key. It represents one deployable runtime instance of a
+Component in an Environment. A Component can have zero, one or several
+Workloads, and each Workload has its own persisted identity, desired scale,
+suspension, provider association, observed state and operation history.
 
-`workloads` is concise manifest syntax owned by a component. Applied workloads
-are persisted and reconciled through the same Resource and operation model as
-databases, principals and queues.
+For authoring convenience, Workload declarations are nested in their Component.
+Containment makes the single-parent relationship structural, removes a
+redundant `componentRef` and prevents dangling references. It does not collapse
+Workload into the Component in the domain, persistence, API or operation model.
+The Workload local ID is scoped to that Component, so several Components may each
+declare a Workload named `main`. Moving a declaration to another Component is a
+replacement by default because its logical manifest identity changes.
+
+A Workload has no meaning without its Component and cannot be shared or exported.
+Removing a Component therefore plans removal of all its Workloads. This cascade
+is safe for Workloads and deliberately does not apply to Application-owned
+Resources, which remain desired while declared in `spec.resources`.
+
+Kubernetes is one Workload provider, not a special configuration-document merge
+mode. Future Workload providers do not require changing the Application,
+Component, Resource or Binding contracts.
 
 The Kubernetes plugin should offer versioned profiles such as `grpc-service`,
 `http-service`, `worker` and `scheduled-job`. A profile expands a concise desired
-workload into separately planned Deployment, Service, Ingress or Job resources.
-The plan and observed state still expose those concrete resources.
+Workload into separately planned Deployment, Service, Ingress or Job artifacts.
+The plan and observed Workload state expose those concrete provider objects
+without reclassifying the Workload as a Resource or exposing them implicitly to
+application configuration.
 
 Profiles can be configured per provider instance and extended by downstream
 distributions. Advanced users may use validated patches or a raw-manifest escape
@@ -506,9 +808,9 @@ unstructured merged JSON object:
 
 ### Plugin module
 
-Registers metadata, resource types, schemas, renderer profiles, commands and the
-implementations selected at build time. Registration is explicit and compatible
-with trimming.
+Registers metadata, resource and workload types, schemas, renderer profiles,
+commands and the implementations selected at build time. Registration is
+explicit and compatible with trimming.
 
 ### Resource provisioner
 
@@ -525,11 +827,24 @@ identities, provider-instance configuration, desired properties and current
 resource state. It returns structured outputs, secret references, external IDs,
 diagnostics and observed state.
 
+### Workload reconciler
+
+Owns one or more versioned Workload types and supports validation, planning,
+apply, observe, reconcile and deletion. It receives stable Application,
+Component, Workload and Environment identities and returns provider-object
+status without treating deployment artifacts as configuration outputs.
+
+Resource provisioners and Workload reconcilers share operation, cancellation,
+idempotency, retry, diagnostics and secret-redaction rules, but their domain
+contracts remain distinct.
+
 ### Configuration renderer
 
-Purely converts typed resource outputs and binding options into a configuration
-fragment. It has no permission to create resources or generate new persisted
-values during rendering.
+Purely converts typed resource outputs and Binding options into a format-neutral
+structured configuration fragment. JSON and YAML use the same renderer output;
+the referenced Configuration document selects the final serializer. A renderer
+has no permission to create resources, serialize the final document or generate
+new persisted values during rendering.
 
 ### Configuration publisher
 
@@ -572,8 +887,10 @@ the desired declaration.
 Validates provider-instance configuration and reports connectivity and
 capability status without mutating application resources.
 
-Kubernetes workload support uses the same resource provisioner contract. It does
-not require a Kubernetes-specific branch in the Haby application layer.
+Workload providers use a dedicated, transport-neutral workload reconciler
+contract and the same durable plan/operation infrastructure as Resource
+provisioners. Kubernetes support does not require a Kubernetes-specific branch
+in the Haby application layer.
 
 ## Persisted state boundaries
 
@@ -584,7 +901,8 @@ The database keeps the following records separate:
 - parameter and operational overrides with provenance;
 - application sets, configuration-profile revisions and profile assignments;
 - provider instances, Secret metadata, encrypted Secret versions and SecretRefs;
-- desired resources and component bindings;
+- desired resources, Resource exports and component bindings;
+- Workloads with their Component relationship, desired and observed state;
 - generated values, external IDs and observed resource state;
 - rendered configuration-document revisions;
 - publication records;
@@ -599,8 +917,16 @@ Importing a manifest computes a difference against the last applied revision.
 Changes are represented as a plan before side effects occur. Apply is idempotent
 and persists progress per resource.
 
-Removing a component, binding or resource is not equivalent to deleting a row.
-The resource lifecycle policy determines whether Haby should:
+Removing a component, Workload, Binding, Resource export or Resource is not
+equivalent to deleting a row. Active cross-application consumers are included in
+the plan and can block an incompatible export or Resource removal.
+
+Removing a Component does not imply Resource removal. Any Resource that remains
+declared in `spec.resources` remains desired and continues to reconcile. A
+Component-specific Resource is removed only when its own declaration is removed;
+the plan then revokes consumers before applying its deletion policy.
+
+The Resource lifecycle policy determines whether Haby should:
 
 - retain the external resource under Haby management;
 - orphan it and forget management after confirmation;
@@ -615,21 +941,24 @@ deletion must never bypass plugin deprovisioning and lifecycle policy.
 | --- | --- |
 | Application cannot be renamed | Stable application identity is independent from repository, display name and folder path |
 | Shared resources require copying configuration | Multiple component bindings reference one resource |
-| Different components cannot cleanly request different databases | Each database is a separately identified resource with its own owner and lifecycle |
+| Different components cannot cleanly request different databases | Each database is a separately identified Application-owned Resource with its own lifecycle |
+| Removing a Component can accidentally delete its database | Resource existence is declaration-driven; Component removal never implicitly removes a Resource |
+| A component needs a Resource owned by another Application | The owner publishes a versioned Resource export and the consumer binds through a typed `application-export` target |
 | Defaults overwrite administrator changes | Definitions and defaults are separate from persisted overrides with provenance |
 | Common configuration is copied per module | One versioned profile can target global, overlapping or multi-module Application sets |
 | Temporary detailed logging is difficult to roll out safely | A targeted operational override has impact preview, audit metadata and expiration |
 | Generated credentials are lost during JSON merging | Generated values and secret references are resource state, not editable JSON |
 | Kubernetes requires one large mixed template | Workload profiles and individually planned resources replace the composite merge |
+| Runtime deployment is confused with infrastructure dependencies | Workload is a separate domain entity whose manifest declaration is structurally contained by one Component |
 | Scale-to-zero forgets the previous replica count | Desired replicas and suspension are separate fields |
 | Some provider output must not reach the application | Only explicit bindings contribute to configuration documents |
 | Registry behavior is hard to debug | Immutable revisions, plans, operation history and separated state make each transition inspectable |
 
 ## Deferred decisions
 
-- exact JSON property names and the final v1 schema;
-- whether YAML is accepted as an additional serialization after the JSON schema
-  and semantics stabilize;
+- promotion of the alpha contract to a stable v1 schema after implementation
+  feedback and compatibility tests;
+- additional structured document formats beyond JSON and YAML;
 - a first-class Product or Distribution model;
 - multi-environment management in one Haby installation;
 - remote provider protocols;
