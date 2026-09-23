@@ -125,7 +125,7 @@ Objective: establish the application and resource model before replacing the cur
 - [ ] Replace `OrganizationUnit`, `ConfigurationUnit` and overloaded configuration-key terminology with Folder, Application, Component and Configuration document concepts.
 - [ ] Introduce Provider instance, Resource and Binding as distinct concepts.
 - [ ] Introduce Resource export as the only supported cross-application Resource-consumption boundary.
-- [ ] Introduce Workload as a separate domain entity whose manifest declaration is nested in exactly one Component.
+- [ ] Introduce Workload as a portable declaration nested in exactly one Component and ManagedWorkload as its Environment-specific persisted state.
 - [ ] Introduce immutable persisted IDs and optimistic concurrency tokens; keep names, labels and folder paths mutable.
 - [ ] Introduce immutable manifest revisions with a portable Application version and import audit metadata.
 - [x] Accept [ADR-010](docs/adr/0010-manifest-revisions-and-deployment-change-sets.md) for immutable imports, Environment deployments, generations and grouped apply.
@@ -154,9 +154,11 @@ Objective: establish the application and resource model before replacing the cur
 - [ ] Warn when a change removes the last known consumer from a still-declared Resource rather than deleting it.
 - [ ] Separate domain models from EF Core entities and transport models where necessary.
 - [ ] Split plugin responsibilities into resource provisioning, workload reconciliation, configuration rendering, publication, provider health checks and resource-scoped commands.
-- [ ] Accept the [workload-identity proposal](docs/architecture/workload-identity.md) and define a transport-neutral `IWorkloadIdentityAuthenticator` contract.
-- [ ] Define transient identity evidence, normalized authenticated workload subjects and stable redacted failure codes without hosting, persistence or Kubernetes dependencies.
-- [ ] Register workload identity authenticators explicitly at build time and select them through trusted provider configuration.
+- [x] Accept the [Runtime Identity proposal](docs/architecture/runtime-identity.md) and record its terminology, trust boundaries and milestone split in [ADR-012](docs/adr/0012-runtime-identity-authentication.md).
+- [ ] Define a transport-neutral `IRuntimeIdentityAuthenticator` contract.
+- [ ] Define trusted authentication context, transient identity evidence, normalized authenticated runtime subjects and stable redacted failure codes without hosting, persistence or Kubernetes dependencies.
+- [ ] Register Runtime Identity authenticators explicitly at build time and select them through trusted provider configuration.
+- [ ] Implement a minimal Kubernetes TokenReview adapter and real-cluster contract test without adding delivery endpoints or ManagedWorkload reconciliation.
 - [ ] Add plugin metadata: ID, version, compatible Haby API range, capabilities, resource types and versioned schemas.
 - [ ] Support plugin settings validation and secret-field declarations.
 - [ ] Define Secret, immutable SecretVersion, SecretRef, ownership and sensitivity independently from generated values and rendered documents.
@@ -171,7 +173,7 @@ Exit criteria:
 - local IDs use kebab-case and all polymorphic manifest alternatives deserialize through explicit source-generated contracts;
 - one Component can consume an authorized export from another Application without acquiring lifecycle control over the exported Resource;
 - removing a Component preserves every Resource that remains explicitly declared;
-- Workloads have independent persisted identity and state while their manifest declarations are structurally contained by one Component;
+- Workload declarations are structurally contained by one Component while their Environment-specific ManagedWorkloads have independent persisted identity and state;
 - removing a Component plans removal of its nested Workloads while preserving Resources that remain declared;
 - one Application can target different Manifest revisions in different Environments;
 - a ChangeSet freezes exact membership and becomes stale when a target deployment generation changes;
@@ -186,7 +188,7 @@ Exit criteria:
 - an external sample plugin can be developed without referencing Haby.Server;
 - plugin compatibility failures are detected during startup;
 - plugin and application configuration can be validated before execution;
-- workload identity can be authenticated through a fake adapter without exposing credentials or granting application permissions;
+- Runtime Identity can be authenticated through a fake adapter and a minimal real-cluster TokenReview adapter without exposing credentials, persisting RuntimeInstances or granting application permissions;
 - plugins can produce and consume SecretRefs without returning plaintext through generated-value or diagnostic contracts.
 
 ### M3 — Reliable operations and reconciliation
@@ -197,7 +199,7 @@ Objective: prevent request failures from leaving unknown external state.
 - [ ] Execute DeploymentChangeSets as durable, resumable operations with per-member progress.
 - [ ] Support dependency-ordered stop-on-failure execution and make partial application explicit.
 - [ ] Reconcile Resource desired state against observed state through the owning plugin.
-- [ ] Reconcile Workload desired state through its dedicated reconciler while sharing the durable operation infrastructure.
+- [ ] Reconcile ManagedWorkload desired state through its dedicated reconciler while sharing the durable operation infrastructure.
 - [ ] Add idempotency keys, retries, timeouts and cancellation.
 - [ ] Add leases so multiple Haby replicas cannot execute the same operation concurrently.
 - [ ] Persist structured per-step results without leaking secrets.
@@ -234,8 +236,11 @@ Objective: provide stable automation contracts suitable for third-party clients.
 - [ ] Generate and publish API clients.
 - [ ] Add OIDC authentication.
 - [ ] Add service-account/API-key authentication for automation.
-- [ ] Map authenticated workload subjects to persisted Workloads and authorize exact Configuration-document revisions.
-- [ ] Add a workload pull endpoint with audit, rate limiting and replay-aware policies.
+- [ ] Map authenticated runtime subjects through Runtime Identity bindings to persisted ManagedWorkloads and authorize exact Configuration-document revisions.
+- [ ] Define immutable ConfigurationSnapshots that pin exact Configuration-document revisions to one ManagedWorkload generation.
+- [ ] Add a single-request runtime configuration pull endpoint with authentication, authorization, secret materialization, audit, rate limiting and replay-aware policies.
+- [ ] Define short-lived user-delegated DeveloperDeliverySessions and a separately disableable developer configuration endpoint without treating local processes as RuntimeInstances.
+- [ ] Require explicit remote mode and target Environment for developer access; local Development mode alone must never connect to a remote Haby instance.
 - [ ] Add optional hashed, one-time Delivery grants only if the pull protocol requires a second request.
 - [ ] Add role- and scope-based authorization.
 - [ ] Authorize cross-application Resource-export consumption independently from export declaration.
@@ -295,8 +300,9 @@ Objective: provide a useful product-neutral distribution.
 - [ ] Redis ACL and logical database resources where the target supports them.
 - [ ] S3-compatible bucket and credential resources.
 - [ ] Kubernetes workload and networking resources with standard profiles.
-- [ ] Kubernetes TokenReview workload identity adapter with audience and Pod-bound identity validation.
-- [ ] Kubernetes init-container pull with explicit projected ServiceAccount tokens and pinned configuration revisions.
+- [ ] Productionize the Kubernetes TokenReview Runtime Identity adapter with audience, Pod-bound identity, binding rotation and operational diagnostics.
+- [ ] Kubernetes application and init-container pull with explicit projected ServiceAccount token files, Runtime Identity bindings and pinned ConfigurationSnapshots.
+- [ ] Add a CLI-assisted local development workflow and configuration client using protected DeveloperDeliverySession credentials rather than committed settings or ordinary environment variables.
 - [ ] ConfigMap and Secret publication.
 - [ ] Generic HTTP/webhook publication.
 - [ ] Optional Consul publisher only if it can remain product-neutral.
@@ -350,7 +356,7 @@ Objective: publish a supportable first modern Haby release.
 
 The first M2 implementation is **M2.1 — Manifest foundation**. It establishes a
 side-effect-free vertical slice and does not combine manifest parsing with
-plugin execution, workload authentication or secret storage.
+plugin execution, Runtime Identity authentication or secret storage.
 
 1. Introduce transport- and persistence-independent project boundaries for Domain, Manifest and Application code.
 2. Define IDs and records for Application, ManifestRevision, ApplicationDeployment, DeploymentChangeSet, Component, Resource, Resource export, Binding, Configuration document and Workload.
@@ -367,7 +373,7 @@ Definition of done for this work package:
 - the manifest parser is deterministic and side-effect free;
 - manifest parsing uses explicit `System.Text.Json` source-generated metadata and does not rely on shape-guessing converters or runtime type discovery;
 - invalid imports do not create Manifest revisions, repeated equivalent imports of one Application version return the same revision, and changed content under that version is rejected;
-- declaration identities remain portable while managed Resource and Workload instance identities include Environment scope;
+- declaration identities remain portable while managed Resource and ManagedWorkload identities include Environment scope;
 - ChangeSets store exact revision membership rather than dynamic selectors;
 - plans bind to expected deployment generations and expose a stable stale-plan failure;
 - Workloads are accepted only inside Components and need no `componentRef` in the manifest contract;
@@ -388,7 +394,7 @@ Definition of done for this work package:
 - [ADR-009](docs/adr/0009-application-manifest-domain-model.md): Application, Component, Resource, Resource export, Binding, Workload and Configuration-document model.
 - [ADR-010](docs/adr/0010-manifest-revisions-and-deployment-change-sets.md): Immutable Manifest revisions, Application deployments, state ownership and Deployment change sets.
 - ADR-011: Reusable configuration profiles, target sets and deterministic composition.
-- ADR-012: Workload identity authentication and Kubernetes TokenReview.
+- [ADR-012](docs/adr/0012-runtime-identity-authentication.md): Runtime Identity authentication and Kubernetes TokenReview.
 
 ## Out of scope for the first milestones
 
@@ -401,6 +407,7 @@ Definition of done for this work package:
 - Dynamic credential leasing and renewal before durable secret and operation lifecycles are established.
 - Runtime provider protocols and out-of-process plugin lifecycle management.
 - Configuration publisher implementations and the complete pull-delivery endpoint in the first M2 contract change.
+- DeveloperDeliverySession contracts, local configuration clients and remote-development access during M2.
 - Implicit configuration inheritance based on folder paths.
 - A first-class product or release aggregate before a many-to-many grouping use case is validated.
 - Using Kubernetes/etcd as the only Haby database.
@@ -411,4 +418,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md` and `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement workload identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md` and `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

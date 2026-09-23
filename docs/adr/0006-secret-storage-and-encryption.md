@@ -175,7 +175,7 @@ target; HashiCorp Vault compatibility may be provided through a separately
 tested adapter. Vendor names do not appear in the public core contracts.
 
 Credentials used by Haby to authenticate to an external secret system are
-bootstrap credentials. They must come from workload identity, a mounted secret,
+bootstrap credentials. They must come from Runtime Identity, a mounted secret,
 a client certificate or another source outside the target secret store. Haby
 must not create a recursive dependency by storing that credential through the
 same provider it unlocks.

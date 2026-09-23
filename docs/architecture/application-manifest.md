@@ -30,7 +30,9 @@ simple manifest for the common case.
 | Folder | An optional organizational container for folders and applications | Organization unit |
 | Application | An independently versioned software and ownership boundary, commonly represented by one source repository | Configuration unit, modular microservice |
 | Component | A separately runnable part of an application, such as an API, worker, scheduler or compiler | Configuration key when it was used as a nanoservice |
-| Workload | An environment-specific deployment of a component, such as a Kubernetes Deployment, StatefulSet or Job | Kubernetes data embedded in a configuration key |
+| Workload | A portable declaration of how a Component should run | Kubernetes data embedded in a configuration key |
+| ManagedWorkload | Environment-specific desired and observed state produced from one Workload declaration | A portable Workload declaration or an individual replica |
+| RuntimeInstance | A concrete running replica, task or process such as one Kubernetes Pod | A Workload declaration or persisted ManagedWorkload |
 | Configuration document | A named rendered document consumed by a component, such as `appsettings.json` | Configuration key when it was used as an output document |
 | Provider instance | A configured external system that Haby can manage, such as one PostgreSQL cluster or RabbitMQ broker | Service |
 | Resource | A desired and observed dependency managed through a provider instance, such as a database, principal, queue, bucket or network endpoint | Configuration-unit-at-service association |
@@ -108,9 +110,9 @@ must not assume that folder paths represent environments.
   Human-facing names are separate and mutable.
 - A Workload local ID is unique within its containing Component. Its logical
   declaration identity is Application ID, Component local ID and Workload local
-  ID; persisted state receives its own immutable Workload ID. Moving a Workload
-  declaration between Components is replacement unless an explicit migration
-  associates it with existing state.
+  ID; each Environment-specific ManagedWorkload receives its own immutable
+  persisted ID. Moving a Workload declaration between Components is replacement
+  unless an explicit migration associates it with existing state.
 - A resource is owned by the Application whose `spec.resources` collection
   declares it. The manifest does not contain `ownerRef`; ownership is structural
   and cannot be redirected to a Component or another Application.
@@ -819,16 +821,18 @@ later requires an exact, versioned set of application revisions, Haby can add a
 
 ## Workloads and Kubernetes
 
-`Workload` is a separate domain entity, not a subtype of Resource and not a
-configuration-document key. It represents one deployable runtime instance of a
-Component in an Environment. A Component can have zero, one or several
-Workloads, and each Workload has its own persisted identity, desired scale,
-suspension, provider association, observed state and operation history.
+`Workload` is a separate portable domain declaration, not a subtype of Resource
+and not a configuration-document key. It describes how one Component should run.
+A Component can declare zero, one or several Workloads. Applying a declaration
+to an Environment produces a `ManagedWorkload` with its own persisted identity,
+desired scale, suspension, provider association, observed state and operation
+history.
 
 For authoring convenience, Workload declarations are nested in their Component.
 Containment makes the single-parent relationship structural, removes a
 redundant `componentRef` and prevents dangling references. It does not collapse
-Workload into the Component in the domain, persistence, API or operation model.
+Workload into the Component in the manifest or domain model, and it does not
+collapse ManagedWorkload into the Component in persistence, API or operations.
 The Workload local ID is scoped to that Component, so several Components may each
 declare a Workload named `main`. Moving a declaration to another Component is a
 replacement by default because its logical manifest identity changes.
@@ -923,18 +927,19 @@ Publishes selected document revisions to a delivery channel. Consul, files,
 Kubernetes ConfigMaps and Secrets, and generic HTTP endpoints are publishers,
 not implicit responsibilities of every provisioner.
 
-Configuration publication is separate from workload authentication. The
-[workload-identity proposal](workload-identity.md) defines the transport-neutral
+Configuration publication is separate from Runtime Identity authentication. The
+[Runtime Identity proposal](runtime-identity.md) defines the transport-neutral
 authentication boundary selected for M2 and Kubernetes TokenReview as its first
-implementation. An authenticator returns a verified external subject; it never
-selects the Application, Component or Configuration document that subject may
-access.
+implementation. An authenticator returns a verified external runtime subject; it
+never selects the Application, Component, Workload or Configuration document
+that subject may access.
 
-### Workload identity authenticator
+### Runtime Identity authenticator
 
 Validates transient platform identity evidence and returns a normalized,
-transport-neutral authenticated workload subject. Haby core owns authorization
-and maps that subject to a persisted Workload and its allowed operations.
+transport-neutral authenticated runtime subject. Haby core owns authorization
+and maps that subject through a Runtime Identity binding to a persisted
+ManagedWorkload and its allowed operations.
 
 The contract has no dependency on ASP.NET Core, gRPC, EF Core or Kubernetes
 client models. Kubernetes TokenReview is the first adapter. Publisher
@@ -975,7 +980,8 @@ The database keeps the following records separate:
 - application sets, configuration-profile revisions and profile assignments;
 - provider instances, Secret metadata, encrypted Secret versions and SecretRefs;
 - desired resources, Resource exports and component bindings;
-- Workloads with their Component relationship, desired and observed state;
+- ManagedWorkloads with their Workload declaration reference, Component
+  relationship, desired and observed state;
 - generated values, external IDs and observed resource state;
 - rendered configuration-document revisions;
 - publication records;
@@ -1023,7 +1029,7 @@ deletion must never bypass plugin deprovisioning and lifecycle policy.
 | Temporary detailed logging is difficult to roll out safely | A targeted operational override has impact preview, audit metadata and expiration |
 | Generated credentials are lost during JSON merging | Generated values and secret references are resource state, not editable JSON |
 | Kubernetes requires one large mixed template | Workload profiles and individually planned resources replace the composite merge |
-| Runtime deployment is confused with infrastructure dependencies | Workload is a separate domain entity whose manifest declaration is structurally contained by one Component |
+| Runtime deployment is confused with infrastructure dependencies | Workload is a portable declaration structurally contained by one Component; ManagedWorkload owns Environment-specific desired and observed state |
 | Scale-to-zero forgets the previous replica count | Desired replicas and suspension are separate fields |
 | Some provider output must not reach the application | Only explicit bindings contribute to configuration documents |
 | Registry behavior is hard to debug | Immutable revisions, plans, operation history and separated state make each transition inspectable |

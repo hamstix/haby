@@ -42,15 +42,24 @@ is still Application-owned. Bindings express consumption, not ownership.
   bucket.
 - A **Binding** connects a Component to a local Resource or an external Resource
   export and optionally projects typed outputs into a Configuration document.
-- A **Workload** is an environment-specific runtime deployment of one Component.
+- A **Workload** is a portable declaration of how one Component should run.
+- A **ManagedWorkload** is the Environment-specific desired and observed state
+  produced from one Workload declaration.
+- A **RuntimeInstance** is a concrete running replica, task or process produced
+  for a ManagedWorkload.
 
-Workload is a separate domain and persisted entity rather than a Resource subtype
-or an unstructured Component value. Its manifest declaration is nested inside
-the Component for authoring convenience, making the parent relationship
-structural and removing a redundant `componentRef`. Each persisted Workload
-retains its own immutable ID, desired and observed state and operation history.
-Resource and Workload implementations share durable operation infrastructure but
+Workload is a separate domain declaration rather than a Resource subtype or an
+unstructured Component value. Its manifest declaration is nested inside the
+Component for authoring convenience, making the parent relationship structural
+and removing a redundant `componentRef`. Each persisted ManagedWorkload retains
+its own immutable ID, desired and observed state and operation history. Resource
+and ManagedWorkload implementations share durable operation infrastructure but
 use distinct domain contracts.
+
+RuntimeInstance is conceptual and observed rather than a required persisted
+aggregate in M2. A later runtime delivery or observability capability may append
+redacted per-instance audit events without requiring Haby to maintain a durable
+inventory of every replica.
 
 A Workload local ID is scoped to its containing Component. A Workload cannot be
 shared or exported and has no meaning without that Component. Component removal
@@ -179,8 +188,8 @@ destructive operation is approved.
 - Cross-application sharing has an owner-controlled, versioned compatibility
   boundary.
 - Component removal cannot accidentally deprovision a still-declared Resource.
-- Workload lifecycle, scale and observed state can evolve independently from
-  Resource and Configuration document contracts.
+- ManagedWorkload lifecycle, scale and observed state can evolve independently
+  from Resource and Configuration document contracts.
 - Manifest authors see Workloads next to the Component they run without
   repeating a `componentRef`.
 - Configuration exposure remains explicit and auditable through Document
@@ -232,17 +241,19 @@ errors while keeping applied revisions deterministic.
 
 ### Treat Workload as Resource
 
-Workloads represent execution, scale, suspension and runtime identity, whereas
-Resources represent managed dependencies consumed by Components. Sharing only
-the durable operation infrastructure preserves useful reuse without collapsing
-the domain concepts.
+Workload declarations and ManagedWorkloads represent execution, scale and
+suspension, whereas Resources represent managed dependencies consumed by
+Components. Concrete Runtime Identity is a separate security concept. Sharing
+only the durable operation infrastructure preserves useful reuse without
+collapsing the domain concepts.
 
 ### Declare Workloads in a top-level manifest collection
 
 A top-level collection requires every Workload to repeat `componentRef`, permits
 dangling references and separates runtime configuration from the Component it
-runs. Nesting is preferred for authoring while the parsed and persisted Workload
-remains a separate domain entity.
+runs. Nesting is preferred for authoring while the parsed Workload remains a
+separate domain declaration and its Environment-specific ManagedWorkload remains
+a separate persisted entity.
 
 ### Infer publication from a document flag
 

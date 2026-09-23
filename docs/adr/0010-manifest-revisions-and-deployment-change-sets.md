@@ -157,13 +157,17 @@ Managed Resource instance
 Workload declaration
   = Application ID + Component local ID + Workload local ID
 
-Managed Workload instance
+ManagedWorkload
   = Environment ID + Application ID + Component local ID + Workload local ID
 ```
 
 Persisted instances additionally receive immutable internal IDs. Provider
 outputs, external IDs, SecretRefs and observed state belong to those
 Environment-scoped instances, not to the portable ManifestRevision.
+
+A concrete runtime replica or process is a `RuntimeInstance`. RuntimeInstances
+are not required persisted aggregates in M2 and are distinct from both the
+portable Workload declaration and its Environment-scoped ManagedWorkload.
 
 ### DeploymentChangeSet is the batch planning boundary
 
