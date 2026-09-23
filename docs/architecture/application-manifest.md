@@ -3,7 +3,8 @@
 - Status: Accepted
 - Target milestone: M2
 - Decision records: [ADR-009](../adr/0009-application-manifest-domain-model.md),
-  [ADR-010](../adr/0010-manifest-revisions-and-deployment-change-sets.md)
+  [ADR-010](../adr/0010-manifest-revisions-and-deployment-change-sets.md),
+  [ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md)
 
 ## Purpose
 
@@ -27,7 +28,7 @@ simple manifest for the common case.
 
 | Term | Meaning | Replaces or clarifies |
 | --- | --- | --- |
-| Folder | An optional organizational container for folders and applications | Organization unit |
+| Folder | A future optional organizational container for folders and applications, scheduled for M5.1 | Organization unit |
 | Application | An independently versioned software and ownership boundary, commonly represented by one source repository | Configuration unit, modular microservice |
 | Component | A separately runnable part of an application, such as an API, worker, scheduler or compiler | Configuration key when it was used as a nanoservice |
 | Workload | A portable declaration of how a Component should run | Kubernetes data embedded in a configuration key |
@@ -63,7 +64,7 @@ runtime execution.
 The model has independent organizational, software, runtime and delivery axes:
 
 ```text
-Folder
+Folder (optional, M5.1)
   `- Application
        |- Manifest revision
        |- Component
@@ -101,10 +102,15 @@ must not assume that folder paths represent environments.
 
 ## Identity and rename rules
 
-- Applications, components, resources, documents and provider instances receive
-  immutable persisted IDs.
-- `metadata.id` in the manifest is a stable logical application ID and is not
-  derived from a Git repository name.
+- Persisted aggregates receive aggregate-specific UUIDv7 value types. Portable
+  declaration identities remain separate from those internal persisted IDs.
+- `metadata.id` in the manifest is a stable, opaque logical `ApplicationId`. It
+  is unique within one Haby installation and is not derived from a Git repository,
+  folder, organization or product name.
+- An `ApplicationId` is lowercase ASCII, has at most 128 characters and matches
+  `^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$`. Both kebab-case and reverse-DNS values
+  are valid; reverse-DNS is optional publisher guidance rather than a validation
+  requirement.
 - Object keys such as `api`, `worker` and `main-database` are stable
   manifest-local IDs. All manifest-local IDs use lowercase kebab-case.
   Human-facing names are separate and mutable.
@@ -130,7 +136,10 @@ must not assume that folder paths represent environments.
   implicit consequence of editing display metadata.
 
 These rules make ordinary rename and folder moves safe while keeping resource
-replacement explicit.
+replacement explicit. Changing `ApplicationId` is an explicit identity migration
+rather than an ordinary rename and is outside M2.1. The complete project,
+serialization and persisted-ID boundaries are recorded in
+[ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md).
 
 ## Manifest name and envelope
 
@@ -260,7 +269,7 @@ JSON Schema validation occurs before semantic validation by plugins.
   "apiVersion": "haby.dev/v1alpha1",
   "kind": "Application",
   "metadata": {
-    "id": "com.example.automation",
+    "id": "automation-processor-service",
     "displayName": "Automation",
     "labels": {
       "team": "platform"
@@ -534,7 +543,7 @@ A consuming Application uses a typed target:
 {
   "target": {
     "kind": "application-export",
-    "applicationRef": "com.example.storage",
+    "applicationRef": "shared-storage-service",
     "exportRef": "reporting-database"
   },
   "documentProjections": [
@@ -797,6 +806,11 @@ while an authorized provisioner or delivery operation materializes the value;
 it is never persisted in a rendered revision.
 
 ## Folder and product organization
+
+Folder is an accepted organizational concept but is not part of the M2 or M2.1
+implementation. It is scheduled after the core administration UI as M5.1 because
+its primary purpose is navigation and operator organization. No M2 contract,
+persistence model or use case should require a Folder to exist.
 
 Folders provide an arbitrary tree for navigation, for example:
 

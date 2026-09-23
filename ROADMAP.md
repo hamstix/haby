@@ -54,16 +54,19 @@ Generic improvements should be proposed upstream. A downstream source mirror mus
 
 ## Target solution shape
 
-The exact project names may change through ADRs, but dependencies should move toward this structure:
+ADR-013 fixes the first M2 core project names and dependency direction. Later
+integration projects should extend this structure without reversing those
+dependencies:
 
 ```text
 Haby.Domain
-  <- Haby.Application
-       <- Haby.Persistence.PostgreSql
-       <- Haby.Plugins.Abstractions
-       <- Haby.Api.Contracts
-       <- Haby.Server
-       <- Haby.Web
+  <- Haby.Manifest
+       <- Haby.Application
+            <- Haby.Persistence.PostgreSql
+            <- Haby.Plugins.Abstractions
+            <- Haby.Api.Contracts
+            <- Haby.Server
+            <- Haby.Web
 
 Haby.Plugin.PostgreSql
 Haby.Plugin.RabbitMQ
@@ -122,13 +125,14 @@ Exit criteria:
 Objective: establish the application and resource model before replacing the current configurator and make extensions a supported public surface.
 
 - [x] Accept the [application-manifest proposal](docs/architecture/application-manifest.md) and record its domain terminology and invariants in [ADR-009](docs/adr/0009-application-manifest-domain-model.md).
-- [ ] Replace `OrganizationUnit`, `ConfigurationUnit` and overloaded configuration-key terminology with Folder, Application, Component and Configuration document concepts.
+- [ ] Replace `ConfigurationUnit` and overloaded configuration-key terminology with Application, Component and Configuration document concepts; do not carry `OrganizationUnit` into the M2 core.
 - [ ] Introduce Provider instance, Resource and Binding as distinct concepts.
 - [ ] Introduce Resource export as the only supported cross-application Resource-consumption boundary.
 - [ ] Introduce Workload as a portable declaration nested in exactly one Component and ManagedWorkload as its Environment-specific persisted state.
-- [ ] Introduce immutable persisted IDs and optimistic concurrency tokens; keep names, labels and folder paths mutable.
+- [ ] Introduce immutable persisted IDs and optimistic concurrency tokens; keep names and labels mutable.
 - [ ] Introduce immutable manifest revisions with a portable Application version and import audit metadata.
 - [x] Accept [ADR-010](docs/adr/0010-manifest-revisions-and-deployment-change-sets.md) for immutable imports, Environment deployments, generations and grouped apply.
+- [x] Accept [ADR-013](docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md) for M2.1 project boundaries, DTO/domain separation, portable Application IDs, UUIDv7 persisted IDs and local revision numbers.
 - [ ] Introduce ApplicationDeployment as the desired/applied state boundary for one Application in one Environment.
 - [ ] Introduce DeploymentChangeSet with exact revision membership, expected generations and a complete cross-Application dependency plan.
 - [ ] Keep ChangeSet planning non-mutating and atomically commit all target deployment generations before provider side effects.
@@ -139,7 +143,6 @@ Objective: establish the application and resource model before replacing the cur
 - [ ] Separate Component identity from Configuration document names and delivery paths.
 - [ ] Define a format-neutral structured Configuration tree with SecretRef placeholders, JSON Pointer composition and deterministic JSON and YAML serializers.
 - [ ] Keep raw text documents separate from structured documents and reject Document projections for raw text.
-- [ ] Keep folders organizational and make configuration or policy inheritance explicit rather than path-based.
 - [ ] Introduce Application sets with static membership or label selectors for reusable cross-cutting targeting.
 - [ ] Introduce versioned Configuration profiles and explicit Profile assignments for global and group configuration.
 - [ ] Represent Profile assignment references as structured `{ profileId, revision }` values pinned to exact immutable revisions.
@@ -179,7 +182,7 @@ Exit criteria:
 - a ChangeSet freezes exact membership and becomes stale when a target deployment generation changes;
 - a stale ChangeSet performs no desired-state or provider mutation;
 - every member is validated and planned before the ChangeSet starts external side effects;
-- application rename and folder moves preserve persisted identity and resource ownership;
+- application rename preserves persisted identity and resource ownership;
 - changing a manifest default does not overwrite an operator override;
 - one profile revision can apply globally or to several overlapping Application sets without copying its content;
 - component configuration can override a shared profile with deterministic, inspectable provenance;
@@ -291,6 +294,35 @@ Exit criteria:
 - template errors are visible before apply;
 - existing secrets never round-trip through UI forms as plaintext.
 
+### M5.1 — Folder organization
+
+Objective: add optional navigation-oriented organization after the core
+administration UI and its Application views are stable.
+
+- [ ] Introduce Folder as an operator-owned aggregate outside `haby.json`.
+- [ ] Support an arbitrary Folder tree and optional single-parent Application
+  placement without requiring every Application to belong to a Folder.
+- [ ] Add persistence and API operations for creating, renaming, moving and
+  deleting empty Folders and for moving Applications between them.
+- [ ] Add Folder navigation, breadcrumbs and Application move workflows to the
+  administration UI.
+- [ ] Keep Folder paths out of Application, Resource and external object
+  identity.
+- [ ] Keep configuration profiles, authorization and policy assignment explicit;
+  Folder containment does not imply inheritance.
+- [ ] Keep labels, Application sets and search independent from Folder
+  containment.
+
+Exit criteria:
+
+- an Application can remain unfiled or be moved between Folders without changing
+  its identity, effective configuration, managed Resources or Workloads;
+- renaming or moving a Folder changes navigation only;
+- deleting a non-empty Folder is rejected or requires explicit relocation of its
+  children and Applications;
+- no configuration, authorization or lifecycle behavior is inferred from a
+  Folder path.
+
 ### M6 — Standard resource providers and delivery channels
 
 Objective: provide a useful product-neutral distribution.
@@ -395,6 +427,7 @@ Definition of done for this work package:
 - [ADR-010](docs/adr/0010-manifest-revisions-and-deployment-change-sets.md): Immutable Manifest revisions, Application deployments, state ownership and Deployment change sets.
 - ADR-011: Reusable configuration profiles, target sets and deterministic composition.
 - [ADR-012](docs/adr/0012-runtime-identity-authentication.md): Runtime Identity authentication and Kubernetes TokenReview.
+- [ADR-013](docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md): M2.1 project boundaries, DTO/domain separation and identifier rules.
 
 ## Out of scope for the first milestones
 
@@ -418,4 +451,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md` and `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md` and `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

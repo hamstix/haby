@@ -55,7 +55,7 @@ A portable Application-version reference is structured:
 
 ```json
 {
-  "applicationId": "com.example.automation",
+  "applicationId": "automation-processor-service",
   "applicationVersion": "3.4.6-rev.1042"
 }
 ```
@@ -64,7 +64,7 @@ After import, Haby resolves that reference to its local exact revision reference
 
 ```json
 {
-  "applicationId": "com.example.automation",
+  "applicationId": "automation-processor-service",
   "revision": 7
 }
 ```
