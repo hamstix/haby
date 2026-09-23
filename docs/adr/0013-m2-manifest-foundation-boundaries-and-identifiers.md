@@ -201,7 +201,9 @@ and hides important scope distinctions from APIs and tests.
 
 - implement the validation-error codes, paths and aggregation rules accepted in
   [ADR-014](0014-manifest-validation-diagnostics.md);
-- accept normalized-manifest equality and canonical fingerprint boundaries;
+- implement the normalized-manifest equality and canonical fingerprint boundaries
+  accepted in
+  [ADR-015](0015-normalized-manifest-equality-and-immutable-version-imports.md);
 - implement the three projects and tests as the first M2.1 vertical slice;
 - define explicit identity-migration behavior only when a real rename use case
   requires it.

@@ -110,8 +110,14 @@ declaration is equivalent to an earlier version.
 Haby may maintain an internal `ManifestFingerprint` of the normalized declaration
 to optimize equality checks and diagnostics. It is server-generated and is not a
 required import field or a portable identity. Its deterministic representation
-and algorithm must be versioned before the fingerprint becomes a public
-contract; semantic equality remains authoritative.
+and algorithm are versioned, and normalized-content comparison remains
+authoritative as defined by
+[ADR-015](0015-normalized-manifest-equality-and-immutable-version-imports.md).
+
+Haby never replaces or overwrites a declaration under an existing
+`ApplicationId + ApplicationVersion`. Operational retry, resume and
+reconciliation act on the existing desired revision and do not weaken import
+immutability.
 
 Private producer provenance such as repository URI, commit, pipeline and source
 path remains on the producer side of the delivery boundary. It must not be
@@ -354,8 +360,9 @@ would increase complexity without protecting a real user.
 - define source-generated import, Application-version reference, local
   revision-reference and the validation DTO mappings described by
   [ADR-014](0014-manifest-validation-diagnostics.md);
-- define deterministic normalized-declaration equality and the stable
-  version-content conflict contract;
+- implement normalized-declaration equality and the stable version-content
+  conflict accepted in
+  [ADR-015](0015-normalized-manifest-equality-and-immutable-version-imports.md);
 - define plan input fingerprinting and stale-plan error contracts;
 - specify DeploymentChangeSet and operation status contracts in ADR-005;
 - decide versioning of ProviderInstance configuration and other planning inputs;

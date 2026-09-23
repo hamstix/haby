@@ -195,7 +195,9 @@ requirements are known. Standard Haby codes cover the initial schema boundary.
 ## Follow-up work
 
 - define the initial code catalog and required parameters in implementation;
-- define normalized-manifest equality and canonical fingerprint boundaries;
+- implement normalized-manifest equality and canonical fingerprint boundaries as
+  accepted in
+  [ADR-015](0015-normalized-manifest-equality-and-immutable-version-imports.md);
 - map reports to versioned REST and gRPC contracts in M4;
 - decide persistence and retention for explicit revalidation reports when that
   use case is implemented.

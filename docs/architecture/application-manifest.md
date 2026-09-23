@@ -5,7 +5,8 @@
 - Decision records: [ADR-009](../adr/0009-application-manifest-domain-model.md),
   [ADR-010](../adr/0010-manifest-revisions-and-deployment-change-sets.md),
   [ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md),
-  [ADR-014](../adr/0014-manifest-validation-diagnostics.md)
+  [ADR-014](../adr/0014-manifest-validation-diagnostics.md),
+  [ADR-015](../adr/0015-normalized-manifest-equality-and-immutable-version-imports.md)
 
 ## Purpose
 
@@ -184,6 +185,26 @@ declaration for efficient comparison, but the client does not supply a manifest
 digest and the fingerprint is not the revision identity. SHA-256 values for
 physical manifest files belong to a future release-bundle format, not to this
 import envelope.
+
+### Normalized declaration equality
+
+[ADR-015](../adr/0015-normalized-manifest-equality-and-immutable-version-imports.md)
+defines equality independently from source bytes and serializer output. Object
+order, JSON formatting, equivalent number spellings and omitted core defaults do
+not change the normalized declaration. Array order, strings, raw text, labels and
+all other meaningful declaration content remain significant unless a versioned
+field contract explicitly says otherwise.
+
+Normalization semantics are selected by manifest `apiVersion`. An internal
+versioned SHA-256 fingerprint may accelerate comparison, but matching fingerprints
+are always followed by authoritative normalized-content comparison.
+
+Haby never replaces or overwrites an existing
+`ApplicationId + ApplicationVersion`. Equal reimports return the first accepted
+revision and its historical warnings; different content returns a safe
+version-content conflict containing changed paths but no values. Re-executing
+provider work is retry, resume or reconciliation against existing desired state,
+not manifest replacement.
 
 ## Revision and deployment lifecycle
 
