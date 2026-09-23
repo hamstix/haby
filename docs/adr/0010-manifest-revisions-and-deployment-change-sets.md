@@ -352,7 +352,8 @@ would increase complexity without protecting a real user.
 ## Follow-up work
 
 - define source-generated import, Application-version reference, local
-  revision-reference and validation-error DTOs;
+  revision-reference and the validation DTO mappings described by
+  [ADR-014](0014-manifest-validation-diagnostics.md);
 - define deterministic normalized-declaration equality and the stable
   version-content conflict contract;
 - define plan input fingerprinting and stale-plan error contracts;

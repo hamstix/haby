@@ -133,6 +133,7 @@ Objective: establish the application and resource model before replacing the cur
 - [ ] Introduce immutable manifest revisions with a portable Application version and import audit metadata.
 - [x] Accept [ADR-010](docs/adr/0010-manifest-revisions-and-deployment-change-sets.md) for immutable imports, Environment deployments, generations and grouped apply.
 - [x] Accept [ADR-013](docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md) for M2.1 project boundaries, DTO/domain separation, portable Application IDs, UUIDv7 persisted IDs and local revision numbers.
+- [x] Accept [ADR-014](docs/adr/0014-manifest-validation-diagnostics.md) for transport-neutral validation reports, stable diagnostics and immutable historical import warnings.
 - [ ] Introduce ApplicationDeployment as the desired/applied state boundary for one Application in one Environment.
 - [ ] Introduce DeploymentChangeSet with exact revision membership, expected generations and a complete cross-Application dependency plan.
 - [ ] Keep ChangeSet planning non-mutating and atomically commit all target deployment generations before provider side effects.
@@ -182,6 +183,8 @@ Exit criteria:
 - a ChangeSet freezes exact membership and becomes stale when a target deployment generation changes;
 - a stale ChangeSet performs no desired-state or provider mutation;
 - every member is validated and planned before the ChangeSet starts external side effects;
+- successful-import warnings are stored with the immutable ManifestRevision and
+  are never changed by implicit or explicit revalidation;
 - application rename preserves persisted identity and resource ownership;
 - changing a manifest default does not overwrite an operator override;
 - one profile revision can apply globally or to several overlapping Application sets without copying its content;
@@ -252,7 +255,8 @@ Objective: provide stable automation contracts suitable for third-party clients.
 - [ ] Add separate permissions for shared-profile changes, broad target selectors and break-glass overrides.
 - [ ] Add authorization, confirmation and audit rules for plugin resource commands.
 - [ ] Add rate limits and request-size limits.
-- [ ] Add structured validation errors and stable error codes.
+- [ ] Map transport-neutral validation reports and stable error codes to
+  versioned REST and gRPC DTOs and error details.
 - [ ] Add export/import and supported break-glass patch/rollback commands.
 - [ ] Add contract and backward-compatibility tests.
 
@@ -393,7 +397,9 @@ plugin execution, Runtime Identity authentication or secret storage.
 1. Introduce transport- and persistence-independent project boundaries for Domain, Manifest and Application code.
 2. Define IDs and records for Application, ManifestRevision, ApplicationDeployment, DeploymentChangeSet, Component, Resource, Resource export, Binding, Configuration document and Workload.
 3. Define source-generated import-envelope and `haby.json` DTOs plus the first checked-in JSON Schema.
-4. Implement deterministic parsing and import-time validation with stable error codes and JSON paths.
+4. Implement deterministic parsing and the import-time validation reports
+   accepted in [ADR-014](docs/adr/0014-manifest-validation-diagnostics.md), with
+   stable error codes, JSON Pointer paths and persisted historical warnings.
 5. Add semantic tests for IDs, references, Resource lifecycle, nested Workloads, exact Profile revision references and JSON/YAML Document projections.
 6. Define portable Application-version references, local revision references, normalized-declaration equality and idempotent version imports through in-memory repositories and focused tests.
 7. Define ChangeSet membership, expected-generation and stale-plan contracts without executing plugin side effects.
@@ -403,6 +409,8 @@ Definition of done for this work package:
 
 - domain naming no longer depends on Consul keys or Kubernetes objects;
 - the manifest parser is deterministic and side-effect free;
+- validation diagnostics are bounded, deterministically ordered, redacted and
+  use only the standard Haby code catalog;
 - manifest parsing uses explicit `System.Text.Json` source-generated metadata and does not rely on shape-guessing converters or runtime type discovery;
 - invalid imports do not create Manifest revisions, repeated equivalent imports of one Application version return the same revision, and changed content under that version is rejected;
 - declaration identities remain portable while managed Resource and ManagedWorkload identities include Environment scope;
@@ -428,6 +436,7 @@ Definition of done for this work package:
 - ADR-011: Reusable configuration profiles, target sets and deterministic composition.
 - [ADR-012](docs/adr/0012-runtime-identity-authentication.md): Runtime Identity authentication and Kubernetes TokenReview.
 - [ADR-013](docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md): M2.1 project boundaries, DTO/domain separation and identifier rules.
+- [ADR-014](docs/adr/0014-manifest-validation-diagnostics.md): Transport-neutral manifest validation reports, diagnostics and historical warnings.
 
 ## Out of scope for the first milestones
 
@@ -451,4 +460,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md` and `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md` and `docs/adr/0014-manifest-validation-diagnostics.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

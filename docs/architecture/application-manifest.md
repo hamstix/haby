@@ -4,7 +4,8 @@
 - Target milestone: M2
 - Decision records: [ADR-009](../adr/0009-application-manifest-domain-model.md),
   [ADR-010](../adr/0010-manifest-revisions-and-deployment-change-sets.md),
-  [ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md)
+  [ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md),
+  [ADR-014](../adr/0014-manifest-validation-diagnostics.md)
 
 ## Purpose
 
@@ -257,6 +258,24 @@ plugin execution:
 
 Import is side-effect free. Schema and semantic errors are returned together
 where practical and use stable JSON paths and error codes.
+
+### Validation diagnostics
+
+Validation produces the transport-neutral report defined by
+[ADR-014](../adr/0014-manifest-validation-diagnostics.md). Diagnostics use stable
+Haby codes and JSON Pointers rooted at `haby.json`; syntax errors may additionally
+carry a one-based source location. Errors block import, while warnings allow a
+revision to be accepted.
+
+Warnings produced by a successful import are persisted unchanged with its
+immutable ManifestRevision. Reading a revision never revalidates it implicitly.
+Explicit revalidation creates a separate report under the current rules and does
+not modify the original revision or its historical warnings.
+
+Diagnostics are deterministically ordered, bounded and redacted. M2 type-specific
+validators map failures to standard Haby codes rather than introducing arbitrary
+plugin code namespaces. Version conflicts, authorization and concurrency failures
+remain application errors rather than manifest diagnostics.
 
 ## Application manifest shape
 
