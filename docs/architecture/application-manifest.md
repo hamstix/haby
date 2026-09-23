@@ -6,7 +6,8 @@
   [ADR-010](../adr/0010-manifest-revisions-and-deployment-change-sets.md),
   [ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md),
   [ADR-014](../adr/0014-manifest-validation-diagnostics.md),
-  [ADR-015](../adr/0015-normalized-manifest-equality-and-immutable-version-imports.md)
+  [ADR-015](../adr/0015-normalized-manifest-equality-and-immutable-version-imports.md),
+  [ADR-016](../adr/0016-deployment-change-sets-plans-and-generations.md)
 
 ## Purpose
 
@@ -215,13 +216,23 @@ created only after core, semantic and plugin-schema validation succeeds. Invalid
 imports return stable error codes and JSON paths but are not stored as revisions.
 
 `ApplicationDeployment` relates one Application to one Environment. It records
-the desired Manifest revision, a desired generation, the last successfully
-applied generation and optimistic concurrency state. The same Application can
-therefore run different revisions in different Environments.
+the current desired generation, the last successfully applied generation and
+optimistic concurrency state. Its immutable generation snapshot records desired
+presence, an optional Manifest revision and exact planning inputs. The same
+Application can therefore run different revisions or be explicitly absent in
+different Environments.
 
-Changing the desired manifest or another effective input increments generation.
-A plan records the exact generation and input fingerprint; apply rejects a stale
-plan if any target deployment changes before execution.
+Each accepted generation is an immutable `ApplicationDeploymentGeneration`
+snapshot containing desired presence and every exact planning input. Generation
+versions effective desired state rather than apply attempts; retry, resume,
+reconciliation and observed-state changes do not increment it. Provider aliases
+are resolved to exact versioned references during planning and become effective
+only when a Plan is committed as a new desired generation.
+
+Accepting a changed desired Manifest revision or another exact effective input
+increments generation. A ChangeSet records expected generations or absence; its
+Plan records the exact planning inputs and fingerprint. Apply distinguishes a
+stale ChangeSet from a stale Plan before changing desired state.
 
 A `DeploymentChangeSet` freezes a group update for exactly one Environment. A
 release bundle identifies portable `ApplicationId + ApplicationVersion` pairs;
@@ -234,9 +245,19 @@ Creating and planning a ChangeSet do not mutate ApplicationDeployment desired
 state. When apply starts, Haby checks every expected generation (or expected
 absence for a new deployment) and atomically commits all target desired revisions
 and new generations in its own PostgreSQL transaction before external side
-effects. If that check fails, the plan is stale and no provider work starts.
+effects. If a deployment precondition fails, the ChangeSet is stale and no
+provider work starts. If only exact planning inputs changed, the Plan is stale
+and another Plan may be created for the same ChangeSet.
 After the desired-state commit, partial external failure remains visible and the
 operation can resume toward the committed target.
+
+[ADR-016](../adr/0016-deployment-change-sets-plans-and-generations.md)
+defines ChangeSet as immutable user intent, Plan as an immutable calculation and
+ChangeSetCommit as the idempotent atomic acceptance result. Explicit
+`DeployRevision` and `RemoveDeployment` changes ensure that omission never means
+deletion. Changed deployment generations make the ChangeSet stale; changed exact
+planning inputs make only its Plan stale and permit replanning the same open
+ChangeSet.
 
 The normal high-level workflow is:
 

@@ -135,18 +135,26 @@ plan-input fingerprint.
 `ApplicationDeployment` is the stable relationship between one Application and
 one Environment. It contains at least:
 
-- the desired ManifestRevision;
+- the desired presence and optional ManifestRevision represented by an immutable
+  generation snapshot;
 - a monotonically increasing desired generation;
-- the last successfully applied generation and ManifestRevision;
+- the last successfully applied generation;
 - an optimistic concurrency token;
 - summarized status and references to detailed plans and operations.
 
 The same Application may target different revisions in different Environments.
-Changing a manifest revision, relevant override, Profile assignment or another
-desired input increments the deployment generation.
+Accepting a changed Manifest revision, relevant override, Profile assignment or
+another exact desired input increments the deployment generation. Changing an
+Environment alias or observed state alone does not.
 
-A plan is pinned to the deployment generation and exact input references. If any
-target generation changes before apply, the plan is stale and must be recomputed.
+A ChangeSet is pinned to each deployment generation or expected absence. If a
+precondition changes before apply, the ChangeSet is stale and must be replaced.
+A Plan additionally pins exact planning-input references; if only those inputs
+change, another Plan may be computed for the same still-valid ChangeSet.
+
+The exact generation snapshots, ChangeSet member unions, distinct ChangeSet and
+Plan stale errors and atomic commit semantics are defined by
+[ADR-016](0016-deployment-change-sets-plans-and-generations.md).
 
 ### Declaration identity and Environment instances are distinct
 
@@ -185,9 +193,10 @@ changes for one Environment. It contains:
 - the expected generation of each existing ApplicationDeployment;
 - an expected-absence precondition for each new ApplicationDeployment;
 - the resolved membership snapshot;
-- dependency and impact information;
-- a fingerprint of all planning inputs;
-- references to its plan and execution operation.
+- references to its Plans, successful commit and execution operation.
+
+Each immutable Plan contains the dependency and impact information, exact
+planning-input snapshot and its versioned fingerprint.
 
 Selectors such as `module=processing` are authoring or CLI conveniences. They
 are resolved against the incoming bundle before the ChangeSet is stored. A
@@ -204,7 +213,9 @@ Creating and planning a ChangeSet do not mutate ApplicationDeployment desired
 state. Starting apply first verifies all expected generations and expected
 absences, then atomically commits the target desired Manifest revisions and new
 generations for every member in Haby's PostgreSQL transaction. Failure of this
-concurrency check makes the plan stale and starts no external work.
+concurrency check makes the ChangeSet stale and starts no external work. If those
+preconditions still hold but exact planning inputs changed, only the Plan is
+stale and the same ChangeSet may be planned again.
 
 After this desired-state commit, external execution is intentionally durable. A
 provider failure does not restore the previous desired revisions; the operation
@@ -363,7 +374,8 @@ would increase complexity without protecting a real user.
 - implement normalized-declaration equality and the stable version-content
   conflict accepted in
   [ADR-015](0015-normalized-manifest-equality-and-immutable-version-imports.md);
-- define plan input fingerprinting and stale-plan error contracts;
+- implement plan input fingerprinting and stale contracts as accepted in
+  [ADR-016](0016-deployment-change-sets-plans-and-generations.md);
 - specify DeploymentChangeSet and operation status contracts in ADR-005;
 - decide versioning of ProviderInstance configuration and other planning inputs;
 - add CLI/API design after the application use cases are stable.
