@@ -145,7 +145,9 @@ Objective: establish the application and resource model before replacing the cur
 - [ ] Keep ChangeSet planning non-mutating and atomically commit all target deployment generations before provider side effects.
 - [ ] Keep import, plan and apply as separate use cases while allowing one high-level CLI command to orchestrate them.
 - [ ] Persist only valid Manifest revisions and make `ApplicationId + ApplicationVersion` identify exactly one immutable declaration.
-- [ ] Define the versioned `haby.json` application manifest and publish its JSON Schema.
+- [ ] Implement the accepted
+  [`haby.dev/v1alpha1` application manifest](docs/architecture/application-manifest-v1alpha1.md)
+  and publish its JSON Schema.
 - [ ] Implement metadata-based `System.Text.Json` source-generated manifest parsing with explicit discriminators and no reflection-based type discovery.
 - [ ] Separate Component identity from Configuration document names and delivery paths.
 - [ ] Define a format-neutral structured Configuration tree with SecretRef placeholders, JSON Pointer composition and deterministic JSON and YAML serializers.
@@ -227,7 +229,8 @@ Objective: prevent request failures from leaving unknown external state.
 - [ ] Plan and apply Configuration-profile revision rollouts using the same operation history as application revisions.
 - [ ] Add targeted operational overrides with reason, author, expiration and automatic rollback.
 - [ ] Add `validate`, `plan`, `apply`, `reconcile` and `rollback` workflows.
-- [ ] Define deletion policies: retain, orphan or deprovision external resources.
+- [ ] Implement `retain`, `orphan` and `delete` Resource deletion policies;
+  `delete` deprovisions the external object through its Provider.
 - [ ] Apply removal of applications, components and resources through plans instead of database cascades alone.
 - [ ] Order Component and Resource removal so Workloads stop, consumer access is revoked and exports are checked before a Resource deletion policy runs.
 - [ ] Separate desired replica count from temporary workload suspension and operational scaling overrides.
@@ -406,9 +409,10 @@ plugin execution, Runtime Identity authentication or secret storage.
 
 1. Introduce transport- and persistence-independent project boundaries for Domain, Manifest and Application code.
 2. Define IDs and records for Application, EnvironmentKey, ManifestRevision, ApplicationDeployment, DeploymentChangeSet, Component, Resource, Resource export, Binding, Configuration document and Workload.
-3. Define source-generated import-envelope and version-specific `haby.json` DTOs
-   plus the first checked-in JSON Schema and adapter-independent normalized-model
-   version.
+3. Implement the accepted
+   [`haby.dev/v1alpha1` field matrix](docs/architecture/application-manifest-v1alpha1.md)
+   as source-generated import-envelope and manifest DTOs, the first checked-in
+   JSON Schema and an adapter-independent normalized-model version.
 4. Implement deterministic parsing and the import-time validation reports
    accepted in [ADR-014](docs/adr/0014-manifest-validation-diagnostics.md), with
    stable error codes, JSON Pointer paths and persisted historical warnings.
@@ -439,6 +443,8 @@ Definition of done for this work package:
 - validation diagnostics are bounded, deterministically ordered, redacted and
   use only the standard Haby code catalog;
 - manifest parsing uses explicit `System.Text.Json` source-generated metadata and does not rely on shape-guessing converters or runtime type discovery;
+- the checked-in schema, source-generated DTOs and normalized mapper agree with
+  the accepted `haby.dev/v1alpha1` field matrix and shared validation corpus;
 - accepted Manifest revisions remain usable from their versioned normalized
   representation without retaining a retired alpha input adapter;
 - invalid imports do not create Manifest revisions, repeated equivalent imports of one Application version return the same revision, and changed content under that version is rejected;
@@ -512,4 +518,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`, `docs/adr/0019-typed-parameters-and-effective-value-resolution.md` and `docs/adr/0020-versioned-application-manifest-json-contract.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/application-manifest-v1alpha1.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`, `docs/adr/0019-typed-parameters-and-effective-value-resolution.md` and `docs/adr/0020-versioned-application-manifest-json-contract.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

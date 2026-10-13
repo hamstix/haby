@@ -179,6 +179,12 @@ valid manifests, invalid syntax, duplicate and unknown members, wrong casing,
 missing required members, nulls, unknown discriminators and extension-contract
 examples.
 
+The exact required members, defaults, lexical constraints, discriminated shapes
+and cross-field rules are fixed by the
+[`haby.dev/v1alpha1` contract](../architecture/application-manifest-v1alpha1.md).
+The checked-in schema, DTOs and normalized mapper must implement that field
+matrix without adding independent defaults or permissive alternatives.
+
 Validation remains bounded by the diagnostic limit accepted in ADR-014. Limits
 on individual identifiers and values belong to their versioned field schemas;
 the manifest domain does not hard-code an HTTP or gRPC request-size limit.

@@ -168,6 +168,16 @@ For one structured document, Haby:
 Failure at any step creates no Configuration-document revision. Sorting makes
 execution and diagnostics deterministic; it does not establish precedence.
 
+`documentProjections` is an explicitly set-like manifest collection. Exact
+duplicates are rejected, and normalization orders entries by `documentRef`,
+canonical path and `rendererRef` using ordinal comparison. Reordering source
+entries therefore does not change normalized-manifest equality. Projection path
+collisions are evaluated across all Bindings of the containing Component.
+
+A structured template may have any ConfigurationValue root when it has no
+projections. A document targeted by a projection must have an Object root; Haby
+does not replace an Array or scalar root implicitly.
+
 Parameter definitions, assignments and default-expression evaluation are
 outside the document renderer. Their exact M2.1 resolution and provenance rules
 are defined by

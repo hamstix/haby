@@ -48,6 +48,22 @@ ranges or unversioned aliases. A later compatibility mechanism may describe an
 explicit relationship between exact versions, but it does not change either
 identifier.
 
+M2.1 contract IDs use the following lexical form:
+
+```regex
+^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*/v[1-9][0-9]*(?:(?:alpha|beta)[1-9][0-9]*)?$
+```
+
+Manifest-local IDs use lowercase kebab-case with at most 63 characters.
+Provider aliases have at most 128 ASCII characters and use:
+
+```regex
+^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$
+```
+
+These forms are validation rules only; separators do not participate in
+resolution.
+
 ### Identifier types remain distinct
 
 The shared lexical form does not make the identifiers interchangeable. Domain

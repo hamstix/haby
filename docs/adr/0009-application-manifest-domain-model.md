@@ -90,6 +90,27 @@ not determine when the Resource leaves desired state. If a change removes the
 last known consumer from a still-declared Resource, that Resource remains managed
 and the plan produces an unused-resource warning rather than deleting it.
 
+The policy is fixed in the immutable removal Plan after dependent Workloads,
+Bindings, exports and consumer-specific access have been handled:
+
+- `retain`, the default, keeps the external object and Haby's managed record,
+  external ID and required SecretRefs. The Resource leaves the active desired
+  graph and ordinary reconciliation but remains visible for an explicit restore,
+  delete or orphan decision. It cannot receive new Bindings while merely
+  retained.
+- `orphan` keeps the external object but, after explicit confirmation, removes
+  it from Haby management, observation and reconciliation. Haby removes active
+  managed state and unneeded SecretRefs and keeps an audit tombstone. The
+  operator assumes responsibility for the external object; consumer-specific
+  access is revoked before orphaning.
+- `delete` invokes idempotent provider deprovision and retains managed state
+  until external deletion is confirmed. Failure remains visible and retryable;
+  successful completion removes active state subject to audit and secret
+  retention rules.
+
+Changing the policy of a still-declared Resource has no immediate lifecycle
+effect.
+
 ### Types and references are explicit
 
 Resource and Workload type identifiers include a contract version, for example

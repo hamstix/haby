@@ -159,6 +159,13 @@ Bounds are inclusive. `allowedValues` entries have the exact declared parameter
 kind and use ADR-015 number equality where applicable. Contradictory constraints
 are import errors.
 
+`allowedValues` is an explicitly set-like collection. When present it must be
+non-empty, exact typed duplicates are invalid and normalization orders values by
+their exact typed representation. Source order does not affect
+normalized-manifest equality. Every entry must satisfy the definition's other
+constraints. An optional parameter `description` has at most 2048 Unicode scalar
+values.
+
 Regular-expression constraints are deferred. Adding `pattern` requires an
 explicit dialect, timeout policy and agreement between JSON Schema and runtime
 validation.

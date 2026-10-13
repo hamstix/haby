@@ -343,6 +343,9 @@ remain application errors rather than manifest diagnostics.
 
 The initial schema remains JSON and retains Liquid for explicit value templates.
 JSON Schema validation occurs before semantic validation by plugins.
+The normative field matrix for required members, defaults, lexical constraints
+and closed DTO shapes is the
+[`haby.dev/v1alpha1` contract](application-manifest-v1alpha1.md).
 
 ```json
 {
@@ -620,11 +623,30 @@ and the Resource declaration explicitly. The plan orders the resulting work:
 3. verify that no Resource exports or other consumers remain;
 4. apply the Resource's `lifecycle.deletionPolicy`.
 
-The deletion policy answers only what happens after explicit Resource removal:
-`delete` deprovisions the external object, `orphan` leaves it externally and
-forgets Haby management after confirmation, and `retain` preserves the object
-and its managed record for an explicit later decision. It does not decide when
-the Resource leaves desired state.
+The deletion policy answers only what happens after explicit Resource removal;
+it does not decide when the Resource leaves desired state. Its value is pinned
+in the immutable Plan after Workloads, Bindings, exports and consumer-specific
+access have been removed or verified absent.
+
+- `retain` performs no destructive provider action. Haby removes the Resource
+  from the active desired graph, stops ordinary reconciliation, preserves the
+  external object, managed record, external ID and required SecretRefs, and
+  exposes it as retained pending an explicit restore, delete or orphan decision.
+  New Bindings cannot consume it merely because its retained record exists.
+- `orphan` does not call provider deprovision for the main external object. After
+  explicit confirmation, Haby stops observation and reconciliation, removes
+  active managed state and SecretRefs it no longer needs, and retains only an
+  audit tombstone. Responsibility for the external object's configuration and
+  security passes to the operator. Haby-managed consumer access is revoked
+  before the object is orphaned.
+- `delete` invokes idempotent provider deprovision. Haby retains managed state
+  until external deletion succeeds; a failure remains visible and retryable.
+  Active managed state and eligible generated values or SecretRefs are removed
+  only after confirmed success, subject to their retention rules, while an audit
+  tombstone remains.
+
+Changing `deletionPolicy` while the Resource remains declared causes no
+immediate lifecycle action. `retain` is the safe default.
 
 ### Cross-application resource bindings
 
