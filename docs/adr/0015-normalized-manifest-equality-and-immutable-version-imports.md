@@ -100,10 +100,16 @@ Application version.
 ### Normalization profiles are versioned
 
 Normalization semantics are selected by manifest `apiVersion`. A
-ManifestRevision records the normalization profile used for its accepted
-declaration. Haby retains compatible profiles for supported manifest API
-versions; changing equality semantics requires a new manifest API version or an
-explicit migration that preserves comparison with existing revisions.
+ManifestRevision records the input API version and the separately versioned
+normalized representation used for its accepted declaration. Haby retains
+version-specific adapters while an input API version is supported, but an
+accepted revision does not require its original adapter for planning or
+reconciliation. Alpha input adapters may be removed before the stable manifest
+contract as defined by
+[ADR-020](0020-versioned-application-manifest-json-contract.md).
+
+Changing equality semantics requires a new manifest API version or an explicit
+internal-model migration that preserves comparison with existing revisions.
 
 An ordinary Haby upgrade must not silently change whether an existing
 declaration is equal to a repeated import.

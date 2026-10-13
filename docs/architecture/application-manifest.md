@@ -10,7 +10,8 @@
   [ADR-016](../adr/0016-deployment-change-sets-plans-and-generations.md),
   [ADR-017](../adr/0017-structured-configuration-trees-and-document-projections.md),
   [ADR-018](../adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md),
-  [ADR-019](../adr/0019-typed-parameters-and-effective-value-resolution.md)
+  [ADR-019](../adr/0019-typed-parameters-and-effective-value-resolution.md),
+  [ADR-020](../adr/0020-versioned-application-manifest-json-contract.md)
 
 ## Purpose
 
@@ -173,6 +174,12 @@ A CI import conceptually contains:
 }
 ```
 
+The transport-independent M2.1 envelope contains exactly
+`applicationVersion` and `manifest`. `applicationVersion` is a bounded opaque
+identifier; Haby compares it exactly and does not require or order it as SemVer.
+The complete syntax, strict JSON rules and schema dispatch are defined by
+[ADR-020](../adr/0020-versioned-application-manifest-json-contract.md).
+
 The Application ID is read from `manifest.metadata.id` and is not duplicated in
 the import envelope. The manifest is a structured JSON value rather than an
 opaque copy of the original file bytes. The operation is an idempotent import of
@@ -203,9 +210,13 @@ not change the normalized declaration. Array order, strings, raw text, labels an
 all other meaningful declaration content remain significant unless a versioned
 field contract explicitly says otherwise.
 
-Normalization semantics are selected by manifest `apiVersion`. An internal
-versioned SHA-256 fingerprint may accelerate comparison, but matching fingerprints
-are always followed by authoritative normalized-content comparison.
+Each supported manifest `apiVersion` has a version-specific parsing, validation
+and normalization adapter. Published API versions are immutable while supported,
+but alpha adapters may be removed before the stable contract. Every accepted
+revision retains a separately versioned normalized representation, so planning
+and reconciliation never require the original input adapter. An internal
+versioned SHA-256 fingerprint may accelerate comparison, but matching
+fingerprints are always followed by authoritative normalized-content comparison.
 
 Haby never replaces or overwrites an existing
 `ApplicationId + ApplicationVersion`. Equal reimports return the first accepted
@@ -471,11 +482,16 @@ JSON Schema validation occurs before semantic validation by plugins.
 }
 ```
 
-The alpha contract may still evolve through explicit schema revisions, but the
-separation between resources, exports, bindings, documents and workloads is an
-invariant. A Configuration document declaration describes materialization; its
-delivery is configured separately, so the manifest does not use a `publish`
-Boolean.
+Published manifest API versions are immutable while supported. Alpha versions
+may evolve only by publishing an explicit new API version and may be removed
+before the stable contract is released. The separation between resources,
+exports, bindings, documents and workloads remains an invariant. A
+Configuration document declaration describes materialization; its delivery is
+configured separately, so the manifest does not use a `publish` Boolean.
+
+`spec.components` may be absent or empty. This permits an infrastructure-only
+Application to own Resources and optionally expose them through Resource exports
+for Components in other Applications without declaring a dummy Component.
 
 `providerRef` is an environment-local alias. The same manifest can therefore use
 `postgresql.primary` in several environments while each environment resolves the
@@ -484,6 +500,10 @@ only alias syntax. Planning records the exact typed resolution described by
 [ADR-018](../adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md).
 
 ### Serialization contract
+
+The complete normative JSON wire contract, import envelope, schema versioning,
+strict parsing rules and normalized-model persistence boundary are recorded in
+[ADR-020](../adr/0020-versioned-application-manifest-json-contract.md).
 
 The manifest DTOs are designed for `System.Text.Json` source generation and
 Native AOT-friendly metadata generation. Core contract alternatives use an
