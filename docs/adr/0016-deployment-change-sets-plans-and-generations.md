@@ -89,11 +89,18 @@ applied.
 
 ### Planning inputs are exact and reproducible
 
-M2.1 has ManifestRevision as its only effective desired-state input. Later
-versions add typed references for operator override revisions, Profile revisions,
-Provider configuration revisions, Resource export revisions and other accepted
-inputs. M2.1 does not introduce a generic stringly typed planning-input reference
-for entities that do not yet exist.
+M2.1 has ManifestRevision as its only user-selected desired-state input. Planning
+also derives exact Provider-alias and external-export resolutions from that
+declaration and its Environment. The Plan records the typed resolution results
+that exist in the implementation slice; M2.1 does not introduce generic
+stringly typed references or require persisted Provider and Resource-export
+revision aggregates merely to represent entities that do not yet exist.
+
+Later versions add independently selected typed references for operator override
+revisions, Profile revisions, persisted Provider configuration revisions,
+independent Resource export revisions and other accepted inputs. Exact M2.1
+resolution rules are defined by
+[ADR-018](0018-versioned-contract-identifiers-and-manifest-dependencies.md).
 
 Provider aliases and other selectors are resolved during planning to exact,
 versioned references. Changing an alias or creating a new Provider configuration

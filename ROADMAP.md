@@ -137,6 +137,7 @@ Objective: establish the application and resource model before replacing the cur
 - [x] Accept [ADR-015](docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md) for normalized equality, internal fingerprints, version-content conflicts and the prohibition on replacing immutable Application versions.
 - [x] Accept [ADR-016](docs/adr/0016-deployment-change-sets-plans-and-generations.md) for immutable deployment generations, ChangeSet intent, Plans, stale detection and atomic desired-state commits.
 - [x] Accept [ADR-017](docs/adr/0017-structured-configuration-trees-and-document-projections.md) for format-neutral Configuration trees, static structured templates, typed fragments, projections and deterministic JSON/YAML serialization.
+- [x] Accept [ADR-018](docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md) for opaque versioned contract IDs, separate contract and implementation registration, exact Provider/export resolution and derived cross-Application dependencies.
 - [ ] Introduce ApplicationDeployment as the desired/applied state boundary for one Application in one Environment.
 - [ ] Introduce DeploymentChangeSet with exact revision membership, expected generations and a complete cross-Application dependency plan.
 - [ ] Keep ChangeSet planning non-mutating and atomically commit all target deployment generations before provider side effects.
@@ -419,7 +420,9 @@ plugin execution, Runtime Identity authentication or secret storage.
 7. Implement the immutable generation snapshots, ChangeSet membership, Plans,
    distinct stale errors and atomic in-memory commit contracts accepted in
    [ADR-016](docs/adr/0016-deployment-change-sets-plans-and-generations.md)
-   without executing plugin side effects.
+   without executing plugin side effects. Add the in-memory metadata catalog,
+   fake Provider resolver and exact external-export dependency resolution from
+   [ADR-018](docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md).
 8. Remove legacy types only when their new vertical slice is covered; do not build permanent compatibility adapters or prototype-data migrations.
 
 Definition of done for this work package:
@@ -446,6 +449,9 @@ Definition of done for this work package:
 - structured templates keep static topology, Document projections fail closed on
   collisions and JSON/YAML serializers preserve equivalent typed trees;
 - direct cross-application Resource references and deletion of actively exported Resources are rejected before side effects;
+- contract definitions are independent from implementations, Provider aliases
+  and external exports resolve to exact Plan inputs, and cross-Application
+  dependency cycles are rejected;
 - removing a Component does not remove a still-declared Resource, and an unused declared Resource produces a warning;
 - focused tests and `git diff --check` pass.
 
@@ -468,6 +474,7 @@ Definition of done for this work package:
 - [ADR-015](docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md): Normalized manifest equality, immutable version imports and operational retry separation.
 - [ADR-016](docs/adr/0016-deployment-change-sets-plans-and-generations.md): Environment deployments, immutable generations, ChangeSet intent, Plans and atomic desired-state commits.
 - [ADR-017](docs/adr/0017-structured-configuration-trees-and-document-projections.md): Structured Configuration trees, typed Liquid values, Document projections and deterministic serializers.
+- [ADR-018](docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md): Opaque versioned contract identifiers, implementation resolution and exact manifest dependencies.
 
 ## Out of scope for the first milestones
 
@@ -491,4 +498,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md` and `docs/adr/0017-structured-configuration-trees-and-document-projections.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md` and `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

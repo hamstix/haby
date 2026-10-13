@@ -8,7 +8,8 @@
   [ADR-014](../adr/0014-manifest-validation-diagnostics.md),
   [ADR-015](../adr/0015-normalized-manifest-equality-and-immutable-version-imports.md),
   [ADR-016](../adr/0016-deployment-change-sets-plans-and-generations.md),
-  [ADR-017](../adr/0017-structured-configuration-trees-and-document-projections.md)
+  [ADR-017](../adr/0017-structured-configuration-trees-and-document-projections.md),
+  [ADR-018](../adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md)
 
 ## Purpose
 
@@ -288,6 +289,8 @@ plugin execution:
 - every local reference resolves within the same manifest and has the expected
   target kind;
 - every Resource and Workload `type` includes an explicit contract version;
+- every output contract and Configuration renderer reference includes an
+  explicit version;
 - every Resource is owned by the declaring Application and has no overridable
   `ownerRef`;
 - a Binding target has exactly one registered discriminator: `local-resource`
@@ -383,7 +386,7 @@ JSON Schema validation occurs before semantic validation by plugins.
               {
                 "documentRef": "settings",
                 "path": "/PostgreSql",
-                "rendererRef": "npgsql-connection/v1alpha1"
+                "rendererRef": "postgresql.npgsql-connection/v1alpha1"
               }
             ]
           }
@@ -421,7 +424,7 @@ JSON Schema validation occurs before semantic validation by plugins.
               {
                 "documentRef": "settings",
                 "path": "/PostgreSql/Shared",
-                "rendererRef": "npgsql-connection/v1alpha1"
+                "rendererRef": "postgresql.npgsql-connection/v1alpha1"
               }
             ]
           },
@@ -434,7 +437,7 @@ JSON Schema validation occurs before semantic validation by plugins.
               {
                 "documentRef": "settings",
                 "path": "/PostgreSql/Worker",
-                "rendererRef": "npgsql-connection/v1alpha1"
+                "rendererRef": "postgresql.npgsql-connection/v1alpha1"
               }
             ]
           }
@@ -471,7 +474,9 @@ Boolean.
 
 `providerRef` is an environment-local alias. The same manifest can therefore use
 `postgresql.primary` in several environments while each environment resolves the
-alias to a different provider instance and administrator secret.
+alias to a different provider instance and administrator secret. Import checks
+only alias syntax. Planning records the exact typed resolution described by
+[ADR-018](../adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md).
 
 ### Serialization contract
 
@@ -492,8 +497,9 @@ public sealed record LocalResourceBindingTarget(
     string ResourceRef) : BindingTarget;
 
 public sealed record ApplicationExportBindingTarget(
-    string ApplicationRef,
-    string ExportRef) : BindingTarget;
+    string ApplicationId,
+    string ExportRef,
+    string Contract) : BindingTarget;
 
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Metadata,
@@ -525,6 +531,8 @@ Arbitrary JSON is limited to intentional extension boundaries:
 
 - `Resource.properties` and `Workload.properties`, validated against the versioned
   plugin schema selected by `type`;
+- Binding `options`, validated against the exact binding or output-contract
+  schema;
 - a structured Configuration document's `template`;
 - typed parameter defaults whose JSON token kind is checked against the
   parameter definition.
@@ -605,18 +613,34 @@ A consuming Application uses a typed target:
 {
   "target": {
     "kind": "application-export",
-    "applicationRef": "shared-storage-service",
-    "exportRef": "reporting-database"
+    "applicationId": "shared-storage-service",
+    "exportRef": "reporting-database",
+    "contract": "postgresql.connection/v1alpha1"
+  },
+  "options": {
+    "accessMode": "read-only"
   },
   "documentProjections": [
     {
       "documentRef": "settings",
       "path": "/ReportingDatabase",
-      "rendererRef": "npgsql-connection/v1alpha1"
+      "rendererRef": "postgresql.npgsql-connection/v1alpha1"
     }
   ]
 }
 ```
+
+The consumer states its exact expected output contract. M2.1 requires exact
+equality with the owner's export contract; future compatibility rules must be
+explicit and versioned. Binding `options` describe consumption and cannot mutate
+the Resource's desired state or lifecycle.
+
+Import validates this reference without requiring the producer to exist.
+Planning resolves it to an exact producer deployment generation and
+ManifestRevision, records that resolution in the immutable Plan and derives the
+producer-to-consumer dependency edge. If the producer is part of the same
+ChangeSet, its target revision is used; otherwise its current exact desired
+snapshot is used. Cyclic cross-Application dependencies are rejected in M2.1.
 
 Cross-application consumption is read-only at the Haby control-plane level. The
 consumer may use the permitted export outputs but cannot change the Resource's
@@ -692,7 +716,7 @@ document:
 {
   "documentRef": "settings",
   "path": "/PostgreSql",
-  "rendererRef": "npgsql-connection/v1alpha1"
+  "rendererRef": "postgresql.npgsql-connection/v1alpha1"
 }
 ```
 

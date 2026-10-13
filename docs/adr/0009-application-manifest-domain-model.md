@@ -93,7 +93,11 @@ and the plan produces an unused-resource warning rather than deleting it.
 ### Types and references are explicit
 
 Resource and Workload type identifiers include a contract version, for example
-`postgresql.database/v1alpha1` and `kubernetes.workload/v1alpha1`.
+`postgresql.database/v1alpha1` and `kubernetes.workload/v1alpha1`. Everything
+before `/` is one opaque contract name; dots are a naming convention and do not
+participate in resolution. Contract definitions and their implementations are
+registered separately as specified by
+[ADR-018](0018-versioned-contract-identifiers-and-manifest-dependencies.md).
 
 Compound references use structured DTOs rather than delimiter-based strings.
 In particular, a Profile assignment identifies an exact immutable revision with
@@ -105,7 +109,12 @@ before validation and persistence.
 Binding targets are a discriminated union:
 
 - `local-resource` contains a local `resourceRef`;
-- `application-export` contains an `applicationRef` and `exportRef`.
+- `application-export` contains an `applicationId`, `exportRef` and exact expected
+  output `contract`.
+
+A Binding may contain consumer-specific `options` validated against its exact
+contract. Options cannot change Resource desire, ownership, Provider selection
+or lifecycle.
 
 Document projections are an explicit list on a Binding. Each projection targets
 a Configuration document at a JSON Pointer path and selects a versioned
@@ -124,9 +133,9 @@ Core manifest alternatives use `JsonPolymorphic` and explicitly registered
 do not use `object`, reflection-based discovery or converters that guess a type
 from JSON shape.
 
-Plugin-owned Resource and Workload `properties`, structured document templates
-and typed parameter defaults use `JsonElement` at documented extension
-boundaries. Their token kinds and contents are validated against the
+Plugin-owned Resource and Workload `properties`, Binding `options`, structured
+document templates and typed parameter defaults use `JsonElement` at documented
+extension boundaries. Their token kinds and contents are validated against the
 corresponding versioned schemas; they are not used for CLR type selection.
 
 ### Structured documents are format-neutral
@@ -169,6 +178,11 @@ The consumer binds to the export through an `application-export` target. This is
 read-only at the Haby control-plane level: the consumer cannot change desired
 state, provider selection, lifecycle, reconciliation or commands for the owned
 Resource.
+
+Import validates the external reference shape but does not resolve the producer.
+Planning selects either the producer revision from the same ChangeSet or its
+exact current deployment generation, records that resolution as an immutable
+input and derives the producer-to-consumer dependency edge. M2.1 rejects cycles.
 
 An external-system access profile, such as PostgreSQL read-only grants, is a
 separate provider concern. A consumer cannot request broader access than the
