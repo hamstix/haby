@@ -415,7 +415,9 @@ plugin execution, Runtime Identity authentication or secret storage.
    JSON Schema and an adapter-independent normalized-model version.
 4. Implement deterministic parsing and the import-time validation reports
    accepted in [ADR-014](docs/adr/0014-manifest-validation-diagnostics.md), with
-   stable error codes, JSON Pointer paths and persisted historical warnings.
+   the accepted
+   [M2.1 diagnostic catalog](docs/architecture/manifest-validation-diagnostic-catalog.md),
+   stable JSON Pointer paths and persisted historical warnings.
 5. Implement the format-neutral Configuration tree, static structured-template
    evaluation and JSON/YAML Document projection rules accepted in
    [ADR-017](docs/adr/0017-structured-configuration-trees-and-document-projections.md),
@@ -441,7 +443,8 @@ Definition of done for this work package:
 - domain naming no longer depends on Consul keys or Kubernetes objects;
 - the manifest parser is deterministic and side-effect free;
 - validation diagnostics are bounded, deterministically ordered, redacted and
-  use only the standard Haby code catalog;
+  use only the accepted standard Haby code catalog with most-specific-code
+  selection;
 - manifest parsing uses explicit `System.Text.Json` source-generated metadata and does not rely on shape-guessing converters or runtime type discovery;
 - the checked-in schema, source-generated DTOs and normalized mapper agree with
   the accepted `haby.dev/v1alpha1` field matrix and shared validation corpus;
@@ -518,4 +521,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/application-manifest-v1alpha1.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`, `docs/adr/0019-typed-parameters-and-effective-value-resolution.md` and `docs/adr/0020-versioned-application-manifest-json-contract.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/application-manifest-v1alpha1.md`, `docs/architecture/manifest-validation-diagnostic-catalog.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`, `docs/adr/0019-typed-parameters-and-effective-value-resolution.md` and `docs/adr/0020-versioned-application-manifest-json-contract.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

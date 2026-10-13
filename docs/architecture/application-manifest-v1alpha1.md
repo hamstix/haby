@@ -5,6 +5,8 @@
 - Format: JSON
 - Canonical schema ID:
   `https://haby.dev/schemas/application-manifest.v1alpha1.json`
+- Validation catalog:
+  [M2.1 manifest diagnostics](manifest-validation-diagnostic-catalog.md)
 - Related decisions: [ADR-009](../adr/0009-application-manifest-domain-model.md),
   [ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md),
   [ADR-014](../adr/0014-manifest-validation-diagnostics.md),

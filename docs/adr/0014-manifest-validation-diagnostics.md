@@ -72,6 +72,7 @@ manifest.id.*
 manifest.reference.*
 manifest.type.*
 manifest.properties.*
+manifest.parameter.*
 manifest.document.*
 manifest.resource.*
 manifest.workload.*
@@ -88,6 +89,10 @@ code is compatible; removing a code, changing its meaning or changing required
 parameters requires contract-version consideration. A future plugin SDK may add
 a controlled extension-code namespace through a separate decision after a real
 use case exists.
+
+The accepted M2.1 codes, severities, required parameters, path conventions,
+most-specific-code rule and adapter requirements are defined by the
+[manifest validation diagnostic catalog](../architecture/manifest-validation-diagnostic-catalog.md).
 
 ### Validation proceeds in dependency order
 
@@ -143,6 +148,10 @@ expected types and references. They must not contain secret values, complete
 configuration fragments, credentials or arbitrary `properties` content. Haby
 reports the path to a sensitive invalid value without echoing that value.
 
+Diagnostic parameters describe the violated contract, expected shape and
+involved safe identities. They never reproduce the invalid configuration value
+itself.
+
 ### REST and gRPC are adapters over the same semantics
 
 The validation model is suitable for both public transports:
@@ -194,7 +203,7 @@ requirements are known. Standard Haby codes cover the initial schema boundary.
 
 ## Follow-up work
 
-- define the initial code catalog and required parameters in implementation;
+- implement the accepted diagnostic catalog and shared validation corpus;
 - implement normalized-manifest equality and canonical fingerprint boundaries as
   accepted in
   [ADR-015](0015-normalized-manifest-equality-and-immutable-version-imports.md);

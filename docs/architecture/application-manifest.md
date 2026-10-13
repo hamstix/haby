@@ -338,6 +338,9 @@ Diagnostics are deterministically ordered, bounded and redacted. M2 type-specifi
 validators map failures to standard Haby codes rather than introducing arbitrary
 plugin code namespaces. Version conflicts, authorization and concurrency failures
 remain application errors rather than manifest diagnostics.
+The initial codes, fixed severities, safe parameters and path rules are defined
+by the
+[M2.1 diagnostic catalog](manifest-validation-diagnostic-catalog.md).
 
 ## Application manifest shape
 
