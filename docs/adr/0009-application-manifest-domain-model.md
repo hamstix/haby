@@ -138,6 +138,14 @@ profiles and overrides to that tree using JSON Pointer paths, then serializes th
 completed document according to its `format`. SecretRefs remain typed revision
 data until an authorized delivery operation materializes their values.
 
+A structured document template has static Object members and Array elements.
+Liquid evaluates value nodes but cannot create, remove, rename or reorder that
+structure. A standalone expression may preserve a scalar type; Object, Array and
+SecretRef results are rejected. Resource renderers remain a separate typed
+fragment mechanism. Exact tree, projection, collision, serialization and
+provenance rules are defined by
+[ADR-017](0017-structured-configuration-trees-and-document-projections.md).
+
 Structured YAML is limited to the shared JSON-compatible data model: mappings
 have string keys, duplicate keys and custom tags are invalid, and comments,
 anchors, aliases and source formatting are not preserved. Scalar types are

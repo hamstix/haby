@@ -7,7 +7,8 @@
   [ADR-013](../adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md),
   [ADR-014](../adr/0014-manifest-validation-diagnostics.md),
   [ADR-015](../adr/0015-normalized-manifest-equality-and-immutable-version-imports.md),
-  [ADR-016](../adr/0016-deployment-change-sets-plans-and-generations.md)
+  [ADR-016](../adr/0016-deployment-change-sets-plans-and-generations.md),
+  [ADR-017](../adr/0017-structured-configuration-trees-and-document-projections.md)
 
 ## Purpose
 
@@ -663,6 +664,14 @@ rather than serialized JSON or YAML text.
 Haby applies templates, profiles, overrides and Document projections to the tree
 and invokes the document-format serializer only after composition is complete.
 
+The tree is the Haby-owned immutable `ConfigurationValue` union defined by
+[ADR-017](../adr/0017-structured-configuration-trees-and-document-projections.md),
+not a serializer-specific DOM. A Structured document template fixes Object keys,
+Array length and element order. Liquid evaluates string value nodes but cannot
+change that topology. A standalone output expression preserves String, Boolean,
+exact Number or Null; mixed literal and expression content produces String.
+Object, Array and SecretRef expression results are invalid.
+
 The `template` is represented with JSON syntax inside `haby.json` even when the
 output document is YAML. For example:
 
@@ -697,6 +706,12 @@ PostgreSql:
     ConnectionString: "..."
 ```
 
+M2.1 projections traverse Object members only. They cannot target the root or
+traverse Arrays. Missing Object parents are created, but the target leaf must be
+absent. Duplicate and ancestor/descendant projection paths, existing leaves and
+non-Object intermediate nodes are collisions. Fragments are never implicitly
+merged or overwritten, and declaration order establishes no precedence.
+
 Structured YAML is intentionally limited to the shared data model. It uses one
 YAML document, requires string mapping keys, rejects duplicate keys and custom
 tags, and does not preserve comments, anchors, aliases or source formatting.
@@ -710,6 +725,9 @@ structured tree. It is not eligible for `documentProjections`, JSON Pointer
 insertion, structured profile composition or JSON Merge Patch. Additional
 structured formats require an explicit serializer and compatibility decision;
 they are not inferred from a file extension.
+
+M2.1 raw text templates cannot receive SecretRefs or secret plaintext. Secure
+secret-bearing text interpolation requires a later explicit delivery contract.
 
 ### Parameters and overrides
 
