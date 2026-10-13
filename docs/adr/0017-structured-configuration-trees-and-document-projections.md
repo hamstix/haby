@@ -155,7 +155,8 @@ M2.1 manifest does not expose a speculative `conflictPolicy` member.
 
 For one structured document, Haby:
 
-1. maps the static document template to a tree and evaluates Liquid values;
+1. receives the exact `ResolvedParameterSet` accepted by planning, maps the
+   static document template to a tree and evaluates Liquid values;
 2. evaluates every referenced renderer into a typed fragment;
 3. canonicalizes all projection paths;
 4. validates the complete path set and current tree for collisions;
@@ -166,6 +167,11 @@ For one structured document, Haby:
 
 Failure at any step creates no Configuration-document revision. Sorting makes
 execution and diagnostics deterministic; it does not establish precedence.
+
+Parameter definitions, assignments and default-expression evaluation are
+outside the document renderer. Their exact M2.1 resolution and provenance rules
+are defined by
+[ADR-019](0019-typed-parameters-and-effective-value-resolution.md).
 
 ### Import and planning validate different facts
 
@@ -239,7 +245,7 @@ M2.1 defines and exercises at least these origins:
 - `ManifestTemplate`, including the ManifestRevision reference;
 - `ResourceBinding`, including Binding and renderer references.
 
-Profile revisions, parameter overrides and operational overrides add their own
+Profile revisions, parameter assignments and operational overrides add their own
 typed origins when implemented. Provenance values do not contain secret
 plaintext or arbitrary source fragments.
 

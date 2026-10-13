@@ -138,6 +138,13 @@ document templates and typed parameter defaults use `JsonElement` at documented
 extension boundaries. Their token kinds and contents are validated against the
 corresponding versioned schemas; they are not used for CLR type selection.
 
+Application parameters are scalar, typed definitions owned by the manifest.
+Literal `default` and Liquid `defaultExpression` are distinct and mutually
+exclusive; the latter is evaluated only during planning against a closed
+deterministic context. Operator assignments remain separate versioned state.
+Exact types, precedence, provenance and M2.1 boundaries are defined by
+[ADR-019](0019-typed-parameters-and-effective-value-resolution.md).
+
 ### Structured documents are format-neutral
 
 JSON and YAML Configuration documents share one structured configuration tree,

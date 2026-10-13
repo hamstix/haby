@@ -9,7 +9,8 @@
   [ADR-015](../adr/0015-normalized-manifest-equality-and-immutable-version-imports.md),
   [ADR-016](../adr/0016-deployment-change-sets-plans-and-generations.md),
   [ADR-017](../adr/0017-structured-configuration-trees-and-document-projections.md),
-  [ADR-018](../adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md)
+  [ADR-018](../adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md),
+  [ADR-019](../adr/0019-typed-parameters-and-effective-value-resolution.md)
 
 ## Purpose
 
@@ -46,7 +47,8 @@ simple manifest for the common case.
 | Binding | An explicit relationship through which a component consumes a local resource or another application's resource export and may project selected outputs into a configuration document | `fromKey` and implicit JSON copying |
 | Document projection | A format-neutral mapping that renders Binding outputs into a structured Configuration document at an explicit path | Implicit insertion of provider JSON into a configuration key |
 | Parameter definition | A typed input declared by an application manifest, including an optional default | Template parameter |
-| Parameter override | An operator-supplied value stored independently from the manifest default | A template parameter value overwritten during every update |
+| Parameter assignment | A typed, versioned operator-supplied value stored independently from the manifest default | A template parameter value overwritten during every update |
+| Environment key | A stable installation-local symbolic Environment ID exposed to deterministic planning expressions | A mutable display name or implicit process environment variable |
 | Application set | A named static membership or label selector used to target several applications without changing folder containment | Module-like operational grouping |
 | Configuration profile | A reusable, versioned configuration fragment such as common observability or logging defaults | Common configuration copied between hierarchy levels |
 | Profile assignment | An explicit relationship that applies a profile revision to an environment, application set or target selector | Implicit folder-based inheritance |
@@ -82,7 +84,7 @@ Folder (optional, M5.1)
 
 Environment
   |- Provider instance aliases
-  |- Parameter overrides
+  |- Parameter assignments
   |- Operational overrides
   |- Application deployment -> desired/applied Manifest revision
   `- Deployment change set -> exact deployment/revision membership
@@ -129,6 +131,9 @@ must not assume that folder paths represent environments.
   and cannot be redirected to a Component or another Application.
 - Resource and Workload declarations are portable. Their managed instances are
   scoped by Environment and receive separate immutable persisted IDs.
+- An Environment has an internal UUIDv7 `EnvironmentRecordId`, an immutable
+  lowercase kebab-case `EnvironmentKey` such as `production`, and a mutable
+  display name. Planning expressions see only `environment.key`.
 - `metadata.id` is the stable Application identity, and `applicationVersion`
   identifies one immutable declaration within that Application. Repository URL,
   commit, branch, pipeline and source path are private producer provenance, not
@@ -345,7 +350,7 @@ JSON Schema validation occurs before semantic validation by plugins.
       "query-prefix": {
         "type": "string",
         "description": "Prefix used by application queries",
-        "default": "{{ environment.name }}_"
+        "defaultExpression": "{{ environment.key }}_"
       }
     },
     "resources": {
@@ -514,7 +519,9 @@ registered explicitly. Unknown discriminator values, missing required members
 and unexpected properties are validation errors; the parser does not silently
 fall back to a base type.
 
-The same discriminated-contract approach applies to typed parameter definitions.
+The same discriminated-contract approach applies to the scalar `string`,
+`boolean`, `integer` and `number` parameter definitions accepted by
+[ADR-019](../adr/0019-typed-parameters-and-effective-value-resolution.md).
 `DocumentProjection` itself is a simple closed DTO containing `documentRef`,
 `path` and `rendererRef`; its target format comes from the referenced document,
 so it needs no discriminator. Manifest DTOs use concrete closed collections such
@@ -534,8 +541,9 @@ Arbitrary JSON is limited to intentional extension boundaries:
 - Binding `options`, validated against the exact binding or output-contract
   schema;
 - a structured Configuration document's `template`;
-- typed parameter defaults whose JSON token kind is checked against the
-  parameter definition.
+- typed literal parameter defaults whose JSON token kind is checked against the
+  parameter definition. `defaultExpression` remains an explicit Liquid string,
+  not an arbitrary value.
 
 These values use `JsonElement`, not `object`, and are never used to choose a CLR
 type. The JSON Schema mirrors the same discriminators with `oneOf` branches so
@@ -753,25 +761,58 @@ they are not inferred from a file extension.
 M2.1 raw text templates cannot receive SecretRefs or secret plaintext. Secure
 secret-bearing text interpolation requires a later explicit delivery contract.
 
-### Parameters and overrides
+### Parameters and assignments
 
-The manifest defines type, validation rules, description and default value.
-Operator values are separate override records with scope and provenance.
+The manifest declares Application-owned kebab-case Parameter IDs. M2.1 supports
+source-generated definitions for `string`, `boolean`, `integer` and `number`.
+Values are non-null and non-secret; integer and number values retain the exact
+mathematical semantics from ADR-015.
 
-Effective values are resolved from explicit layers:
+A definition may contain either literal `default` or Liquid
+`defaultExpression`, never both. A definition with neither is required. Literal
+defaults are type-checked during import. A default expression is syntax-checked
+during import and evaluated during planning against only `environment.key` and
+`application.id`. It cannot read another parameter, process environment
+variables, Resource outputs, secrets, time or random state.
 
-1. schema and plugin defaults;
-2. manifest values;
-3. environment overrides;
-4. application or component operator overrides.
+The explicit migration for a legacy `%env%_` default is:
 
-A new manifest default affects only values without an operator override. The UI
-must show the effective value, its source and a reset-to-default action. Updating
-a manifest never silently converts a default into an operator value or overwrites
-an existing override.
+```json
+{
+  "type": "string",
+  "defaultExpression": "{{ environment.key }}_"
+}
+```
+
+Effective parameter values use these layers:
+
+1. manifest literal default or evaluated default expression;
+2. Environment assignment;
+3. Application assignment;
+4. Component assignment.
+
+Assignments are typed, versioned operator state outside the ManifestRevision.
+Planning stores their exact revisions, resolved non-secret values and provenance
+in an immutable `ResolvedParameterSet`. A Component assignment affects only that
+Component's documents. Unknown assignments and missing required values fail
+planning instead of being silently ignored.
+
+Parameters are available through canonical bracket access such as
+`{{ parameters["query-prefix"] }}` only in structured or raw Configuration
+document templates. M2.1 does not execute Liquid in Resource or Workload
+`properties`, Binding `options` or exports.
+
+A new manifest default affects only scopes without an operator assignment. The
+UI must eventually show the effective value, source and reset-to-default action.
+Updating a manifest never converts a default into an operator value or
+overwrites an existing assignment.
 
 Generated values and resource outputs are not another merge layer. They are
 persisted state referenced by resource bindings.
+
+The exact constraints, diagnostics, precedence and M2.1 in-memory implementation
+boundary are defined by
+[ADR-019](../adr/0019-typed-parameters-and-effective-value-resolution.md).
 
 ## Shared configuration profiles
 

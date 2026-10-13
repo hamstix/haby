@@ -79,6 +79,12 @@ Normalized equality includes all meaningful declaration content, including:
 - Components, Configuration documents, Bindings, projections and Workloads;
 - normalized structured templates and type-specific `properties`.
 
+Parameter definitions include their exact literal defaults or unevaluated
+`defaultExpression` source in normalized declaration equality. Environment and
+operator assignments, evaluated expression results and resolved parameter sets
+remain deployment state outside the ManifestRevision as specified by
+[ADR-019](0019-typed-parameters-and-effective-value-resolution.md).
+
 It excludes:
 
 - `$schema`, which is an authoring and editor hint;

@@ -138,6 +138,7 @@ Objective: establish the application and resource model before replacing the cur
 - [x] Accept [ADR-016](docs/adr/0016-deployment-change-sets-plans-and-generations.md) for immutable deployment generations, ChangeSet intent, Plans, stale detection and atomic desired-state commits.
 - [x] Accept [ADR-017](docs/adr/0017-structured-configuration-trees-and-document-projections.md) for format-neutral Configuration trees, static structured templates, typed fragments, projections and deterministic JSON/YAML serialization.
 - [x] Accept [ADR-018](docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md) for opaque versioned contract IDs, separate contract and implementation registration, exact Provider/export resolution and derived cross-Application dependencies.
+- [x] Accept [ADR-019](docs/adr/0019-typed-parameters-and-effective-value-resolution.md) for scalar parameter definitions, literal and Environment-derived defaults, scoped assignments, precedence and provenance.
 - [ ] Introduce ApplicationDeployment as the desired/applied state boundary for one Application in one Environment.
 - [ ] Introduce DeploymentChangeSet with exact revision membership, expected generations and a complete cross-Application dependency plan.
 - [ ] Keep ChangeSet planning non-mutating and atomically commit all target deployment generations before provider side effects.
@@ -152,7 +153,7 @@ Objective: establish the application and resource model before replacing the cur
 - [ ] Introduce versioned Configuration profiles and explicit Profile assignments for global and group configuration.
 - [ ] Represent Profile assignment references as structured `{ profileId, revision }` values pinned to exact immutable revisions.
 - [ ] Define deterministic profile precedence, JSON Merge Patch and JSON Patch behavior, collision detection and per-path provenance.
-- [ ] Model typed parameter definitions and defaults separately from scoped operator overrides and their provenance.
+- [ ] Model typed parameter definitions and defaults separately from scoped operator assignments and their provenance.
 - [ ] Model generated values, secret references, external IDs and observed state separately from rendered documents.
 - [ ] Replace `fromKey` configuration copying with explicit bindings from multiple components to one resource.
 - [ ] Require explicit bindings before resource outputs can contribute to a component's configuration document.
@@ -403,7 +404,7 @@ side-effect-free vertical slice and does not combine manifest parsing with
 plugin execution, Runtime Identity authentication or secret storage.
 
 1. Introduce transport- and persistence-independent project boundaries for Domain, Manifest and Application code.
-2. Define IDs and records for Application, ManifestRevision, ApplicationDeployment, DeploymentChangeSet, Component, Resource, Resource export, Binding, Configuration document and Workload.
+2. Define IDs and records for Application, EnvironmentKey, ManifestRevision, ApplicationDeployment, DeploymentChangeSet, Component, Resource, Resource export, Binding, Configuration document and Workload.
 3. Define source-generated import-envelope and `haby.json` DTOs plus the first checked-in JSON Schema.
 4. Implement deterministic parsing and the import-time validation reports
    accepted in [ADR-014](docs/adr/0014-manifest-validation-diagnostics.md), with
@@ -412,6 +413,9 @@ plugin execution, Runtime Identity authentication or secret storage.
    evaluation and JSON/YAML Document projection rules accepted in
    [ADR-017](docs/adr/0017-structured-configuration-trees-and-document-projections.md),
    with focused semantic tests for typed Liquid scalars, paths and collisions.
+   Add typed parameter definitions, deterministic `defaultExpression`
+   evaluation, in-memory assignment precedence and resolved-value provenance
+   from [ADR-019](docs/adr/0019-typed-parameters-and-effective-value-resolution.md).
 6. Define portable Application-version references and local revision references,
    then implement the normalized-declaration equality, conflict and no-replacement
    rules accepted in
@@ -448,6 +452,9 @@ Definition of done for this work package:
 - Workloads are accepted only inside Components and need no `componentRef` in the manifest contract;
 - structured templates keep static topology, Document projections fail closed on
   collisions and JSON/YAML serializers preserve equivalent typed trees;
+- parameters are scalar, exact and non-secret; Environment-derived defaults are
+  resolved during planning, while scoped operator assignments retain precedence
+  and provenance without mutating Manifest revisions;
 - direct cross-application Resource references and deletion of actively exported Resources are rejected before side effects;
 - contract definitions are independent from implementations, Provider aliases
   and external exports resolve to exact Plan inputs, and cross-Application
@@ -475,6 +482,7 @@ Definition of done for this work package:
 - [ADR-016](docs/adr/0016-deployment-change-sets-plans-and-generations.md): Environment deployments, immutable generations, ChangeSet intent, Plans and atomic desired-state commits.
 - [ADR-017](docs/adr/0017-structured-configuration-trees-and-document-projections.md): Structured Configuration trees, typed Liquid values, Document projections and deterministic serializers.
 - [ADR-018](docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md): Opaque versioned contract identifiers, implementation resolution and exact manifest dependencies.
+- [ADR-019](docs/adr/0019-typed-parameters-and-effective-value-resolution.md): Typed scalar parameters, deterministic Environment-derived defaults, assignment precedence and provenance.
 
 ## Out of scope for the first milestones
 
@@ -498,4 +506,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md` and `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md` and `docs/adr/0019-typed-parameters-and-effective-value-resolution.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

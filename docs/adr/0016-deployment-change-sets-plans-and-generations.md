@@ -91,16 +91,20 @@ applied.
 
 M2.1 has ManifestRevision as its only user-selected desired-state input. Planning
 also derives exact Provider-alias and external-export resolutions from that
-declaration and its Environment. The Plan records the typed resolution results
-that exist in the implementation slice; M2.1 does not introduce generic
-stringly typed references or require persisted Provider and Resource-export
-revision aggregates merely to represent entities that do not yet exist.
+declaration and its Environment and resolves any supplied immutable in-memory
+parameter assignments. The Plan records the typed resolution results, exact
+assignment revisions and effective parameter values that exist in the
+implementation slice; M2.1 does not introduce generic stringly typed references
+or require persisted Provider, Resource-export or assignment aggregates merely
+to represent entities that do not yet exist.
 
 Later versions add independently selected typed references for operator override
 revisions, Profile revisions, persisted Provider configuration revisions,
 independent Resource export revisions and other accepted inputs. Exact M2.1
 resolution rules are defined by
 [ADR-018](0018-versioned-contract-identifiers-and-manifest-dependencies.md).
+Parameter resolution rules are defined by
+[ADR-019](0019-typed-parameters-and-effective-value-resolution.md).
 
 Provider aliases and other selectors are resolved during planning to exact,
 versioned references. Changing an alias or creating a new Provider configuration
