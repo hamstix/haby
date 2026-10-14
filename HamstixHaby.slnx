@@ -21,4 +21,10 @@
   <Project Path="Hamstix.Haby/Server.Tests/Hamstix.Haby.Server.Tests.csproj" />
   <Project Path="Hamstix.Haby/Server/Hamstix.Haby.Server.csproj" />
   <Project Path="Hamstix.Haby/Shared/Hamstix.Haby.Shared.csproj" />
+  <Project Path="src/Haby.Domain/Haby.Domain.csproj" />
+  <Project Path="src/Haby.Manifest/Haby.Manifest.csproj" />
+  <Project Path="src/Haby.Application/Haby.Application.csproj" />
+  <Project Path="tests/Haby.Domain.Tests/Haby.Domain.Tests.csproj" />
+  <Project Path="tests/Haby.Manifest.Tests/Haby.Manifest.Tests.csproj" />
+  <Project Path="tests/Haby.Application.Tests/Haby.Application.Tests.csproj" />
 </Solution>

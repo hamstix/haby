@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Haby.Domain\Haby.Domain.csproj" />
+    <ProjectReference Include="..\Haby.Manifest\Haby.Manifest.csproj" />
+  </ItemGroup>
+</Project>
