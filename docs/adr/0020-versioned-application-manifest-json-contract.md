@@ -266,8 +266,9 @@ could silently reinterpret a revision after an upgrade.
 
 ## Follow-up work
 
-- implement the source-generated import-envelope and version-specific manifest
-  DTOs;
+- implement the shared raw-envelope parser, source-generated import-envelope and
+  version-specific manifest DTOs through the use cases accepted in
+  [ADR-021](0021-application-manifest-validation-and-import-use-cases.md);
 - add the Draft 2020-12 schema and shared positive and negative corpus;
 - implement duplicate-member, strict UTF-8 and maximum-depth checks before DTO
   deserialization;

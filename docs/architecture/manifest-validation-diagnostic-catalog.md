@@ -345,9 +345,14 @@ The following are application or transport errors rather than manifest
 diagnostics:
 
 ```text
-invalid import envelope
-invalid applicationVersion
-request too large
+manifest-import.invalid-encoding
+manifest-import.invalid-json
+manifest-import.duplicate-property
+manifest-import.required
+manifest-import.unknown-property
+manifest-import.type-mismatch
+manifest-import.invalid-application-version
+manifest-import.request-too-large
 authentication failure
 authorization failure
 application-version-content-conflict
@@ -359,4 +364,5 @@ external export resolution failure
 ```
 
 Their typed result contracts are defined by the owning application use case,
-beginning with manifest import in ADR-021.
+beginning with manifest validation and import in
+[ADR-021](../adr/0021-application-manifest-validation-and-import-use-cases.md).

@@ -237,6 +237,7 @@ state.
   comparer with focused equivalence tests;
 - implement canonical representation and internal fingerprinting as an
   optimization after equality tests are authoritative;
-- define the typed version-content conflict application result;
+- implement the typed version-content conflict application result accepted in
+  [ADR-021](0021-application-manifest-validation-and-import-use-cases.md);
 - specify retry, resume and reconciliation operations in ADR-005 without adding
   manifest-replacement semantics.

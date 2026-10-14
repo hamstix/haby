@@ -140,6 +140,7 @@ Objective: establish the application and resource model before replacing the cur
 - [x] Accept [ADR-018](docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md) for opaque versioned contract IDs, separate contract and implementation registration, exact Provider/export resolution and derived cross-Application dependencies.
 - [x] Accept [ADR-019](docs/adr/0019-typed-parameters-and-effective-value-resolution.md) for scalar parameter definitions, literal and Environment-derived defaults, scoped assignments, precedence and provenance.
 - [x] Accept [ADR-020](docs/adr/0020-versioned-application-manifest-json-contract.md) for the strict versioned JSON wire contract, minimal import envelope, checked-in schema boundary and adapter-independent normalized revisions.
+- [x] Accept [ADR-021](docs/adr/0021-application-manifest-validation-and-import-use-cases.md) for shared raw-payload validation and import use cases, typed outcomes, atomic immutable-revision creation and deterministic safe version conflicts.
 - [ ] Introduce ApplicationDeployment as the desired/applied state boundary for one Application in one Environment.
 - [ ] Introduce DeploymentChangeSet with exact revision membership, expected generations and a complete cross-Application dependency plan.
 - [ ] Keep ChangeSet planning non-mutating and atomically commit all target deployment generations before provider side effects.
@@ -429,7 +430,9 @@ plugin execution, Runtime Identity authentication or secret storage.
    then implement the normalized-declaration equality, conflict and no-replacement
    rules accepted in
    [ADR-015](docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md)
-   through in-memory repositories and focused tests.
+   through the raw-payload validation and atomic import use cases accepted in
+   [ADR-021](docs/adr/0021-application-manifest-validation-and-import-use-cases.md),
+   using in-memory repositories and focused sequential and concurrent tests.
 7. Implement the immutable generation snapshots, ChangeSet membership, Plans,
    distinct stale errors and atomic in-memory commit contracts accepted in
    [ADR-016](docs/adr/0016-deployment-change-sets-plans-and-generations.md)
@@ -451,6 +454,7 @@ Definition of done for this work package:
 - accepted Manifest revisions remain usable from their versioned normalized
   representation without retaining a retired alpha input adapter;
 - invalid imports do not create Manifest revisions, repeated equivalent imports of one Application version return the same revision, and changed content under that version is rejected;
+- invalid first imports do not leave empty Application records, concurrent imports preserve one immutable winning revision, and typed results distinguish created, equivalent and conflicting submissions;
 - equality uses the manifest API's normalization profile, exact number semantics
   and authoritative normalized-content comparison rather than source bytes or a
   fingerprint alone;
@@ -498,6 +502,7 @@ Definition of done for this work package:
 - [ADR-018](docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md): Opaque versioned contract identifiers, implementation resolution and exact manifest dependencies.
 - [ADR-019](docs/adr/0019-typed-parameters-and-effective-value-resolution.md): Typed scalar parameters, deterministic Environment-derived defaults, assignment precedence and provenance.
 - [ADR-020](docs/adr/0020-versioned-application-manifest-json-contract.md): Strict versioned Application manifest JSON, import envelope, checked-in schema and normalized-model persistence boundary.
+- [ADR-021](docs/adr/0021-application-manifest-validation-and-import-use-cases.md): Shared manifest validation and import use cases, typed outcomes, atomic revision creation and safe version-conflict reporting.
 
 ## Out of scope for the first milestones
 
@@ -521,4 +526,4 @@ Definition of done for this work package:
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/application-manifest-v1alpha1.md`, `docs/architecture/manifest-validation-diagnostic-catalog.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`, `docs/adr/0019-typed-parameters-and-effective-value-resolution.md` and `docs/adr/0020-versioned-application-manifest-json-contract.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Do not add persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/application-manifest-v1alpha1.md`, `docs/architecture/manifest-validation-diagnostic-catalog.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`, `docs/adr/0019-typed-parameters-and-effective-value-resolution.md`, `docs/adr/0020-versioned-application-manifest-json-contract.md` and `docs/adr/0021-application-manifest-validation-and-import-use-cases.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Preserve raw JSON through the shared Manifest-layer parser, use typed validation/import outcomes and prove atomic immutable import behavior under concurrency. Do not add PostgreSQL persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.

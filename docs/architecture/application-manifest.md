@@ -11,7 +11,8 @@
   [ADR-017](../adr/0017-structured-configuration-trees-and-document-projections.md),
   [ADR-018](../adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md),
   [ADR-019](../adr/0019-typed-parameters-and-effective-value-resolution.md),
-  [ADR-020](../adr/0020-versioned-application-manifest-json-contract.md)
+  [ADR-020](../adr/0020-versioned-application-manifest-json-contract.md),
+  [ADR-021](../adr/0021-application-manifest-validation-and-import-use-cases.md)
 
 ## Purpose
 
