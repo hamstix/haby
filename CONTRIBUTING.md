@@ -42,6 +42,11 @@ Do not create milestone-sized branches such as `develop`, `rewrite` or `oss-revi
 
 ## Development workflow
 
+Maintainers coordinating coding agents should also follow the
+[agent-assisted development workflow](docs/development/agent-coding-workflow.md).
+It defines slice readiness, branch ownership, independent review, pull-request
+gates and the initial M2.1 execution wave.
+
 1. Synchronize the default branch and create a topic branch.
 2. Reproduce the current behavior before editing it.
 3. For a defect, add a focused failing test before changing production code.
@@ -58,9 +63,9 @@ Do not hide baseline failures. Clearly distinguish existing failures, environmen
 The reproducible baseline is being established in milestone M0. Until its commands are automated, use the solution-level .NET workflow:
 
 ```powershell
-dotnet restore .\HamstixHaby.sln
-dotnet build .\HamstixHaby.sln --no-restore
-dotnet test .\HamstixHaby.sln --no-build
+dotnet restore .\HamstixHaby.slnx
+dotnet build .\HamstixHaby.slnx --no-restore
+dotnet test .\HamstixHaby.slnx --no-build
 git diff --check
 ```
 

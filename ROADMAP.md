@@ -408,6 +408,12 @@ The first M2 implementation is **M2.1 — Manifest foundation**. It establishes 
 side-effect-free vertical slice and does not combine manifest parsing with
 plugin execution, Runtime Identity authentication or secret storage.
 
+Implementation is coordinated through the
+[agent-assisted development workflow](docs/development/agent-coding-workflow.md).
+Its first execution wave separates core project foundations, the complete
+`v1alpha1` schema/DTO contract and deterministic raw-payload parsing into three
+sequential pull requests with independent review gates.
+
 1. Introduce transport- and persistence-independent project boundaries for Domain, Manifest and Application code.
 2. Define IDs and records for Application, EnvironmentKey, ManifestRevision, ApplicationDeployment, DeploymentChangeSet, Component, Resource, Resource export, Binding, Configuration document and Workload.
 3. Implement the accepted
