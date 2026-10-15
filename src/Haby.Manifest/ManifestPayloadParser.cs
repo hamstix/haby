@@ -162,9 +162,10 @@ public static class ManifestPayloadParser
             if (string.IsNullOrEmpty(schemaPath) || !schemaPath.Contains('/')) continue;
             var keyword = schemaPath[(schemaPath.LastIndexOf('/') + 1)..];
             if (keyword is not ("required" or "additionalProperties" or "type" or "oneOf" or "const" or "enum" or "pattern" or "minLength" or "maxLength" or "minimum" or "maximum" or "minItems" or "maxItems" or "maxProperties" or "uniqueItems" or "propertyNames" or "not")) continue;
-            if (schemaPath.Contains("/propertyNames", StringComparison.Ordinal) ||
-                ((schemaPath.Contains("/$defs/localId/", StringComparison.Ordinal) || schemaPath.Contains("/$defs/applicationId/", StringComparison.Ordinal)) &&
-                 TryAtPointer(manifest, path, out var map) && map.ValueKind == JsonValueKind.Object))
+            if (keyword is "propertyNames" or "pattern" or "maxLength" &&
+                (schemaPath.Contains("/propertyNames", StringComparison.Ordinal) ||
+                 ((schemaPath.Contains("/$defs/localId/", StringComparison.Ordinal) || schemaPath.Contains("/$defs/applicationId/", StringComparison.Ordinal)) &&
+                  TryAtPointer(manifest, path, out var map) && map.ValueKind == JsonValueKind.Object)))
             {
                 if (keyword is "propertyNames" or "pattern")
                 {
@@ -207,8 +208,11 @@ public static class ManifestPayloadParser
             }
             if (keyword == "additionalProperties")
             {
-                var property = LastSegment(path);
-                yield return Diagnostic("manifest.schema.unknown-property", path, "A core object contains an unknown member.", ("property", SafeProperty(property)));
+                if (SchemaNode(schemaPath) is JsonValue schemaValue && schemaValue.TryGetValue<bool>(out var allowed) && !allowed)
+                {
+                    var property = LastSegment(path);
+                    yield return Diagnostic("manifest.schema.unknown-property", path, "A core object contains an unknown member.", ("property", SafeProperty(property)));
+                }
                 continue;
             }
             if (keyword == "type")

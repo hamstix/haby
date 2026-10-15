@@ -142,6 +142,28 @@ public class ManifestPayloadParserTests
     }
 
     [Theory]
+    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":{}},"spec":{}}""", "/metadata/id")]
+    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"resources":{"r":{"type":"a/v1","providerRef":{}}}}}""", "/spec/resources/r/providerRef")]
+    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"c":{"bindings":{"b":{"target":{"kind":"application-export","applicationId":{},"exportRef":"e","contract":"a/v1"}}}}}}}""", "/spec/components/c/bindings/b/target/applicationId")]
+    public void Object_valued_identifiers_report_precise_type_mismatches(string manifest, string path)
+    {
+        var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
+        Assert.Equal("manifest.schema.type-mismatch", diagnostic.Code);
+        Assert.Equal(path, diagnostic.Path);
+        Assert.Equal("string", diagnostic.Parameters["expectedType"]);
+    }
+
+    [Fact]
+    public void Wrong_label_value_type_does_not_become_an_unknown_property()
+    {
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example","labels":{"k":42}},"spec":{}}""";
+        var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
+        Assert.Equal("manifest.schema.type-mismatch", diagnostic.Code);
+        Assert.Equal("/metadata/labels/k", diagnostic.Path);
+        Assert.Equal("string", diagnostic.Parameters["expectedType"]);
+    }
+
+    [Theory]
     [InlineData("string", "1", "string")]
     [InlineData("integer", "1.5", "integer")]
     [InlineData("boolean", "\"true\"", "boolean")]
