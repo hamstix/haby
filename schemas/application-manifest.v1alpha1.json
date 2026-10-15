@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haby.dev/schemas/application-manifest.v1alpha1.json",
+  "type": "object",
+  "properties": {
+    "$schema": { "const": "https://haby.dev/schemas/application-manifest.v1alpha1.json" },
+    "apiVersion": { "const": "haby.dev/v1alpha1" },
+    "kind": { "const": "Application" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "spec": { "$ref": "#/$defs/spec" }
+  },
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "$defs": {
+    "applicationId": { "type": "string", "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$" },
+    "localId": { "type": "string", "maxLength": 63, "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$" },
+    "contractId": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*/v[1-9][0-9]*(?:(?:alpha|beta)[1-9][0-9]*)?$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "labels": {
+      "type": "object", "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/applicationId" },
+      "additionalProperties": { "type": "string", "maxLength": 63, "pattern": "^(?:[a-z0-9](?:[a-z0-9._-]{0,62})?)?$" }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/applicationId" },
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "labels": { "$ref": "#/$defs/labels" }
+      },
+      "required": ["id"], "additionalProperties": false
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "parameters": { "$ref": "#/$defs/parameterMap" },
+        "resources": { "$ref": "#/$defs/resourceMap" },
+        "exports": { "$ref": "#/$defs/exportMap" },
+        "components": { "$ref": "#/$defs/componentMap" }
+      },
+      "additionalProperties": false
+    },
+    "resourceMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/localId" }, "additionalProperties": { "$ref": "#/$defs/resource" } },
+    "exportMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/localId" }, "additionalProperties": { "$ref": "#/$defs/export" } },
+    "componentMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/localId" }, "additionalProperties": { "$ref": "#/$defs/component" } },
+    "parameterMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/localId" }, "additionalProperties": { "$ref": "#/$defs/parameter" } },
+    "bindingMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/localId" }, "additionalProperties": { "$ref": "#/$defs/binding" } },
+    "documentMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/localId" }, "additionalProperties": { "$ref": "#/$defs/document" } },
+    "workloadMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/localId" }, "additionalProperties": { "$ref": "#/$defs/workload" } },
+    "resource": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/$defs/contractId" },
+        "providerRef": { "$ref": "#/$defs/applicationId" },
+        "properties": { "type": "object" },
+        "lifecycle": { "$ref": "#/$defs/lifecycle" }
+      },
+      "required": ["type", "providerRef"], "additionalProperties": false
+    },
+    "lifecycle": {
+      "type": "object",
+      "properties": { "deletionPolicy": { "enum": ["retain", "orphan", "delete"] } },
+      "additionalProperties": false
+    },
+    "export": {
+      "type": "object",
+      "properties": {
+        "resourceRef": { "$ref": "#/$defs/localId" },
+        "contract": { "$ref": "#/$defs/contractId" },
+        "accessProfile": { "$ref": "#/$defs/localId" }
+      },
+      "required": ["resourceRef", "contract"], "additionalProperties": false
+    },
+    "component": {
+      "type": "object",
+      "properties": {
+        "displayName": { "$ref": "#/$defs/displayName" },
+        "labels": { "$ref": "#/$defs/labels" },
+        "bindings": { "$ref": "#/$defs/bindingMap" },
+        "documents": { "$ref": "#/$defs/documentMap" },
+        "workloads": { "$ref": "#/$defs/workloadMap" }
+      },
+      "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "properties": {
+        "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/externalTarget" }] },
+        "options": { "type": "object" },
+        "documentProjections": { "type": "array", "items": { "$ref": "#/$defs/projection" }, "uniqueItems": true }
+      },
+      "required": ["target"], "additionalProperties": false
+    },
+    "localTarget": {
+      "type": "object",
+      "properties": { "kind": { "const": "local-resource" }, "resourceRef": { "$ref": "#/$defs/localId" } },
+      "required": ["kind", "resourceRef"], "additionalProperties": false
+    },
+    "externalTarget": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "application-export" },
+        "applicationId": { "$ref": "#/$defs/applicationId" },
+        "exportRef": { "$ref": "#/$defs/localId" },
+        "contract": { "$ref": "#/$defs/contractId" }
+      },
+      "required": ["kind", "applicationId", "exportRef", "contract"], "additionalProperties": false
+    },
+    "projection": {
+      "type": "object",
+      "properties": {
+        "documentRef": { "$ref": "#/$defs/localId" },
+        "path": { "type": "string", "minLength": 1, "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$" },
+        "rendererRef": { "$ref": "#/$defs/contractId" }
+      },
+      "required": ["documentRef", "path", "rendererRef"], "additionalProperties": false
+    },
+    "document": { "oneOf": [{ "$ref": "#/$defs/structuredDocument" }, { "$ref": "#/$defs/textDocument" }] },
+    "fileName": {
+      "type": "string", "maxLength": 255,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "structuredDocument": {
+      "type": "object",
+      "properties": {
+        "fileName": { "$ref": "#/$defs/fileName" },
+        "format": { "enum": ["json", "yaml"] },
+        "template": true
+      },
+      "required": ["fileName", "format", "template"], "additionalProperties": false
+    },
+    "textDocument": {
+      "type": "object",
+      "properties": {
+        "fileName": { "$ref": "#/$defs/fileName" },
+        "format": { "const": "text" },
+        "template": { "type": "string" }
+      },
+      "required": ["fileName", "format", "template"], "additionalProperties": false
+    },
+    "workload": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/$defs/contractId" },
+        "providerRef": { "$ref": "#/$defs/applicationId" },
+        "profile": { "$ref": "#/$defs/localId" },
+        "properties": { "type": "object" }
+      },
+      "required": ["type", "providerRef"], "additionalProperties": false
+    },
+    "parameter": {
+      "oneOf": [
+        { "$ref": "#/$defs/stringParameter" },
+        { "$ref": "#/$defs/booleanParameter" },
+        { "$ref": "#/$defs/integerParameter" },
+        { "$ref": "#/$defs/numberParameter" }
+      ]
+    },
+    "stringParameter": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "string" }, "description": { "type": "string", "maxLength": 2048 },
+        "default": { "type": "string" }, "defaultExpression": { "type": "string" },
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 0 },
+        "allowedValues": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+      },
+      "required": ["type"], "additionalProperties": false,
+      "not": { "required": ["default", "defaultExpression"] }
+    },
+    "booleanParameter": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "boolean" }, "description": { "type": "string", "maxLength": 2048 },
+        "default": { "type": "boolean" }, "defaultExpression": { "type": "string" }
+      },
+      "required": ["type"], "additionalProperties": false,
+      "not": { "required": ["default", "defaultExpression"] }
+    },
+    "integerParameter": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "integer" }, "description": { "type": "string", "maxLength": 2048 },
+        "default": { "type": "integer" }, "defaultExpression": { "type": "string" },
+        "minimum": { "type": "integer" }, "maximum": { "type": "integer" },
+        "allowedValues": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer" } }
+      },
+      "required": ["type"], "additionalProperties": false,
+      "not": { "required": ["default", "defaultExpression"] }
+    },
+    "numberParameter": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "number" }, "description": { "type": "string", "maxLength": 2048 },
+        "default": { "type": "number" }, "defaultExpression": { "type": "string" },
+        "minimum": { "type": "number" }, "maximum": { "type": "number" },
+        "allowedValues": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "number" } }
+      },
+      "required": ["type"], "additionalProperties": false,
+      "not": { "required": ["default", "defaultExpression"] }
+    }
+  }
+}

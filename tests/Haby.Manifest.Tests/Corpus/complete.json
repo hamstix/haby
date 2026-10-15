@@ -1,0 +1,42 @@
+{
+  "$schema": "https://haby.dev/schemas/application-manifest.v1alpha1.json",
+  "apiVersion": "haby.dev/v1alpha1",
+  "kind": "Application",
+  "metadata": {
+    "id": "example.service",
+    "displayName": "Example",
+    "labels": { "team": "platform", "enabled": "" }
+  },
+  "spec": {
+    "parameters": {
+      "prefix": { "description": "A literal prefix", "minLength": 0, "maxLength": 30, "allowedValues": ["a", "b"], "default": "a", "type": "string" },
+      "enabled": { "defaultExpression": "{{ environment.key }}", "type": "boolean" },
+      "count": { "minimum": -999999999999999999999999999999999999999, "maximum": 999999999999999999999999999999999999999, "allowedValues": [1, 2], "default": 1, "type": "integer" },
+      "ratio": { "minimum": 0.123456789012345678901234567890123456789, "maximum": 1e999, "allowedValues": [0.123456789012345678901234567890123456789, 1e999], "default": 0.123456789012345678901234567890123456789, "type": "number" }
+    },
+    "resources": {
+      "database": { "type": "postgresql.database/v1alpha1", "providerRef": "postgresql.primary", "properties": { "plan": "small", "nested": [1, null] }, "lifecycle": { "deletionPolicy": "retain" } }
+    },
+    "exports": {
+      "database": { "resourceRef": "database", "contract": "postgresql.connection/v1alpha1", "accessProfile": "read-only" }
+    },
+    "components": {
+      "worker": {
+        "displayName": "Worker",
+        "labels": { "role": "worker" },
+        "bindings": {
+          "local": { "options": { "ssl": true }, "documentProjections": [{ "documentRef": "settings", "path": "/Database", "rendererRef": "postgresql.connection/v1alpha1" }], "target": { "resourceRef": "database", "kind": "local-resource" } },
+          "shared": { "target": { "applicationId": "shared.service", "exportRef": "database", "contract": "postgresql.connection/v1alpha1", "kind": "application-export" } }
+        },
+        "documents": {
+          "settings": { "fileName": "settings.json", "template": { "enabled": true, "count": 1 }, "format": "json" },
+          "yaml-settings": { "fileName": "settings.yaml", "template": [1, false, null], "format": "yaml" },
+          "readme": { "fileName": "README.txt", "template": "", "format": "text" }
+        },
+        "workloads": {
+          "main": { "type": "kubernetes.workload/v1alpha1", "providerRef": "kubernetes.primary", "profile": "worker", "properties": { "replicas": 2 } }
+        }
+      }
+    }
+  }
+}

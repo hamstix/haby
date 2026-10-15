@@ -1,0 +1,6 @@
+{
+  "apiVersion": "haby.dev/v1alpha1",
+  "kind": "Application",
+  "metadata": { "id": "example-service" },
+  "spec": {}
+}
