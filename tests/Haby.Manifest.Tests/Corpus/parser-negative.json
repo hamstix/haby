@@ -1,0 +1,51 @@
+[
+  {
+    "name": "missing envelope member",
+    "payload": "{\"manifest\":{}}",
+    "outcome": "request",
+    "code": "manifest-import.required",
+    "path": "/applicationVersion"
+  },
+  {
+    "name": "unknown envelope member",
+    "payload": "{\"applicationVersion\":\"1\",\"manifest\":{},\"extra\":true}",
+    "outcome": "request",
+    "code": "manifest-import.unknown-property",
+    "path": "/extra"
+  },
+  {
+    "name": "duplicate envelope member",
+    "payload": "{\"applicationVersion\":\"1\",\"applicationVersion\":\"2\",\"manifest\":{}}",
+    "outcome": "request",
+    "code": "manifest-import.duplicate-property",
+    "path": "/applicationVersion"
+  },
+  {
+    "name": "unsupported version",
+    "payload": "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v2\",\"kind\":\"Application\",\"metadata\":{\"id\":\"example\"},\"spec\":{}}}",
+    "outcome": "manifest",
+    "code": "manifest.schema.unsupported-api-version",
+    "path": "/apiVersion"
+  },
+  {
+    "name": "unknown parameter discriminator",
+    "payload": "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"example\"},\"spec\":{\"parameters\":{\"p\":{\"type\":\"secret-value\"}}}}}",
+    "outcome": "manifest",
+    "code": "manifest.parameter.type-invalid",
+    "path": "/spec/parameters/p/type"
+  },
+  {
+    "name": "duplicate in extension",
+    "payload": "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"example\"},\"spec\":{\"resources\":{\"r\":{\"type\":\"a/v1\",\"providerRef\":\"p\",\"properties\":{\"x\":\"secret-value\",\"x\":\"another-secret\"}}}}}}",
+    "outcome": "manifest",
+    "code": "manifest.syntax.duplicate-property",
+    "path": "/spec/resources/r/properties/x"
+  },
+  {
+    "name": "escaped pointer",
+    "payload": "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"example\"},\"spec\":{\"resources\":{\"a/b~c\":{\"type\":\"a/v1\",\"providerRef\":\"p\",\"properties\":{\"x\":1,\"x\":2}}}}}}",
+    "outcome": "manifest",
+    "code": "manifest.syntax.duplicate-property",
+    "path": "/spec/resources/a~1b~0c/properties/x"
+  }
+]

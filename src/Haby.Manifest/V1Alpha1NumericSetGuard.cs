@@ -16,23 +16,29 @@ public static class V1Alpha1NumericSetGuard
     public static IReadOnlyList<string> FindDuplicatePaths(JsonElement manifest, int maxDiagnostics = 100)
     {
         if (maxDiagnostics <= 0 ||
-            !manifest.TryGetProperty("spec", out var spec) ||
-            !spec.TryGetProperty("parameters", out var parameters))
+            !manifest.TryGetProperty("spec"u8, out var spec) ||
+            spec.ValueKind != JsonValueKind.Object ||
+            !spec.TryGetProperty("parameters"u8, out var parameters) ||
+            parameters.ValueKind != JsonValueKind.Object)
             return [];
 
         var paths = new List<string>();
         foreach (var parameter in parameters.EnumerateObject())
         {
             var definition = parameter.Value;
-            if (!definition.TryGetProperty("type", out var type) ||
+            if (definition.ValueKind != JsonValueKind.Object ||
+                !definition.TryGetProperty("type"u8, out var type) ||
                 type.ValueKind != JsonValueKind.String ||
                 type.GetString() is not ("integer" or "number") ||
-                !definition.TryGetProperty("allowedValues", out var values))
+                !definition.TryGetProperty("allowedValues"u8, out var values) ||
+                values.ValueKind != JsonValueKind.Array)
                 continue;
 
             var seen = new HashSet<ExactJsonNumber>();
             foreach (var value in values.EnumerateArray())
             {
+                if (value.ValueKind != JsonValueKind.Number)
+                    break;
                 if (seen.Add(ExactJsonNumber.Parse(value.GetRawText())))
                     continue;
 

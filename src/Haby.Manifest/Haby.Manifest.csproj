@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\Haby.Domain\Haby.Domain.csproj" />
+    <PackageReference Include="Corvus.Text.Json.Validator" />
+    <EmbeddedResource Include="..\..\schemas\application-manifest.v1alpha1.json" LogicalName="Haby.Manifest.application-manifest.v1alpha1.json" />
   </ItemGroup>
 </Project>
