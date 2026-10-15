@@ -554,10 +554,12 @@ Completion gate:
 
 ### Dependency decision before Slice 2
 
-The maintainer has selected Corvus.Text.Json.Validator 5.7.7 for JSON Schema
-Draft 2020-12 parity validation in Slice 2. The restored .NET 10 package graph
-(`Corvus.Text.Json.Validator`, `Corvus.Text.Json` and `NodaTime`) declares
-Apache-2.0 for every binary package. A .NET 10 compile spike confirmed offline
+The maintainer confirmed Corvus.Text.Json.Validator 5.7.7 for JSON Schema
+Draft 2020-12 parity validation in Slice 2. JsonSchema.Net's related binary
+packages use OSMF terms that do not fit Haby's intended commercial use. The
+restored .NET 10 package graph (`Corvus.Text.Json.Validator`, `Corvus.Text.Json`
+and `NodaTime`) declares Apache-2.0 for every binary package. A .NET 10 compile
+spike confirmed offline
 evaluation, safe instance/schema paths and the accepted high-precision cases.
 Corvus treats `-0` and `0` as distinct under `uniqueItems`.
 Haby therefore applies exact-number equality to the v1alpha1 integer and number
@@ -571,6 +573,9 @@ checked-in schema and input JSON remain unchanged. The decision covered:
 - trimming/AOT characteristics relevant to libraries;
 - license and maintenance status;
 - testability without network access.
+
+Trimming and Native AOT behavior were not verified in Slice 2; no Native AOT
+support is claimed for the server.
 
 The implementation agent must verify the package API, .NET 10 restore/build,
 schema evaluation, error-path access, offline testability and exact numeric

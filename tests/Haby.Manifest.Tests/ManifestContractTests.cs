@@ -114,6 +114,11 @@ public sealed class ManifestContractTests
         var cases = new (string Name, Action<JsonObject> Change)[]
         {
             ("missing apiVersion", root => root.Remove("apiVersion")),
+            ("missing kind", root => root.Remove("kind")),
+            ("missing spec", root => root.Remove("spec")),
+            ("unsupported apiVersion", root => root["apiVersion"] = "haby.dev/v1beta1"),
+            ("unsupported kind", root => root["kind"] = "Server"),
+            ("schema uri mismatch", root => root["$schema"] = "https://haby.dev/schemas/application-manifest.v9.json"),
             ("wrong root casing", root => { root["ApiVersion"] = root["apiVersion"]!.DeepClone(); root.Remove("apiVersion"); }),
             ("unknown root", root => root["extra"] = true),
             ("null metadata", root => root["metadata"] = null),
@@ -163,6 +168,8 @@ public sealed class ManifestContractTests
             ("string wrong default", root => Parameter(root, "prefix")["default"] = 1),
             ("boolean wrong default", root => Parameter(root, "enabled")["default"] = "true"),
             ("integer wrong allowed value", root => Parameter(root, "count")["allowedValues"] = new JsonArray("1")),
+            ("integer fractional default", root => Parameter(root, "count")["default"] = 1.5),
+            ("integer fractional bound", root => Parameter(root, "count")["minimum"] = 1.5),
             ("number wrong bound", root => Parameter(root, "ratio")["minimum"] = "0.1"),
             ("number forbidden string constraint", root => Parameter(root, "ratio")["minLength"] = 1),
             ("boolean forbidden numeric constraint", root => Parameter(root, "enabled")["minimum"] = 0),
@@ -183,6 +190,55 @@ public sealed class ManifestContractTests
             var root = CompleteNode();
             change(root);
             Assert.False(IsSchemaValid(root.ToJsonString()), name);
+        }
+    }
+
+    [Fact]
+    public void Integer_parameter_accepts_integral_decimal_lexeme()
+    {
+        var root = CompleteNode();
+        Parameter(root, "count")["default"] = JsonNode.Parse("1.0"u8);
+        var json = root.ToJsonString();
+        Assert.True(IsSchemaValid(json));
+        Assert.Equal("1.0", JsonSerializer.Deserialize(json, Context.ApplicationManifest)!.Spec.Parameters["count"].Default.GetRawText());
+    }
+
+    [Fact]
+    public void Lexical_length_and_collection_boundaries_match_the_field_matrix()
+    {
+        var cases = new (string Name, Action<JsonObject, int> Change, int Limit)[]
+        {
+            ("application id", (root, length) => root["metadata"]!["id"] = "a" + new string('b', length - 1), 128),
+            ("local id", (root, length) => root["spec"]!["resources"]!.AsObject()["a" + new string('b', length - 1)] = Resource(root).DeepClone(), 63),
+            ("label value", (root, length) => root["metadata"]!["labels"]!["team"] = new string('a', length), 63),
+            ("description", (root, length) => Parameter(root, "prefix")["description"] = new string('a', length), 2048),
+            ("file name", (root, length) => Document(root, "readme")["fileName"] = new string('a', length), 255)
+        };
+
+        foreach (var (name, change, limit) in cases)
+        {
+            foreach (var (length, expected) in new[] { (limit, true), (limit + 1, false) })
+            {
+                var root = CompleteNode();
+                change(root, length);
+                Assert.True(IsSchemaValid(root.ToJsonString()) == expected, $"{name} at length {length}");
+            }
+        }
+
+        foreach (var (count, expected) in new[] { (64, true), (65, false) })
+        {
+            var root = CompleteNode();
+            var labels = root["metadata"]!["labels"]!.AsObject();
+            labels.Clear();
+            for (var i = 0; i < count; i++) labels[$"key{i}"] = "ok";
+            Assert.Equal(expected, IsSchemaValid(root.ToJsonString()));
+        }
+
+        foreach (var contract in new[] { "postgresql.database", "a.b/latest", "a.b/v1-latest" })
+        {
+            var root = CompleteNode();
+            Resource(root)["type"] = contract;
+            Assert.False(IsSchemaValid(root.ToJsonString()), contract);
         }
     }
 
