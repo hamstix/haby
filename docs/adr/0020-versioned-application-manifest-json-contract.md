@@ -103,6 +103,10 @@ Those values use `JsonElement`, never `object`, and are validated by the exact
 registered contract where applicable. An extension boundary is not a mechanism
 for choosing a CLR type.
 
+Exact numeric constraint values in parameter definitions are core typed fields,
+not additional `JsonElement` extension boundaries. Their wire representation
+and converter are specified by ADR-019.
+
 ### Absence, null and collection defaults are explicit
 
 Absent and explicit `null` are different unless a field contract explicitly
@@ -122,8 +126,17 @@ normalization. An Application may contain no Components. This supports an
 infrastructure-only Application that owns Resources and may expose them through
 Resource exports for Components in other Applications.
 
+Documented member defaults also apply inside a present empty object. In
+particular, absent Resource `lifecycle`, `lifecycle: {}` and an explicit
+`deletionPolicy: "retain"` normalize identically. Explicit `null` is invalid,
+and closed core objects still reject unknown members.
+
 Manifest-local declarations use map keys as their IDs. An entry does not repeat
 that ID in its value, and JSON object member order has no semantic meaning.
+Source-generated DTOs must therefore accept a union discriminator even when it
+appears after other members of the same JSON object. Required DTO members must
+enforce presence as well as type; non-nullable CLR annotations alone do not
+provide that guarantee. The schema and DTO corpus covers both rules.
 
 ### Validation precedes source-generated deserialization
 
@@ -140,6 +153,12 @@ UTF-8 JSON
   -> registered extension-contract validation
   -> normalization
 ```
+
+The typed import-envelope DTO is part of the source-generated M2.1 contract.
+Its embedded `manifest` JSON value is dispatched by exact `apiVersion` and
+`kind` before version-specific DTO deserialization; it is not an additional
+manifest extension boundary. Slice 2 defines this DTO. Slice 3 implements raw
+UTF-8 intake, envelope validation and the dispatch pipeline.
 
 Schema validation remains authoritative for complete aggregated shape
 diagnostics; DTO deserialization is not used as the only validator. All manifest
