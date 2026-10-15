@@ -104,7 +104,7 @@ public class ManifestPayloadParserTests
     [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"Bad_Id"},"spec":{}}""", "manifest.id.invalid", "/metadata/id")]
     [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"c":{"bindings":{"b":{"target":{"kind":"local-resource"}}}}}}}""", "manifest.schema.required", "/spec/components/c/bindings/b/target/resourceRef")]
     [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"c":{"bindings":{"b":{"target":{"kind":"unknown"}}}}}}}""", "manifest.schema.invalid-discriminator", "/spec/components/c/bindings/b/target/kind")]
-    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"parameters":{"p":{"type":"number","allowedValues":[-0,0]}}}}""", "manifest.schema.constraint-violation", "/spec/parameters/p/allowedValues")]
+    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"parameters":{"p":{"type":"number","allowedValues":[-0,0]}}}}""", "manifest.parameter.allowed-value-duplicate", "/spec/parameters/p/allowedValues")]
     [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"parameters":{"p":{"type":"unknown"}}}}""", "manifest.parameter.type-invalid", "/spec/parameters/p/type")]
     [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"a":{"documents":{"d":{"format":"xml","fileName":"x","template":"x"}}}}}}""", "manifest.schema.invalid-discriminator", "/spec/components/a/documents/d/format")]
     public void Manifest_negative_corpus(string manifest, string code, string path)
@@ -115,12 +115,154 @@ public class ManifestPayloadParserTests
     }
 
     [Fact]
+    public void Too_many_labels_report_the_maxProperties_constraint_at_the_map()
+    {
+        var labels = string.Join(',', Enumerable.Range(0, 65).Select(i => $"\"label{i}\":\"ok\""));
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example","labels":{}},"spec":{}}""";
+        manifest = manifest.Replace("\"labels\":{}", "\"labels\":{" + labels + "}", StringComparison.Ordinal);
+        var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
+        Assert.Equal("manifest.schema.constraint-violation", diagnostic.Code);
+        Assert.Equal("/metadata/labels", diagnostic.Path);
+        Assert.Equal("maxProperties", diagnostic.Parameters["constraint"]);
+    }
+
+    [Theory]
+    [InlineData("Bad_Key")]
+    [InlineData("bad/key")]
+    [InlineData("bad~key")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void Invalid_label_key_has_one_escaped_member_diagnostic(string key)
+    {
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example","labels":{}},"spec":{}}""";
+        manifest = manifest.Replace("\"labels\":{}", "\"labels\":{\"" + key + "\":\"ok\"}", StringComparison.Ordinal);
+        var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
+        Assert.Equal("manifest.schema.constraint-violation", diagnostic.Code);
+        Assert.Equal("/metadata/labels/" + key.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal), diagnostic.Path);
+        Assert.Equal("propertyNames", diagnostic.Parameters["constraint"]);
+    }
+
+    [Theory]
+    [InlineData("string", "1", "string")]
+    [InlineData("integer", "1.5", "integer")]
+    [InlineData("boolean", "\"true\"", "boolean")]
+    [InlineData("number", "null", "number")]
+    public void Literal_default_type_mismatch_uses_parameter_diagnostic(string type, string value, string expectedType)
+    {
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"parameters":{"p":{"type":"TYPE","default":VALUE}}}}"""
+            .Replace("TYPE", type, StringComparison.Ordinal).Replace("VALUE", value, StringComparison.Ordinal);
+        var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
+        Assert.Equal("manifest.parameter.default-type-mismatch", diagnostic.Code);
+        Assert.Equal("/spec/parameters/p/default", diagnostic.Path);
+        Assert.Equal(expectedType, diagnostic.Parameters["expectedType"]);
+    }
+
+    [Theory]
+    [InlineData("string", "[\"secret-value\",\"secret-value\"]")]
+    [InlineData("integer", "[1,1.0]")]
+    [InlineData("number", "[-0,0]")]
+    public void Duplicate_allowed_values_use_parameter_diagnostic(string type, string values)
+    {
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"parameters":{"p":{"type":"TYPE","allowedValues":VALUES}}}}"""
+            .Replace("TYPE", type, StringComparison.Ordinal).Replace("VALUES", values, StringComparison.Ordinal);
+        var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
+        Assert.Equal("manifest.parameter.allowed-value-duplicate", diagnostic.Code);
+        Assert.Equal("/spec/parameters/p/allowedValues", diagnostic.Path);
+        Assert.Empty(diagnostic.Parameters);
+        Assert.DoesNotContain("secret-value", diagnostic.Message + string.Join("", diagnostic.RelatedPaths));
+    }
+
+    [Fact]
     public void Rejects_invalid_encoding_and_unicode()
     {
         foreach (var bytes in new[] { new byte[] { 0xEF, 0xBB, 0xBF, (byte)'{' }, new byte[] { (byte)'{', 0xFF, (byte)'}' } })
             Assert.Equal("manifest-import.invalid-encoding", Assert.Single(Assert.IsType<ManifestParseResult.InvalidRequest>(ManifestPayloadParser.Parse(bytes)).Errors).Code);
         Assert.Contains(Report(Envelope("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"\uD800"},"spec":{}}""")).Diagnostics,
             diagnostic => diagnostic.Code == "manifest.syntax.invalid-json" && diagnostic.Path == "/metadata/id");
+    }
+
+    [Fact]
+    public void Rejects_utf16_payload_as_an_envelope_encoding_error()
+    {
+        var bytes = Encoding.Unicode.GetBytes(Minimal);
+        var error = Assert.Single(Assert.IsType<ManifestParseResult.InvalidRequest>(ManifestPayloadParser.Parse(bytes)).Errors);
+        Assert.Equal("manifest-import.invalid-encoding", error.Code);
+    }
+
+    [Theory]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    public void Non_json_numbers_inside_manifest_are_manifest_syntax_errors(string literal)
+    {
+        var payload = Minimal.Replace("\"spec\":{}", "\"spec\":{\"extra\":" + literal + "}", StringComparison.Ordinal);
+        var diagnostic = Assert.Single(Report(payload).Diagnostics);
+        Assert.Equal("manifest.syntax.invalid-json", diagnostic.Code);
+        Assert.DoesNotContain("manifest.schema.", diagnostic.Code);
+    }
+
+    [Fact]
+    public void Bare_application_version_is_an_envelope_json_error()
+    {
+        var payload = Minimal.Replace("\"applicationVersion\":\"1.0.0+build.17\"", "\"applicationVersion\":1.0.0", StringComparison.Ordinal);
+        var error = Assert.Single(Assert.IsType<ManifestParseResult.InvalidRequest>(Parse(payload)).Errors);
+        Assert.Equal("manifest-import.invalid-json", error.Code);
+    }
+
+    [Theory]
+    [InlineData("{\"applicationVersion\":\"1.0\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",")]
+    [InlineData("""{"applicationVersion":"1.0","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"bad\q"},"spec":{}}}""")]
+    public void Malformed_json_after_manifest_start_stays_in_manifest_syntax(string payload)
+    {
+        var diagnostic = Assert.Single(Report(payload).Diagnostics);
+        Assert.Equal("manifest.syntax.invalid-json", diagnostic.Code);
+        Assert.NotNull(diagnostic.Location);
+    }
+
+    [Fact]
+    public void Envelope_syntax_error_precedes_manifest_diagnostics()
+    {
+        const string payload = """{"applicationVersion":"1.0","manifest":{"apiVersion":"wrong","metadata":{"id":"example"},"spec":{}},}""";
+        var errors = Assert.IsType<ManifestParseResult.InvalidRequest>(Parse(payload)).Errors;
+        Assert.Contains(errors, error => error.Code == "manifest-import.invalid-json");
+        Assert.DoesNotContain(errors, error => error.Code.StartsWith("manifest.schema.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Schema_uri_mismatch_uses_the_selected_version_uri()
+    {
+        var manifest = """{"$schema":"https://haby.dev/schemas/application-manifest.v2alpha1.json","apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{}}""";
+        var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
+        Assert.Equal("manifest.schema.schema-uri-mismatch", diagnostic.Code);
+        Assert.Equal("/$schema", diagnostic.Path);
+        Assert.Equal("https://haby.dev/schemas/application-manifest.v1alpha1.json", diagnostic.Parameters["expectedSchema"]);
+    }
+
+    [Fact]
+    public void Duplicate_manifest_metadata_is_deduplicated_at_manifest_relative_path()
+    {
+        var payload = Minimal.Replace("\"metadata\":{\"id\":\"example\"}",
+            "\"metadata\":{\"id\":\"a\"},\"metadata\":{\"id\":\"b\"},\"metadata\":{\"id\":\"c\"}", StringComparison.Ordinal);
+        var diagnostic = Assert.Single(Report(payload).Diagnostics);
+        Assert.Equal("manifest.syntax.duplicate-property", diagnostic.Code);
+        Assert.Equal("/metadata", diagnostic.Path);
+        Assert.Equal("metadata", diagnostic.Parameters["property"]);
+    }
+
+    [Fact]
+    public void Missing_document_members_are_reported_once_each_in_path_order()
+    {
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"api":{"documents":{"app":{}}}}}}""";
+        var diagnostics = Report(Envelope(manifest)).Diagnostics;
+        Assert.Equal(["fileName", "format", "template"], diagnostics.Select(d => d.Parameters["property"]));
+        Assert.Equal(["/spec/components/api/documents/app/fileName", "/spec/components/api/documents/app/format", "/spec/components/api/documents/app/template"],
+            diagnostics.Select(d => d.Path));
+        Assert.All(diagnostics, d => Assert.Equal("manifest.schema.required", d.Code));
+    }
+
+    [Fact]
+    public void Accepts_late_union_discriminator_and_empty_presence_label()
+    {
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example","labels":{"production":""}},"spec":{"components":{"api":{"bindings":{"b":{"target":{"resourceRef":"db","kind":"local-resource"}}}}}}}""";
+        Assert.IsType<ManifestParseResult.Valid>(Parse(Envelope(manifest)));
     }
 
     [Fact]

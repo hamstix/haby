@@ -10,7 +10,7 @@ namespace Haby.Manifest;
 /// </summary>
 public static class V1Alpha1NumericSetGuard
 {
-    public const string DiagnosticCode = "manifest.schema.constraint-violation";
+    public const string DiagnosticCode = "manifest.parameter.allowed-value-duplicate";
     public const string Constraint = "uniqueItems";
 
     public static IReadOnlyList<string> FindDuplicatePaths(JsonElement manifest, int maxDiagnostics = 100)

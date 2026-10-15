@@ -317,7 +317,7 @@ public sealed class ManifestContractTests
         using var document = JsonDocument.Parse(bytes);
         var paths = V1Alpha1NumericSetGuard.FindDuplicatePaths(document.RootElement);
         Assert.Equal(["/spec/parameters/ratio/allowedValues", "/spec/parameters/count/allowedValues"], paths);
-        Assert.Equal("manifest.schema.constraint-violation", V1Alpha1NumericSetGuard.DiagnosticCode);
+        Assert.Equal("manifest.parameter.allowed-value-duplicate", V1Alpha1NumericSetGuard.DiagnosticCode);
         Assert.Equal("uniqueItems", V1Alpha1NumericSetGuard.Constraint);
         Assert.Equal(input, Encoding.UTF8.GetString(bytes));
     }

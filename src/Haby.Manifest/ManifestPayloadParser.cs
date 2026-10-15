@@ -21,7 +21,11 @@ public static class ManifestPayloadParser
     public static ManifestParseResult Parse(ReadOnlyMemory<byte> payload)
     {
         var bytes = payload.Span;
-        if (bytes.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) || !IsValidUtf8(bytes))
+        if (bytes.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) ||
+            bytes.StartsWith(new byte[] { 0xFF, 0xFE }) || bytes.StartsWith(new byte[] { 0xFE, 0xFF }) ||
+            (bytes.Length >= 4 && ((bytes[0] == (byte)'{' && bytes[1] == 0 && bytes[2] == (byte)'"' && bytes[3] == 0) ||
+                                   (bytes[0] == 0 && bytes[1] == (byte)'{' && bytes[2] == 0 && bytes[3] == (byte)'"'))) ||
+            !IsValidUtf8(bytes))
             return Request("invalid-encoding", "", "The payload must be UTF-8 without a byte-order mark.");
 
         var syntax = ScanSyntax(bytes);
@@ -57,7 +61,7 @@ public static class ManifestPayloadParser
             diagnostics.AddRange(TranslateSchemaResults(manifest, collector));
         foreach (var path in V1Alpha1NumericSetGuard.FindDuplicatePaths(manifest, DiagnosticLimit + 1))
         {
-            diagnostics.Add(Diagnostic("manifest.schema.constraint-violation", path, "Array items must be unique.", ("constraint", "uniqueItems")));
+            diagnostics.Add(Diagnostic(V1Alpha1NumericSetGuard.DiagnosticCode, path, "Parameter allowed values must be unique."));
         }
         if (diagnostics.Count != 0)
             return Invalid(diagnostics);
@@ -157,9 +161,10 @@ public static class ManifestPayloadParser
             var path = result.GetDocumentEvaluationLocationText();
             if (string.IsNullOrEmpty(schemaPath) || !schemaPath.Contains('/')) continue;
             var keyword = schemaPath[(schemaPath.LastIndexOf('/') + 1)..];
-            if (keyword is not ("required" or "additionalProperties" or "type" or "oneOf" or "const" or "enum" or "pattern" or "minLength" or "maxLength" or "minimum" or "maximum" or "minItems" or "maxItems" or "uniqueItems" or "propertyNames" or "not")) continue;
+            if (keyword is not ("required" or "additionalProperties" or "type" or "oneOf" or "const" or "enum" or "pattern" or "minLength" or "maxLength" or "minimum" or "maximum" or "minItems" or "maxItems" or "maxProperties" or "uniqueItems" or "propertyNames" or "not")) continue;
             if (schemaPath.Contains("/propertyNames", StringComparison.Ordinal) ||
-                (schemaPath.Contains("/$defs/localId/", StringComparison.Ordinal) && TryAtPointer(manifest, path, out var map) && map.ValueKind == JsonValueKind.Object))
+                ((schemaPath.Contains("/$defs/localId/", StringComparison.Ordinal) || schemaPath.Contains("/$defs/applicationId/", StringComparison.Ordinal)) &&
+                 TryAtPointer(manifest, path, out var map) && map.ValueKind == JsonValueKind.Object))
             {
                 if (keyword is "propertyNames" or "pattern")
                 {
@@ -180,6 +185,13 @@ public static class ManifestPayloadParser
                     }
                     else
                     {
+                        if (discriminator == "format" && !union.TryGetProperty("format"u8, out _))
+                        {
+                            foreach (var name in new[] { "fileName", "format", "template" })
+                                if (!union.TryGetProperty(name, out _))
+                                    yield return Diagnostic("manifest.schema.required", path + "/" + name, "A required manifest member is absent.", ("property", name));
+                            continue;
+                        }
                         var code = discriminator == "type" ? "manifest.parameter.type-invalid" : "manifest.schema.invalid-discriminator";
                         yield return Diagnostic(code, path + "/" + discriminator, "The union discriminator is invalid.", discriminator == "type" ? ("parameterType", "unknown") : ("property", discriminator));
                     }
@@ -188,7 +200,7 @@ public static class ManifestPayloadParser
             }
             if (keyword == "required")
             {
-                // Corvus reports the owning object, so identify absent schema members below.
+                // Derive absent members from the selected schema's required list.
                 foreach (var name in MissingRequiredMembers(manifest, path, schemaPath))
                     yield return Diagnostic("manifest.schema.required", path.EndsWith("/" + Escape(name), StringComparison.Ordinal) ? path : path + "/" + Escape(name), "A required manifest member is absent.", ("property", name));
                 continue;
@@ -200,7 +212,9 @@ public static class ManifestPayloadParser
                 continue;
             }
             if (keyword == "type")
-                yield return Diagnostic("manifest.schema.type-mismatch", path, "A manifest member has the wrong type.", ("expectedType", SchemaNode(schemaPath)?.GetValue<string>() ?? "contract type"));
+                yield return Diagnostic(path.StartsWith("/spec/parameters/", StringComparison.Ordinal) && path.EndsWith("/default", StringComparison.Ordinal)
+                    ? "manifest.parameter.default-type-mismatch" : "manifest.schema.type-mismatch", path,
+                    "A manifest member has the wrong type.", ("expectedType", SchemaNode(schemaPath)?.GetValue<string>() ?? "contract type"));
             else if (keyword is "pattern" or "maxLength" &&
                 schemaPath.Contains("/$defs/", StringComparison.Ordinal) && IdKind(path) is { } idKind)
                 yield return Diagnostic("manifest.id.invalid", path, "An identifier is invalid.", ("idKind", idKind));
@@ -208,6 +222,8 @@ public static class ManifestPayloadParser
                 yield return Diagnostic("manifest.parameter.default-conflict", path, "A parameter cannot declare both defaults.");
             else if (keyword == "const" && path.EndsWith("/kind", StringComparison.Ordinal))
                 yield return Diagnostic("manifest.schema.invalid-discriminator", path, "The union discriminator is invalid.", ("property", "kind"));
+            else if (keyword == "uniqueItems" && path.StartsWith("/spec/parameters/", StringComparison.Ordinal) && path.EndsWith("/allowedValues", StringComparison.Ordinal))
+                yield return Diagnostic("manifest.parameter.allowed-value-duplicate", path, "Parameter allowed values must be unique.");
             else if (keyword != "propertyNames")
                 yield return Diagnostic("manifest.schema.constraint-violation", path, "A manifest constraint is violated.", ("constraint", keyword));
         }
@@ -249,7 +265,17 @@ public static class ManifestPayloadParser
         if (schema.Validate(Encoding.UTF8.GetBytes(value.GetRawText()), collector)) yield break;
         var translated = TranslateSchemaResults(value, collector).ToArray();
         foreach (var diagnostic in translated)
-            yield return diagnostic with { Path = prefix + diagnostic.Path };
+        {
+            var prefixed = diagnostic with { Path = prefix + diagnostic.Path };
+            if (prefix.StartsWith("/spec/parameters/", StringComparison.Ordinal) && diagnostic.Path == "/default" &&
+                prefixed.Code == "manifest.schema.type-mismatch")
+                prefixed = prefixed with { Code = "manifest.parameter.default-type-mismatch" };
+            else if (prefix.StartsWith("/spec/parameters/", StringComparison.Ordinal) && diagnostic.Path == "/allowedValues" &&
+                     prefixed.Code == "manifest.schema.constraint-violation" &&
+                     prefixed.Parameters.TryGetValue("constraint", out var constraint) && constraint == "uniqueItems")
+                prefixed = Diagnostic("manifest.parameter.allowed-value-duplicate", prefixed.Path, "Parameter allowed values must be unique.");
+            yield return prefixed;
+        }
         if (translated.Length == 0)
             yield return Diagnostic("manifest.schema.constraint-violation", prefix, "A union member violates its schema.", ("constraint", "branch"));
     }
