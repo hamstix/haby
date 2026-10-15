@@ -554,9 +554,8 @@ Completion gate:
 
 ### Dependency decision before Slice 2
 
-Before coding Slice 2, the maintainer approves a JSON Schema Draft 2020-12
-validation library or an alternative implementation approach. The long-context
-agent prepares a current comparison covering:
+The maintainer has selected JsonSchema.Net for JSON Schema Draft 2020-12
+validation in Slice 2. The long-context comparison covered:
 
 - full Draft 2020-12 support;
 - deterministic access to keyword and instance paths;
@@ -566,8 +565,12 @@ agent prepares a current comparison covering:
 - license and maintenance status;
 - testability without network access.
 
-The implementation agent may run a minimal throwaway compile spike. No
-dependency is committed until the maintainer approves the choice.
+The implementation agent must run a minimal throwaway compile spike to confirm
+the current package API, .NET 10 restore/build, schema evaluation, error-path
+access and offline testability. Pin the validated package version in central
+package management; do not assume a version from the comparison report or
+commit an unverified dependency. Document any trimming limitations without
+claiming Native AOT support for the server.
 
 ### Slice 2: v1alpha1 manifest contract
 
@@ -579,10 +582,20 @@ Deliverables:
 
 - implement the complete source-generated DTO graph for
   `haby.dev/v1alpha1`;
-- add explicit discriminators and permitted `JsonElement` boundaries;
+- include the typed import-envelope DTO in that source-generated graph; raw
+  UTF-8 envelope parsing and envelope validation belong to Slice 3;
+- add explicit discriminators and permitted `JsonElement` boundaries; configure
+  metadata-mode deserialization so discriminator members may appear after
+  ordinary object members;
+- enforce required-member presence in DTO metadata (for example, with
+  `[JsonRequired]`); CLR non-nullability alone is insufficient;
+- use an exact JSON-number wire type for `number` parameter constraints, with
+  a metadata-compatible converter; do not pass through `double` or `decimal`;
 - check in the complete Draft 2020-12 schema under its accepted canonical ID;
 - add positive examples for every accepted manifest shape;
-- add schema/DTO parity tests.
+- add schema/DTO parity tests, including absent and empty Resource lifecycle,
+  explicit `null` rejection, required-member presence and discriminators after
+  ordinary object members.
 
 Out of scope:
 
@@ -596,6 +609,8 @@ Completion gate:
 
 - the field matrix, schema and DTOs agree;
 - DTO deserialization uses metadata-based source generation;
+- absent lifecycle, empty lifecycle and explicit `retain` yield the same core
+  default in the contract tests; explicit `null` and unknown members fail;
 - no reflection-based type discovery or shape guessing exists;
 - the checked-in schema is complete rather than a temporary partial contract;
 - focused and solution tests pass.

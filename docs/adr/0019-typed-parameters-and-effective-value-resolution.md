@@ -43,6 +43,14 @@ number
 exact coefficient-and-decimal-exponent representation accepted by ADR-015 and
 never passes through `double`.
 
+For the `haby.dev/v1alpha1` wire DTO, `number`-kind `minimum`, `maximum` and
+`allowedValues` entries use an exact JSON-number value type owned by
+`Haby.Manifest`, with a metadata-compatible `System.Text.Json` converter. The
+wire type preserves arbitrary precision and converts to the domain's exact
+number representation during normalization; it is not itself a domain model.
+`double` and bounded `decimal` are not valid intermediate representations.
+The separate typed literal `default` remains a `JsonElement` boundary.
+
 Arrays, Objects, Null and SecretReference are not parameter kinds in M2.1. A
 later version may add a type only with explicit validation, normalization,
 Liquid-conversion and compatibility rules.

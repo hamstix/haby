@@ -141,7 +141,10 @@ A Resource requires `type` and `providerRef`:
 
 `properties` is an extension JSON object and defaults to empty. Arrays, scalars
 and `null` are invalid. `lifecycle` is optional and defaults to
-`{ "deletionPolicy": "retain" }`. The only deletion-policy values are:
+`{ "deletionPolicy": "retain" }`. An absent `lifecycle`, `lifecycle: {}` and
+`lifecycle: { "deletionPolicy": "retain" }` have the same normalized value.
+An explicit `null` deletion policy and unknown lifecycle members are invalid.
+The only deletion-policy values are:
 
 ```text
 retain
