@@ -94,6 +94,11 @@ The accepted M2.1 codes, severities, required parameters, path conventions,
 most-specific-code rule and adapter requirements are defined by the
 [manifest validation diagnostic catalog](../architecture/manifest-validation-diagnostic-catalog.md).
 
+The `idKind` parameter describes an identifier's semantic role, not just its
+lexical grammar. A Workload's `profile` uses `idKind=workload-profile`, while a
+Resource export's `accessProfile` uses `idKind=access-profile`. Both fields use
+manifest-local ID syntax, but their diagnostics must remain distinguishable.
+
 ### Validation proceeds in dependency order
 
 The import-time pipeline is:
@@ -204,6 +209,8 @@ requirements are known. Standard Haby codes cover the initial schema boundary.
 ## Follow-up work
 
 - implement the accepted diagnostic catalog and shared validation corpus;
+- correct the Workload `profile` parser mapping and add focused tests for both
+  `workload-profile` and Resource export `access-profile` diagnostics;
 - implement normalized-manifest equality and canonical fingerprint boundaries as
   accepted in
   [ADR-015](0015-normalized-manifest-equality-and-immutable-version-imports.md);

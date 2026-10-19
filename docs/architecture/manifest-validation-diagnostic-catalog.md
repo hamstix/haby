@@ -93,11 +93,19 @@ resource-export
 binding
 document
 workload
+workload-profile
 parameter
 provider-alias
 contract
 access-profile
 ```
+
+`workload-profile` identifies the Workload `profile` field at
+`/spec/components/{componentId}/workloads/{workloadId}/profile`.
+`access-profile` identifies the Resource export `accessProfile` field at
+`/spec/exports/{exportId}/accessProfile`. Both use manifest-local ID syntax.
+Focused tests must assert the diagnostic code, path and `idKind` for each
+invalid field independently.
 
 A duplicate JSON map member is a syntax error and therefore uses
 `manifest.syntax.duplicate-property`, not `manifest.id.duplicate`.
