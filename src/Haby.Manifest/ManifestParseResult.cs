@@ -31,7 +31,11 @@ public abstract record ManifestParseResult
 {
     private ManifestParseResult() { }
 
-    public sealed record Valid(string ApplicationVersion, ApplicationManifest Manifest) : ManifestParseResult;
+    public sealed record Valid(string ApplicationVersion, ApplicationManifest Manifest) : ManifestParseResult
+    {
+        /// <summary>Validation warnings produced for this successful manifest.</summary>
+        public ManifestValidationReport Report { get; init; } = new([], false);
+    }
     public sealed record InvalidRequest(IReadOnlyList<ManifestRequestError> Errors) : ManifestParseResult;
     public sealed record InvalidManifest(ManifestValidationReport Report) : ManifestParseResult;
 }

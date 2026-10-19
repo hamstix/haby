@@ -75,7 +75,10 @@ public static class ManifestPayloadParser
             var typedManifest = JsonSerializer.Deserialize(manifestBytes, Context.ApplicationManifest);
             if (typedManifest is null)
                 return Invalid([Diagnostic("manifest.schema.type-mismatch", "", "The manifest must be an object.", ("expectedType", "object"))]);
-            return new ManifestParseResult.Valid(version, typedManifest);
+            var report = CreateReport(ManifestSemanticValidator.Validate(typedManifest));
+            return report.IsValid
+                ? new ManifestParseResult.Valid(version, typedManifest) { Report = report }
+                : new ManifestParseResult.InvalidManifest(report);
         }
         catch (JsonException)
         {
@@ -363,7 +366,9 @@ public static class ManifestPayloadParser
         return true;
     }
 
-    private static ManifestParseResult.InvalidManifest Invalid(IEnumerable<ManifestDiagnostic> source)
+    private static ManifestParseResult.InvalidManifest Invalid(IEnumerable<ManifestDiagnostic> source) => new(CreateReport(source));
+
+    private static ManifestValidationReport CreateReport(IEnumerable<ManifestDiagnostic> source)
     {
         var unique = source.DistinctBy(d => (d.Code, d.Severity, d.Path,
             string.Join("\u001f", d.Parameters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value)),
@@ -371,7 +376,7 @@ public static class ManifestPayloadParser
             .ThenBy(d => d.Code, StringComparer.Ordinal)
             .ThenBy(d => string.Join("\u001f", d.Parameters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value)), StringComparer.Ordinal)
             .ThenBy(d => string.Join("\u001f", d.RelatedPaths), StringComparer.Ordinal).ToArray();
-        return new(new(unique.Take(DiagnosticLimit).ToArray(), unique.Length > DiagnosticLimit));
+        return new(unique.Take(DiagnosticLimit).ToArray(), unique.Length > DiagnosticLimit);
     }
 
     private static ManifestDiagnostic Diagnostic(string code, string path, string message, params (string Key, string Value)[] parameters) =>

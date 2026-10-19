@@ -129,7 +129,7 @@ public class ManifestPayloadParserTests
     [Fact]
     public void Valid_workload_and_access_profile_ids_are_accepted()
     {
-        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"exports":{"database":{"resourceRef":"database","contract":"a/v1","accessProfile":"read-only"}},"components":{"worker":{"workloads":{"main":{"type":"a/v1","providerRef":"p","profile":"worker"}}}}}}""";
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"resources":{"database":{"type":"a/v1","providerRef":"p"}},"exports":{"database":{"resourceRef":"database","contract":"a/v1","accessProfile":"read-only"}},"components":{"worker":{"workloads":{"main":{"type":"a/v1","providerRef":"p","profile":"worker"}}}}}}""";
         Assert.IsType<ManifestParseResult.Valid>(Parse(Envelope(manifest)));
     }
 
@@ -302,7 +302,7 @@ public class ManifestPayloadParserTests
     [Fact]
     public void Accepts_late_union_discriminator_and_empty_presence_label()
     {
-        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example","labels":{"production":""}},"spec":{"components":{"api":{"bindings":{"b":{"target":{"resourceRef":"db","kind":"local-resource"}}}}}}}""";
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example","labels":{"production":""}},"spec":{"resources":{"db":{"type":"a/v1","providerRef":"p"}},"components":{"api":{"bindings":{"b":{"target":{"resourceRef":"db","kind":"local-resource"}}}}}}}""";
         Assert.IsType<ManifestParseResult.Valid>(Parse(Envelope(manifest)));
     }
 
