@@ -100,6 +100,45 @@ public class DocumentProjectionValidationTests
     }
 
     [Fact]
+    public void Reordering_bindings_and_projections_preserves_full_ordered_diagnostics()
+    {
+        var a = string.Join(',', Projection("/same", renderer: "a/v1"), Projection("/same", renderer: "b/v1"));
+        var aReversed = string.Join(',', Projection("/same", renderer: "b/v1"), Projection("/same", renderer: "a/v1"));
+        var b = string.Join(',', Projection("/same", renderer: "c/v1"), Projection("/same", renderer: "d/v1"));
+        var bReversed = string.Join(',', Projection("/same", renderer: "d/v1"), Projection("/same", renderer: "c/v1"));
+
+        var original = Assert.IsType<ManifestParseResult.InvalidManifest>(ParseWithBindingOrder("{}", a, b, false)).Report;
+        var reordered = Assert.IsType<ManifestParseResult.InvalidManifest>(ParseWithBindingOrder("{}", aReversed, bReversed, true)).Report;
+
+        Assert.Equal(original.Diagnostics.Select(Describe), reordered.Diagnostics.Select(Describe));
+        Assert.Equal(6, original.Diagnostics.Count);
+        Assert.All(original.Diagnostics, diagnostic =>
+        {
+            Assert.Equal("manifest.document.projection-collision", diagnostic.Code);
+            Assert.Equal("same-path", diagnostic.Parameters["reason"]);
+        });
+        Assert.Equal("/spec/components/c/bindings/a/documentProjections/0/path", original.Diagnostics[0].Path);
+        Assert.Equal(new[] { "/spec/components/c/bindings/a/documentProjections/1/path" }, original.Diagnostics[0].RelatedPaths);
+    }
+
+    [Theory]
+    [InlineData("{}", "/", true)]
+    [InlineData("{\"\":1}", "/", false)]
+    [InlineData("{\"a\":\"{{ parameters.value }}\"}", "/a/b", false)]
+    public void Empty_key_and_liquid_value_follow_static_template_shape(string template, string pointer, bool valid)
+    {
+        var result = Parse(template, Projection(pointer));
+        if (valid)
+            Assert.IsType<ManifestParseResult.Valid>(result);
+        else
+        {
+            var diagnostic = Assert.Single(Assert.IsType<ManifestParseResult.InvalidManifest>(result).Report.Diagnostics);
+            Assert.Equal("manifest.document.projection-collision", diagnostic.Code);
+            Assert.Equal(pointer == "/" ? "existing-leaf" : "non-object-parent", diagnostic.Parameters["reason"]);
+        }
+    }
+
+    [Fact]
     public void Projection_diagnostics_obey_report_limit()
     {
         var projections = string.Join(',', Enumerable.Range(0, 101).Select(i => Projection($"/missing{i:D3}", "absent")));
@@ -122,11 +161,25 @@ public class DocumentProjectionValidationTests
     private static ManifestValidationReport Invalid(string template, params string[] projections) =>
         Assert.IsType<ManifestParseResult.InvalidManifest>(Parse(template, projections)).Report;
 
+    private static (string Code, ManifestDiagnosticSeverity Severity, string Path, string Parameters, string RelatedPaths) Describe(ManifestDiagnostic diagnostic) =>
+        (diagnostic.Code, diagnostic.Severity, diagnostic.Path,
+            string.Join(';', diagnostic.Parameters.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => item.Key + "=" + item.Value)),
+            string.Join(';', diagnostic.RelatedPaths));
+
     private static ManifestParseResult Parse(string template, params string[] projections)
     {
         var a = projections.Length > 0 ? projections[0] : "";
         var b = projections.Length > 1 ? string.Join(',', projections.Skip(1)) : "";
-        var json = "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"example\"},\"spec\":{\"components\":{\"c\":{\"documents\":{\"settings\":{\"fileName\":\"settings.json\",\"format\":\"json\",\"template\":" + template + "}},\"bindings\":{\"a\":{\"target\":{\"kind\":\"application-export\",\"applicationId\":\"other\",\"exportRef\":\"out\",\"contract\":\"a/v1\"},\"documentProjections\":[" + a + "]},\"b\":{\"target\":{\"kind\":\"application-export\",\"applicationId\":\"other\",\"exportRef\":\"out\",\"contract\":\"a/v1\"},\"documentProjections\":[" + b + "]}}}}}}}";
+        return ParseWithBindingOrder(template, a, b, false);
+    }
+
+    private static ManifestParseResult ParseWithBindingOrder(string template, string a, string b, bool reverseBindings)
+    {
+        const string target = "\"target\":{\"kind\":\"application-export\",\"applicationId\":\"other\",\"exportRef\":\"out\",\"contract\":\"a/v1\"}";
+        var aBinding = "\"a\":{" + target + ",\"documentProjections\":[" + a + "]}";
+        var bBinding = "\"b\":{" + target + ",\"documentProjections\":[" + b + "]}";
+        var bindings = reverseBindings ? bBinding + "," + aBinding : aBinding + "," + bBinding;
+        var json = "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"example\"},\"spec\":{\"components\":{\"c\":{\"documents\":{\"settings\":{\"fileName\":\"settings.json\",\"format\":\"json\",\"template\":" + template + "}},\"bindings\":{" + bindings + "}}}}}}";
         return ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(json));
     }
 }
