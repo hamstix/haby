@@ -25,5 +25,12 @@ resolved here. Schema results are mapped to Haby codes and safe parameters;
 library messages and input values are not returned. Reports contain at most 100
 distinct diagnostics and indicate truncation when more exist.
 
-Normalized mapping, extension contract validation and import orchestration
-belong to later M2.1 slices.
+`ConfigurationValueMapper.FromValidatedJson` copies a schema- and semantics-
+validated `JsonElement` for a structured template or extension object into the
+immutable Haby.Domain tree. It preserves exact JSON numbers and does not retain
+the input `JsonDocument`. It rejects duplicate object members and a JSON
+`$secretRef` sentinel. Only trusted domain operations can construct a typed
+`ConfigurationSecretReference` from an exact-version `SecretRef`.
+
+Normalized Application manifest mapping, extension contract validation and
+import orchestration belong to later M2.1 slices.
