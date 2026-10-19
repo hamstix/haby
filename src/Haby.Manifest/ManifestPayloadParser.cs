@@ -202,6 +202,18 @@ public static class ManifestPayloadParser
                     continue;
                 }
             }
+            if (keyword is "pattern" or "minLength" && IsProjectionPath(path))
+            {
+                if (TryAtPointer(manifest, path, out var pointer) && pointer.ValueKind == JsonValueKind.String)
+                    yield return Diagnostic("manifest.document.projection-path-invalid", path,
+                        "The projection path is invalid.", ("reason", pointer.GetString()!.Length == 0 ? "root" : "invalid-pointer"));
+                continue;
+            }
+            if (keyword == "uniqueItems" && path.EndsWith("/documentProjections", StringComparison.Ordinal))
+            {
+                foreach (var duplicate in DuplicateProjections(manifest, path)) yield return duplicate;
+                continue;
+            }
             if (keyword == "required")
             {
                 // Derive absent members from the selected schema's required list.
@@ -233,6 +245,32 @@ public static class ManifestPayloadParser
                 yield return Diagnostic("manifest.parameter.allowed-value-duplicate", path, "Parameter allowed values must be unique.");
             else if (keyword != "propertyNames")
                 yield return Diagnostic("manifest.schema.constraint-violation", path, "A manifest constraint is violated.", ("constraint", keyword));
+        }
+    }
+
+    private static bool IsProjectionPath(string path) =>
+        path.Contains("/bindings/", StringComparison.Ordinal) &&
+        path.Contains("/documentProjections/", StringComparison.Ordinal) &&
+        path.EndsWith("/path", StringComparison.Ordinal);
+
+    private static IEnumerable<ManifestDiagnostic> DuplicateProjections(JsonElement manifest, string path)
+    {
+        if (!TryAtPointer(manifest, path, out var projections) || projections.ValueKind != JsonValueKind.Array)
+            yield break;
+        var entries = projections.EnumerateArray().Select((value, index) => (value, index))
+            .Where(item => item.value.ValueKind == JsonValueKind.Object &&
+                item.value.TryGetProperty("documentRef"u8, out var documentRef) && documentRef.ValueKind == JsonValueKind.String &&
+                item.value.TryGetProperty("path"u8, out var projectionPath) && projectionPath.ValueKind == JsonValueKind.String &&
+                item.value.TryGetProperty("rendererRef"u8, out var rendererRef) && rendererRef.ValueKind == JsonValueKind.String)
+            .GroupBy(item => (item.value.GetProperty("documentRef"u8).GetString(),
+                item.value.GetProperty("path"u8).GetString(), item.value.GetProperty("rendererRef"u8).GetString()));
+        foreach (var group in entries)
+        {
+            var paths = group.Select(item => path + "/" + item.index + "/path")
+                .OrderBy(value => value, StringComparer.Ordinal).ToArray();
+            if (paths.Length < 2) continue;
+            yield return new("manifest.document.projection-duplicate", ManifestDiagnosticSeverity.Error,
+                paths[0], "A projection is declared more than once.", Params(), paths[1..]);
         }
     }
 
