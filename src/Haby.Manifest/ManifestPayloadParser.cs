@@ -346,7 +346,7 @@ public static class ManifestPayloadParser
         _ when path.EndsWith("/resourceRef", StringComparison.Ordinal) => "resource",
         _ when path.EndsWith("/exportRef", StringComparison.Ordinal) => "resource-export",
         _ when path.EndsWith("/documentRef", StringComparison.Ordinal) => "document",
-        _ when path.EndsWith("/profile", StringComparison.Ordinal) => "access-profile",
+        _ when path.EndsWith("/profile", StringComparison.Ordinal) => "workload-profile",
         _ => null
     };
 
