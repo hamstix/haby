@@ -22,6 +22,28 @@ public class ManifestSemanticValidationTests
     }
 
     [Fact]
+    public void Export_alone_marks_its_resource_used()
+    {
+        var result = Assert.IsType<ManifestParseResult.Valid>(Parse("""
+            "resources":{"db":{"type":"a/v1","providerRef":"p"}},
+            "exports":{"out":{"resourceRef":"db","contract":"a/v1"}}
+            """));
+        Assert.True(result.Report.IsValid);
+        Assert.Empty(result.Report.Diagnostics);
+    }
+
+    [Fact]
+    public void Local_binding_alone_marks_its_resource_used()
+    {
+        var result = Assert.IsType<ManifestParseResult.Valid>(Parse("""
+            "resources":{"db":{"type":"a/v1","providerRef":"p"}},
+            "components":{"first":{"bindings":{"local":{"target":{"kind":"local-resource","resourceRef":"db"}}}}}
+            """));
+        Assert.True(result.Report.IsValid);
+        Assert.Empty(result.Report.Diagnostics);
+    }
+
+    [Fact]
     public void Missing_references_are_ordered_and_report_safe_parameters()
     {
         var report = Invalid("""
@@ -82,6 +104,7 @@ public class ManifestSemanticValidationTests
             "components":{"c":{"documents":{
               "z":{"fileName":"same.json","format":"json","template":{}},
               "a":{"fileName":"same.json","format":"yaml","template":{}},
+              "m":{"fileName":"same.json","format":"json","template":{}},
               "other":{"fileName":"different.json","format":"text","template":""}
             }}}
             """);
@@ -90,7 +113,7 @@ public class ManifestSemanticValidationTests
         Assert.Equal(ManifestDiagnosticSeverity.Error, diagnostic.Severity);
         Assert.Equal("/spec/components/c/documents/a/fileName", diagnostic.Path);
         Assert.Equal("same.json", diagnostic.Parameters["fileName"]);
-        Assert.Equal(new[] { "/spec/components/c/documents/z/fileName" }, diagnostic.RelatedPaths);
+        Assert.Equal(new[] { "/spec/components/c/documents/m/fileName", "/spec/components/c/documents/z/fileName" }, diagnostic.RelatedPaths);
     }
 
     [Fact]

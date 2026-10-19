@@ -16,6 +16,9 @@ public class ManifestPayloadParserTests
         var result = Assert.IsType<ManifestParseResult.Valid>(Parse(Minimal));
         Assert.Equal("1.0.0+build.17", result.ApplicationVersion);
         Assert.Equal("example", result.Manifest.Metadata.Id);
+        Assert.True(result.Report.IsValid);
+        Assert.Empty(result.Report.Diagnostics);
+        Assert.False(result.Report.Truncated);
         var again = Assert.IsType<ManifestParseResult.Valid>(Parse(Minimal));
         Assert.Equal(result.ApplicationVersion, again.ApplicationVersion);
         Assert.Equal(result.Manifest.Metadata.Id, again.Manifest.Metadata.Id);
