@@ -36,6 +36,8 @@ public sealed class ConfigurationValueTests
     [InlineData("1", "1.0")]
     [InlineData("1", "1e0")]
     [InlineData("-0", "0")]
+    [InlineData("-0.0", "0")]
+    [InlineData("-0e5", "0")]
     [InlineData("123456789012345678901234567890.12345678901234567890", "1234567890123456789012345678901234567890123456789e-19")]
     [InlineData("1e999999999999999999999", "10e999999999999999999998")]
     public void Exact_numbers_have_mathematical_equality_and_consistent_hashes(string left, string right)

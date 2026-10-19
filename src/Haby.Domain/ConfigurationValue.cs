@@ -44,15 +44,11 @@ public sealed class ConfigurationNumber : ConfigurationValue
     private readonly string _coefficient;
     private readonly BigInteger _exponent;
 
-    private ConfigurationNumber(string rawText, string coefficient, BigInteger exponent)
+    private ConfigurationNumber(string coefficient, BigInteger exponent)
     {
-        RawText = rawText;
         _coefficient = coefficient;
         _exponent = exponent;
     }
-
-    /// <summary>The original valid JSON number token. Equality uses its mathematical value.</summary>
-    public string RawText { get; }
 
     public static ConfigurationNumber Parse(string rawText)
     {
@@ -99,10 +95,10 @@ public sealed class ConfigurationNumber : ConfigurationValue
         if (index != span.Length) throw new FormatException("The value must be one JSON number.");
         exponent -= fractionDigits;
         var digits = span[(negative ? 1 : 0)..significandEnd].ToString().Replace(".", "", StringComparison.Ordinal).TrimStart('0');
-        if (digits.Length == 0) return new(rawText, "0", BigInteger.Zero);
+        if (digits.Length == 0) return new("0", BigInteger.Zero);
         var significantLength = digits.TrimEnd('0').Length;
         exponent += digits.Length - significantLength;
-        return new(rawText, (negative ? "-" : "") + digits[..significantLength], exponent);
+        return new((negative ? "-" : "") + digits[..significantLength], exponent);
     }
 
     private static bool IsDigit(char value) => value is >= '0' and <= '9';

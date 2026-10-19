@@ -24,10 +24,14 @@ public sealed class ConfigurationValueMapperTests
     }
 
     [Fact]
-    public void Json_shaped_secret_reference_is_rejected()
+    public void Json_shaped_fake_reference_remains_an_ordinary_object_at_any_depth()
     {
-        using var document = JsonDocument.Parse("""{"$secretRef":{"secretId":"value","secretVersionId":"version"}}""");
-        Assert.Throws<ArgumentException>(() => ConfigurationValueMapper.FromValidatedJson(document.RootElement));
+        using var document = JsonDocument.Parse("""{"$secretRef":{"secretId":"value","secretVersionId":"version"},"nested":{"$secretRef":{"secretId":"x","secretVersionId":"y"}}}""");
+        var mapped = Assert.IsType<ConfigurationObject>(ConfigurationValueMapper.FromValidatedJson(document.RootElement));
+        Assert.IsType<ConfigurationObject>(mapped.Members["$secretRef"]);
+        var nested = Assert.IsType<ConfigurationObject>(mapped.Members["nested"]);
+        Assert.IsType<ConfigurationObject>(nested.Members["$secretRef"]);
+        Assert.IsNotType<ConfigurationSecretReference>(nested.Members["$secretRef"]);
     }
 
     [Fact]

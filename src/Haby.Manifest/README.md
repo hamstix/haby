@@ -28,9 +28,10 @@ distinct diagnostics and indicate truncation when more exist.
 `ConfigurationValueMapper.FromValidatedJson` copies a schema- and semantics-
 validated `JsonElement` for a structured template or extension object into the
 immutable Haby.Domain tree. It preserves exact JSON numbers and does not retain
-the input `JsonDocument`. It rejects duplicate object members and a JSON
-`$secretRef` sentinel. Only trusted domain operations can construct a typed
-`ConfigurationSecretReference` from an exact-version `SecretRef`.
+the input `JsonDocument`. It rejects duplicate object members. JSON objects,
+including ones with a `$secretRef` key, remain ordinary Object nodes; no JSON
+shape creates a typed `ConfigurationSecretReference`. Trusted domain operations
+can construct that node from an exact-version `SecretRef`.
 
 Normalized Application manifest mapping, extension contract validation and
 import orchestration belong to later M2.1 slices.
