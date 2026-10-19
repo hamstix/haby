@@ -39,6 +39,30 @@ A Secret records at least:
 - ownership policy;
 - current version and lifecycle metadata.
 
+### SecretRef identifies one immutable version
+
+`SecretId` and `SecretVersionId` are distinct, strongly typed, Haby-issued
+UUIDv7 identifiers. `SecretId` identifies a stable Secret within one Haby
+installation; the Secret's metadata assigns it to exactly one Environment.
+`SecretVersionId` identifies one immutable version and belongs to exactly one
+Secret. Neither identifier is derived from a storage backend's path or native
+version number.
+
+`SecretRef` contains exactly `(SecretId, SecretVersionId)`. Its value equality
+and hash code use both identifiers. A stored reference always pins an exact
+version; it cannot mean `current`, `latest` or another mutable alias. Secret
+rotation creates a new SecretVersion and therefore a different `SecretRef`.
+KEK rotation does not change the referenced SecretVersion or its `SecretRef`.
+
+Environment, owner, purpose, storage backend, external path and secret material
+are not fields of `SecretRef`. They remain in Secret and SecretVersion metadata
+or behind the storage adapter. Before resolving a reference, Haby verifies that
+the version belongs to the identified Secret, that the Secret belongs to the
+Environment of the authorized operation, and that the operation may access it.
+A missing version or any scope or authorization mismatch fails closed. An
+external secret store maps Haby's stable identifiers to its own identifiers
+without changing this domain contract.
+
 Secret ownership is explicit:
 
 - **Managed**: Haby may create versions, rotate and delete the value according

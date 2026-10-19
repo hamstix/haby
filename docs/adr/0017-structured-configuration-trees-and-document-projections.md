@@ -40,7 +40,11 @@ ConfigurationValue
 `Number` reuses the exact arbitrary-precision JSON number semantics accepted in
 ADR-015. `Object` has string keys compared ordinally. `Array` preserves order.
 `SecretReference` is an internal typed placeholder and is not an object with a
-magic JSON property.
+magic JSON property. It contains the exact-version `SecretRef` defined by
+[ADR-006](0006-secret-storage-and-encryption.md). Two `SecretReference` values
+are equal when their `SecretId` and `SecretVersionId` both match; they do not
+resolve or compare secret plaintext. The node does not carry Environment,
+storage-backend details or an implicit `latest` selector.
 
 The tree has no DateTime, binary or YAML-specific scalar variants. Manifest DTOs
 may receive a structured template as `JsonElement`, but validation and mapping
@@ -228,7 +232,8 @@ serialized object during composition.
 - only an authorized delivery operation resolves the reference transiently.
 
 M2.1 defines the placeholder boundary but does not implement Secret storage or
-delivery.
+delivery. Its `SecretReference` node holds the typed `SecretRef` and remains
+unresolved during tree composition, equality checks and redacted preview.
 
 ### Serializer profiles are deterministic and versioned
 
