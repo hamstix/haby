@@ -219,7 +219,7 @@ public class ManifestPayloadParserTests
     public void Rejects_invalid_encoding_and_unicode()
     {
         foreach (var bytes in new[] { new byte[] { 0xEF, 0xBB, 0xBF, (byte)'{' }, new byte[] { (byte)'{', 0xFF, (byte)'}' } })
-            Assert.Equal("manifest-import.invalid-encoding", Assert.Single(Assert.IsType<ManifestParseResult.InvalidRequest>(ManifestPayloadParser.Parse(bytes)).Errors).Code);
+            Assert.Equal("manifest-import.invalid-encoding", Assert.Single(Assert.IsType<ManifestParseResult.InvalidRequest>(ManifestPayloadParser.Parse(bytes, TestManifestCatalog.Instance)).Errors).Code);
         Assert.Contains(Report(Envelope("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"\uD800"},"spec":{}}""")).Diagnostics,
             diagnostic => diagnostic.Code == "manifest.syntax.invalid-json" && diagnostic.Path == "/metadata/id");
     }
@@ -228,7 +228,7 @@ public class ManifestPayloadParserTests
     public void Rejects_utf16_payload_as_an_envelope_encoding_error()
     {
         var bytes = Encoding.Unicode.GetBytes(Minimal);
-        var error = Assert.Single(Assert.IsType<ManifestParseResult.InvalidRequest>(ManifestPayloadParser.Parse(bytes)).Errors);
+        var error = Assert.Single(Assert.IsType<ManifestParseResult.InvalidRequest>(ManifestPayloadParser.Parse(bytes, TestManifestCatalog.Instance)).Errors);
         Assert.Equal("manifest-import.invalid-encoding", error.Code);
     }
 
@@ -410,7 +410,7 @@ public class ManifestPayloadParserTests
     }
 
     private static string Envelope(string manifest) => "{\"applicationVersion\":\"1.0\",\"manifest\":" + manifest + "}";
-    private static ManifestParseResult Parse(string text) => ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(text));
+    private static ManifestParseResult Parse(string text) => ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(text), TestManifestCatalog.Instance);
     private static ManifestValidationReport Report(string text) => Assert.IsType<ManifestParseResult.InvalidManifest>(Parse(text)).Report;
 
     private static string RepositoryPath(params string[] parts)

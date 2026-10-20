@@ -1,8 +1,10 @@
 # Manifest payload parser
 
 `ManifestPayloadParser.Parse` is the shared, side-effect-free entry point for an
-original UTF-8 import-envelope payload. Pass the bytes received from a caller;
-do not deserialize the envelope in a transport adapter first.
+original UTF-8 import-envelope payload. Pass the bytes received from a caller
+and an immutable `ManifestContractCatalog` containing exact registered Resource,
+Workload, output and renderer definitions. Do not deserialize the envelope in a
+transport adapter first.
 
 The parser returns one of three typed outcomes:
 
@@ -20,10 +22,16 @@ the 64-level nesting limit and the closed envelope before exact `apiVersion` and
 v1alpha1 schema, metadata-based DTO deserialization and local semantic checks.
 The semantic checks resolve Resource exports, local Binding targets and Document
 projections, reject text projection targets and duplicate Document file names,
-and warn about unused Resources. An external application export target is not
-resolved here. Schema results are mapped to Haby codes and safe parameters;
-library messages and input values are not returned. Reports contain at most 100
-distinct diagnostics and indicate truncation when more exist.
+and warn about unused Resources. If core semantics have no errors, registered
+extension validation checks exact definitions, properties and Binding options
+schemas, and projection renderers. Omitted extension objects use the effective
+empty Object. Empty options need no schema; non-empty options do. An external
+application export target is not resolved here. Schema results are mapped to
+Haby codes and safe parameters; library messages and input values are not
+returned. Reports contain at most 100
+distinct diagnostics, retain errors before warnings and indicate truncation when
+more exist. Catalog registration rejects missing properties schemas and
+conflicting exact definitions; equivalent definitions may be registered twice.
 
 `ConfigurationValueMapper.FromValidatedJson` copies a schema- and semantics-
 validated `JsonElement` for a structured template or extension object into the
@@ -40,8 +48,7 @@ structured templates, Resource/Workload properties and Binding options use
 `ConfigurationValue`. The mapper materializes core defaults, sorts the two
 set-like declaration fields and preserves exact numbers and raw text.
 
-The mapper is not called by the parser. The parser's current `Valid` result
-does not prove that registered extension contracts were checked. A future
-Validate/Import pipeline must complete that validation before calling the
-mapper or accepting a ManifestRevision. Fingerprints, persistence and import
+The mapper is not called by the parser. A parser `Valid` result proves that core
+and registered extension checks completed. A future Validate/Import pipeline
+may call the mapper after this gate. Fingerprints, persistence and import
 orchestration remain separate work.
