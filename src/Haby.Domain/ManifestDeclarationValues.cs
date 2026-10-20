@@ -106,7 +106,7 @@ public sealed record ProjectionPath
     internal static ProjectionPath FromValidated(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        if (value.Length < 2 || value[0] != '/') throw new ArgumentException("A non-root absolute JSON Pointer is required.", nameof(value));
+        if (value.Length == 0 || value[0] != '/') throw new ArgumentException("A non-root absolute JSON Pointer is required.", nameof(value));
         return new(value);
     }
     public override string ToString() => Value;
