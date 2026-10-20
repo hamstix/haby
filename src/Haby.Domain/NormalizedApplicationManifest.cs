@@ -8,6 +8,13 @@ public sealed class NormalizedApplicationManifest : IEquatable<NormalizedApplica
 {
     internal NormalizedApplicationManifest(string inputApiVersion, ApplicationId applicationId, ConfigurationObject declaration)
     {
+        if (!declaration.Members.TryGetValue("metadata", out var metadata) ||
+            metadata is not ConfigurationObject metadataObject ||
+            !metadataObject.Members.TryGetValue("id", out var id) ||
+            id is not ConfigurationString metadataId ||
+            !string.Equals(applicationId.Value, metadataId.Value, StringComparison.Ordinal))
+            throw new ArgumentException("Application ID must match the normalized metadata ID.", nameof(declaration));
+
         InputApiVersion = inputApiVersion;
         ApplicationId = applicationId;
         Declaration = declaration;

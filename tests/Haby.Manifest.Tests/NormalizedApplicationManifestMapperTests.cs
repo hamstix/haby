@@ -37,6 +37,10 @@ public sealed class NormalizedApplicationManifestMapperTests
     {
         var original = CompleteNode();
         var changed = CompleteNode();
+        original["spec"]!["components"]!["worker"]!["documents"]!["extra-settings"] =
+            new JsonObject { ["fileName"] = "extra.json", ["format"] = "json", ["template"] = new JsonObject() };
+        changed["spec"]!["components"]!["worker"]!["documents"]!["extra-settings"] =
+            new JsonObject { ["fileName"] = "extra.json", ["format"] = "json", ["template"] = new JsonObject() };
         changed.Remove("$schema");
         var spec = changed["spec"]!.AsObject();
         var resource = spec["resources"]!["database"]!.AsObject();
@@ -44,8 +48,10 @@ public sealed class NormalizedApplicationManifestMapperTests
         var local = spec["components"]!["worker"]!["bindings"]!["local"]!.AsObject();
         local["documentProjections"] = new JsonArray(
             new JsonObject { ["documentRef"] = "settings", ["path"] = "/Other", ["rendererRef"] = "postgresql.connection/v1alpha1" },
-            new JsonObject { ["documentRef"] = "settings", ["path"] = "/Database", ["rendererRef"] = "postgresql.connection/v1alpha1" });
+            new JsonObject { ["documentRef"] = "settings", ["path"] = "/Database", ["rendererRef"] = "postgresql.connection/v1alpha1" },
+            new JsonObject { ["documentRef"] = "extra-settings", ["path"] = "/Z", ["rendererRef"] = "postgresql.connection/v1alpha1" });
         original["spec"]!["components"]!["worker"]!["bindings"]!["local"]!["documentProjections"] = new JsonArray(
+            new JsonObject { ["documentRef"] = "extra-settings", ["path"] = "/Z", ["rendererRef"] = "postgresql.connection/v1alpha1" },
             new JsonObject { ["documentRef"] = "settings", ["path"] = "/Database", ["rendererRef"] = "postgresql.connection/v1alpha1" },
             new JsonObject { ["documentRef"] = "settings", ["path"] = "/Other", ["rendererRef"] = "postgresql.connection/v1alpha1" });
         changed["spec"]!["parameters"]!["prefix"]!["allowedValues"] = new JsonArray("b", "a");
@@ -54,6 +60,9 @@ public sealed class NormalizedApplicationManifestMapperTests
         var second = Map(changed);
         Assert.Equal(first, second);
         Assert.Equal(first.GetHashCode(), second.GetHashCode());
+        var projections = Assert.IsType<ConfigurationArray>(At(first.Declaration, "spec", "components", "worker", "bindings", "local").Members["documentProjections"]);
+        Assert.Equal(["extra-settings", "settings", "settings"], projections.Items.Select(item => String(Assert.IsType<ConfigurationObject>(item), "documentRef")));
+        Assert.Equal(["/Z", "/Database", "/Other"], projections.Items.Select(item => String(Assert.IsType<ConfigurationObject>(item), "path")));
     }
 
     [Fact]
@@ -76,6 +85,14 @@ public sealed class NormalizedApplicationManifestMapperTests
         var b = Map(second);
         Assert.Equal(a, b);
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
+    }
+
+    [Theory]
+    [InlineData("0.123456789012345678901234567890123456789", "0.123456789012345678901234567890123456788")]
+    [InlineData("1e999999999999999999999", "2e999999999999999999999")]
+    public void Distinct_exact_numbers_remain_distinct(string first, string second)
+    {
+        Assert.NotEqual(MapWithNumberMinimum(first), MapWithNumberMinimum(second));
     }
 
     [Fact]
@@ -123,6 +140,8 @@ public sealed class NormalizedApplicationManifestMapperTests
 
     private static NormalizedApplicationManifest Map(string json) =>
         NormalizedApplicationManifestMapper.Map(JsonSerializer.Deserialize(json, Context.ApplicationManifest)!);
+    private static NormalizedApplicationManifest MapWithNumberMinimum(string rawNumber) =>
+        Map("{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"sample\"},\"spec\":{\"parameters\":{\"ratio\":{\"type\":\"number\",\"minimum\":" + rawNumber + "}}}}");
     private static NormalizedApplicationManifest Map(JsonObject json) => Map(json.ToJsonString());
     private static ApplicationManifest ReadComplete() => JsonSerializer.Deserialize(File.ReadAllText(RepositoryPath("tests", "Haby.Manifest.Tests", "Corpus", "complete.json")), Context.ApplicationManifest)!;
     private static JsonObject CompleteNode() => JsonNode.Parse(File.ReadAllText(RepositoryPath("tests", "Haby.Manifest.Tests", "Corpus", "complete.json")))!.AsObject();
