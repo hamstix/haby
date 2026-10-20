@@ -492,6 +492,29 @@ Definition of done for this work package:
 - removing a Component does not remove a still-declared Resource, and an unused declared Resource produces a warning;
 - focused tests and `git diff --check` pass.
 
+### Architecture validation checkpoint — PostgreSQL walking skeleton
+
+After [Slice 9](https://github.com/hamstix/haby/issues/24) and
+[Slice 10](https://github.com/hamstix/haby/issues/25) are merged, prioritize the
+[end-to-end checkpoint](https://github.com/hamstix/haby/issues/28) over further
+horizontal framework work. Deliver it through small dependent changes: a minimal
+one-Application, one-Environment ChangeSet/Plan/Apply path; one
+`postgresql.database` Resource provider; and a thin gRPC test-host adapter.
+
+The observable result is an automated test that submits a versioned Application
+manifest through gRPC, explicitly plans and applies its exact revision, and
+verifies that a database exists in an ephemeral PostgreSQL instance. Equivalent
+import and apply retries must be idempotent; invalid input must cause no
+provisioning, and PostgreSQL failures must be visible. Import itself remains
+side-effect free, and the Plan pins exact Environment and Provider inputs.
+
+This checkpoint tests whether the accepted boundaries work together; it is not
+a production-ready provisioning release. Database principals, generated
+passwords, SecretVersions, Configuration publication, durable operation recovery,
+stable public API and authorization remain separate follow-up work. Do not
+expose an unauthenticated provisioning endpoint or reuse the prototype
+PostgreSQL provider's interpolated SQL.
+
 ## Decisions to record as ADRs
 
 - ADR-001: Public core and downstream distribution boundary.
