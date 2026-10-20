@@ -27,6 +27,17 @@ Haby maps a validated manifest DTO to an immutable
 it does not use original bytes, reserialized DTO bytes or default CLR record
 equality.
 
+The normalized model's closed core is the typed domain graph required by
+[ADR-013](0013-m2-manifest-foundation-boundaries-and-identifiers.md).
+Comparison traverses its typed fields and applies each field's declared
+semantics. A generic `ConfigurationObject` containing the entire declaration
+is not an authoritative substitute. Open structured values are compared as
+`ConfigurationValue` trees only at their explicit extension boundaries.
+Collection equality must be implemented explicitly: default CLR equality for
+records containing arrays or dictionaries does not establish these structural
+rules. A canonical representation, if used, is derived from the typed model
+and must not become a parallel source of truth.
+
 The following structural rules apply:
 
 | Value | Equality rule |

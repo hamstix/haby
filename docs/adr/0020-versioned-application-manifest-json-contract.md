@@ -225,6 +225,13 @@ NormalizedModelVersion: 1
 declaration. `NormalizedModelVersion` identifies the persisted internal
 representation used by current planning and reconciliation code.
 
+That persisted representation must reconstruct the typed normalized domain
+graph defined by ADR-013. A versioned serialized or canonical tree may be used
+as its storage encoding, but a generic tree is not the authoritative runtime
+declaration and must not require consumers to reinterpret core manifest member
+names. The input DTO and its version-specific adapter are not needed to read an
+accepted revision.
+
 An internal normalized-model change requires a deterministic migration or
 upcaster. It must preserve the accepted declaration's semantics, revision
 identity and recorded normalized fingerprint; runtime code must not reconstruct

@@ -101,6 +101,30 @@ not one shared object graph. The exact validation-error contract and the rules
 for normalized-declaration equality are separate decisions that must be accepted
 before their M2.1 implementation.
 
+### Normalized declarations have a typed core graph
+
+The authoritative `NormalizedApplicationManifest` is an immutable, strongly
+typed domain graph. Its closed core structure represents metadata, parameter
+definitions, Resources and exports, Components, Configuration documents,
+Bindings and their targets and projections, and Workloads with dedicated domain
+types. References and discriminators use typed values rather than relying on
+serialized member names for interpretation. A generic `ConfigurationObject`,
+`ConfigurationValue`, `JsonElement` or manifest DTO tree must not serve as the
+authoritative representation of this closed structure.
+
+`ConfigurationValue` remains the intentional open-value boundary for structured
+document templates, Resource and Workload `properties`, Binding `options`, and
+other explicitly specified extension values (ADR-017). It does not replace the
+typed core declaration. A canonical tree or serialized form may be derived from
+the typed graph for persistence, comparison or fingerprints, but it is not a
+second independently maintained declaration.
+
+The mapper admits a normalized declaration only after the applicable schema,
+semantic, local-reference and registered extension-contract validation succeeds.
+The resulting graph does not retain unresolved references or depend on the
+source manifest DTO or an Environment-specific Provider resolution. Supported
+input API versions map to the internal graph through version-specific adapters.
+
 ### ApplicationId is portable, opaque and installation-scoped
 
 `ApplicationId` is the stable logical identifier carried in
@@ -167,6 +191,8 @@ producer-supplied opaque string; Haby does not infer ordering from it.
   outside a single installation is valuable.
 - Malformed input remains representable only in DTOs and validation results, not
   as accepted domain state.
+- Planning and reconciliation consume typed normalized declarations without
+  rediscovering core meaning from serialized member names.
 - Database and transport mappings must explicitly convert aggregate-specific ID
   value types.
 - The old prototype can remain operational during small M2 pull requests, but it
