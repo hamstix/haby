@@ -15,6 +15,29 @@ public sealed record ConfigurationRendererDefinition(ConfigurationRendererId Id)
 /// <summary>An immutable snapshot of registered, exact contract definitions.</summary>
 public sealed class ManifestContractCatalog
 {
+    private const string Draft202012 = "https://json-schema.org/draft/2020-12/schema";
+    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
+    {
+        "$schema", "$id", "$ref", "$anchor", "$dynamicRef", "$dynamicAnchor", "$comment", "$defs",
+        "type", "const", "enum", "multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum",
+        "maxLength", "minLength", "pattern", "maxItems", "minItems", "uniqueItems", "maxContains", "minContains",
+        "maxProperties", "minProperties", "required", "dependentRequired", "format",
+        "prefixItems", "items", "contains", "additionalProperties", "properties", "patternProperties",
+        "dependentSchemas", "propertyNames", "if", "then", "else", "allOf", "anyOf", "oneOf", "not",
+        "unevaluatedItems", "unevaluatedProperties", "title", "description", "default", "deprecated",
+        "readOnly", "writeOnly", "examples", "contentEncoding", "contentMediaType", "contentSchema"
+    };
+    private static readonly HashSet<string> SchemaMaps = new(StringComparer.Ordinal)
+    { "$defs", "properties", "patternProperties", "dependentSchemas" };
+    private static readonly HashSet<string> SchemaArrays = new(StringComparer.Ordinal)
+    { "prefixItems", "allOf", "anyOf", "oneOf" };
+    private static readonly HashSet<string> SchemaValues = new(StringComparer.Ordinal)
+    {
+        "items", "contains", "additionalProperties", "propertyNames", "if", "then", "else", "not",
+        "unevaluatedItems", "unevaluatedProperties", "contentSchema"
+    };
+    private static readonly Lazy<JsonSchema> MetaSchema = new(() => JsonSchema.FromUri(Draft202012,
+        new JsonSchema.Options(allowFileSystemAndHttpResolution: false)));
     private readonly Dictionary<ResourceTypeId, ResourceTypeDefinition> _resources = [];
     private readonly Dictionary<WorkloadTypeId, WorkloadTypeDefinition> _workloads = [];
     private readonly Dictionary<OutputContractId, OutputContractDefinition> _outputs = [];
@@ -64,12 +87,48 @@ public sealed class ManifestContractCatalog
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         if (_schemas.ContainsKey(text)) return;
-        using var document = JsonDocument.Parse(text);
-        if (document.RootElement.ValueKind != JsonValueKind.Object)
-            throw new ArgumentException("A registered schema must be a JSON Schema object.");
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
-        _schemas.Add(text, JsonSchema.FromText(text, "https://haby.dev/schemas/extensions/" + hash,
-            new JsonSchema.Options(allowFileSystemAndHttpResolution: false)));
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                (document.RootElement.TryGetProperty("$schema"u8, out var dialect) &&
+                 (dialect.ValueKind != JsonValueKind.String || dialect.GetString() != Draft202012)) ||
+                !MetaSchema.Value.Validate(text))
+                throw new ArgumentException("A registered schema must satisfy the Draft 2020-12 meta-schema.", nameof(text));
+            RequireKnownKeywords(document.RootElement);
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+            _schemas.Add(text, JsonSchema.FromText(text, "https://haby.dev/schemas/extensions/" + hash,
+                new JsonSchema.Options(allowFileSystemAndHttpResolution: false)));
+        }
+        catch (JsonException)
+        {
+            throw new ArgumentException("A registered schema must be valid JSON.", nameof(text));
+        }
+        catch (Corvus.Text.Json.RuntimeEvaluator.JsonSchemaCompilationException)
+        {
+            throw new ArgumentException("A registered schema contains an unresolved or invalid reference.", nameof(text));
+        }
+    }
+
+    private static void RequireKnownKeywords(JsonElement schema)
+    {
+        if (schema.ValueKind == JsonValueKind.True || schema.ValueKind == JsonValueKind.False) return;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var keyword in schema.EnumerateObject())
+        {
+            if (!Keywords.Contains(keyword.Name) || !seen.Add(keyword.Name))
+                throw new ArgumentException("A registered schema contains an unsupported or duplicate keyword.");
+            if (SchemaMaps.Contains(keyword.Name))
+            {
+                foreach (var item in keyword.Value.EnumerateObject()) RequireKnownKeywords(item.Value);
+            }
+            else if (SchemaArrays.Contains(keyword.Name))
+            {
+                foreach (var item in keyword.Value.EnumerateArray()) RequireKnownKeywords(item);
+            }
+            else if (SchemaValues.Contains(keyword.Name))
+                RequireKnownKeywords(keyword.Value);
+        }
     }
 
     private static bool Equivalent(string? first, string? second)

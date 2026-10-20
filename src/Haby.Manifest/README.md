@@ -30,7 +30,8 @@ application export target is not resolved here. Schema results are mapped to
 Haby codes and safe parameters; library messages and input values are not
 returned. Reports contain at most 100
 distinct diagnostics, retain errors before warnings and indicate truncation when
-more exist. Catalog registration rejects missing properties schemas and
+more exist. Catalog registration validates Draft 2020-12 schema syntax and
+references, rejects unsupported keywords, missing properties schemas and
 conflicting exact definitions; equivalent definitions may be registered twice.
 
 `ConfigurationValueMapper.FromValidatedJson` copies a schema- and semantics-

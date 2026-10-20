@@ -110,6 +110,63 @@ public sealed class ManifestExtensionValidationTests
         Assert.Throws<ArgumentException>(() => new ManifestContractCatalog([new(id, "")], [], [], []));
     }
 
+    [Theory]
+    [InlineData("""{"type":"object","required":"name"}""")]
+    [InlineData("""{"type":"object","properties":{"name":{"type":42}}}""")]
+    [InlineData("""{"type":"object","$ref":"#/$defs/missing"}""")]
+    [InlineData("""{"type":"object","requird":["name"]}""")]
+    public void Registration_rejects_malformed_or_unresolved_schemas(string schema)
+    {
+        Assert.Throws<ArgumentException>(() => new ManifestContractCatalog(
+            [new(ResourceTypeId.Create("example.store/v1"), schema)], [], [], []));
+    }
+
+    [Fact]
+    public void Registration_accepts_resolved_local_refs_and_rejects_invalid_output_options_schema()
+    {
+        const string localRef = """{"$defs":{"object":{"type":"object","required":["name"]}},"$ref":"#/$defs/object"}""";
+        _ = Catalog(localRef);
+        Assert.Throws<ArgumentException>(() => new ManifestContractCatalog([], [],
+            [new(OutputContractId.Create("example.output/v1"), """{"required":"name"}""")], []));
+    }
+
+    [Fact]
+    public void Output_contract_registration_is_idempotent_and_conflicting_options_fail()
+    {
+        var id = OutputContractId.Create("example.output/v1");
+        _ = new ManifestContractCatalog([], [],
+            [new(id, """{"type":"object","required":["name"]}"""),
+             new(id, """{"required":["name"],"type":"object"}""")], []);
+        Assert.Throws<InvalidOperationException>(() => new ManifestContractCatalog([], [],
+            [new(id, AnyObject), new(id, RequiredName)], []));
+    }
+
+    [Fact]
+    public void Unmatched_oneOf_branches_produce_one_parent_diagnostic()
+    {
+        const string schema = """{"type":"object","properties":{"mode":{"oneOf":[{"type":"string","enum":["read"]},{"type":"integer"}]}}}""";
+        var manifest = Base();
+        manifest["spec"]!["resources"] = JsonNode.Parse("""{"db":{"type":"example.store/v1","providerRef":"provider","properties":{"mode":true}}}"""u8);
+
+        var diagnostics = Invalid(manifest, Catalog(schema)).Diagnostics;
+        var error = Assert.Single(diagnostics, d => d.Severity == ManifestDiagnosticSeverity.Error);
+        Assert.Equal("manifest.properties.schema-violation", error.Code);
+        Assert.Equal("/spec/resources/db/properties/mode", error.Path);
+        Assert.Equal("oneOf", error.Parameters["constraint"]);
+    }
+
+    [Fact]
+    public void Failed_unselected_oneOf_branch_does_not_leak_when_another_field_is_invalid()
+    {
+        const string schema = """{"type":"object","properties":{"mode":{"oneOf":[{"type":"string"},{"type":"integer"}]},"count":{"type":"integer"}}}""";
+        var manifest = Base();
+        manifest["spec"]!["resources"] = JsonNode.Parse("""{"db":{"type":"example.store/v1","providerRef":"provider","properties":{"mode":"read","count":true}}}"""u8);
+        var error = Assert.Single(Invalid(manifest, Catalog(schema)).Diagnostics,
+            d => d.Severity == ManifestDiagnosticSeverity.Error);
+        Assert.Equal("/spec/resources/db/properties/count", error.Path);
+        Assert.Equal("type", error.Parameters["constraint"]);
+    }
+
     private static JsonObject Base() => JsonNode.Parse("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{}}"""u8)!.AsObject();
 
     private static ManifestContractCatalog Empty() => new([], [], [], []);

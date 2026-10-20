@@ -94,10 +94,14 @@ internal static class ManifestExtensionValidator
         {
             if (result.IsMatch) continue;
             var location = result.GetSchemaEvaluationLocationText();
+            if (location.Contains("/oneOf/", StringComparison.Ordinal) ||
+                location.Contains("/anyOf/", StringComparison.Ordinal))
+                continue;
             var keyword = location[(location.LastIndexOf('/') + 1)..];
             if (keyword is not ("required" or "additionalProperties" or "type" or "enum" or "const" or "pattern" or
                 "minLength" or "maxLength" or "minimum" or "maximum" or "exclusiveMinimum" or "exclusiveMaximum" or
-                "minItems" or "maxItems" or "uniqueItems" or "minProperties" or "maxProperties" or "multipleOf" or "format"))
+                "minItems" or "maxItems" or "uniqueItems" or "minProperties" or "maxProperties" or "multipleOf" or "format" or
+                "oneOf" or "anyOf"))
                 continue;
             var relative = result.GetDocumentEvaluationLocationText();
             if (keyword == "required" && relative.Length != 0)
