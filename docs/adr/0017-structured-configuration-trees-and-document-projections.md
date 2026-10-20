@@ -194,7 +194,8 @@ execution, including:
 
 - the referenced document exists in the consuming Component;
 - the document is structured rather than raw text;
-- the renderer reference and JSON Pointer are syntactically valid;
+- the renderer reference and JSON Pointer are syntactically valid, and an exact
+  renderer definition is registered as required by ADR-018;
 - statically known projection paths do not duplicate or overlap.
 
 Planning or materialization validates Environment-specific facts, including:

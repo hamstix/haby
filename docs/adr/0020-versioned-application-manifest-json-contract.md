@@ -154,6 +154,11 @@ UTF-8 JSON
   -> normalization
 ```
 
+A successful complete-validation result requires every applicable stage,
+including registered extension-contract validation, to have run without
+errors. Core-schema and semantic success alone must not be exposed as a
+complete `Valid` result or used to admit a normalized ManifestRevision.
+
 The typed import-envelope DTO is part of the source-generated M2.1 contract.
 Its embedded `manifest` JSON value is dispatched by exact `apiVersion` and
 `kind` before version-specific DTO deserialization; it is not an additional

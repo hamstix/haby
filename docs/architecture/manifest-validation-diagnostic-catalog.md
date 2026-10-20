@@ -133,6 +133,11 @@ binding-options
 Plugin or schema-library codes and messages never pass through this boundary.
 Every extension-schema failure maps to
 `manifest.properties.schema-violation` at the precise manifest path.
+For `contractKind=binding-options`, `manifest.type.unknown` means that a
+non-empty Binding `options` Object has no registered options schema under its
+owning exact Resource type or output contract ID. Empty options without such a
+schema are valid. When a schema exists, even an empty effective options Object
+is validated against it.
 
 ## Parameter codes
 
@@ -308,9 +313,14 @@ RelatedPaths
 Severity does not participate because it is fixed by code.
 
 M2.1 returns at most 100 diagnostics. Validation follows dependency order and
-deterministic traversal within each stage. After deduplication and ordering, the
-first 100 diagnostics are retained and `Truncated` is set. Later validation
-stages do not run once the limit is exhausted.
+deterministic traversal within each stage. Exact duplicates are removed first.
+When more than 100 distinct diagnostics exist, errors are selected first in
+their ordinary ordinal order, up to the limit; warnings fill any remaining
+places in their ordinary ordinal order. The retained diagnostics are then
+ordered together by the final order above, and `Truncated` is set. With 100 or
+fewer distinct diagnostics, all are retained in that final order. This keeps at
+least one error visible whenever validation has produced an error, so `IsValid`
+remains derivable from the bounded report.
 
 ## Stage gating
 
@@ -328,6 +338,10 @@ A stage runs only when the previous stage produced a sufficiently valid model.
 Invalid JSON does not create schema diagnostics; an unknown discriminator does
 not create errors from every branch; and a missing Resource does not create
 extension-schema errors for that Resource.
+Errors prevent later dependent stages. Warnings never do, even when more than
+100 warnings have been produced. In particular, registered extension schemas
+must still be checked after an overflowing set of core-semantic warnings; a
+later extension error must make the final report invalid.
 
 ## Test corpus
 

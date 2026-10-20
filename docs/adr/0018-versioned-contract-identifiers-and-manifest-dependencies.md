@@ -107,6 +107,16 @@ an equivalent normalized definition is idempotent. Registering a different
 schema or semantic definition for the same ID fails startup with a contract
 definition conflict.
 
+For import validation, a Resource or Workload type definition must include an
+exact `properties` JSON Schema, even if that schema only permits any Object.
+Omitting this schema is an invalid catalog registration, not permission to skip
+validation. A Resource type definition and an output contract definition may
+also include an optional `bindingOptionsSchema`. These schemas are part of the
+versioned definition and participate in definition-conflict detection. A
+Binding-options schema does not introduce a separate manifest field or a new
+contract ID: it is identified by the exact Resource type or output contract ID
+that owns it.
+
 Conformance includes behavior and cannot be proven from a schema alone. Plugin
 compatibility tests remain responsible for proving the declared semantics.
 
@@ -194,8 +204,23 @@ A Binding may contain an `options` extension value for consumer-specific input:
 
 Binding options are separate from Resource `properties`. They cannot change the
 Resource's desired state, Provider selection, ownership or lifecycle. Their
-`JsonElement` content is validated against the exact binding or output-contract
-schema registered in the metadata catalog.
+`JsonElement` content is validated against an exact schema registered in the
+metadata catalog. For a local-resource target, Haby resolves `resourceRef`
+within the manifest and selects the `bindingOptionsSchema` of that Resource's
+exact `ResourceTypeId`. For an application-export target, it selects the
+`bindingOptionsSchema` of the exact `OutputContractId` stated by
+`target.contract`; the external Application and export are not resolved during
+import.
+
+If an options schema exists, Haby validates the effective options Object
+against it even when `options` is absent or `{}`. An absent options member has
+the core default `{}` but does not bypass schema constraints such as `required`.
+If no options schema exists, absent or empty options are valid; non-empty
+options produce `manifest.type.unknown` with `contractKind=binding-options`,
+`contractId` set to the owning Resource type or output contract ID, and the
+Binding's `/options` path. A missing owning type or output contract produces
+its own `manifest.type.unknown` diagnostic first; Haby does not report a
+secondary options-schema error for it.
 
 For an Application export, options cannot request broader access than the
 owner's export and Environment policy permit.

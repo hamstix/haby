@@ -108,7 +108,7 @@ JSON syntax and duplicate-property checks
   -> core JSON Schema validation
   -> source-generated DTO deserialization
   -> core semantic validation and reference resolution
-  -> type-specific properties-schema validation
+  -> registered extension-contract and properties-schema validation
 ```
 
 A later stage runs only when the preceding stages produced a sufficiently valid
@@ -118,8 +118,13 @@ can do so safely.
 
 Diagnostics have deterministic ordering by path, code and related paths.
 Parameters use deterministic key ordering when serialized. M2.1 returns at most
-100 diagnostics and sets `Truncated` when more diagnostics exist. An invalid
-import stores no ManifestRevision.
+100 diagnostics and sets `Truncated` when more diagnostics exist. Warnings do
+not prevent a required later validation stage from running. If diagnostics
+must be truncated, errors take selection priority over warnings; retained
+diagnostics are then placed in the ordinary deterministic order. Thus any
+validation error remains represented in the bounded report and `IsValid`
+continues to mean that no error diagnostic was produced. An invalid import
+stores no ManifestRevision.
 
 ### Successful-import warnings are immutable historical data
 
