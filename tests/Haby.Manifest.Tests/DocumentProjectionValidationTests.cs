@@ -191,6 +191,6 @@ public class DocumentProjectionValidationTests
         var bBinding = "\"b\":{" + target + ",\"documentProjections\":[" + b + "]}";
         var bindings = reverseBindings ? bBinding + "," + aBinding : aBinding + "," + bBinding;
         var json = "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"example\"},\"spec\":{\"components\":{\"c\":{\"documents\":{\"settings\":{\"fileName\":\"settings.json\",\"format\":\"json\",\"template\":" + template + "}},\"bindings\":{" + bindings + "}}}}}}";
-        return ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(json));
+        return ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(json), TestManifestCatalog.Instance);
     }
 }

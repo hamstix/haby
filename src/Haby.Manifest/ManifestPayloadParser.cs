@@ -18,8 +18,9 @@ public static class ManifestPayloadParser
     private static readonly ManifestJsonContext Context = ManifestJsonContext.CreateStrict();
     private static readonly JsonDocumentOptions DocumentOptions = new() { MaxDepth = 64, CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false };
 
-    public static ManifestParseResult Parse(ReadOnlyMemory<byte> payload)
+    public static ManifestParseResult Parse(ReadOnlyMemory<byte> payload, ManifestContractCatalog catalog)
     {
+        ArgumentNullException.ThrowIfNull(catalog);
         var bytes = payload.Span;
         if (bytes.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) ||
             bytes.StartsWith(new byte[] { 0xFF, 0xFE }) || bytes.StartsWith(new byte[] { 0xFE, 0xFF }) ||
@@ -75,7 +76,10 @@ public static class ManifestPayloadParser
             var typedManifest = JsonSerializer.Deserialize(manifestBytes, Context.ApplicationManifest);
             if (typedManifest is null)
                 return Invalid([Diagnostic("manifest.schema.type-mismatch", "", "The manifest must be an object.", ("expectedType", "object"))]);
-            var report = CreateReport(ManifestSemanticValidator.Validate(typedManifest));
+            var semantic = ManifestSemanticValidator.Validate(typedManifest).ToArray();
+            var report = CreateReport(semantic.Any(diagnostic => diagnostic.Severity == ManifestDiagnosticSeverity.Error)
+                ? semantic
+                : semantic.Concat(ManifestExtensionValidator.Validate(typedManifest, catalog)));
             return report.IsValid
                 ? new ManifestParseResult.Valid(version, typedManifest) { Report = report }
                 : new ManifestParseResult.InvalidManifest(report);
@@ -414,7 +418,14 @@ public static class ManifestPayloadParser
             .ThenBy(d => d.Code, StringComparer.Ordinal)
             .ThenBy(d => string.Join("\u001f", d.Parameters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value)), StringComparer.Ordinal)
             .ThenBy(d => string.Join("\u001f", d.RelatedPaths), StringComparer.Ordinal).ToArray();
-        return new(unique.Take(DiagnosticLimit).ToArray(), unique.Length > DiagnosticLimit);
+        if (unique.Length <= DiagnosticLimit) return new(unique, false);
+        var retained = unique.Where(d => d.Severity == ManifestDiagnosticSeverity.Error).Take(DiagnosticLimit)
+            .Concat(unique.Where(d => d.Severity == ManifestDiagnosticSeverity.Warning)
+                .Take(Math.Max(0, DiagnosticLimit - unique.Count(d => d.Severity == ManifestDiagnosticSeverity.Error))))
+            .OrderBy(d => d.Path, StringComparer.Ordinal).ThenBy(d => d.Code, StringComparer.Ordinal)
+            .ThenBy(d => string.Join("\u001f", d.Parameters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value)), StringComparer.Ordinal)
+            .ThenBy(d => string.Join("\u001f", d.RelatedPaths), StringComparer.Ordinal).ToArray();
+        return new(retained, true);
     }
 
     private static ManifestDiagnostic Diagnostic(string code, string path, string message, params (string Key, string Value)[] parameters) =>

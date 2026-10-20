@@ -187,6 +187,6 @@ public class ManifestSemanticValidationTests
     {
         var json = """{"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{SPEC}}}"""
             .Replace("SPEC", spec, StringComparison.Ordinal);
-        return ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(json));
+        return ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(json), TestManifestCatalog.Instance);
     }
 }
