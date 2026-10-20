@@ -122,6 +122,14 @@ public sealed class ManifestExtensionValidationTests
     }
 
     [Fact]
+    public void Registration_rejects_external_ref_offline()
+    {
+        const string schema = """{"$ref":"https://example.com/schema.json"}""";
+        Assert.Throws<ArgumentException>(() => new ManifestContractCatalog(
+            [new(ResourceTypeId.Create("example.store/v1"), schema)], [], [], []));
+    }
+
+    [Fact]
     public void Registration_accepts_resolved_local_refs_and_rejects_invalid_output_options_schema()
     {
         const string localRef = """{"$defs":{"object":{"type":"object","required":["name"]}},"$ref":"#/$defs/object"}""";
