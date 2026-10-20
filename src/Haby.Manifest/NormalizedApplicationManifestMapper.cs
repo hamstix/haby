@@ -1,142 +1,133 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using Haby.Domain;
 
 namespace Haby.Manifest;
 
-/// <summary>Maps a core-validated v1alpha1 DTO without retaining its mutable storage.</summary>
+/// <summary>
+/// Pure v1alpha1 adapter for DTOs that passed core and registered extension-contract validation.
+/// It is intentionally disconnected from the parser and import pipeline until that gate exists.
+/// </summary>
 internal static class NormalizedApplicationManifestMapper
 {
     internal static NormalizedApplicationManifest Map(ApplicationManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
-        return new NormalizedApplicationManifest(manifest.ApiVersion, Haby.Domain.ApplicationId.Create(manifest.Metadata.Id), Object(
-            ("apiVersion", Text(manifest.ApiVersion)),
-            ("kind", Text(manifest.Kind)),
-            ("metadata", Object(
-                ("id", Text(manifest.Metadata.Id)),
-                ("displayName", OptionalText(manifest.Metadata.DisplayName)),
-                ("labels", StringMap(manifest.Metadata.Labels)))),
-            ("spec", Object(
-                ("parameters", Map(manifest.Spec.Parameters, Parameter)),
-                ("resources", Map(manifest.Spec.Resources, Resource)),
-                ("exports", Map(manifest.Spec.Exports, Export)),
-                ("components", Map(manifest.Spec.Components, Component))))));
+        if (manifest.ApiVersion != "haby.dev/v1alpha1" || manifest.Kind != "Application")
+            throw new ArgumentException("The mapper requires a validated v1alpha1 Application.", nameof(manifest));
+        return new NormalizedApplicationManifest(manifest.ApiVersion,
+            new NormalizedManifestMetadata(Haby.Domain.ApplicationId.Create(manifest.Metadata.Id),
+                manifest.Metadata.DisplayName, Labels(manifest.Metadata.Labels)),
+            new NormalizedManifestSpec(
+                Entries(manifest.Spec.Parameters, Parameter),
+                Entries(manifest.Spec.Resources, Resource),
+                Entries(manifest.Spec.Exports, Export),
+                Entries(manifest.Spec.Components, Component)));
     }
 
-    private static ConfigurationValue Parameter(ParameterDefinition value)
+    private static NormalizedParameterDefinition Parameter(ParameterDefinition value)
     {
-        var fields = new List<(string, ConfigurationValue?)>
+        var defaultValue = Default(value);
+        return value switch
         {
-            ("description", OptionalText(value.Description)),
-            ("default", value.Default.ValueKind == JsonValueKind.Undefined ? null : ConfigurationValueMapper.FromValidatedJson(value.Default)),
-            ("defaultExpression", OptionalText(value.DefaultExpression))
+            StringParameterDefinition item => new NormalizedStringParameter(item.Description, defaultValue,
+                item.MinLength, item.MaxLength,
+                item.AllowedValues is null ? null : item.AllowedValues.Order(StringComparer.Ordinal).ToImmutableArray()),
+            BooleanParameterDefinition item => new NormalizedBooleanParameter(item.Description, defaultValue),
+            IntegerParameterDefinition item => new NormalizedIntegerParameter(item.Description, defaultValue,
+                OptionalNumber(item.Minimum?.RawText), OptionalNumber(item.Maximum?.RawText),
+                item.AllowedValues is null ? null : Numbers(item.AllowedValues.Select(x => x.RawText))),
+            NumberParameterDefinition item => new NormalizedNumberParameter(item.Description, defaultValue,
+                OptionalNumber(item.Minimum?.RawText), OptionalNumber(item.Maximum?.RawText),
+                item.AllowedValues is null ? null : Numbers(item.AllowedValues.Select(x => x.RawText))),
+            _ => throw new ArgumentException("The parameter must be a validated v1alpha1 alternative.", nameof(value))
         };
-        switch (value)
-        {
-            case StringParameterDefinition item:
-                fields.Add(("type", Text("string")));
-                fields.Add(("minLength", item.MinLength is int min ? Number(min.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null));
-                fields.Add(("maxLength", item.MaxLength is int max ? Number(max.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null));
-                fields.Add(("allowedValues", item.AllowedValues is null ? null : Set(item.AllowedValues.Select(Text), item.AllowedValues.Select(x => x))));
-                break;
-            case BooleanParameterDefinition:
-                fields.Add(("type", Text("boolean")));
-                break;
-            case IntegerParameterDefinition item:
-                fields.Add(("type", Text("integer")));
-                fields.Add(("minimum", item.Minimum is { } integerMinimum ? Number(integerMinimum.RawText) : null));
-                fields.Add(("maximum", item.Maximum is { } integerMaximum ? Number(integerMaximum.RawText) : null));
-                fields.Add(("allowedValues", item.AllowedValues is null ? null : NumericSet(item.AllowedValues.Select(x => x.RawText))));
-                break;
-            case NumberParameterDefinition item:
-                fields.Add(("type", Text("number")));
-                fields.Add(("minimum", item.Minimum is { } numberMinimum ? Number(numberMinimum.RawText) : null));
-                fields.Add(("maximum", item.Maximum is { } numberMaximum ? Number(numberMaximum.RawText) : null));
-                fields.Add(("allowedValues", item.AllowedValues is null ? null : NumericSet(item.AllowedValues.Select(x => x.RawText))));
-                break;
-            default:
-                throw new ArgumentException("The parameter must be a validated v1alpha1 alternative.", nameof(value));
-        }
-        return Object(fields);
     }
 
-    private static ConfigurationValue Resource(ResourceDeclaration value) => Object(
-        ("type", Text(value.Type)),
-        ("providerRef", Text(value.ProviderRef)),
-        ("properties", ConfigurationValueMapper.FromValidatedJson(value.Properties)),
-        ("lifecycle", Object(("deletionPolicy", Text(value.Lifecycle.DeletionPolicy)))));
-
-    private static ConfigurationValue Export(ResourceExport value) => Object(
-        ("resourceRef", Text(value.ResourceRef)),
-        ("contract", Text(value.Contract)),
-        ("accessProfile", OptionalText(value.AccessProfile)));
-
-    private static ConfigurationValue Component(ComponentDeclaration value) => Object(
-        ("displayName", OptionalText(value.DisplayName)),
-        ("labels", StringMap(value.Labels)),
-        ("bindings", Map(value.Bindings, Binding)),
-        ("documents", Map(value.Documents, Document)),
-        ("workloads", Map(value.Workloads, Workload)));
-
-    private static ConfigurationValue Binding(BindingDeclaration value) => Object(
-        ("target", Target(value.Target)),
-        ("options", ConfigurationValueMapper.FromValidatedJson(value.Options)),
-        ("documentProjections", new ConfigurationArray(value.DocumentProjections
-            .OrderBy(x => x.DocumentRef, StringComparer.Ordinal)
-            .ThenBy(x => x.Path, StringComparer.Ordinal)
-            .ThenBy(x => x.RendererRef, StringComparer.Ordinal)
-            .Select(Projection))));
-
-    private static ConfigurationValue Target(BindingTarget value) => value switch
+    private static NormalizedParameterDefault? Default(ParameterDefinition value)
     {
-        LocalResourceTarget item => Object(("kind", Text("local-resource")), ("resourceRef", Text(item.ResourceRef))),
-        ApplicationExportTarget item => Object(("kind", Text("application-export")),
-            ("applicationId", Text(item.ApplicationId)), ("exportRef", Text(item.ExportRef)),
-            ("contract", Text(item.Contract))),
+        if (value.DefaultExpression is not null) return new NormalizedExpressionDefault(value.DefaultExpression);
+        if (value.Default.ValueKind == JsonValueKind.Undefined) return null;
+        var literal = value switch
+        {
+            StringParameterDefinition => new NormalizedStringScalar(value.Default.GetString()!),
+            BooleanParameterDefinition => (NormalizedParameterScalar)new NormalizedBooleanScalar(value.Default.GetBoolean()),
+            IntegerParameterDefinition => new NormalizedIntegerScalar(ExactManifestNumber.Parse(value.Default.GetRawText())),
+            NumberParameterDefinition => new NormalizedNumberScalar(ExactManifestNumber.Parse(value.Default.GetRawText())),
+            _ => throw new ArgumentException("The parameter must be a validated v1alpha1 alternative.", nameof(value))
+        };
+        return new NormalizedLiteralDefault(literal);
+    }
+
+    private static NormalizedResource Resource(ResourceDeclaration value) => new(
+        ResourceTypeId.Create(value.Type), ProviderAlias.Create(value.ProviderRef),
+        OpenObject(value.Properties), value.Lifecycle.DeletionPolicy switch
+        {
+            "retain" => ResourceDeletionPolicy.Retain,
+            "orphan" => ResourceDeletionPolicy.Orphan,
+            "delete" => ResourceDeletionPolicy.Delete,
+            _ => throw new ArgumentException("Unknown resource deletion policy.", nameof(value))
+        });
+
+    private static NormalizedResourceExport Export(ResourceExport value) => new(
+        ManifestLocalId.Create(value.ResourceRef), OutputContractId.Create(value.Contract),
+        value.AccessProfile is null ? null : ManifestLocalId.Create(value.AccessProfile));
+
+    private static NormalizedComponent Component(ComponentDeclaration value) => new(
+        value.DisplayName, Labels(value.Labels),
+        Entries(value.Bindings, Binding),
+        Entries(value.Documents, Document),
+        Entries(value.Workloads, Workload));
+
+    private static NormalizedBinding Binding(BindingDeclaration value) => new(
+        Target(value.Target), OpenObject(value.Options),
+        value.DocumentProjections.Select(Projection)
+            .OrderBy(x => x.DocumentRef.Value, StringComparer.Ordinal)
+            .ThenBy(x => x.Path.Value, StringComparer.Ordinal)
+            .ThenBy(x => x.RendererRef.Value, StringComparer.Ordinal)
+            .ToImmutableArray());
+
+    private static NormalizedBindingTarget Target(BindingTarget value) => value switch
+    {
+        LocalResourceTarget item => new NormalizedLocalResourceTarget(ManifestLocalId.Create(item.ResourceRef)),
+        ApplicationExportTarget item => new NormalizedApplicationExportTarget(
+            Haby.Domain.ApplicationId.Create(item.ApplicationId), ManifestLocalId.Create(item.ExportRef),
+            OutputContractId.Create(item.Contract)),
         _ => throw new ArgumentException("The target must be a validated v1alpha1 alternative.", nameof(value))
     };
 
-    private static ConfigurationValue Projection(DocumentProjection value) => Object(
-        ("documentRef", Text(value.DocumentRef)), ("path", Text(value.Path)),
-        ("rendererRef", Text(value.RendererRef)));
+    private static NormalizedDocumentProjection Projection(DocumentProjection value) => new(
+        ManifestLocalId.Create(value.DocumentRef), ProjectionPath.FromValidated(value.Path),
+        ConfigurationRendererId.Create(value.RendererRef));
 
-    private static ConfigurationValue Document(ConfigurationDocument value) => value switch
+    private static NormalizedConfigurationDocument Document(ConfigurationDocument value) => value switch
     {
-        JsonConfigurationDocument item => Object(("format", Text("json")),
-            ("fileName", Text(item.FileName)), ("template", ConfigurationValueMapper.FromValidatedJson(item.Template))),
-        YamlConfigurationDocument item => Object(("format", Text("yaml")),
-            ("fileName", Text(item.FileName)), ("template", ConfigurationValueMapper.FromValidatedJson(item.Template))),
-        TextConfigurationDocument item => Object(("format", Text("text")),
-            ("fileName", Text(item.FileName)), ("template", Text(item.Template))),
+        JsonConfigurationDocument item => new NormalizedStructuredDocument(item.FileName,
+            StructuredDocumentFormat.Json, ConfigurationValueMapper.FromValidatedJson(item.Template)),
+        YamlConfigurationDocument item => new NormalizedStructuredDocument(item.FileName,
+            StructuredDocumentFormat.Yaml, ConfigurationValueMapper.FromValidatedJson(item.Template)),
+        TextConfigurationDocument item => new NormalizedTextDocument(item.FileName, item.Template),
         _ => throw new ArgumentException("The document must be a validated v1alpha1 alternative.", nameof(value))
     };
 
-    private static ConfigurationValue Workload(WorkloadDeclaration value) => Object(
-        ("type", Text(value.Type)), ("providerRef", Text(value.ProviderRef)),
-        ("profile", OptionalText(value.Profile)),
-        ("properties", ConfigurationValueMapper.FromValidatedJson(value.Properties)));
+    private static NormalizedWorkload Workload(WorkloadDeclaration value) => new(
+        WorkloadTypeId.Create(value.Type), ProviderAlias.Create(value.ProviderRef),
+        value.Profile is null ? null : ManifestLocalId.Create(value.Profile),
+        OpenObject(value.Properties));
 
-    private static ConfigurationArray NumericSet(IEnumerable<string> values)
-    {
-        var numbers = values.Select(Number).ToArray();
-        return Set(numbers, numbers.Select(x => x.CanonicalText));
-    }
+    private static ConfigurationObject OpenObject(JsonElement value) =>
+        (ConfigurationObject)ConfigurationValueMapper.FromValidatedJson(value);
 
-    private static ConfigurationArray Set<T>(IEnumerable<T> values, IEnumerable<string> keys) where T : ConfigurationValue =>
-        new(values.Zip(keys).OrderBy(x => x.Second, StringComparer.Ordinal).Select(x => x.First));
+    private static ExactManifestNumber? OptionalNumber(string? raw) =>
+        raw is null ? null : ExactManifestNumber.Parse(raw);
 
-    private static ConfigurationNumber Number(string rawText) => ConfigurationNumber.Parse(rawText);
-    private static ConfigurationString Text(string value) => new(value);
-    private static ConfigurationString? OptionalText(string? value) => value is null ? null : Text(value);
+    private static ImmutableArray<ExactManifestNumber> Numbers(IEnumerable<string> raw) =>
+        raw.Select(ExactManifestNumber.Parse).OrderBy(x => x.CanonicalText, StringComparer.Ordinal).ToImmutableArray();
 
-    private static ConfigurationObject StringMap(Dictionary<string, string> values) =>
-        new(values.Select(item => new KeyValuePair<string, ConfigurationValue>(item.Key, Text(item.Value))));
+    private static ImmutableDictionary<string, string> Labels(Dictionary<string, string> values) =>
+        values.ToImmutableDictionary(StringComparer.Ordinal);
 
-    private static ConfigurationObject Map<T>(Dictionary<string, T> values, Func<T, ConfigurationValue> map) =>
-        new(values.Select(item => new KeyValuePair<string, ConfigurationValue>(item.Key, map(item.Value))));
-
-    private static ConfigurationObject Object(params (string Key, ConfigurationValue? Value)[] fields) => Object((IEnumerable<(string Key, ConfigurationValue? Value)>)fields);
-    private static ConfigurationObject Object(IEnumerable<(string Key, ConfigurationValue? Value)> fields) =>
-        new(fields.Where(item => item.Value is not null).Select(item =>
-            new KeyValuePair<string, ConfigurationValue>(item.Key, item.Value!)));
+    private static ImmutableDictionary<ManifestLocalId, TValue> Entries<TSource, TValue>(
+        Dictionary<string, TSource> values, Func<TSource, TValue> map) =>
+        values.ToImmutableDictionary(item => ManifestLocalId.Create(item.Key), item => map(item.Value));
 }

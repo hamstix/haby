@@ -102,8 +102,6 @@ public sealed class ConfigurationNumber : ConfigurationValue
     }
 
     private static bool IsDigit(char value) => value is >= '0' and <= '9';
-    /// <summary>A stable representation for ordering exact values in set-like declarations.</summary>
-    internal string CanonicalText => _coefficient + "e" + _exponent.ToString(System.Globalization.CultureInfo.InvariantCulture);
     public override bool Equals(ConfigurationValue? other) => other is ConfigurationNumber value &&
         string.Equals(_coefficient, value._coefficient, StringComparison.Ordinal) && _exponent == value._exponent;
     public override int GetHashCode() => HashCode.Combine(3, _coefficient, _exponent);
