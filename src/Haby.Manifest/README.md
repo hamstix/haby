@@ -53,8 +53,10 @@ set-like declaration fields and preserves exact numbers and raw text.
 operations. It maps the DTO once only when core and registered extension checks
 completed without errors, and returns a typed `ValidatedManifestCandidate` with
 the immutable normalized declaration, typed identity and the complete bounded
-warning report. Request and manifest failures retain the parser's original
-codes, paths and reports. `ValidateApplicationManifest.Execute` in
-`Haby.Application` uses this seam and returns only typed identity and warnings on
-success; it does not expose the candidate or access a catalog repository.
+warning report. The candidate snapshots diagnostics, parameters and related
+paths into read-only collections. Request and manifest failures retain the
+parser's original codes, paths and reports.
+`ValidateApplicationManifest.Execute` in `Haby.Application` uses this seam and
+returns only typed identity and warnings on success; it does not expose the
+candidate or access a catalog repository.
 Fingerprints, persistence and import orchestration remain separate work.

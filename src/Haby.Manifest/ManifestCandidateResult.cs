@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Haby.Domain;
 using ApplicationId = Haby.Domain.ApplicationId;
 
@@ -11,7 +12,13 @@ public sealed class ValidatedManifestCandidate
     {
         ApplicationVersion = applicationVersion;
         Declaration = declaration;
-        Warnings = warnings;
+        Warnings = new ManifestValidationReport(Array.AsReadOnly(warnings.Diagnostics.Select(diagnostic =>
+            diagnostic with
+            {
+                Parameters = new ReadOnlyDictionary<string, string>(
+                    new Dictionary<string, string>(diagnostic.Parameters, StringComparer.Ordinal)),
+                RelatedPaths = Array.AsReadOnly(diagnostic.RelatedPaths.ToArray())
+            }).ToArray()), warnings.Truncated);
     }
 
     public ApplicationId ApplicationId => Declaration.ApplicationId;
