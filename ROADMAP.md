@@ -439,6 +439,12 @@ sequential pull requests with independent review gates.
    through the raw-payload validation and atomic import use cases accepted in
    [ADR-021](docs/adr/0021-application-manifest-validation-and-import-use-cases.md),
    using in-memory repositories and focused sequential and concurrent tests.
+   Complete this in two dependent slices: [Slice 9](https://github.com/hamstix/haby/issues/24)
+   connects the fully validated parser result to the normalized model and the
+   read-only `ValidateApplicationManifest` use case; [Slice 10](https://github.com/hamstix/haby/issues/25)
+   implements immutable `ImportApplicationManifest` with an atomic in-memory
+   compare-and-create store. Start Slice 10 only after Slice 9 is merged and
+   verified on `main`.
 7. Implement the immutable generation snapshots, ChangeSet membership, Plans,
    distinct stale errors and atomic in-memory commit contracts accepted in
    [ADR-016](docs/adr/0016-deployment-change-sets-plans-and-generations.md)
