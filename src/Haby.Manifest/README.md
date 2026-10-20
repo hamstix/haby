@@ -49,7 +49,14 @@ structured templates, Resource/Workload properties and Binding options use
 `ConfigurationValue`. The mapper materializes core defaults, sorts the two
 set-like declaration fields and preserves exact numbers and raw text.
 
-The mapper is not called by the parser. A parser `Valid` result proves that core
-and registered extension checks completed. A future Validate/Import pipeline
-may call the mapper after this gate. Fingerprints, persistence and import
-orchestration remain separate work.
+`ManifestCandidatePipeline.Prepare` composes the parser and mapper for application
+operations. It maps the DTO once only when core and registered extension checks
+completed without errors, and returns a typed `ValidatedManifestCandidate` with
+the immutable normalized declaration, typed identity and the complete bounded
+warning report. The candidate snapshots diagnostics, parameters and related
+paths into read-only collections. Request and manifest failures retain the
+parser's original codes, paths and reports.
+`ValidateApplicationManifest.Execute` in `Haby.Application` uses this seam and
+returns only typed identity and warnings on success; it does not expose the
+candidate or access a catalog repository.
+Fingerprints, persistence and import orchestration remain separate work.
