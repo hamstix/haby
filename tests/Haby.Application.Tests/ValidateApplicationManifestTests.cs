@@ -58,6 +58,18 @@ public class ValidateApplicationManifestTests
     }
 
     [Fact]
+    public void Core_manifest_errors_reach_the_application_outcome()
+    {
+        var payload = Encoding.UTF8.GetBytes("""{"applicationVersion":"1.0","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"Bad_Id"},"spec":{}}}""");
+
+        var result = Assert.IsType<ValidateApplicationManifestResult.InvalidManifest>(
+            ValidateApplicationManifest.Execute(payload, Catalog));
+        Assert.Contains(result.ValidationReport.Diagnostics,
+            diagnostic => diagnostic.Code == "manifest.id.invalid" && diagnostic.Path == "/metadata/id");
+        Assert.IsType<ManifestCandidateResult.InvalidManifest>(ManifestCandidatePipeline.Prepare(payload, Catalog));
+    }
+
+    [Fact]
     public void Truncated_warnings_still_allow_normalization()
     {
         var resources = string.Join(",", Enumerable.Range(0, 101).Select(index =>
@@ -85,6 +97,10 @@ public class ValidateApplicationManifestTests
         Assert.Empty(first.Warnings.Diagnostics);
         Assert.Empty(second.Warnings.Diagnostics);
         Assert.False(first.Warnings.Truncated);
+
+        var firstCandidate = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(payload, Catalog)).Candidate;
+        var secondCandidate = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(payload, Catalog)).Candidate;
+        Assert.Equal(firstCandidate.Declaration, secondCandidate.Declaration);
     }
 
     private static byte[] Envelope(string specMembers) => Encoding.UTF8.GetBytes(
