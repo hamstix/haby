@@ -39,6 +39,17 @@ public class DocumentProjectionValidationTests
         Assert.IsType<ManifestParseResult.Valid>(Parse("{}", projections));
     }
 
+    [Fact]
+    public void Empty_key_pointer_passes_core_validation_and_maps()
+    {
+        var valid = Assert.IsType<ManifestParseResult.Valid>(Parse("{}", Projection("/")));
+
+        var mapped = NormalizedApplicationManifestMapper.Map(valid.Manifest);
+
+        Assert.Equal("/", Assert.Single(mapped.Spec.Components.Values.Single().Bindings.Values
+            .SelectMany(binding => binding.DocumentProjections)).Path.Value);
+    }
+
     [Theory]
     [InlineData("{\"leaf\":1}", "/leaf", "manifest.document.projection-collision", "existing-leaf")]
     [InlineData("{\"leaf\":null}", "/leaf/child", "manifest.document.projection-collision", "non-object-parent")]

@@ -33,5 +33,15 @@ including ones with a `$secretRef` key, remain ordinary Object nodes; no JSON
 shape creates a typed `ConfigurationSecretReference`. Trusted domain operations
 can construct that node from an exact-version `SecretRef`.
 
-Normalized Application manifest mapping, extension contract validation and
-import orchestration belong to later M2.1 slices.
+The internal `NormalizedApplicationManifestMapper` copies a validated
+v1alpha1 DTO into the immutable typed domain graph (normalized model version 1).
+Closed declarations, references and discriminators have domain types; only
+structured templates, Resource/Workload properties and Binding options use
+`ConfigurationValue`. The mapper materializes core defaults, sorts the two
+set-like declaration fields and preserves exact numbers and raw text.
+
+The mapper is not called by the parser. The parser's current `Valid` result
+does not prove that registered extension contracts were checked. A future
+Validate/Import pipeline must complete that validation before calling the
+mapper or accepting a ManifestRevision. Fingerprints, persistence and import
+orchestration remain separate work.
