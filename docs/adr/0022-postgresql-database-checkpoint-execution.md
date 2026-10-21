@@ -128,6 +128,24 @@ CI must run the real-PostgreSQL test and must not silently skip it when the
 container runtime is unavailable. A maintainer's existing PostgreSQL instance
 may be used only for an explicitly opted-in, isolated manual smoke test.
 
+On Windows, the built-in `wslc` CLI can run a disposable PostgreSQL container,
+but it is not assumed to expose the Docker-compatible API required by
+Testcontainers. The same integration assertions may connect to a temporary
+`wslc` container through an explicit, opt-in external-connection test mode.
+The local helper owns startup, readiness checks and cleanup of only its own
+container. The [integration-test guide](../development/postgresql-integration-tests.md)
+describes the Windows and Linux paths; neither path uses a persistent personal
+PostgreSQL installation by default.
+
+On Windows, the built-in `wslc` CLI can run a disposable PostgreSQL container,
+but it is not assumed to expose the Docker-compatible API required by
+Testcontainers. The same integration assertions may connect to a temporary
+`wslc` container through an explicit, opt-in external-connection test mode.
+The local helper owns startup, readiness checks and cleanup of only its own
+container. The [integration-test guide](../development/postgresql-integration-tests.md)
+describes the Windows and Linux paths; neither path uses a persistent personal
+PostgreSQL installation by default.
+
 ## Consequences
 
 - The checkpoint can falsify the architecture using a real PostgreSQL side
