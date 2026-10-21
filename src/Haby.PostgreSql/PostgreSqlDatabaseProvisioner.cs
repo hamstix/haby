@@ -88,6 +88,11 @@ public sealed class PostgreSqlDatabaseProvisioner(InMemoryPostgreSqlConfiguratio
             {
                 return CheckpointProvisionOutcome.Conflict;
             }
+            catch (PostgresException)
+            {
+                // PostgreSQL answered the CREATE command with an error; it did not create this database.
+                return CheckpointProvisionOutcome.ServerRejected;
+            }
             catch (Exception ex) when (ex is NpgsqlException or OperationCanceledException or System.IO.IOException)
             {
                 return CheckpointProvisionOutcome.UncertainOutcome;

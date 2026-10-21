@@ -4,12 +4,12 @@ using Haby.Manifest;
 namespace Haby.Application;
 
 public enum CheckpointExecutionState { Pending, Running, Succeeded, Failed, NeedsAttention }
-public enum CheckpointExecutionFailure { None, UnsupportedShape, PinnedRevisionMissing, ConfigurationUnavailable, Conflict, PreDispatchFailure, UncertainOutcome }
+public enum CheckpointExecutionFailure { None, UnsupportedShape, PinnedRevisionMissing, ConfigurationUnavailable, Conflict, PreDispatchFailure, ServerRejected, UncertainOutcome }
 
 /// <summary>Local observation only. It is not a durable operation contract.</summary>
 public sealed record CheckpointExecutionStatus(CheckpointExecutionState State, CheckpointExecutionFailure Failure);
 
-public enum CheckpointProvisionOutcome { Created, Conflict, ConfigurationUnavailable, PreDispatchFailure, UncertainOutcome }
+public enum CheckpointProvisionOutcome { Created, Conflict, ConfigurationUnavailable, PreDispatchFailure, ServerRejected, UncertainOutcome }
 
 /// <summary>The only external effect boundary needed for this checkpoint.</summary>
 public interface ICheckpointDatabaseProvisioner
@@ -84,6 +84,7 @@ public sealed class PostgreSqlCheckpointExecutor(InMemoryDesiredStateStore desir
                         CheckpointProvisionOutcome.Conflict => Failed(CheckpointExecutionFailure.Conflict),
                         CheckpointProvisionOutcome.ConfigurationUnavailable => Failed(CheckpointExecutionFailure.ConfigurationUnavailable),
                         CheckpointProvisionOutcome.PreDispatchFailure => Failed(CheckpointExecutionFailure.PreDispatchFailure),
+                        CheckpointProvisionOutcome.ServerRejected => Failed(CheckpointExecutionFailure.ServerRejected),
                         _ => new(CheckpointExecutionState.NeedsAttention, CheckpointExecutionFailure.UncertainOutcome)
                     };
                     if (result.State == CheckpointExecutionState.Succeeded && !desired.TryMarkApplied(generation))

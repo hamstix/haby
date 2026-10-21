@@ -140,6 +140,22 @@ public sealed class PostgreSqlIntegrationTests(PostgreSqlFixture fixture) : ICla
         Assert.False(await Exists(name));
     }
 
+    [Fact]
+    public async Task Server_rejected_create_is_a_definitive_failure()
+    {
+        var name = Name();
+        var readOnly = new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
+        {
+            Options = "-c default_transaction_read_only=on"
+        };
+        var configurations = new InMemoryPostgreSqlConfigurationCatalog();
+        configurations.Add("provider", 1, readOnly.ConnectionString);
+        var provider = new PostgreSqlDatabaseProvisioner(configurations);
+        Assert.Equal(CheckpointProvisionOutcome.ServerRejected,
+            await provider.CreateAsync(Selection(), name, default));
+        Assert.False(await Exists(name));
+    }
+
     private PostgreSqlDatabaseProvisioner Provider()
     {
         var configurations = new InMemoryPostgreSqlConfigurationCatalog();

@@ -112,9 +112,10 @@ advisories again in CI. No WSLc library package is used.
 - The integration fixture creates only uniquely named test databases in its
   disposable PostgreSQL instance and verifies existence through an independent
   connection or catalog query.
-- It covers confirmed retry, a pre-existing database conflict, invalid names,
-  a definitive failure and an ambiguous post-dispatch outcome without treating
-  any of them as success.
+- The integration suite covers confirmed retry, a pre-existing database
+  conflict, invalid names and visible failures with real Npgsql. The fast
+  Application tests cover ambiguous post-dispatch outcomes through Haby's
+  execution boundary without treating them as success.
 - It never targets a maintainer's persistent PostgreSQL by default. A separate
   manual smoke-test mode requires an explicit opt-in and an isolated target.
 - Npgsql is real in the provider integration test. Fast orchestration tests may

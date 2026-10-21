@@ -82,6 +82,22 @@ public class PostgreSqlCheckpointTests
     }
 
     [Fact]
+    public async Task Server_rejection_is_visible_and_retryable()
+    {
+        var fake = new RecordingProvisioner(CheckpointProvisionOutcome.ServerRejected,
+            CheckpointProvisionOutcome.Created);
+        var fixture = await Fixture.Create(fake);
+        var generation = fixture.Commit();
+        var rejected = await fixture.Executor.ExecuteAsync(generation);
+        Assert.Equal(CheckpointExecutionState.Failed, rejected.State);
+        Assert.Equal(CheckpointExecutionFailure.ServerRejected, rejected.Failure);
+        Assert.Null(Assert.Single(fixture.Desired.Deployments).AppliedGeneration);
+        Assert.Equal(CheckpointExecutionState.Succeeded, (await fixture.Executor.ExecuteAsync(generation)).State);
+        Assert.Equal(2, fake.Calls);
+        Assert.Equal(generation.Generation, Assert.Single(fixture.Desired.Deployments).AppliedGeneration);
+    }
+
+    [Fact]
     public async Task Concurrent_attempts_dispatch_only_once()
     {
         var fake = new RecordingProvisioner();
