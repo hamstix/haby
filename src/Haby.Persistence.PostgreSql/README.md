@@ -1,0 +1,58 @@
+# PostgreSQL manifest catalog
+
+This project is the EF Core persistence adapter for accepted Applications and
+immutable ManifestRevisions. It does not persist deployments or execute
+Providers. `IManifestImportStore` retains the existing import use case;
+`IManifestRevisionQuery` provides asynchronous inspection without changing the
+checkpoint planner's synchronous in-memory reader.
+
+Register the adapter with `AddPostgreSqlManifestCatalog(connectionString)`.
+Before a single-instance pilot host accepts requests, await
+`ManifestCatalogMigrationInitializer.MigrateAsync(cancellationToken)`. A failed
+migration must fail startup. Do not call `EnsureCreated`. The database principal
+needs DDL rights for EF's migration history table, the two catalog tables,
+indexes and constraints, plus normal read/write rights. The pilot deployment
+must restrict schema migration to one Haby instance.
+
+Before applying a reviewed migration, stop catalog writes and take a verified
+database backup. With PostgreSQL client environment variables supplied by the
+operator's secret management, a PowerShell procedure is:
+
+```powershell
+pg_dump --format=custom --file=manifest-catalog.dump --dbname=$env:PGDATABASE
+createdb haby_catalog_restore_check
+pg_restore --no-owner --no-privileges --dbname=haby_catalog_restore_check manifest-catalog.dump
+```
+
+Use a separate empty restore-check database and compare Application/revision row
+counts and `__EFMigrationsHistory` to the source. Confirm the restored revision
+can be read before relying on the backup. The configured migration principal
+must have `USAGE` and `CREATE` on the target schema and ownership or equivalent
+DDL rights on existing catalog objects. Check schema privileges with
+`SELECT has_schema_privilege(current_user, 'public', 'USAGE'),
+has_schema_privilege(current_user, 'public', 'CREATE');` and exercise migrations
+against an isolated copy with the actual pilot principal. Do not store
+connection strings or backups in this repository.
+
+Migration `InitialManifestCatalog` creates Applications and revisions together
+with database uniqueness on logical Application ID, Application ID plus version,
+and Application record ID plus local revision number. The adapter serializes
+imports of one Application through a transaction-scoped PostgreSQL advisory
+lock, then commits the first Application and revision in one transaction.
+Database constraints remain the final integrity guard. A failed database write
+propagates as an infrastructure error; it is not converted into a content
+conflict.
+
+The declaration snapshot is internal JSON **format version 1**. It records the
+complete typed normalized graph under **normalized model version 1**, with
+exact numbers encoded as canonical decimal coefficient and exponent text.
+Input API version, historical warnings and first-import actor/time are retained
+alongside it. Rehydration checks the format and model versions and fails on
+unsupported or corrupt snapshots. No original manifest parser or current
+extension catalog is consulted. Any encoding change requires a new format
+version and a migration or compatibility reader. The snapshot is not the
+public manifest contract or an equality shortcut.
+
+The real PostgreSQL integration tests use the existing disposable container
+suite and Windows WSLc helper documented in
+[`docs/development/postgresql-integration-tests.md`](../../docs/development/postgresql-integration-tests.md).

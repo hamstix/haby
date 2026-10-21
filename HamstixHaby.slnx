@@ -12,6 +12,7 @@
   <Project Path="src/Haby.Manifest/Haby.Manifest.csproj" />
   <Project Path="src/Haby.Application/Haby.Application.csproj" />
   <Project Path="src/Haby.PostgreSql/Haby.PostgreSql.csproj" />
+  <Project Path="src/Haby.Persistence.PostgreSql/Haby.Persistence.PostgreSql.csproj" />
   <Project Path="tests/Haby.Domain.Tests/Haby.Domain.Tests.csproj" />
   <Project Path="tests/Haby.Manifest.Tests/Haby.Manifest.Tests.csproj" />
   <Project Path="tests/Haby.Application.Tests/Haby.Application.Tests.csproj" />
