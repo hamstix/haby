@@ -1,0 +1,26 @@
+syntax = "proto3";
+option csharp_namespace = "Haby.PostgreSql.IntegrationTests.Wire";
+package haby.checkpoint.test;
+
+// Private to the integration-test assembly. No compatibility promise.
+service Checkpoint {
+  rpc Import(ImportRequest) returns (ImportReply);
+  rpc CreateChangeSet(ChangeSetRequest) returns (ChangeSetReply);
+  rpc Plan(PlanRequest) returns (PlanReply);
+  rpc CommitDesiredState(CommitRequest) returns (CommitReply);
+  rpc ExecuteCommittedGeneration(ExecuteRequest) returns (ExecuteReply);
+  rpc ReadState(StateRequest) returns (StateReply);
+}
+
+message ImportRequest { bytes original_envelope = 1; }
+message ImportReply { string outcome = 1; string revision = 2; string application = 3; int64 revision_number = 4; }
+message ChangeSetRequest { string application = 1; string revision = 2; int64 expected_generation = 3; }
+message ChangeSetReply { string outcome = 1; string change_set = 2; }
+message PlanRequest { string change_set = 1; }
+message PlanReply { string outcome = 1; string plan = 2; }
+message CommitRequest { string change_set = 1; string plan = 2; }
+message CommitReply { string outcome = 1; string generation = 2; int64 desired_generation = 3; bool no_op = 4; }
+message ExecuteRequest { string generation = 1; }
+message ExecuteReply { string state = 1; string failure = 2; }
+message StateRequest { string application = 1; }
+message StateReply { int32 revisions = 1; int32 generations = 2; int64 desired_generation = 3; int64 applied_generation = 4; }
