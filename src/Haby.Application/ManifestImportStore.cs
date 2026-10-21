@@ -32,6 +32,12 @@ public interface IManifestImportStore
         ValidatedManifestCandidate candidate, ImportAuditMetadata auditMetadata, CancellationToken cancellationToken);
 }
 
+/// <summary>Asynchronous inspection of accepted revisions in a durable catalog.</summary>
+public interface IManifestRevisionQuery
+{
+    ValueTask<ManifestRevision?> FindAsync(ManifestRevisionRef reference, CancellationToken cancellationToken = default);
+}
+
 /// <summary>An in-memory catalog with one atomic boundary for Application and revision creation.</summary>
 public sealed class InMemoryManifestImportStore : IManifestImportStore, IManifestRevisionReader
 {

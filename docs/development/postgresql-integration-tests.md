@@ -157,3 +157,25 @@ This test validates the accepted boundaries for one database Resource, not
 durable operations, PostgreSQL-backed Haby state, authorization, stable public
 APIs, generated credentials, SecretVersions, configuration publication,
 deprovisioning or Kubernetes integration.
+
+## Immutable manifest catalog (Slice 14)
+
+The same separate integration project and disposable PostgreSQL runtime now
+exercise the EF Core manifest catalog. Each catalog test creates a distinct
+database inside the test-owned container. Tests apply the initial migration,
+import through `ImportApplicationManifest`, dispose the first service provider,
+then read through a fresh provider against the same database. They also check
+database uniqueness, rollback on a failed revision insert, concurrent imports,
+stored snapshot and warning failures, and startup migration failure. The
+solution's `Haby.Persistence.PostgreSql.Tests` project checks snapshot codec
+round-trip and corrupt input without PostgreSQL. The in-memory checkpoint host
+remains a separate test boundary.
+
+The runtime packages are `Microsoft.EntityFrameworkCore` 10.0.13 (MIT),
+`Microsoft.EntityFrameworkCore.Relational` 10.0.13 (MIT), and
+`Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 (PostgreSQL license) for catalog
+persistence. `Microsoft.EntityFrameworkCore.Design` 10.0.13 (MIT) is a private
+design-time dependency for migrations. The initial migration is checked in.
+The existing Npgsql and Testcontainers packages are reused; no new container
+or network transport dependency is introduced. See the catalog project's README
+for startup migration, backup and snapshot compatibility requirements.
