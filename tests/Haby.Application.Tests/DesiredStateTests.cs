@@ -142,6 +142,96 @@ public class DesiredStateTests
             fixture.Desired.Commit(changeSet.Id, plan.Id, "actor", source.Token)).Commit);
     }
 
+    [Fact]
+    public async Task Unknown_environment_change_set_and_plan_have_distinct_results()
+    {
+        var fixture = await Fixture.Create();
+        Assert.IsType<CreateChangeSetResult.EnvironmentNotFound>(fixture.Desired.CreateChangeSet(
+            EnvironmentRecordId.New(), fixture.First.ApplicationRecordId, fixture.First,
+            new DeploymentPrecondition.ExpectedAbsence(), "actor"));
+        Assert.IsType<PlanChangeSetResult.ChangeSetNotFound>(fixture.Desired.Plan(DeploymentChangeSetId.New(), "actor"));
+        Assert.IsType<CommitDesiredStateResult.ChangeSetNotFound>(fixture.Desired.Commit(
+            DeploymentChangeSetId.New(), DeploymentPlanId.New(), "actor"));
+
+        var first = fixture.ChangeSet(fixture.First, new DeploymentPrecondition.ExpectedAbsence());
+        var second = fixture.ChangeSet(fixture.First, new DeploymentPrecondition.ExpectedAbsence());
+        var secondPlan = fixture.Plan(second);
+        Assert.IsType<CommitDesiredStateResult.PlanNotFound>(fixture.Desired.Commit(first.Id, DeploymentPlanId.New(), "actor"));
+        Assert.IsType<CommitDesiredStateResult.PlanDoesNotBelongToChangeSet>(fixture.Desired.Commit(first.Id, secondPlan.Id, "actor"));
+        Assert.Empty(fixture.Desired.Deployments);
+        Assert.Empty(fixture.Desired.Generations);
+    }
+
+    [Fact]
+    public async Task Wrong_expected_generation_is_stale_during_plan_and_commit()
+    {
+        var fixture = await Fixture.Create();
+        var initial = fixture.ChangeSet(fixture.First, new DeploymentPrecondition.ExpectedAbsence());
+        fixture.Commit(initial, fixture.Plan(initial));
+        var wrong = fixture.ChangeSet(fixture.Second,
+            new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(2)));
+        var atPlan = Assert.IsType<PlanChangeSetResult.ChangeSetStale>(fixture.Desired.Plan(wrong.Id, "actor"));
+        Assert.Equal(1, atPlan.ActualGeneration?.Value);
+
+        var pending = fixture.ChangeSet(fixture.Second,
+            new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(1)));
+        var pendingPlan = fixture.Plan(pending);
+        var advancing = fixture.ChangeSet(fixture.Second,
+            new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(1)));
+        fixture.Commit(advancing, fixture.Plan(advancing));
+        var atCommit = Assert.IsType<CommitDesiredStateResult.ChangeSetStale>(
+            fixture.Desired.Commit(pending.Id, pendingPlan.Id, "actor"));
+        Assert.Equal(2, atCommit.ActualGeneration?.Value);
+        Assert.Equal(2, fixture.Desired.Generations.Count);
+    }
+
+    [Fact]
+    public async Task Rollback_to_earlier_revision_creates_a_new_generation()
+    {
+        var fixture = await Fixture.Create();
+        var first = fixture.ChangeSet(fixture.First, new DeploymentPrecondition.ExpectedAbsence());
+        fixture.Commit(first, fixture.Plan(first));
+        var second = fixture.ChangeSet(fixture.Second,
+            new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(1)));
+        fixture.Commit(second, fixture.Plan(second));
+        var rollback = fixture.ChangeSet(fixture.First,
+            new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(2)));
+        var result = fixture.Commit(rollback, fixture.Plan(rollback));
+        Assert.Equal(3, result.Generation.Value);
+        Assert.Equal([fixture.First, fixture.Second, fixture.First],
+            fixture.Desired.Generations.Select(item => item.ManifestRevisionRef));
+        Assert.Equal([1L, 2L, 3L], fixture.Desired.Generations.Select(item => item.Generation.Value));
+    }
+
+    [Fact]
+    public async Task New_value_objects_and_catalog_reject_invalid_inputs()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => DeploymentGeneration.Create(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => DeploymentGeneration.Create(-1));
+        foreach (var value in new[] { "", "Upper", "bad--key", "bad.key", new string('a', 65) })
+            Assert.Throws<ArgumentException>(() => EnvironmentId.Create(value));
+        var fixture = await Fixture.Create();
+        Assert.Throws<ArgumentException>(() => fixture.Desired.AddEnvironment(EnvironmentId.Create("test-env"), "Other"));
+        Assert.Throws<ArgumentException>(() => fixture.Desired.SetProviderAlias(fixture.Environment.RecordId,
+            ProviderAlias.Create("main"), new ProviderResolution("provider", 0, "fake")));
+        Assert.Throws<ArgumentException>(() => fixture.Desired.SetProviderAlias(fixture.Environment.RecordId,
+            ProviderAlias.Create("main"), new ProviderResolution("", 1, "fake")));
+        Assert.Throws<ArgumentException>(() => fixture.Desired.SetProviderAlias(fixture.Environment.RecordId,
+            ProviderAlias.Create("main"), new ProviderResolution("provider", 1, "")));
+    }
+
+    [Fact]
+    public async Task Planning_inputs_reject_null_provider_entries()
+    {
+        var fixture = await Fixture.Create();
+        Assert.Throws<ArgumentException>(() => new DeploymentPlanningInputs(fixture.Environment.RecordId,
+            fixture.Environment.Id, fixture.First, [null!]));
+        Assert.Throws<ArgumentException>(() => new DeploymentPlanningInputs(fixture.Environment.RecordId,
+            fixture.Environment.Id, fixture.First, [new ResolvedProviderAlias(null!, new ProviderResolution("id", 1, "fake"))]));
+        Assert.Throws<ArgumentException>(() => new DeploymentPlanningInputs(fixture.Environment.RecordId,
+            fixture.Environment.Id, fixture.First, [new ResolvedProviderAlias(ProviderAlias.Create("main"), null!)]));
+    }
+
     private static byte[] Payload(string application, string version, string additionalSpec) => Encoding.UTF8.GetBytes(
         "{\"applicationVersion\":\"" + version + "\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"" + application + "\"},\"spec\":{" +
         "\"resources\":{\"database\":{\"type\":\"example.resource/v1\",\"providerRef\":\"main\",\"properties\":{}}}" +

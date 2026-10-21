@@ -41,7 +41,11 @@ public sealed class DeploymentPlanningInputs : IEquatable<DeploymentPlanningInpu
         EnvironmentRecordId = environmentRecordId ?? throw new ArgumentNullException(nameof(environmentRecordId));
         EnvironmentId = environmentId ?? throw new ArgumentNullException(nameof(environmentId));
         ManifestRevisionRef = manifestRevisionRef ?? throw new ArgumentNullException(nameof(manifestRevisionRef));
-        Providers = Array.AsReadOnly(providers.OrderBy(item => item.Alias.Value, StringComparer.Ordinal).ToArray());
+        ArgumentNullException.ThrowIfNull(providers);
+        var snapshot = providers.ToArray();
+        if (snapshot.Any(item => item is null || item.Alias is null || item.Resolution is null))
+            throw new ArgumentException("Provider resolutions must be non-null and complete.", nameof(providers));
+        Providers = Array.AsReadOnly(snapshot.OrderBy(item => item.Alias.Value, StringComparer.Ordinal).ToArray());
     }
     public EnvironmentRecordId EnvironmentRecordId { get; }
     public EnvironmentId EnvironmentId { get; }
