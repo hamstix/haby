@@ -44,21 +44,21 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
 internal sealed class ApplicationRow
 {
     public Guid Id { get; set; }
-    public string ApplicationId { get; set; } = null!;
+    public required string ApplicationId { get; set; }
 }
 
 internal sealed class ManifestRevisionRow
 {
     public Guid Id { get; set; }
     public Guid ApplicationRecordId { get; set; }
-    public string ApplicationId { get; set; } = null!;
-    public string ApplicationVersion { get; set; } = null!;
+    public required string ApplicationId { get; set; }
+    public required string ApplicationVersion { get; set; }
     public long LocalRevisionNumber { get; set; }
-    public string InputApiVersion { get; set; } = null!;
+    public required string InputApiVersion { get; set; }
     public int NormalizedModelVersion { get; set; }
     public int SnapshotFormatVersion { get; set; }
-    public string Snapshot { get; set; } = null!;
-    public string HistoricalWarnings { get; set; } = null!;
-    public string ActorId { get; set; } = null!;
+    public required string Snapshot { get; set; }
+    public required string HistoricalWarnings { get; set; }
+    public required string ActorId { get; set; }
     public DateTimeOffset ImportedAt { get; set; }
 }
