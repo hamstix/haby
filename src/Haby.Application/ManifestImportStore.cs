@@ -40,11 +40,13 @@ public sealed class InMemoryManifestImportStore : IManifestImportStore
     private readonly Dictionary<(ApplicationId, ApplicationVersion), ManifestRevision> _byVersion = [];
     private readonly Dictionary<ApplicationId, long> _lastRevision = [];
 
+    /// <summary>A catalog snapshot. Enumeration order is unspecified.</summary>
     public IReadOnlyList<ApplicationRecord> Applications
     {
         get { lock (_gate) return Array.AsReadOnly(_applications.Values.ToArray()); }
     }
 
+    /// <summary>A revision snapshot. Enumeration order is unspecified.</summary>
     public IReadOnlyList<ManifestRevision> Revisions
     {
         get { lock (_gate) return Array.AsReadOnly(_byVersion.Values.ToArray()); }

@@ -43,8 +43,17 @@ public class ImportApplicationManifestTests
             await import.ExecuteAsync(Envelope("1", "\"displayName\":\"first\"", warning: true), "second-actor"));
         Assert.Equal(ImportApplicationManifestResult.ImportDisposition.ExistingEquivalent, repeat.Disposition);
         Assert.Equal(first.ManifestRevisionRef, repeat.ManifestRevisionRef);
-        Assert.Equal(first.HistoricalWarnings, repeat.HistoricalWarnings);
+        Assert.Equal(first.HistoricalWarnings.Truncated, repeat.HistoricalWarnings.Truncated);
+        var firstWarning = Assert.Single(first.HistoricalWarnings.Diagnostics);
+        var historicalWarning = Assert.Single(repeat.HistoricalWarnings.Diagnostics);
+        Assert.Equal(firstWarning.Code, historicalWarning.Code);
+        Assert.Equal(firstWarning.Severity, historicalWarning.Severity);
+        Assert.Equal(firstWarning.Path, historicalWarning.Path);
+        Assert.Equal(firstWarning.Parameters.OrderBy(item => item.Key),
+            historicalWarning.Parameters.OrderBy(item => item.Key));
+        Assert.Equal(firstWarning.RelatedPaths, historicalWarning.RelatedPaths);
         Assert.Equal(first.AuditMetadata, repeat.AuditMetadata);
+        Assert.Equal("first-actor", repeat.AuditMetadata.ActorId);
 
         var conflict = Assert.IsType<ImportApplicationManifestResult.ApplicationVersionContentConflict>(
             await import.ExecuteAsync(Envelope("1", "\"displayName\":\"secret-value\""), "third-actor"));
@@ -72,14 +81,15 @@ public class ImportApplicationManifestTests
             var two = import.ExecuteAsync(Envelope("1", different ? "\"displayName\":\"two\"" : "\"displayName\":\"one\""), "two").AsTask();
             var results = await Task.WhenAll(one, two);
             Assert.Single(inner.Applications);
-            Assert.Single(inner.Revisions);
-            Assert.Single(results.OfType<ImportApplicationManifestResult.Succeeded>(),
+            var stored = Assert.Single(inner.Revisions);
+            var created = Assert.Single(results.OfType<ImportApplicationManifestResult.Succeeded>(),
                 result => result.Disposition == ImportApplicationManifestResult.ImportDisposition.Created);
             if (different)
             {
                 var conflict = Assert.Single(results.OfType<ImportApplicationManifestResult.ApplicationVersionContentConflict>());
                 Assert.Equal(["/metadata/displayName"], conflict.ChangedPaths);
-                Assert.Equal(inner.Revisions[0].Reference, conflict.ExistingManifestRevisionRef);
+                Assert.Equal(stored.Reference, conflict.ExistingManifestRevisionRef);
+                Assert.Equal(created.AuditMetadata.ActorId, stored.Declaration.Metadata.DisplayName);
             }
             else
             {
@@ -116,6 +126,13 @@ public class ImportApplicationManifestTests
             await Create(inner).ExecuteAsync(Envelope("1"), "actor", source.Token));
         Assert.Empty(inner.Applications);
 
+        using var beforeCommit = new CancellationTokenSource();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await Create(new CancelBeforeCommitStore(inner, beforeCommit)).ExecuteAsync(
+                Envelope("1"), "actor", beforeCommit.Token));
+        Assert.Empty(inner.Applications);
+        Assert.Empty(inner.Revisions);
+
         using var after = new CancellationTokenSource();
         var import = Create(new CancelAfterCommitStore(inner, after));
         var result = Assert.IsType<ImportApplicationManifestResult.Succeeded>(
@@ -143,6 +160,46 @@ public class ImportApplicationManifestTests
         Assert.Equal("/spec/resources/resource000/providerRef", conflict.ChangedPaths[0]);
         Assert.Equal("/spec/resources/resource099/providerRef", conflict.ChangedPaths[^1]);
         Assert.DoesNotContain("secret", string.Join("", conflict.ChangedPaths));
+    }
+
+    [Fact]
+    public async Task Conflict_paths_escape_slash_and_tilde_without_collisions()
+    {
+        var store = new InMemoryManifestImportStore();
+        var import = Create(store);
+        static byte[] Payload(string properties) => EnvelopeWithSpec("1",
+            "\"resources\":{\"db\":{\"type\":\"example.resource/v1\",\"providerRef\":\"main\",\"properties\":{\"enabled\":true," + properties + "}}}");
+
+        Assert.IsType<ImportApplicationManifestResult.Succeeded>(await import.ExecuteAsync(
+            Payload("\"a/b\":true"), "actor"));
+        var conflict = Assert.IsType<ImportApplicationManifestResult.ApplicationVersionContentConflict>(
+            await import.ExecuteAsync(Payload("\"a/b\":false,\"a~1b\":true"), "actor"));
+
+        Assert.Equal([
+            "/spec/resources/db/properties/a~01b",
+            "/spec/resources/db/properties/a~1b"
+        ], conflict.ChangedPaths);
+        Assert.False(conflict.ChangedPathsTruncated);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("actor\u0001")]
+    public async Task Invalid_trusted_actor_identity_is_rejected_before_import(string actorId)
+    {
+        var store = new InMemoryManifestImportStore();
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await Create(store).ExecuteAsync(Envelope("1"), actorId));
+        Assert.Empty(store.Applications);
+    }
+
+    [Fact]
+    public async Task Oversized_trusted_actor_identity_is_rejected_before_import()
+    {
+        var store = new InMemoryManifestImportStore();
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await Create(store).ExecuteAsync(Envelope("1"), new string('a', 257)));
+        Assert.Empty(store.Applications);
     }
 
     private static ImportApplicationManifest Create(IManifestImportStore store) => new(store, Catalog,
@@ -182,6 +239,16 @@ public class ImportApplicationManifestTests
             var result = await inner.CompareAndCreateAsync(candidate, audit, cancellationToken);
             source.Cancel();
             return result;
+        }
+    }
+
+    private sealed class CancelBeforeCommitStore(IManifestImportStore inner, CancellationTokenSource source) : IManifestImportStore
+    {
+        public ValueTask<ManifestCompareAndCreateResult> CompareAndCreateAsync(
+            ValidatedManifestCandidate candidate, ImportAuditMetadata audit, CancellationToken cancellationToken)
+        {
+            source.Cancel();
+            return inner.CompareAndCreateAsync(candidate, audit, cancellationToken);
         }
     }
 }
