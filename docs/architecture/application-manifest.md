@@ -375,7 +375,7 @@ and closed DTO shapes is the
       "main-database": {
         "type": "postgresql.database/v1alpha1",
         "providerRef": "postgresql.primary",
-        "properties": {},
+        "properties": { "name": "automation_main" },
         "lifecycle": {
           "deletionPolicy": "retain"
         }
@@ -383,7 +383,7 @@ and closed DTO shapes is the
       "worker-database": {
         "type": "postgresql.database/v1alpha1",
         "providerRef": "postgresql.primary",
-        "properties": {},
+        "properties": { "name": "automation_worker" },
         "lifecycle": {
           "deletionPolicy": "delete"
         }

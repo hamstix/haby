@@ -132,7 +132,7 @@ A Resource requires `type` and `providerRef`:
 {
   "type": "postgresql.database/v1alpha1",
   "providerRef": "postgresql.primary",
-  "properties": {},
+  "properties": { "name": "application_data" },
   "lifecycle": {
     "deletionPolicy": "retain"
   }
@@ -140,7 +140,11 @@ A Resource requires `type` and `providerRef`:
 ```
 
 `properties` is an extension JSON object and defaults to empty. Arrays, scalars
-and `null` are invalid. `lifecycle` is optional and defaults to
+and `null` are invalid. A registered Resource type may impose a stricter
+schema: the checkpoint `postgresql.database/v1alpha1` contract requires
+`properties.name` as specified by
+[ADR-022](../adr/0022-postgresql-database-checkpoint-execution.md).
+`lifecycle` is optional and defaults to
 `{ "deletionPolicy": "retain" }`. An absent `lifecycle`, `lifecycle: {}` and
 `lifecycle: { "deletionPolicy": "retain" }` have the same normalized value.
 An explicit `null` deletion policy and unknown lifecycle members are invalid.
