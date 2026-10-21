@@ -1,11 +1,13 @@
 using System.Security.Cryptography;
 using System.Text;
 using Haby.Domain;
+using Haby.Manifest;
 
 namespace Haby.Application;
 
 /// <summary>A test catalog and atomic desired-state boundary. It executes no Provider operation.</summary>
-public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions, TimeProvider clock)
+public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions, TimeProvider clock,
+    ICheckpointProviderCapability? checkpointCapability = null)
 {
     private readonly object _gate = new();
     private readonly Dictionary<EnvironmentRecordId, EnvironmentRecord> _environments = [];
@@ -31,6 +33,25 @@ public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions,
     public IReadOnlyList<DeploymentPlan> Plans
     {
         get { lock (_gate) return Array.AsReadOnly(_plans.Values.ToArray()); }
+    }
+
+    internal bool TryMarkApplied(ApplicationDeploymentGeneration snapshot)
+    {
+        lock (_gate)
+        {
+            if (!_generations.Contains(snapshot)) return false;
+            var key = (snapshot.Inputs.EnvironmentRecordId, snapshot.ManifestRevisionRef.ApplicationRecordId);
+            if (!_deployments.TryGetValue(key, out var current) || current.Id != snapshot.DeploymentId ||
+                current.DesiredGeneration.Value < snapshot.Generation.Value) return false;
+            if (current.AppliedGeneration is not null && current.AppliedGeneration.Value >= snapshot.Generation.Value)
+                return true;
+            _deployments[key] = current with
+            {
+                AppliedGeneration = snapshot.Generation,
+                ConcurrencyToken = checked(current.ConcurrencyToken + 1)
+            };
+            return true;
+        }
     }
 
     public EnvironmentRecord AddEnvironment(EnvironmentId id, string displayName)
@@ -186,6 +207,13 @@ public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions,
             if (!_aliases.TryGetValue((changeSet.EnvironmentRecordId, alias), out var provider))
                 return new PlanChangeSetResult.ProviderAliasNotResolved(alias);
             resolved.Add(new ResolvedProviderAlias(alias, provider));
+        }
+        foreach (var resource in declaration.Spec.Resources.Values)
+        {
+            if (resource.Type != PostgreSqlDatabaseContract.Id) continue;
+            var selected = resolved.Single(item => item.Alias == resource.ProviderRef);
+            if (checkpointCapability?.Supports(selected.Resolution, resource.Type) != true)
+                return new PlanChangeSetResult.ProviderCapabilityMismatch(resource.ProviderRef);
         }
         var environment = _environments[changeSet.EnvironmentRecordId];
         return new DeploymentPlanningInputs(environment.RecordId, environment.Id, revision.Reference, resolved);

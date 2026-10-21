@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Haby.Application\Haby.Application.csproj" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+</Project>

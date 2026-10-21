@@ -68,3 +68,4 @@ _ReSharper*/
 **/temp/*.bookmark
 **/temp/*.json
 .cr/
+.artifacts/

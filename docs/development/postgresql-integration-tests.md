@@ -1,8 +1,6 @@
 # PostgreSQL checkpoint integration tests
 
-This guide records the test-runtime contract for the planned Slice 12
-implementation. The test project and helper mentioned below do not exist yet;
-their exact commands become runnable when that slice lands. See
+This guide records the test-runtime contract for Slice 12. See
 [ADR-022](../adr/0022-postgresql-database-checkpoint-execution.md) for the
 Resource and execution semantics.
 
@@ -43,8 +41,7 @@ access-denied result or failed `hello-world` run is an environment blocker,
 not a failed PostgreSQL provider test. The agent should report it; it must not
 install a new runtime or switch to a personal PostgreSQL instance silently.
 
-Slice 12 should add a narrow PowerShell helper such as
-`scripts/test-postgresql-wslc.ps1`. It must:
+Run `scripts/test-postgresql-wslc.ps1` from the repository root. It:
 
 1. Verify `wslc` and the .NET SDK in its own process environment.
 2. Choose a unique test-owned container name, an available loopback host port
@@ -67,8 +64,7 @@ secrets. A failed test does not authorize leaving the test container running
 indefinitely. An explicitly requested diagnostic mode may preserve it with
 the exact container name reported to the operator.
 
-After Slice 12 lands, run the helper from the repository root to exercise the
-real-PostgreSQL assertions locally. Direct `dotnet test` from Windows without
+The helper exercises the same real-PostgreSQL assertions as CI. Direct `dotnet test` from Windows without
 a Docker-compatible endpoint or the helper is not evidence of a provider bug.
 
 ## Linux and Docker-compatible runtimes
@@ -80,12 +76,36 @@ docker info
 dotnet --info
 ```
 
-The Slice 12 integration project should use `Testcontainers.PostgreSql` by
+The separate `tests/Haby.PostgreSql.IntegrationTests` project uses `Testcontainers.PostgreSql` by
 default. It starts and disposes its own container; no developer database,
 hard-coded host port, checked-in password or manually created role is needed.
 CI runs this project in a dedicated required job and fails visibly when its
 Docker-compatible runtime is unavailable. Ordinary solution unit tests remain
 independent of containers; they do not silently skip an integration assertion.
+
+Run the integration project directly on a Docker-compatible host:
+
+```sh
+dotnet test ./tests/Haby.PostgreSql.IntegrationTests/Haby.PostgreSql.IntegrationTests.csproj --artifacts-path ./.artifacts
+```
+
+The external mode requires both `HABY_POSTGRESQL_EPHEMERAL_EXTERNAL=1` and
+`HABY_POSTGRESQL_EPHEMERAL_CONNECTION`. Supplying only a connection string fails.
+Use this mode only with the helper's disposable PostgreSQL container.
+
+## Dependency review for Slice 12
+
+The provider uses [Npgsql 10.0.3](https://www.nuget.org/packages/Npgsql/10.0.3)
+under the PostgreSQL license. Its .NET 10 dependency is
+`Microsoft.Extensions.Logging.Abstractions` (resolved as 10.0.0, MIT). The
+separate test project uses [Testcontainers.PostgreSql 4.16.0](https://www.nuget.org/packages/Testcontainers.PostgreSql/)
+under MIT; it depends on Testcontainers 4.16.0 (MIT). The resolved container
+dependency tree includes Docker.DotNet.Enhanced and its Handler.Abstractions,
+LegacyHttp, NativeHttp, NPipe, Unix and X509 packages (all 4.3.3, MIT),
+SSH.NET 2026.0.0 (MIT), BouncyCastle.Cryptography 2.7.0 (MIT), and
+SharpZipLib 1.4.2 (MIT). NuGet's resolved-package advisory check reported no
+vulnerable package; the required PR dependency-review job checks licenses and
+advisories again in CI. No WSLc library package is used.
 
 ## Test ownership and safety
 
