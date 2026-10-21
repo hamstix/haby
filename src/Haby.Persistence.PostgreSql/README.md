@@ -14,6 +14,11 @@ needs DDL rights for EF's migration history table, the two catalog tables,
 indexes and constraints, plus normal read/write rights. The pilot deployment
 must restrict schema migration to one Haby instance.
 
+EF migration tooling uses `ManifestCatalogDesignTimeFactory` to inspect or add
+migrations without a database connection. Supply a connection explicitly when
+running a database operation through the CLI; normal startup migrations use
+the registered context and its configured connection.
+
 Before applying a reviewed migration, stop catalog writes and take a verified
 database backup. With PostgreSQL client environment variables supplied by the
 operator's secret management, a PowerShell procedure is:
