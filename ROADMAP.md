@@ -422,8 +422,8 @@ Accepted pilot boundaries:
 
 - Run exactly one Haby instance. High availability, leader election and
   distributed execution leases remain outside both pilots.
-- Treat the first operator API as an internal alpha contract that may be
-  rewritten or replaced in full. It is not the stable public API promised by M4.
+- Start with the internal alpha gRPC API and `habyctl` in ADR-004. Its contract
+  may be rewritten or replaced in full; it is not the stable API promised by M4.
 - In the first active pilot, provision only one explicitly named PostgreSQL
   database Resource. Do not create principals, generate credentials, deliver
   application configuration or deprovision the database.
@@ -439,9 +439,13 @@ support validation and non-mutating planning against explicit Environment and
 Provider metadata. Do not commit deployment desired state or execute Providers
 through the shadow workflow. The existing system remains authoritative.
 
-Provide a narrowly scoped authenticated operator API, transport security,
-request limits and useful redacted diagnostics. Run it as one instance and
-document its alpha status. Use reviewed database migrations and a documented
+Provide a narrowly scoped internal alpha gRPC operator API and `habyctl`,
+transport security, request limits and useful redacted diagnostics. The early
+pilot does not add application-level authentication or authorization:
+deployment networking must restrict API access to the explicitly permitted
+developer console, with no public or broadly reachable endpoint. Run one
+instance and document this temporary security boundary and the API's alpha
+status. Use reviewed automatic startup migrations and a documented
 backup/restore procedure; do not require a UI or a general plugin SDK.
 
 Exit criteria:
@@ -470,7 +474,8 @@ durability, idempotency or the distinction between desired and applied state.
 
 Exit criteria:
 
-- the protected alpha API provisions one database and verifies it independently;
+- the network-restricted alpha API provisions one database and verifies it
+  independently;
 - restart and retry tests preserve immutable revisions and generations, do not
   create a second database and never claim success for an uncertain outcome;
 - backups, schema upgrades and a manual failure-recovery procedure are tested
@@ -478,14 +483,18 @@ Exit criteria:
 
 These pilots do not make an Application operational from Haby alone. Issuing a
 database principal, storing its secret and delivering a usable Configuration
-document remain separate work before replacing an existing registry.
+document remain separate work before replacing an existing registry. After the
+database-only active pilot, prioritize those credential and delivery slices
+over a general operator authentication framework, while retaining the strict
+network boundary until application-level access control is introduced.
 
-Decisions to settle before coding the shadow pilot: the PostgreSQL persistence
-adapter and transactional schema, migration/deployment procedure, and the
-authentication and authorization profile for the internal alpha API. Before
-the active pilot, also settle versioned Provider-configuration storage and the
-durable execution/recovery policy. These choices must respect ADR-003, ADR-006,
-ADR-016 and ADR-022 without prematurely stabilizing the M4 public API.
+ADR-023 fixes the PostgreSQL manifest-catalog persistence and single-instance
+startup-migration policy. ADR-004 fixes the alpha API transport. Before exposing
+the shadow-pilot API, define and test its network isolation, transport
+configuration and deployment procedure. Before the active pilot, also settle
+versioned Provider-configuration storage and the durable execution/recovery
+policy. These choices must respect ADR-003, ADR-006, ADR-016 and ADR-022
+without prematurely stabilizing the M4 public API.
 
 ## M2.1 foundation work package and checkpoint record
 
@@ -616,7 +625,8 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - ADR-001: Public core and downstream distribution boundary.
 - ADR-002: PostgreSQL as the default source of truth.
 - ADR-003: Plugin composition and runtime strategy.
-- ADR-004: REST and gRPC public contract strategy.
+- [ADR-004](docs/adr/0004-operator-api-transport-strategy.md): gRPC-first
+  internal alpha operator API; defer REST Minimal API and stable public contracts.
 - ADR-005: Background operation and reconciliation model.
 - [ADR-006](docs/adr/0006-secret-storage-and-encryption.md): Secret storage, envelope encryption and external provider boundary.
 - ADR-007: MudBlazor as the UI component foundation.
@@ -660,12 +670,12 @@ Use the following request to start the next implementation session:
 
 > Continue Haby from the merged PostgreSQL architecture checkpoint. Read the
 > Early pilot delivery track in `ROADMAP.md`, the accepted manifest and
-> ChangeSet ADRs, ADR-003, ADR-006 and ADR-022, and inspect the current
-> repository before proposing a slice. Prepare the smallest PostgreSQL-backed
-> immutable-import step toward the shadow pilot; settle its transaction and
-> migration contract before implementation. Do not turn the private gRPC test
-> host into a public API, execute Providers during shadow validation or planning,
-> add a UI or general plugin SDK, or promise production readiness. Keep each
-> change reviewable, prove persistence across fresh processes where applicable,
-> run focused and solution validation, and report environmental blockers
-> separately from code failures.
+> ChangeSet ADRs, ADR-003, ADR-004, ADR-006, ADR-022 and ADR-023, and inspect
+> the current repository before proposing a slice. Prepare the smallest
+> PostgreSQL-backed immutable-import step toward the shadow pilot under ADR-023.
+> Do not expose the private gRPC test host as the operator API or execute
+> Providers during shadow validation or planning. Do not add a UI or general
+> plugin SDK or promise production readiness. Keep each change reviewable,
+> prove persistence across fresh processes where applicable, run focused and
+> solution validation, and report environmental blockers separately from code
+> failures.
