@@ -1,8 +1,11 @@
 # Haby OSS revival roadmap
 
-This roadmap describes the work required to turn Haby from a working prototype into a maintainable open-source configuration and provisioning platform.
+This roadmap describes the work required to turn Haby's validated architectural
+checkpoint into a maintainable open-source configuration and provisioning platform.
 
-The immediate goal is to establish a stable OSS core that downstream distributions can extend without carrying permanent forks.
+The immediate goal is an operator-controlled shadow pilot, followed by a narrow
+active pilot in an isolated test environment. A stable OSS core that downstream
+distributions can extend without permanent forks remains the longer-term goal.
 
 ## Product boundaries
 
@@ -36,8 +39,8 @@ Generic improvements should be proposed upstream. A downstream source mirror mus
 
 - Lock existing behavior with focused tests before changing production code.
 - Keep each pull request limited to one architectural step.
-- Replace the unused prototype through small tested vertical slices; do not
-  preserve legacy contracts that have no deployed consumers.
+- Grow the replacement through small tested vertical slices; do not preserve
+  contracts from the removed, never-deployed prototype.
 - Keep domain logic independent from ASP.NET Core, EF Core, UI and plugin implementations.
 - Use stable persisted identities. Names, labels and folder paths are mutable metadata.
 - Keep source declarations, operator overrides, generated state and rendered outputs separate.
@@ -78,6 +81,10 @@ Haby.Plugin.Kubernetes
 The server is the composition root. Domain and application projects must not reference plugin implementations, EF Core, gRPC-generated server types or UI packages.
 
 ## Milestones
+
+Milestones group target capabilities; completing all items in M2 through M6 is
+not a prerequisite for the early pilots below. A pilot supports only its
+explicitly documented subset and must fail closed for unsupported operations.
 
 ### M0 — Reproducible baseline
 
@@ -122,7 +129,8 @@ Exit criteria:
 
 ### M2 — Stable domain, application manifest and plugin SDK
 
-Objective: establish the application and resource model before replacing the current configurator and make extensions a supported public surface.
+Objective: establish the application and resource model and make extensions a
+supported public surface. The prototype configurator has already been removed.
 
 - [x] Accept the [application-manifest proposal](docs/architecture/application-manifest.md) and record its domain terminology and invariants in [ADR-009](docs/adr/0009-application-manifest-domain-model.md).
 - [ ] Replace `ConfigurationUnit` and overloaded configuration-key terminology with Application, Component and Configuration document concepts; do not carry `OrganizationUnit` into the M2 core.
@@ -283,9 +291,9 @@ Exit criteria:
 
 ### M5 — Administration UI
 
-Objective: replace the prototype Bootstrap UI with a maintainable administration experience.
+Objective: build a maintainable administration experience.
 
-- [ ] Upgrade the client to the selected .NET 10 hosting model.
+- [ ] Add a client using the selected .NET 10 hosting model.
 - [ ] Introduce MudBlazor and a Haby theme.
 - [ ] Replace the navigation shell, forms, tables, dialogs and notifications.
 - [ ] Add reusable domain components: page header, entity table, status badge, form actions and destructive-action confirmation.
@@ -402,11 +410,90 @@ Objective: publish a supportable first modern Haby release.
 - [ ] Public roadmap, issue templates and contribution guide.
 - [ ] End-to-end installation test from an empty environment.
 
-## Next architecture work package
+## Early pilot delivery track
 
-The first M2 implementation is **M2.1 — Manifest foundation**. It establishes a
-side-effect-free vertical slice and does not combine manifest parsing with
-plugin execution, Runtime Identity authentication or secret storage.
+The [PostgreSQL architecture checkpoint](https://github.com/hamstix/haby/issues/28)
+is complete, but it runs in a test host with in-memory Haby state. The early
+pilots validate Haby in a real, isolated test environment before the full M2-M6
+capability set is complete. They are not a customer release or a replacement
+for an existing configuration registry.
+
+Accepted pilot boundaries:
+
+- Run exactly one Haby instance. High availability, leader election and
+  distributed execution leases remain outside both pilots.
+- Treat the first operator API as an internal alpha contract that may be
+  rewritten or replaced in full. It is not the stable public API promised by M4.
+- In the first active pilot, provision only one explicitly named PostgreSQL
+  database Resource. Do not create principals, generate credentials, deliver
+  application configuration or deprovision the database.
+- Keep import, planning, desired-state commit and external execution separate.
+  Unsupported manifest and operation shapes fail closed.
+
+### Shadow pilot - real declarations, no external provisioning
+
+Build a deployable, operator-controlled Haby instance for one isolated test
+environment and a small set of representative Application manifests. Persist
+accepted Application identities and immutable Manifest revisions in PostgreSQL;
+support validation and non-mutating planning against explicit Environment and
+Provider metadata. Do not commit deployment desired state or execute Providers
+through the shadow workflow. The existing system remains authoritative.
+
+Provide a narrowly scoped authenticated operator API, transport security,
+request limits and useful redacted diagnostics. Run it as one instance and
+document its alpha status. Use reviewed database migrations and a documented
+backup/restore procedure; do not require a UI or a general plugin SDK.
+
+Exit criteria:
+
+- real representative manifests can be submitted and examined after a Haby
+  restart without changing external infrastructure;
+- equivalent imports retain one immutable revision, invalid imports retain
+  none, and unsupported planning inputs are reported explicitly;
+- API access and stored data are limited to the intended test operators and
+  Environment, and no provisioning credential is exposed in responses or logs.
+
+### Active pilot - one database in an isolated test environment
+
+Extend the same single-instance deployment with persisted ChangeSet, Plan,
+generation and execution records sufficient to recover honestly after a
+process restart. Keep exact Provider selection and configuration revisions
+pinned; operator-owned credentials must be protected and remain outside the
+manifest, Plan and ordinary diagnostics. Execute only the supported
+`postgresql.database/v1alpha1` shape after desired-state commit.
+
+Before enabling execution, define how an interrupted or uncertain CREATE is
+recovered without automatic adoption or a blind retry, how the exact Provider
+configuration revision remains available, and how operators inspect and
+resolve failures. Single-instance operation defers distributed leases, not
+durability, idempotency or the distinction between desired and applied state.
+
+Exit criteria:
+
+- the protected alpha API provisions one database and verifies it independently;
+- restart and retry tests preserve immutable revisions and generations, do not
+  create a second database and never claim success for an uncertain outcome;
+- backups, schema upgrades and a manual failure-recovery procedure are tested
+  for this limited deployment profile.
+
+These pilots do not make an Application operational from Haby alone. Issuing a
+database principal, storing its secret and delivering a usable Configuration
+document remain separate work before replacing an existing registry.
+
+Decisions to settle before coding the shadow pilot: the PostgreSQL persistence
+adapter and transactional schema, migration/deployment procedure, and the
+authentication and authorization profile for the internal alpha API. Before
+the active pilot, also settle versioned Provider-configuration storage and the
+durable execution/recovery policy. These choices must respect ADR-003, ADR-006,
+ADR-016 and ADR-022 without prematurely stabilizing the M4 public API.
+
+## M2.1 foundation work package and checkpoint record
+
+The original **M2.1 - Manifest foundation** plan below records the contract
+work that led to the completed architecture checkpoint. It is not the current
+implementation prompt; broader M2 capabilities and the pilot decisions above
+remain open. Manifest parsing and import were kept separate from Provider
+execution, Runtime Identity authentication and secret storage.
 
 Implementation is coordinated through the
 [agent-assisted development workflow](docs/development/agent-coding-workflow.md).
@@ -494,22 +581,20 @@ Definition of done for this work package:
 
 ### Architecture validation checkpoint — PostgreSQL walking skeleton
 
-After [Slice 9](https://github.com/hamstix/haby/issues/24) and
-[Slice 10](https://github.com/hamstix/haby/issues/25) are merged, prioritize the
-[end-to-end checkpoint](https://github.com/hamstix/haby/issues/28) over further
-horizontal framework work. The in-memory, one-Application
-ChangeSet/Plan/desired-state commit path is implemented by
-[Slice 11](https://github.com/hamstix/haby/issues/31). Deliver the remaining
-checkpoint through small dependent changes: the
-[`postgresql.database` execution slice](docs/adr/0022-postgresql-database-checkpoint-execution.md)
-and a thin gRPC test-host adapter.
+The [end-to-end checkpoint](https://github.com/hamstix/haby/issues/28) is
+complete. [Slice 11](https://github.com/hamstix/haby/issues/31) added the
+in-memory one-Application ChangeSet/Plan/desired-state commit path;
+[Slice 12](https://github.com/hamstix/haby/issues/33) added the
+[`postgresql.database` execution slice](docs/adr/0022-postgresql-database-checkpoint-execution.md);
+and [Slice 13](https://github.com/hamstix/haby/issues/37) added a private gRPC
+test host and real-PostgreSQL integration test.
 
-The observable result is an automated test that submits a versioned Application
-manifest through gRPC, explicitly plans and applies its exact revision, and
-verifies that a database exists in an ephemeral PostgreSQL instance. Equivalent
-import and apply retries must be idempotent; invalid input must cause no
-provisioning, and PostgreSQL failures must be visible. Import itself remains
-side-effect free, and the Plan pins exact Environment and Provider inputs.
+The automated test submits a versioned Application manifest through gRPC,
+explicitly plans and commits its exact revision, executes the committed
+generation and independently verifies the database in ephemeral PostgreSQL.
+It covers equivalent retries, invalid input and a visible database conflict.
+Import and desired-state commit remain free of Provider side effects, and the
+Plan pins exact Environment and Provider inputs.
 
 The PostgreSQL slice follows [ADR-022](docs/adr/0022-postgresql-database-checkpoint-execution.md):
 one explicit database name, a separate in-memory executor after desired-state
@@ -519,12 +604,12 @@ Provider itself must be checked with Npgsql and an ephemeral real PostgreSQL
 instance. The container-backed integration test is required in CI, while a
 developer's persistent database is never an implicit test dependency.
 
-This checkpoint tests whether the accepted boundaries work together; it is not
-a production-ready provisioning release. Database principals, generated
-passwords, SecretVersions, Configuration publication, durable operation recovery,
-stable public API and authorization remain separate follow-up work. Do not
-expose an unauthenticated provisioning endpoint or reuse the prototype
-PostgreSQL provider's interpolated SQL.
+This checkpoint proves that the accepted boundaries work together for one
+database while Haby state is in memory. It is not a deployable or
+production-ready provisioning release. Database principals, generated
+passwords, SecretVersions, Configuration publication, durable operation
+recovery, a stable public API and authorization remain separate work. The
+private unauthenticated test endpoint must not be exposed as an operator API.
 
 ## Decisions to record as ADRs
 
@@ -573,4 +658,14 @@ PostgreSQL provider's interpolated SQL.
 
 Use the following request to start the next implementation session:
 
-> Continue the Haby OSS revival using `ROADMAP.md`, `docs/architecture/application-manifest.md`, `docs/architecture/application-manifest-v1alpha1.md`, `docs/architecture/manifest-validation-diagnostic-catalog.md`, `docs/adr/0009-application-manifest-domain-model.md`, `docs/adr/0010-manifest-revisions-and-deployment-change-sets.md`, `docs/adr/0013-m2-manifest-foundation-boundaries-and-identifiers.md`, `docs/adr/0014-manifest-validation-diagnostics.md`, `docs/adr/0015-normalized-manifest-equality-and-immutable-version-imports.md`, `docs/adr/0016-deployment-change-sets-plans-and-generations.md`, `docs/adr/0017-structured-configuration-trees-and-document-projections.md`, `docs/adr/0018-versioned-contract-identifiers-and-manifest-dependencies.md`, `docs/adr/0019-typed-parameters-and-effective-value-resolution.md`, `docs/adr/0020-versioned-application-manifest-json-contract.md` and `docs/adr/0021-application-manifest-validation-and-import-use-cases.md`. Implement only **M2.1 — Manifest foundation** from the Next architecture work package. Add side-effect-free Domain, Manifest and Application contracts, source-generated DTOs, the checked-in JSON Schema, deterministic validation, immutable revision import semantics, structured Configuration trees, typed parameter resolution, exact contract metadata and exact ChangeSet membership/generation contracts with focused tests. Preserve raw JSON through the shared Manifest-layer parser, use typed validation/import outcomes and prove atomic immutable import behavior under concurrency. Do not add PostgreSQL persistence, execute plugins, implement Runtime Identity or secret stores, migrate the UI, preserve legacy API compatibility or add remote providers in the same change. Remove legacy code only when its replacement is covered, run focused and solution validation plus `git diff --check`, and report environmental blockers separately from code failures.
+> Continue Haby from the merged PostgreSQL architecture checkpoint. Read the
+> Early pilot delivery track in `ROADMAP.md`, the accepted manifest and
+> ChangeSet ADRs, ADR-003, ADR-006 and ADR-022, and inspect the current
+> repository before proposing a slice. Prepare the smallest PostgreSQL-backed
+> immutable-import step toward the shadow pilot; settle its transaction and
+> migration contract before implementation. Do not turn the private gRPC test
+> host into a public API, execute Providers during shadow validation or planning,
+> add a UI or general plugin SDK, or promise production readiness. Keep each
+> change reviewable, prove persistence across fresh processes where applicable,
+> run focused and solution validation, and report environmental blockers
+> separately from code failures.
