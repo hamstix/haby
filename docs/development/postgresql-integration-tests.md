@@ -1,6 +1,6 @@
 # PostgreSQL checkpoint integration tests
 
-This guide records the test-runtime contract for Slice 12. See
+This guide records the test-runtime contract for the PostgreSQL checkpoint. See
 [ADR-022](../adr/0022-postgresql-database-checkpoint-execution.md) for the
 Resource and execution semantics.
 
@@ -120,3 +120,40 @@ advisories again in CI. No WSLc library package is used.
   manual smoke-test mode requires an explicit opt-in and an isolated target.
 - Npgsql is real in the provider integration test. Fast orchestration tests may
   fake only Haby's own execution interface.
+
+## gRPC checkpoint (Slice 13)
+
+The integration-test assembly contains a private `.proto`, generated client and
+server, and an ephemeral Kestrel host bound to an OS-assigned loopback HTTP/2
+port. The client sends the original UTF-8 envelope and calls Import,
+CreateChangeSet, Plan, CommitDesiredState and ExecuteCommittedGeneration
+separately. The test queries `pg_database` through an independent Npgsql
+connection before and after execution. The existing CI `postgresql-integration`
+job and Windows WSLc helper run this same test project. No production server or
+public gRPC contract is introduced.
+
+The test host owns the administrative connection and exact in-memory Provider
+configuration. Import, planning and desired-state commit execute no SQL.
+Execution alone calls the PostgreSQL provisioner. The test verifies equivalent
+import identity, commit and execution retries, invalid input without a revision
+or database, and an existing-database conflict that leaves AppliedGeneration
+unset. State disappears with the host.
+
+Dependency review (new packages only):
+
+| Package | Version | Purpose | License |
+| --- | --- | --- | --- |
+| `Grpc.AspNetCore.Server` | 2.83.0 | Private test RPC host | Apache-2.0 |
+| `Grpc.Net.Client` | 2.83.0 | Real generated test client transport | Apache-2.0 |
+| `Grpc.Tools` | 2.83.0 | Build-time protobuf and gRPC generation, private assets | Apache-2.0 |
+| `Google.Protobuf` | 3.33.5 | Generated message serialization | BSD-3-Clause |
+
+The resolved new runtime dependencies are `Grpc.Core.Api` and `Grpc.Net.Common`
+2.83.0, both Apache-2.0. The ASP.NET Core shared framework supplies Kestrel;
+no TestHost or extra container package is needed. CI dependency review remains
+the advisory and license gate for the final package graph.
+
+This test validates the accepted boundaries for one database Resource, not
+durable operations, PostgreSQL-backed Haby state, authorization, stable public
+APIs, generated credentials, SecretVersions, configuration publication,
+deprovisioning or Kubernetes integration.

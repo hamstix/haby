@@ -3,6 +3,9 @@ using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
 using Haby.PostgreSql;
+using Haby.PostgreSql.IntegrationTests.Wire;
+using Google.Protobuf;
+using Grpc.Net.Client;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -56,6 +59,121 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
 public sealed class PostgreSqlIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     private static readonly ManifestContractCatalog Catalog = new([PostgreSqlDatabaseContract.Definition], [], [], []);
+
+    [Fact]
+    public async Task Generated_grpc_client_proves_checkpoint_boundaries()
+    {
+        await using var host = await CheckpointTestHost.StartAsync(fixture.ConnectionString);
+        using var channel = GrpcChannel.ForAddress(host.Address);
+        var client = new Checkpoint.CheckpointClient(channel);
+        var name = Name();
+        var originalEnvelope = Payload(name);
+        Assert.False(await Exists(name));
+
+        var imported = await client.ImportAsync(new ImportRequest { OriginalEnvelope = ByteString.CopyFrom(originalEnvelope) });
+        Assert.Equal("Created", imported.Outcome);
+        Assert.Equal(1, imported.RevisionNumber);
+        Assert.Equal(1, (await client.ReadStateAsync(new StateRequest { Application = imported.Application })).Revisions);
+        Assert.False(await Exists(name));
+
+        var invalid = await client.ImportAsync(new ImportRequest { OriginalEnvelope = ByteString.CopyFromUtf8("{bad") });
+        Assert.Equal("InvalidRequest", invalid.Outcome);
+        var invalidName = Name();
+        var invalidManifest = Encoding.UTF8.GetString(Payload(invalidName, "invalid-checkpoint"))
+            .Replace("postgresql.database/v1alpha1", "unknown.database/v1alpha1", StringComparison.Ordinal);
+        var invalidDeclaration = await client.ImportAsync(new ImportRequest
+        {
+            OriginalEnvelope = ByteString.CopyFromUtf8(invalidManifest)
+        });
+        Assert.Equal("InvalidManifest", invalidDeclaration.Outcome);
+        Assert.Equal(1, (await client.ReadStateAsync(new StateRequest { Application = imported.Application })).Revisions);
+        Assert.Equal(0, (await client.ReadStateAsync(new StateRequest { Application = imported.Application })).Generations);
+        Assert.False(await Exists(name));
+        Assert.False(await Exists(invalidName));
+
+        var change = await client.CreateChangeSetAsync(new ChangeSetRequest
+        {
+            Application = imported.Application,
+            Revision = imported.Revision
+        });
+        Assert.Equal("Created", change.Outcome);
+        var plan = await client.PlanAsync(new PlanRequest { ChangeSet = change.ChangeSet });
+        Assert.Equal("Planned", plan.Outcome);
+        Assert.False(await Exists(name));
+        var commit = await client.CommitDesiredStateAsync(new CommitRequest
+        {
+            ChangeSet = change.ChangeSet,
+            Plan = plan.Plan
+        });
+        Assert.Equal("Committed", commit.Outcome);
+        Assert.Equal(1, commit.DesiredGeneration);
+        Assert.False(await Exists(name));
+        var before = await client.ReadStateAsync(new StateRequest { Application = imported.Application });
+        Assert.Equal(1, before.Generations);
+        Assert.Equal(0, before.AppliedGeneration);
+
+        var execution = await client.ExecuteCommittedGenerationAsync(new ExecuteRequest { Generation = commit.Generation });
+        Assert.Equal("Succeeded", execution.State);
+        Assert.Equal("None", execution.Failure);
+        Assert.True(await Exists(name));
+        Assert.Equal(1, (await client.ReadStateAsync(new StateRequest { Application = imported.Application })).AppliedGeneration);
+
+        var equivalent = await client.ImportAsync(new ImportRequest { OriginalEnvelope = ByteString.CopyFrom(originalEnvelope) });
+        Assert.Equal("ExistingEquivalent", equivalent.Outcome);
+        Assert.Equal(imported.Revision, equivalent.Revision);
+        var repeatedCommit = await client.CommitDesiredStateAsync(new CommitRequest
+        {
+            ChangeSet = change.ChangeSet,
+            Plan = plan.Plan
+        });
+        Assert.Equal(commit.Generation, repeatedCommit.Generation);
+        Assert.Equal(1, repeatedCommit.DesiredGeneration);
+        Assert.Equal("Succeeded", (await client.ExecuteCommittedGenerationAsync(new ExecuteRequest
+        {
+            Generation = repeatedCommit.Generation
+        })).State);
+        var repeatedState = await client.ReadStateAsync(new StateRequest { Application = imported.Application });
+        Assert.Equal(1, repeatedState.Revisions);
+        Assert.Equal(1, repeatedState.Generations);
+        Assert.Equal(1, repeatedState.AppliedGeneration);
+
+        // Another independent database is deliberately created outside Haby to force a deterministic conflict.
+        var conflictName = Name();
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var create = new NpgsqlCommand("CREATE DATABASE \"" + conflictName + "\"", connection);
+            await create.ExecuteNonQueryAsync();
+        }
+        // A new Application has its own immutable revision and deployment precondition.
+        var conflictEnvelope = Payload(conflictName, "conflict-checkpoint");
+        var conflictImport = await client.ImportAsync(new ImportRequest
+        {
+            OriginalEnvelope = ByteString.CopyFrom(conflictEnvelope)
+        });
+        Assert.Equal("Created", conflictImport.Outcome);
+        var conflictChange = await client.CreateChangeSetAsync(new ChangeSetRequest
+        {
+            Application = conflictImport.Application,
+            Revision = conflictImport.Revision
+        });
+        Assert.Equal("Created", conflictChange.Outcome);
+        var conflictPlan = await client.PlanAsync(new PlanRequest { ChangeSet = conflictChange.ChangeSet });
+        Assert.Equal("Planned", conflictPlan.Outcome);
+        var conflictCommit = await client.CommitDesiredStateAsync(new CommitRequest
+        {
+            ChangeSet = conflictChange.ChangeSet,
+            Plan = conflictPlan.Plan
+        });
+        Assert.Equal("Committed", conflictCommit.Outcome);
+        var conflictExecution = await client.ExecuteCommittedGenerationAsync(new ExecuteRequest
+        {
+            Generation = conflictCommit.Generation
+        });
+        Assert.Equal("Failed", conflictExecution.State);
+        Assert.Equal("Conflict", conflictExecution.Failure);
+        Assert.Equal(0, (await client.ReadStateAsync(new StateRequest { Application = conflictImport.Application })).AppliedGeneration);
+    }
 
     [Fact]
     public async Task Imported_and_committed_generation_creates_database_once()
@@ -165,8 +283,8 @@ public sealed class PostgreSqlIntegrationTests(PostgreSqlFixture fixture) : ICla
 
     private static ProviderResolution Selection() => new("provider", 1, PostgreSqlDatabaseProvisioner.ImplementationId);
     private static string Name() => "db_" + Guid.NewGuid().ToString("N")[..20];
-    private static byte[] Payload(string name) => Encoding.UTF8.GetBytes(
-        "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"checkpoint\"},\"spec\":{\"resources\":{\"database\":{\"type\":\"postgresql.database/v1alpha1\",\"providerRef\":\"main\",\"properties\":{\"name\":\"" + name + "\"}}}}}}");
+    private static byte[] Payload(string name, string application = "checkpoint") => Encoding.UTF8.GetBytes(
+        "{\"applicationVersion\":\"1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"" + application + "\"},\"spec\":{\"resources\":{\"database\":{\"type\":\"postgresql.database/v1alpha1\",\"providerRef\":\"main\",\"properties\":{\"name\":\"" + name + "\"}}}}}}");
 
     private async Task<bool> Exists(string name)
     {
