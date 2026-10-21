@@ -25,3 +25,11 @@ return `ProviderAliasNotResolved`.
 The store is a test boundary, not durable persistence, reconciliation or a
 public transport API. It supports one exact member and present desired state;
 multi-Application transactions and explicit removal remain future slices.
+
+`PostgreSqlCheckpointExecutor` is invoked separately after Commit for a
+generation containing exactly one `postgresql.database/v1alpha1` Resource. It
+uses the Plan's exact Provider selection, records local execution status, and
+advances `AppliedGeneration` only after its Provider confirms creation. A
+confirmed retry performs no further SQL; an uncertain result requires attention.
+The build-time-composed implementation and its operator-owned connection
+configuration live in `Haby.PostgreSql`, outside this assembly.

@@ -17,6 +17,12 @@ public sealed record ProviderResolution(string ProviderInstanceId, long Configur
 
 public sealed record ResolvedProviderAlias(ProviderAlias Alias, ProviderResolution Resolution);
 
+/// <summary>Build-time-composed checkpoint capability lookup; no Provider configuration is exposed.</summary>
+public interface ICheckpointProviderCapability
+{
+    bool Supports(ProviderResolution selection, ResourceTypeId contract);
+}
+
 /// <summary>One exact member. Other Applications are unaffected.</summary>
 public sealed record DeploymentChangeSetMember(ApplicationRecordId ApplicationRecordId,
     ManifestRevisionRef ManifestRevisionRef, DeploymentPrecondition Precondition);
@@ -101,6 +107,7 @@ public abstract record PlanChangeSetResult
     public sealed record AlreadyCommitted(ChangeSetCommit Commit) : PlanChangeSetResult;
     public sealed record ChangeSetStale(DeploymentChangeSetMember Member, DeploymentGeneration? ActualGeneration) : PlanChangeSetResult;
     public sealed record ProviderAliasNotResolved(ProviderAlias Alias) : PlanChangeSetResult;
+    public sealed record ProviderCapabilityMismatch(ProviderAlias Alias) : PlanChangeSetResult;
     /// <summary>A dependency outside this checkpoint's one-Application resolver; no public error code is assigned.</summary>
     public sealed record UnsupportedDependency : PlanChangeSetResult;
 }
