@@ -171,8 +171,7 @@ checkpoint host remains a separate test boundary.
 
 The new runtime packages are `Microsoft.EntityFrameworkCore` 10.0.0 (MIT) and
 `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.0 (PostgreSQL license) for catalog
-persistence. `Microsoft.EntityFrameworkCore.Design` 10.0.0 (MIT) is a
-private build-time dependency used to generate and review migrations. The
-existing Npgsql and Testcontainers packages are reused; no new container or
-network transport dependency is introduced. See the catalog project's README
-for startup migration, backup and snapshot compatibility requirements.
+persistence. The initial migration is checked in. The existing Npgsql and
+Testcontainers packages are reused; no new container or network transport
+dependency is introduced. See the catalog project's README for startup
+migration, backup and snapshot compatibility requirements.
