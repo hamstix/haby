@@ -166,8 +166,10 @@ database inside the test-owned container. Tests apply the initial migration,
 import through `ImportApplicationManifest`, dispose the first service provider,
 then read through a fresh provider against the same database. They also check
 database uniqueness, rollback on a failed revision insert, concurrent imports,
-stored snapshot failures and startup migration failure. The in-memory
-checkpoint host remains a separate test boundary.
+stored snapshot and warning failures, and startup migration failure. The
+solution's `Haby.Persistence.PostgreSql.Tests` project checks snapshot codec
+round-trip and corrupt input without PostgreSQL. The in-memory checkpoint host
+remains a separate test boundary.
 
 The runtime packages are `Microsoft.EntityFrameworkCore` 10.0.13 (MIT),
 `Microsoft.EntityFrameworkCore.Relational` 10.0.13 (MIT), and

@@ -199,6 +199,35 @@ public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) :
         await Assert.ThrowsAsync<InvalidDataException>(async () => await query.FindAsync(result.ManifestRevisionRef));
     }
 
+    [Theory]
+    [InlineData("{\"Diagnostics\":{}")]
+    [InlineData("{\"Diagnostics\":{},\"Truncated\":false}")]
+    public async Task Corrupt_historical_warnings_fail_during_fresh_rehydration(string storedWarnings)
+    {
+        var connection = await NewDatabaseAsync();
+        ManifestRevisionRef reference;
+        await using (var first = Services(connection))
+        {
+            await first.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+            var created = Assert.IsType<ImportApplicationManifestResult.Succeeded>(
+                await Import(first, FirstTime).ExecuteAsync(CompleteEnvelope("v1"), "actor"));
+            reference = created.ManifestRevisionRef;
+        }
+
+        await using (var check = new NpgsqlConnection(connection))
+        {
+            await check.OpenAsync();
+            await using var corrupt = new NpgsqlCommand(
+                "UPDATE manifest_revisions SET historical_warnings=@warnings", check);
+            corrupt.Parameters.AddWithValue("warnings", storedWarnings);
+            await corrupt.ExecuteNonQueryAsync();
+        }
+
+        await using var fresh = Services(connection);
+        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await fresh.GetRequiredService<IManifestRevisionQuery>().FindAsync(reference));
+    }
+
     [Fact]
     public async Task Database_constraints_reject_all_three_duplicate_identities()
     {

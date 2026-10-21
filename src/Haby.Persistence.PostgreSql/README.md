@@ -58,6 +58,10 @@ extension catalog is consulted. Any encoding change requires a new format
 version and a migration or compatibility reader. The snapshot is not the
 public manifest contract or an equality shortcut.
 
+`imported_at` is stored as PostgreSQL `timestamptz` with microsecond precision.
+Sub-microsecond .NET ticks may be rounded during a database round trip, so the
+read-back time need not match the original `DateTimeOffset` tick for tick.
+
 The real PostgreSQL integration tests use the existing disposable container
 suite and Windows WSLc helper documented in
 [`docs/development/postgresql-integration-tests.md`](../../docs/development/postgresql-integration-tests.md).
