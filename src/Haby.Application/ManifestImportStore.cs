@@ -33,7 +33,7 @@ public interface IManifestImportStore
 }
 
 /// <summary>An in-memory catalog with one atomic boundary for Application and revision creation.</summary>
-public sealed class InMemoryManifestImportStore : IManifestImportStore
+public sealed class InMemoryManifestImportStore : IManifestImportStore, IManifestRevisionReader
 {
     private readonly object _gate = new();
     private readonly Dictionary<ApplicationId, ApplicationRecord> _applications = [];
@@ -50,6 +50,12 @@ public sealed class InMemoryManifestImportStore : IManifestImportStore
     public IReadOnlyList<ManifestRevision> Revisions
     {
         get { lock (_gate) return Array.AsReadOnly(_byVersion.Values.ToArray()); }
+    }
+
+    public ManifestRevision? Find(ManifestRevisionRef reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        lock (_gate) return _byVersion.Values.FirstOrDefault(item => item.Reference == reference);
     }
 
     public ValueTask<ManifestCompareAndCreateResult> CompareAndCreateAsync(
