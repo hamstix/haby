@@ -169,9 +169,11 @@ database uniqueness, rollback on a failed revision insert, concurrent imports,
 stored snapshot failures and startup migration failure. The in-memory
 checkpoint host remains a separate test boundary.
 
-The new runtime packages are `Microsoft.EntityFrameworkCore` 10.0.0 (MIT) and
-`Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.0 (PostgreSQL license) for catalog
-persistence. The initial migration is checked in. The existing Npgsql and
-Testcontainers packages are reused; no new container or network transport
-dependency is introduced. See the catalog project's README for startup
-migration, backup and snapshot compatibility requirements.
+The runtime packages are `Microsoft.EntityFrameworkCore` 10.0.13 (MIT),
+`Microsoft.EntityFrameworkCore.Relational` 10.0.13 (MIT), and
+`Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 (PostgreSQL license) for catalog
+persistence. `Microsoft.EntityFrameworkCore.Design` 10.0.13 (MIT) is a private
+design-time dependency for migrations. The initial migration is checked in.
+The existing Npgsql and Testcontainers packages are reused; no new container
+or network transport dependency is introduced. See the catalog project's README
+for startup migration, backup and snapshot compatibility requirements.
