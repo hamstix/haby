@@ -60,21 +60,22 @@ Do not hide baseline failures. Clearly distinguish existing failures, environmen
 
 ## Build and validation
 
-The reproducible baseline is being established in milestone M0. Until its commands are automated, use the solution-level .NET workflow:
+Use the .NET 10 SDK selected by `global.json`. The solution contains the current
+Domain, Manifest, Application and PostgreSQL projects and their fast tests. It
+does not contain an installable server or UI. Run the solution-level workflow:
 
 ```powershell
 dotnet restore .\HamstixHaby.slnx
 dotnet build .\HamstixHaby.slnx --no-restore
 dotnet test .\HamstixHaby.slnx --no-build
+dotnet format .\HamstixHaby.slnx --verify-no-changes --severity warn
 git diff --check
 ```
 
 Run narrower project or filtered tests first when that gives faster feedback, but do not substitute them for applicable solution validation in the final report.
 
 Integration tests that need external infrastructure must be explicitly identifiable and documented. Unit tests must not silently depend on a developer's PostgreSQL, Kubernetes, RabbitMQ or other local service.
-The planned PostgreSQL checkpoint test runtimes for Linux and Windows are
-described in [the PostgreSQL integration-test guide](docs/development/postgresql-integration-tests.md).
-The planned PostgreSQL checkpoint test runtimes for Linux and Windows are
+The separate PostgreSQL integration suite and its runtime requirements are
 described in [the PostgreSQL integration-test guide](docs/development/postgresql-integration-tests.md).
 
 For tests that exercise persisted EF Core behavior, use separate `DbContext` instances for arranging data, invoking the system under test and verifying the result. Dispose each context before opening the next one, and prefer `AsNoTracking()` for verification queries when tracking behavior is not under test. This prevents the change tracker, identity map and navigation fix-up from hiding query or persistence defects. A test may intentionally share a context only when the unit-of-work or tracking behavior itself is the subject of the test; make that intent explicit in the test name or setup.
