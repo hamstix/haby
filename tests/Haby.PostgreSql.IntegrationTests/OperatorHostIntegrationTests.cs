@@ -13,10 +13,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture, ITestOutputHelper output) : IClassFixture<PostgreSqlFixture>
 {
     [Fact]
     public async Task Pg_dump_restore_preserves_revision_warnings_and_preview_in_fresh_host()
@@ -30,9 +31,11 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
         using var certificate = Certificate();
         var path = Path.Combine(Path.GetTempPath(), "haby-operator-" + Guid.NewGuid().ToString("N") + ".pfx");
         await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, "test-only"));
+        Exception? testFailure = null;
         try
         {
             RevisionReference reference;
+            RevisionSummary originalRevision;
             PreviewDatabaseReply originalPreview;
             await using (var host = await StartAsync(source, path))
             {
@@ -45,6 +48,7 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                 Assert.Equal(ImportReply.OutcomeOneofCase.Created, imported.OutcomeCase);
                 Assert.Equal("manifest.resource.unused", Assert.Single(imported.Created.Revision.HistoricalWarnings.Diagnostics).Code);
                 reference = imported.Created.Revision.Reference;
+                originalRevision = imported.Created.Revision;
                 var preview = PreviewRequest(reference);
                 originalPreview = await client.PreviewDatabaseAsync(preview);
                 Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.WouldCreate, originalPreview.OutcomeCase);
@@ -65,23 +69,37 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                 var client = new ManifestOperator.ManifestOperatorClient(channel);
                 var found = await client.GetRevisionAsync(new GetRevisionRequest { Reference = reference });
                 Assert.Equal(GetRevisionReply.OutcomeOneofCase.Found, found.OutcomeCase);
-                Assert.Equal(reference, found.Found.Reference);
-                Assert.Equal("manifest.resource.unused", Assert.Single(found.Found.HistoricalWarnings.Diagnostics).Code);
+                Assert.Equal(originalRevision, found.Found);
                 var result = await client.PreviewDatabaseAsync(PreviewRequest(reference));
                 Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.WouldCreate, result.OutcomeCase);
                 Assert.Equal(targetName, result.WouldCreate.DatabaseName);
                 Assert.Equal(originalPreview, result);
             }
+            Assert.Equal(restoredState, await CatalogStateAsync(restored));
             await using var check = new NpgsqlConnection(fixture.ConnectionString);
             await check.OpenAsync();
             await using var target = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", check);
             target.Parameters.AddWithValue("name", targetName);
             Assert.Equal(0L, await target.ExecuteScalarAsync());
         }
+        catch (Exception error)
+        {
+            testFailure = error;
+            throw;
+        }
         finally
         {
-            await fixture.RunClientUtilityAsync("rm", "-f", dump);
-            File.Delete(path);
+            var cleanupErrors = new List<Exception>();
+            try { await fixture.RunClientUtilityAsync("rm", "-f", dump); }
+            catch (Exception error) { cleanupErrors.Add(error); }
+            try { File.Delete(path); }
+            catch (Exception error) { cleanupErrors.Add(error); }
+            if (cleanupErrors.Count > 0)
+            {
+                if (testFailure is null) throw new AggregateException("Backup drill cleanup failed.", cleanupErrors);
+                foreach (var error in cleanupErrors)
+                    output.WriteLine("Cleanup also failed: " + error.Message);
+            }
         }
     }
 

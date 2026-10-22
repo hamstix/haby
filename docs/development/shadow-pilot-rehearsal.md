@@ -83,6 +83,13 @@ pg_restore --exit-on-error --no-owner --no-privileges --dbname=$restoreDatabase 
 if ($LASTEXITCODE -ne 0) { throw 'Catalog restore failed; do not use the restored database.' }
 ```
 
+Run `createdb` and `pg_restore` as the catalog principal where possible. If an
+administrator performs the restore, `--no-privileges` does not recreate that
+principal's grants: assign it ownership or equivalent DDL rights on restored
+catalog objects, plus the step-1 schema and read/write privileges, before
+starting Haby. Verify those rights on the restored database with the actual
+host principal, including its ability to apply reviewed migrations.
+
 Run these read-only queries against **each** database with `psql` and compare
 the exact results, including every migration ID:
 
