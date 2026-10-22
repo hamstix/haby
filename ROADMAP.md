@@ -439,6 +439,12 @@ support validation and non-mutating planning against explicit Environment and
 Provider metadata. Do not commit deployment desired state or execute Providers
 through the shadow workflow. The existing system remains authoritative.
 
+The first shadow preview evaluates one accepted immutable ManifestRevision with
+request-scoped, explicitly hypothetical, non-secret Environment and Provider
+metadata. It does not persist that context or create a ChangeSet, Plan,
+deployment or generation; its output cannot be applied. The active pilot needs
+server-owned exact durable inputs and a separately accepted Plan.
+
 Provide a narrowly scoped internal alpha gRPC operator API and `habyctl`,
 transport security, request limits and useful redacted diagnostics. The early
 pilot does not add application-level authentication or authorization:

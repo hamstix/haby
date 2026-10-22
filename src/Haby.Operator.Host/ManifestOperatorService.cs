@@ -7,7 +7,7 @@ using Haby.Operator.Contracts;
 namespace Haby.Operator.Host;
 
 public sealed class ManifestOperatorService(ManifestContractCatalog catalog, ImportApplicationManifest importer,
-    IManifestRevisionQuery revisions) : ManifestOperator.ManifestOperatorBase
+    IManifestRevisionQuery revisions, PreviewImportedDatabase preview) : ManifestOperator.ManifestOperatorBase
 {
     public override Task<ValidateReply> Validate(EnvelopeRequest request, ServerCallContext context)
     {
@@ -71,6 +71,46 @@ public sealed class ManifestOperatorService(ManifestContractCatalog catalog, Imp
         return revision is null
             ? new GetRevisionReply { NotFound = Reference(reference) }
             : new GetRevisionReply { Found = Summary(revision) };
+    }
+
+    public override async Task<PreviewDatabaseReply> PreviewDatabase(PreviewDatabaseRequest request,
+        ServerCallContext context)
+    {
+        if (request.Reference is null || request.Reference.RevisionNumber <= 0)
+            return new PreviewDatabaseReply { InvalidContext = true };
+        ManifestRevisionRef reference;
+        try
+        {
+            reference = ManifestRevisionRef.Create(ApplicationRecordId.Parse(request.Reference.ApplicationRecordId),
+                ManifestRevisionNumber.Create(request.Reference.RevisionNumber));
+        }
+        catch (ArgumentException) { return new PreviewDatabaseReply { InvalidContext = true }; }
+        var selections = request.Providers.Select(item => new Haby.Application.PreviewProviderSelection(
+            item.Alias, item.InstanceId, item.ConfigurationRevision, item.ImplementationId)).ToArray();
+        var result = await preview.ExecuteAsync(reference, request.EnvironmentId, selections, context.CancellationToken);
+        return result switch
+        {
+            PreviewDatabaseResult.WouldCreate ready => new PreviewDatabaseReply
+            {
+                WouldCreate = new PreviewWouldCreate
+                {
+                    EnvironmentId = ready.EnvironmentId,
+                    ResourceId = ready.ResourceId,
+                    DatabaseName = ready.DatabaseName,
+                    ProviderAlias = ready.ProviderAlias,
+                    InstanceId = ready.ProviderInstanceId,
+                    ConfigurationRevision = ready.ConfigurationRevision,
+                    ImplementationId = ready.ImplementationId
+                }
+            },
+            PreviewDatabaseResult.RevisionNotFound => new PreviewDatabaseReply { RevisionNotFound = true },
+            PreviewDatabaseResult.InvalidContext => new PreviewDatabaseReply { InvalidContext = true },
+            PreviewDatabaseResult.AliasNotResolved missing => new PreviewDatabaseReply
+            { AliasNotResolved = new PreviewAliasFailure { Alias = missing.Alias } },
+            PreviewDatabaseResult.CapabilityMismatch mismatch => new PreviewDatabaseReply
+            { CapabilityMismatch = new PreviewAliasFailure { Alias = mismatch.Alias } },
+            _ => new PreviewDatabaseReply { UnsupportedShape = true }
+        };
     }
 
     private async Task<RevisionSummary> ReadAccepted(ImportApplicationManifestResult.Succeeded accepted)

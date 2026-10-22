@@ -193,28 +193,10 @@ public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions,
         var revision = revisions.Find(changeSet.Member.ManifestRevisionRef);
         if (revision is null || revision.Reference.ApplicationRecordId != changeSet.Member.ApplicationRecordId)
             return new PlanChangeSetResult.UnsupportedDependency();
-        var declaration = revision.Declaration;
-        // These inputs need the ADR-018 export planner or ADR-019 parameter resolver.
-        if (declaration.Spec.Parameters.Count != 0 || declaration.Spec.Components.Values.Any(component =>
-                component.Bindings.Values.Any(binding => binding.Target is NormalizedApplicationExportTarget)))
-            return new PlanChangeSetResult.UnsupportedDependency();
-        var aliases = declaration.Spec.Resources.Values.Select(item => item.ProviderRef)
-            .Concat(declaration.Spec.Components.Values.SelectMany(component => component.Workloads.Values.Select(item => item.ProviderRef)))
-            .Distinct().OrderBy(item => item.Value, StringComparer.Ordinal);
-        var resolved = new List<ResolvedProviderAlias>();
-        foreach (var alias in aliases)
-        {
-            if (!_aliases.TryGetValue((changeSet.EnvironmentRecordId, alias), out var provider))
-                return new PlanChangeSetResult.ProviderAliasNotResolved(alias);
-            resolved.Add(new ResolvedProviderAlias(alias, provider));
-        }
-        foreach (var resource in declaration.Spec.Resources.Values)
-        {
-            if (resource.Type != PostgreSqlDatabaseContract.Id) continue;
-            var selected = resolved.Single(item => item.Alias == resource.ProviderRef);
-            if (checkpointCapability?.Supports(selected.Resolution, resource.Type) != true)
-                return new PlanChangeSetResult.ProviderCapabilityMismatch(resource.ProviderRef);
-        }
+        var result = CheckpointPlanningRules.Resolve(revision.Declaration,
+            alias => _aliases.GetValueOrDefault((changeSet.EnvironmentRecordId, alias)), checkpointCapability);
+        if (result is PlanChangeSetResult blocked) return blocked;
+        var resolved = (List<ResolvedProviderAlias>)result;
         var environment = _environments[changeSet.EnvironmentRecordId];
         return new DeploymentPlanningInputs(environment.RecordId, environment.Id, revision.Reference, resolved);
     }

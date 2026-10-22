@@ -4,8 +4,9 @@ The operator host and `habyctl` are an internal alpha interface for a single
 Haby instance. The host listens only on IPv4 loopback with HTTP/2. TLS is
 enabled by default and can be explicitly disabled for local debugging. It
 has no application authentication or authorization and is unsuitable for broad
-or remote exposure. Its protobuf contract may change before M4. It only
-validates, imports and reads immutable manifest revisions. It does not plan or
+or remote exposure. Its protobuf contract may change before M4. It validates,
+imports, reads immutable manifest revisions and previews one supported database
+Resource against hypothetical request metadata. It does not durably plan or
 commit a ChangeSet, execute a Provider, provision a database, generate a secret
 or deliver configuration.
 
@@ -97,3 +98,42 @@ records `haby-alpha-operator-host` as a technical audit actor because the alpha
 endpoint cannot identify an individual caller. Keep the endpoint reachable only
 from the intended developer console. A remote deployment, network policy and
 application-level access control require separate review.
+
+## Hypothetical database preview
+
+Import this exact envelope as `manifest-envelope.json` with the command above:
+
+```json
+{"applicationVersion":"v1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"postgres-demo"},"spec":{"resources":{"database":{"type":"postgresql.database/v1alpha1","providerRef":"postgresql.primary","properties":{"name":"postgres_demo_db"}}}}}}
+```
+
+Use the returned Application record ID and revision number. Create a local
+`preview-context.json` containing only non-secret, explicitly hypothetical
+metadata:
+
+```json
+{
+  "preview": true,
+  "environmentId": "local-test",
+  "providers": [{
+    "alias": "postgresql.primary",
+    "instanceId": "local-postgresql",
+    "configurationRevision": 1,
+    "implementationId": "haby.postgresql.database/v1alpha1"
+  }]
+}
+```
+
+After restarting the host with the same catalog, request the preview:
+
+```powershell
+dotnet run --project .\src\habyctl -- manifest revision preview '<application-record-id>' 1 .\preview-context.json
+```
+
+The CLI reads at most 16 KiB and rejects unknown fields, including any secret
+or connection string. The server validates the typed context again. A successful
+result says it **would create one database** with the selected alias and exact
+metadata. It is hypothetical, cannot be applied, and creates no ChangeSet,
+Plan, deployment, generation or target database. This context is never saved as
+authoritative Provider state; the later active pilot requires server-owned
+durable inputs and a separately accepted Plan.

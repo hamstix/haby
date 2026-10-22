@@ -7,6 +7,7 @@ service ManifestOperator {
   rpc Validate(EnvelopeRequest) returns (ValidateReply);
   rpc Import(EnvelopeRequest) returns (ImportReply);
   rpc GetRevision(GetRevisionRequest) returns (GetRevisionReply);
+  rpc PreviewDatabase(PreviewDatabaseRequest) returns (PreviewDatabaseReply);
 }
 
 message EnvelopeRequest { bytes original_envelope = 1; }
@@ -65,5 +66,38 @@ message GetRevisionReply {
   oneof outcome {
     RevisionSummary found = 1;
     RevisionReference not_found = 2;
+  }
+}
+
+// Request-scoped hypothetical metadata; no credentials or reusable Plan identity.
+message PreviewProviderSelection {
+  string alias = 1;
+  string instance_id = 2;
+  int64 configuration_revision = 3;
+  string implementation_id = 4;
+}
+message PreviewDatabaseRequest {
+  RevisionReference reference = 1;
+  string environment_id = 2;
+  repeated PreviewProviderSelection providers = 3;
+}
+message PreviewWouldCreate {
+  string environment_id = 1;
+  string resource_id = 2;
+  string database_name = 3;
+  string provider_alias = 4;
+  string instance_id = 5;
+  int64 configuration_revision = 6;
+  string implementation_id = 7;
+}
+message PreviewAliasFailure { string alias = 1; }
+message PreviewDatabaseReply {
+  oneof outcome {
+    PreviewWouldCreate would_create = 1;
+    bool revision_not_found = 2;
+    bool invalid_context = 3;
+    PreviewAliasFailure alias_not_resolved = 4;
+    PreviewAliasFailure capability_mismatch = 5;
+    bool unsupported_shape = 6;
   }
 }

@@ -31,15 +31,15 @@ public sealed class InMemoryPostgreSqlConfigurationCatalog
     }
 }
 
-/// <summary>Build-time-composed implementation of the single checkpoint Resource.</summary>
+/// <summary>Executes the checkpoint Resource with operator-owned configuration.</summary>
 public sealed class PostgreSqlDatabaseProvisioner(InMemoryPostgreSqlConfigurationCatalog configurations) :
     ICheckpointProviderCapability, ICheckpointDatabaseProvisioner
 {
-    public const string ImplementationId = "haby.postgresql.database/v1alpha1";
+    public const string ImplementationId = PostgreSqlDatabaseCheckpointCapability.ImplementationId;
     private static readonly Regex NamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     public bool Supports(ProviderResolution selection, ResourceTypeId contract) =>
-        contract == PostgreSqlDatabaseContract.Id && selection.ImplementationId == ImplementationId;
+        new PostgreSqlDatabaseCheckpointCapability().Supports(selection, contract);
 
     public async ValueTask<CheckpointProvisionOutcome> CreateAsync(ProviderResolution exactProvider,
         string databaseName, CancellationToken cancellationToken)

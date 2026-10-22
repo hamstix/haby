@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json.Nodes;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -17,6 +18,97 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
+    [Fact]
+    public async Task Preview_after_restart_is_hypothetical_and_does_not_create_database_or_deployment_state()
+    {
+        var catalogConnection = await NewDatabaseAsync();
+        var targetName = "preview_" + Guid.NewGuid().ToString("N");
+        using var certificate = Certificate();
+        var path = Path.Combine(Path.GetTempPath(), "haby-operator-" + Guid.NewGuid().ToString("N") + ".pfx");
+        await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, "test-only"));
+        try
+        {
+            RevisionReference reference;
+            await using (var host = await StartAsync(catalogConnection, path))
+            {
+                using var channel = Channel(host, certificate);
+                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var payload = Encoding.UTF8.GetString(Envelope("preview-example"))
+                    .Replace("sample_db", targetName, StringComparison.Ordinal);
+                var imported = await client.ImportAsync(new EnvelopeRequest
+                    { OriginalEnvelope = ByteString.CopyFromUtf8(payload) });
+                reference = imported.Created.Revision.Reference;
+            }
+            await using (var restarted = await StartAsync(catalogConnection, path))
+            {
+                using var channel = Channel(restarted, certificate);
+                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var request = new PreviewDatabaseRequest { Reference = reference, EnvironmentId = "test" };
+                request.Providers.Add(new PreviewProviderSelection
+                {
+                    Alias = "postgresql.primary", InstanceId = "local-postgresql", ConfigurationRevision = 7,
+                    ImplementationId = "haby.postgresql.database/v1alpha1"
+                });
+                for (var attempt = 0; attempt < 2; attempt++)
+                {
+                    var result = await client.PreviewDatabaseAsync(request);
+                    Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.WouldCreate, result.OutcomeCase);
+                    Assert.Equal(targetName, result.WouldCreate.DatabaseName);
+                    Assert.Equal("db", result.WouldCreate.ResourceId);
+                    Assert.Equal("postgresql.primary", result.WouldCreate.ProviderAlias);
+                    Assert.DoesNotContain("connection", result.ToString(), StringComparison.OrdinalIgnoreCase);
+                }
+                request.Providers[0].Alias = "missing";
+                Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.AliasNotResolved,
+                    (await client.PreviewDatabaseAsync(request)).OutcomeCase);
+                request.Providers[0].Alias = "postgresql.primary";
+                request.Providers[0].ImplementationId = "wrong-secret-value";
+                var mismatch = await client.PreviewDatabaseAsync(request);
+                Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.CapabilityMismatch, mismatch.OutcomeCase);
+                Assert.DoesNotContain("secret-value", mismatch.ToString());
+                request.Providers[0].ImplementationId = "haby.postgresql.database/v1alpha1";
+                request.EnvironmentId = "invalid_secret=value";
+                var malformed = await client.PreviewDatabaseAsync(request);
+                Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.InvalidContext, malformed.OutcomeCase);
+                Assert.DoesNotContain("secret-value", malformed.ToString());
+                request.EnvironmentId = "test";
+                request.Providers.Add(request.Providers[0].Clone());
+                Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.InvalidContext,
+                    (await client.PreviewDatabaseAsync(request)).OutcomeCase);
+                request.Providers.RemoveAt(1);
+                var unsupportedDocument = JsonNode.Parse(Envelope("preview-unsupported"))!;
+                unsupportedDocument["manifest"]!["spec"]!["resources"]!["other"] = JsonNode.Parse(
+                    """{"type":"postgresql.database/v1alpha1","providerRef":"postgresql.primary","properties":{"name":"other_db"}}"""u8);
+                var unsupportedPayload = unsupportedDocument.ToJsonString();
+                var unsupported = await client.ImportAsync(new EnvelopeRequest
+                    { OriginalEnvelope = ByteString.CopyFromUtf8(unsupportedPayload) });
+                Assert.Equal(ImportReply.OutcomeOneofCase.Created, unsupported.OutcomeCase);
+                request.Reference = unsupported.Created.Revision.Reference;
+                Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.UnsupportedShape,
+                    (await client.PreviewDatabaseAsync(request)).OutcomeCase);
+                var original = await client.GetRevisionAsync(new GetRevisionRequest { Reference = reference });
+                Assert.Equal(GetRevisionReply.OutcomeOneofCase.Found, original.OutcomeCase);
+                Assert.Equal("manifest.resource.unused", Assert.Single(original.Found.HistoricalWarnings.Diagnostics).Code);
+            }
+            await using (var check = new NpgsqlConnection(fixture.ConnectionString))
+            {
+                await check.OpenAsync();
+                await using var command = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", check);
+                command.Parameters.AddWithValue("name", targetName);
+                Assert.Equal(0L, await command.ExecuteScalarAsync());
+            }
+            await using (var check = new NpgsqlConnection(catalogConnection))
+            {
+                await check.OpenAsync();
+                await using var count = new NpgsqlCommand("SELECT count(*) FROM manifest_revisions", check);
+                Assert.Equal(2L, await count.ExecuteScalarAsync());
+                await using var deployment = new NpgsqlCommand(
+                    "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('application_deployments', 'deployment_plans', 'deployment_change_sets', 'operations')", check);
+                Assert.Equal(0L, await deployment.ExecuteScalarAsync());
+            }
+        }
+        finally { File.Delete(path); }
+    }
     [Fact]
     public async Task Reflection_is_available_in_development_and_production()
     {
@@ -213,7 +305,7 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
     }
 
     private static string[] Arguments(string connection, string path, string environment = "Production") =>
-        ["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:CertificatePath=" + path,
+        ["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=true", "--Haby:Tls:CertificatePath=" + path,
             "--Haby:Tls:CertificatePassword=test-only", "--Haby:Port=0", "--environment=" + environment];
 
     private static async Task<WebApplication> StartAsync(string connection, string path, string environment = "Production")
