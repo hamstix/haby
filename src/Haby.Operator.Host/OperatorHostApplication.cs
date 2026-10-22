@@ -33,21 +33,27 @@ public static class OperatorHostApplication
     {
         var builder = WebApplication.CreateBuilder(args);
         var connection = builder.Configuration["Haby:PostgreSql:ConnectionString"];
+        var tlsEnabledText = builder.Configuration["Haby:Tls:Enabled"];
         var certificatePath = builder.Configuration["Haby:Tls:CertificatePath"];
         var certificatePassword = builder.Configuration["Haby:Tls:CertificatePassword"];
         var portText = builder.Configuration["Haby:Port"];
         var invalid = new List<string>();
         if (string.IsNullOrWhiteSpace(connection)) invalid.Add("Haby:PostgreSql:ConnectionString");
-        if (string.IsNullOrWhiteSpace(certificatePath) || !File.Exists(certificatePath))
+        var tlsEnabled = true;
+        if (tlsEnabledText is not null && !bool.TryParse(tlsEnabledText, out tlsEnabled))
+            invalid.Add("Haby:Tls:Enabled");
+        if (tlsEnabled && (string.IsNullOrWhiteSpace(certificatePath) || !File.Exists(certificatePath)))
             invalid.Add("Haby:Tls:CertificatePath");
         if (!int.TryParse(portText, out var port) || port is < 0 or > 65535) invalid.Add("Haby:Port");
         if (invalid.Count > 0)
             throw new InvalidOperationException("Missing or invalid configuration keys: " + string.Join(", ", invalid));
-        var certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath!, certificatePassword);
+        var certificate = tlsEnabled
+            ? X509CertificateLoader.LoadPkcs12FromFile(certificatePath!, certificatePassword)
+            : null;
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port, listen =>
         {
             listen.Protocols = HttpProtocols.Http2;
-            listen.UseHttps(certificate);
+            if (tlsEnabled) listen.UseHttps(certificate!);
         }));
         builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = MaxReceiveBytes);
         builder.Services.AddGrpcReflection();

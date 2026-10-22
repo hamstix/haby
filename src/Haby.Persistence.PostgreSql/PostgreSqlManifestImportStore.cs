@@ -51,7 +51,8 @@ public sealed class PostgreSqlManifestImportStore(IDbContextFactory<ManifestCata
             NormalizedModelVersion = candidate.Declaration.NormalizedModelVersion,
             SnapshotFormatVersion = NormalizedSnapshotCodec.FormatVersion,
             Snapshot = NormalizedSnapshotCodec.Encode(candidate.Declaration),
-            HistoricalWarnings = JsonSerializer.Serialize(candidate.Warnings),
+            HistoricalWarnings = JsonSerializer.Serialize(candidate.Warnings,
+                ManifestCatalogJsonContext.Default.ManifestValidationReport),
             ActorId = auditMetadata.ActorId,
             ImportedAt = auditMetadata.ImportedAt.ToUniversalTime()
         };
@@ -83,7 +84,8 @@ public sealed class PostgreSqlManifestImportStore(IDbContextFactory<ManifestCata
                 ?? throw new InvalidDataException("Stored historical warnings are corrupt.");
             if (warningNode["Diagnostics"] is not JsonArray || warningNode["Truncated"] is null)
                 throw new InvalidDataException("Stored historical warnings are corrupt.");
-            var warnings = JsonSerializer.Deserialize<ManifestValidationReport>(row.HistoricalWarnings)
+            var warnings = JsonSerializer.Deserialize(row.HistoricalWarnings,
+                ManifestCatalogJsonContext.Default.ManifestValidationReport)
                 ?? throw new InvalidDataException("Stored historical warnings are corrupt.");
             if (warnings.Diagnostics is null || warnings.Diagnostics.Any(diagnostic => diagnostic is null ||
                 diagnostic.Code is null || diagnostic.Path is null || diagnostic.Message is null ||
