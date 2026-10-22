@@ -52,8 +52,10 @@ Run `scripts/test-postgresql-wslc.ps1` from the repository root. It:
    `wslc run -d --rm --name <test-owned-name> -p 127.0.0.1:<port>:5432 -e POSTGRES_PASSWORD=<temporary-value> <pinned-postgres-image>`;
    verify exact option support with `wslc run --help` on the host before use.
 4. Enable a distinct opt-in external-ephemeral mode and pass the temporary
-   connection to the same integration test project used in CI. The test must
-   reject a supplied connection string without the explicit opt-in marker.
+   connection and test-owned container name to the same integration test
+   project used in CI. The test must reject a supplied connection string
+   without the explicit opt-in marker. The container name lets the backup
+   drill run `pg_dump` and `pg_restore` inside that disposable container.
 5. In `finally`, stop **only** the container this invocation created, clear
    temporary environment variables, and report cleanup failure separately.
    Do not run broad prune commands or touch other containers.
@@ -89,8 +91,9 @@ Run the integration project directly on a Docker-compatible host:
 dotnet test ./tests/Haby.PostgreSql.IntegrationTests/Haby.PostgreSql.IntegrationTests.csproj --artifacts-path ./.artifacts
 ```
 
-The external mode requires both `HABY_POSTGRESQL_EPHEMERAL_EXTERNAL=1` and
-`HABY_POSTGRESQL_EPHEMERAL_CONNECTION`. Supplying only a connection string fails.
+The external mode requires `HABY_POSTGRESQL_EPHEMERAL_EXTERNAL=1`,
+`HABY_POSTGRESQL_EPHEMERAL_CONNECTION` and
+`HABY_POSTGRESQL_EPHEMERAL_CONTAINER`. Supplying only a connection string fails.
 Use this mode only with the helper's disposable PostgreSQL container.
 
 ## Dependency review for Slice 12
@@ -185,3 +188,11 @@ requests preview through the generated client, and independently checks that
 the requested target database is absent. It also checks repeated preview,
 typed failures, historical warnings and the absence of deployment or operation
 tables in the catalog. It uses the same disposable PostgreSQL runtime.
+
+The restore integration test stops its source host, runs the PostgreSQL image's
+`pg_dump` and `pg_restore` utilities, restores into a separate empty database,
+compares Application and revision counts plus migration IDs, then reads the
+same immutable revision, warnings and hypothetical preview through a fresh
+host. The archive exists only inside the disposable container and is removed
+after the test. The operator procedure is in
+[the shadow-pilot rehearsal](shadow-pilot-rehearsal.md).

@@ -13,11 +13,121 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture, ITestOutputHelper output) : IClassFixture<PostgreSqlFixture>
 {
+    [Fact]
+    public async Task Pg_dump_restore_preserves_revision_warnings_and_preview_in_fresh_host()
+    {
+        var source = await NewDatabaseAsync();
+        var restored = await NewDatabaseAsync();
+        var sourceName = new NpgsqlConnectionStringBuilder(source).Database!;
+        var restoredName = new NpgsqlConnectionStringBuilder(restored).Database!;
+        var dump = "/tmp/haby-catalog-" + Guid.NewGuid().ToString("N") + ".dump";
+        var targetName = "restore_preview_" + Guid.NewGuid().ToString("N");
+        using var certificate = Certificate();
+        var path = Path.Combine(Path.GetTempPath(), "haby-operator-" + Guid.NewGuid().ToString("N") + ".pfx");
+        await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, "test-only"));
+        Exception? testFailure = null;
+        try
+        {
+            RevisionReference reference;
+            RevisionSummary originalRevision;
+            PreviewDatabaseReply originalPreview;
+            await using (var host = await StartAsync(source, path))
+            {
+                using var channel = Channel(host, certificate);
+                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var payload = Encoding.UTF8.GetString(Envelope("restore-example"))
+                    .Replace("sample_db", targetName, StringComparison.Ordinal);
+                var imported = await client.ImportAsync(new EnvelopeRequest
+                    { OriginalEnvelope = ByteString.CopyFromUtf8(payload) });
+                Assert.Equal(ImportReply.OutcomeOneofCase.Created, imported.OutcomeCase);
+                Assert.Equal("manifest.resource.unused", Assert.Single(imported.Created.Revision.HistoricalWarnings.Diagnostics).Code);
+                reference = imported.Created.Revision.Reference;
+                originalRevision = imported.Created.Revision;
+                var preview = PreviewRequest(reference);
+                originalPreview = await client.PreviewDatabaseAsync(preview);
+                Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.WouldCreate, originalPreview.OutcomeCase);
+            }
+
+            var sourceState = await CatalogStateAsync(source);
+            Assert.Equal((1L, 1L), (sourceState.Applications, sourceState.Revisions));
+            Assert.NotEmpty(sourceState.Migrations);
+            await fixture.RunClientUtilityAsync("pg_dump", "-U", "postgres", "--format=custom", "--file=" + dump, "--dbname=" + sourceName);
+            await fixture.RunClientUtilityAsync("pg_restore", "-U", "postgres", "--exit-on-error", "--no-owner",
+                "--no-privileges", "--dbname=" + restoredName, dump);
+
+            var restoredState = await CatalogStateAsync(restored);
+            Assert.Equal(sourceState, restoredState);
+            await using (var fresh = await StartAsync(restored, path))
+            {
+                using var channel = Channel(fresh, certificate);
+                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var found = await client.GetRevisionAsync(new GetRevisionRequest { Reference = reference });
+                Assert.Equal(GetRevisionReply.OutcomeOneofCase.Found, found.OutcomeCase);
+                Assert.Equal(originalRevision, found.Found);
+                var result = await client.PreviewDatabaseAsync(PreviewRequest(reference));
+                Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.WouldCreate, result.OutcomeCase);
+                Assert.Equal(targetName, result.WouldCreate.DatabaseName);
+                Assert.Equal(originalPreview, result);
+            }
+            Assert.Equal(restoredState, await CatalogStateAsync(restored));
+            await using var check = new NpgsqlConnection(fixture.ConnectionString);
+            await check.OpenAsync();
+            await using var target = new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = @name", check);
+            target.Parameters.AddWithValue("name", targetName);
+            Assert.Equal(0L, await target.ExecuteScalarAsync());
+        }
+        catch (Exception error)
+        {
+            testFailure = error;
+            throw;
+        }
+        finally
+        {
+            var cleanupErrors = new List<Exception>();
+            try { await fixture.RunClientUtilityAsync("rm", "-f", dump); }
+            catch (Exception error) { cleanupErrors.Add(error); }
+            try { File.Delete(path); }
+            catch (Exception error) { cleanupErrors.Add(error); }
+            if (cleanupErrors.Count > 0)
+            {
+                if (testFailure is null) throw new AggregateException("Backup drill cleanup failed.", cleanupErrors);
+                foreach (var error in cleanupErrors)
+                    output.WriteLine("Cleanup also failed: " + error.Message);
+            }
+        }
+    }
+
+    private static PreviewDatabaseRequest PreviewRequest(RevisionReference reference)
+    {
+        var request = new PreviewDatabaseRequest { Reference = reference, EnvironmentId = "test" };
+        request.Providers.Add(new PreviewProviderSelection
+        {
+            Alias = "postgresql.primary", InstanceId = "local-postgresql", ConfigurationRevision = 7,
+            ImplementationId = "haby.postgresql.database/v1alpha1"
+        });
+        return request;
+    }
+
+    private static async Task<(long Applications, long Revisions, string Migrations)> CatalogStateAsync(string connectionString)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        async Task<long> CountAsync(string table)
+        {
+            await using var command = new NpgsqlCommand("SELECT count(*) FROM " + table, connection);
+            return (long)(await command.ExecuteScalarAsync())!;
+        }
+        await using var migrations = new NpgsqlCommand("SELECT string_agg(\"MigrationId\", ',' ORDER BY \"MigrationId\") FROM \"__EFMigrationsHistory\"", connection);
+        return (await CountAsync("applications"), await CountAsync("manifest_revisions"),
+            (string)(await migrations.ExecuteScalarAsync())!);
+    }
+
     [Fact]
     public async Task Preview_after_restart_is_hypothetical_and_does_not_create_database_or_deployment_state()
     {

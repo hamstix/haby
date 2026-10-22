@@ -1,4 +1,5 @@
 using System.Text;
+using System.Diagnostics;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
@@ -15,6 +16,7 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class PostgreSqlFixture : IAsyncLifetime
 {
     private PostgreSqlContainer? _container;
+    private string? _externalContainer;
     public string ConnectionString { get; private set; } = null!;
 
     public async Task InitializeAsync()
@@ -27,6 +29,9 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
         {
             if (string.IsNullOrWhiteSpace(supplied))
                 throw new InvalidOperationException("The ephemeral external connection is missing.");
+            _externalContainer = Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_CONTAINER");
+            if (string.IsNullOrWhiteSpace(_externalContainer))
+                throw new InvalidOperationException("The ephemeral external container name is missing.");
             ConnectionString = supplied;
             // The WSLc helper starts the container; Npgsql readiness is checked here.
             for (var attempt = 0; attempt < 30; attempt++)
@@ -53,6 +58,29 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
     public async Task DisposeAsync()
     {
         if (_container is not null) await _container.DisposeAsync();
+    }
+
+    public async Task RunClientUtilityAsync(params string[] command)
+    {
+        if (_container is not null)
+        {
+            var result = await _container.ExecAsync(command);
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed: {result.Stderr}");
+            return;
+        }
+
+        var start = new ProcessStartInfo("wslc") { RedirectStandardError = true, RedirectStandardOutput = true };
+        start.ArgumentList.Add("exec");
+        start.ArgumentList.Add(_externalContainer!);
+        foreach (var argument in command) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("WSLc did not start.");
+        var error = process.StandardError.ReadToEndAsync();
+        var output = process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        await output;
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed: {await error}");
     }
 }
 
