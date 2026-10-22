@@ -57,7 +57,7 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
         var app = builder.Build();
         app.MapGrpcService<ManifestOperatorService>();
-        if (app.Environment.IsDevelopment()) app.MapGrpcReflectionService();
+        app.MapGrpcReflectionService();
         return app;
     }
 }

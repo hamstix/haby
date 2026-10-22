@@ -18,7 +18,7 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     [Fact]
-    public async Task Reflection_is_available_only_in_development()
+    public async Task Reflection_is_available_in_development_and_production()
     {
         var connection = await NewDatabaseAsync();
         using var certificate = Certificate();
@@ -42,8 +42,9 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                 var client = new ServerReflection.ServerReflectionClient(channel);
                 using var call = client.ServerReflectionInfo();
                 await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
-                var error = await Assert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext());
-                Assert.Equal(StatusCode.Unimplemented, error.StatusCode);
+                Assert.True(await call.ResponseStream.MoveNext());
+                Assert.Contains(call.ResponseStream.Current.ListServicesResponse.Service,
+                    service => service.Name == "haby.operator.v1alpha1.ManifestOperator");
             }
         }
         finally { File.Delete(path); }
