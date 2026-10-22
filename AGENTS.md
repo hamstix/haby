@@ -18,6 +18,7 @@ User instructions override this file. A more specific nested `AGENTS.md`, if add
 - Do not create commits, push branches, open pull requests or change remote settings unless the user explicitly requests it.
 - For regressions, add a focused failing test before changing production code.
 - Keep changes scoped to one coherent outcome; avoid opportunistic refactors and bulk formatting.
+- Use CRLF line endings for new and edited text files, matching the Visual Studio working-tree style. Do not rewrite unrelated files solely to change line endings; Git may normalize stored blobs to LF.
 - Write source code, public documentation, branch suggestions, commit messages and pull-request text in English.
 
 ## Working procedure
@@ -36,6 +37,8 @@ Use the solution-level commands documented in [CONTRIBUTING.md](CONTRIBUTING.md)
 ## Architecture constraints
 
 - Domain and application logic must not depend on ASP.NET Core hosting, EF Core, UI packages or concrete plugins.
+- Prefer source generators and other compile-time generated metadata where supported. Avoid reflection-based discovery, activation, mapping and serialization in Haby-owned code; justify unavoidable reflection and its AOT/trimming impact in the pull request.
+- For production `System.Text.Json` use, including Host and persistence adapters, register DTO roots in a source-generated `JsonSerializerContext` and use its generated type metadata. Do not rely on reflection-based `JsonSerializer` overloads or fallback resolvers.
 - Public contracts and plugin abstractions require compatibility consideration and focused tests.
 - External side effects must be cancellation-aware and designed for idempotency and retry.
 - Secrets must be redacted from logs, errors, snapshots and test fixtures.
