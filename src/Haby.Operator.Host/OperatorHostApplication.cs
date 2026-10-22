@@ -32,11 +32,13 @@ public static class OperatorHostApplication
     public static WebApplication Build(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+
         var connection = builder.Configuration["Haby:PostgreSql:ConnectionString"];
         var tlsEnabledText = builder.Configuration["Haby:Tls:Enabled"];
         var certificatePath = builder.Configuration["Haby:Tls:CertificatePath"];
         var certificatePassword = builder.Configuration["Haby:Tls:CertificatePassword"];
         var portText = builder.Configuration["Haby:Port"];
+
         var invalid = new List<string>();
         if (string.IsNullOrWhiteSpace(connection)) invalid.Add("Haby:PostgreSql:ConnectionString");
         var tlsEnabled = true;
@@ -61,9 +63,11 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ImportApplicationManifest>();
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
+
         var app = builder.Build();
         app.MapGrpcService<ManifestOperatorService>();
         app.MapGrpcReflectionService();
+
         return app;
     }
 }
