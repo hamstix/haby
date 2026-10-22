@@ -28,6 +28,13 @@ try
         {
             Reference = new RevisionReference { ApplicationRecordId = args[3], RevisionNumber = number }
         }));
+    if (args.Length == 6 && args[1] == "revision" && args[2] == "preview" &&
+        long.TryParse(args[4], out var previewNumber) && previewNumber > 0)
+    {
+        var request = await CliApplication.ReadPreviewContextAsync(args[5], new RevisionReference
+        { ApplicationRecordId = args[3], RevisionNumber = previewNumber });
+        return CliApplication.Print(await client.PreviewDatabaseAsync(request));
+    }
     return CliApplication.Usage();
 }
 catch (Exception error) when (error is IOException or UnauthorizedAccessException or RpcException or

@@ -1,5 +1,6 @@
 using Grpc.Core;
 using Haby.Cli;
+using Haby.Operator.Contracts;
 using Xunit;
 
 namespace Haby.Cli.Tests;
@@ -67,5 +68,31 @@ public sealed class CliGuardTests
         using var handler = CliApplication.CreateHttpHandler(true);
         Assert.Same(System.Net.Http.HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
             handler.ServerCertificateCustomValidationCallback);
+    }
+
+    [Fact]
+    public async Task Preview_context_rejects_secret_fields_duplicates_and_oversize()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "haby-preview-" + Guid.NewGuid().ToString("N"));
+        var reference = new RevisionReference { ApplicationRecordId = Guid.NewGuid().ToString(), RevisionNumber = 1 };
+        const string valid = """{"preview":true,"environmentId":"test","providers":[{"alias":"main","instanceId":"local-postgresql","configurationRevision":1,"implementationId":"haby.postgresql.database/v1alpha1"}]}""";
+        try
+        {
+            await File.WriteAllTextAsync(path, valid);
+            var request = await CliApplication.ReadPreviewContextAsync(path, reference);
+            Assert.Equal("test", request.EnvironmentId);
+            Assert.Single(request.Providers);
+            await File.WriteAllTextAsync(path, valid, new System.Text.UTF8Encoding(true));
+            var withBom = await CliApplication.ReadPreviewContextAsync(path, reference);
+            Assert.Equal(request, withBom);
+            await File.WriteAllTextAsync(path, valid.Replace("\"preview\":true", "\"preview\":true,\"connectionString\":\"secret-value\"", StringComparison.Ordinal));
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() => CliApplication.ReadPreviewContextAsync(path, reference));
+            Assert.DoesNotContain("secret-value", error.Message);
+            await File.WriteAllTextAsync(path, valid.Replace("\"preview\":true", "\"preview\":true,\"preview\":true", StringComparison.Ordinal));
+            await Assert.ThrowsAsync<InvalidDataException>(() => CliApplication.ReadPreviewContextAsync(path, reference));
+            await File.WriteAllBytesAsync(path, new byte[CliApplication.MaxPreviewContextBytes + 1]);
+            await Assert.ThrowsAsync<InvalidDataException>(() => CliApplication.ReadPreviewContextAsync(path, reference));
+        }
+        finally { File.Delete(path); }
     }
 }

@@ -121,8 +121,8 @@ public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions,
             if (!Matches(changeSet.Member.Precondition, actual))
                 return new PlanChangeSetResult.ChangeSetStale(changeSet.Member, actual?.DesiredGeneration);
             var inputs = Resolve(changeSet);
-            if (inputs is PlanChangeSetResult blocked) return blocked;
-            var exact = (DeploymentPlanningInputs)inputs;
+            if (inputs is PlanningResolution.Blocked blocked) return blocked.Error;
+            var exact = ((PlanningResolution.Ready)inputs).Inputs;
             var plan = new DeploymentPlan(DeploymentPlanId.New(), changeSetId, changeSet.EnvironmentRecordId,
                 changeSet.Member, Array.AsReadOnly([changeSet.Member.ApplicationRecordId]), exact,
                 Fingerprint(exact), clock.GetUtcNow(), actorId);
@@ -149,7 +149,7 @@ public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions,
             if (!Matches(changeSet.Member.Precondition, actual))
                 return new CommitDesiredStateResult.ChangeSetStale(changeSet.Member, actual?.DesiredGeneration);
             var currentInputs = Resolve(changeSet);
-            if (currentInputs is not DeploymentPlanningInputs exact ||
+            if (currentInputs is not PlanningResolution.Ready { Inputs: var exact } ||
                 Fingerprint(exact) != plan.PlanningFingerprint || !exact.Equals(plan.Inputs))
                 return new CommitDesiredStateResult.PlanStale();
             cancellationToken.ThrowIfCancellationRequested();
@@ -188,35 +188,26 @@ public sealed class InMemoryDesiredStateStore(IManifestRevisionReader revisions,
             _ => false
         };
 
-    private object Resolve(DeploymentChangeSet changeSet)
+    private abstract record PlanningResolution
+    {
+        private PlanningResolution() { }
+        internal sealed record Ready(DeploymentPlanningInputs Inputs) : PlanningResolution;
+        internal sealed record Blocked(PlanChangeSetResult Error) : PlanningResolution;
+    }
+
+    private PlanningResolution Resolve(DeploymentChangeSet changeSet)
     {
         var revision = revisions.Find(changeSet.Member.ManifestRevisionRef);
         if (revision is null || revision.Reference.ApplicationRecordId != changeSet.Member.ApplicationRecordId)
-            return new PlanChangeSetResult.UnsupportedDependency();
-        var declaration = revision.Declaration;
-        // These inputs need the ADR-018 export planner or ADR-019 parameter resolver.
-        if (declaration.Spec.Parameters.Count != 0 || declaration.Spec.Components.Values.Any(component =>
-                component.Bindings.Values.Any(binding => binding.Target is NormalizedApplicationExportTarget)))
-            return new PlanChangeSetResult.UnsupportedDependency();
-        var aliases = declaration.Spec.Resources.Values.Select(item => item.ProviderRef)
-            .Concat(declaration.Spec.Components.Values.SelectMany(component => component.Workloads.Values.Select(item => item.ProviderRef)))
-            .Distinct().OrderBy(item => item.Value, StringComparer.Ordinal);
-        var resolved = new List<ResolvedProviderAlias>();
-        foreach (var alias in aliases)
-        {
-            if (!_aliases.TryGetValue((changeSet.EnvironmentRecordId, alias), out var provider))
-                return new PlanChangeSetResult.ProviderAliasNotResolved(alias);
-            resolved.Add(new ResolvedProviderAlias(alias, provider));
-        }
-        foreach (var resource in declaration.Spec.Resources.Values)
-        {
-            if (resource.Type != PostgreSqlDatabaseContract.Id) continue;
-            var selected = resolved.Single(item => item.Alias == resource.ProviderRef);
-            if (checkpointCapability?.Supports(selected.Resolution, resource.Type) != true)
-                return new PlanChangeSetResult.ProviderCapabilityMismatch(resource.ProviderRef);
-        }
+            return new PlanningResolution.Blocked(new PlanChangeSetResult.UnsupportedDependency());
+        var result = CheckpointPlanningRules.Resolve(revision.Declaration,
+            alias => _aliases.GetValueOrDefault((changeSet.EnvironmentRecordId, alias)), checkpointCapability);
+        if (result is CheckpointPlanningResolution.Blocked blocked)
+            return new PlanningResolution.Blocked(blocked.Error);
+        var resolved = ((CheckpointPlanningResolution.Resolved)result).Providers;
         var environment = _environments[changeSet.EnvironmentRecordId];
-        return new DeploymentPlanningInputs(environment.RecordId, environment.Id, revision.Reference, resolved);
+        return new PlanningResolution.Ready(new DeploymentPlanningInputs(environment.RecordId, environment.Id,
+            revision.Reference, resolved));
     }
 
     private static string Fingerprint(DeploymentPlanningInputs inputs)

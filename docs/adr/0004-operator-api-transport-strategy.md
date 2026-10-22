@@ -31,6 +31,22 @@ publish it as a stable OSS integration contract or promise client compatibility
 across alpha updates. Its implementation adapts the existing transport-neutral
 application use cases; gRPC-generated types do not enter Domain or Application.
 
+### Shadow preview boundary
+
+A shadow preview evaluates one immutable accepted ManifestRevision against an
+explicit Environment ID and exact, non-secret Provider alias selections supplied
+with that request. This preview context is hypothetical and request-scoped: it
+is not an authoritative persisted Environment or Provider configuration. The
+preview reuses the checkpoint's alias and capability planning rules and fails
+closed for declarations outside its single-database shape. It creates no durable
+ChangeSet, DeploymentPlan, ApplicationDeployment or generation, and exposes no
+preview ID or fingerprint that could be reused as an apply capability.
+
+The later active pilot must obtain server-owned, exact, durable planning inputs
+and separately accept a DeploymentPlan under ADR-016 and ADR-018 before desired
+state can be committed. A shadow preview is never that Plan, even when its
+hypothetical inputs happen to match later server state.
+
 The checkpoint's private test `.proto` is not promoted verbatim. Define a
 separate operator contract with typed, bounded outcomes and diagnostics.
 Expected validation, import-equivalence and version-conflict results remain

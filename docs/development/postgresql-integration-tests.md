@@ -179,3 +179,9 @@ design-time dependency for migrations. The initial migration is checked in.
 The existing Npgsql and Testcontainers packages are reused; no new container
 or network transport dependency is introduced. See the catalog project's README
 for startup migration, backup and snapshot compatibility requirements.
+
+The shadow-preview integration test imports a revision, restarts the alpha host,
+requests preview through the generated client, and independently checks that
+the requested target database is absent. It also checks repeated preview,
+typed failures, historical warnings and the absence of deployment or operation
+tables in the catalog. It uses the same disposable PostgreSQL runtime.
