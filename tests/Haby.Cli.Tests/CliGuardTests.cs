@@ -82,6 +82,9 @@ public sealed class CliGuardTests
             var request = await CliApplication.ReadPreviewContextAsync(path, reference);
             Assert.Equal("test", request.EnvironmentId);
             Assert.Single(request.Providers);
+            await File.WriteAllTextAsync(path, valid, new System.Text.UTF8Encoding(true));
+            var withBom = await CliApplication.ReadPreviewContextAsync(path, reference);
+            Assert.Equal(request, withBom);
             await File.WriteAllTextAsync(path, valid.Replace("\"preview\":true", "\"preview\":true,\"connectionString\":\"secret-value\"", StringComparison.Ordinal));
             var error = await Assert.ThrowsAsync<InvalidDataException>(() => CliApplication.ReadPreviewContextAsync(path, reference));
             Assert.DoesNotContain("secret-value", error.Message);

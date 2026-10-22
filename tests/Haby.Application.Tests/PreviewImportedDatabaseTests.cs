@@ -37,12 +37,17 @@ public sealed class PreviewImportedDatabaseTests
         Assert.IsType<PreviewDatabaseResult.CapabilityMismatch>(await preview.ExecuteAsync(revision, "test",
             [Selected with { ImplementationId = "wrong-secret-value" }]));
         Assert.IsType<PreviewDatabaseResult.InvalidContext>(await preview.ExecuteAsync(revision, "Bad_Context", [Selected]));
+        Assert.IsType<PreviewDatabaseResult.InvalidContext>(await preview.ExecuteAsync(revision, "test", []));
         Assert.IsType<PreviewDatabaseResult.InvalidContext>(await preview.ExecuteAsync(revision, "test",
             [Selected, Selected]));
         Assert.IsType<PreviewDatabaseResult.InvalidContext>(await preview.ExecuteAsync(revision, "test",
             [Selected, Selected with { Alias = "unused" }]));
         Assert.IsType<PreviewDatabaseResult.InvalidContext>(await preview.ExecuteAsync(revision, "test",
             [Selected with { InstanceId = "secret=value" }]));
+        Assert.IsType<PreviewDatabaseResult.InvalidContext>(await preview.ExecuteAsync(revision, "test",
+            [Selected with { ImplementationId = "bad\u202Ename" }]));
+        Assert.IsType<PreviewDatabaseResult.InvalidContext>(await preview.ExecuteAsync(revision, "test",
+            [Selected with { ImplementationId = "bad\u200Bname" }]));
     }
 
     [Fact]

@@ -130,10 +130,11 @@ After restarting the host with the same catalog, request the preview:
 dotnet run --project .\src\habyctl -- manifest revision preview '<application-record-id>' 1 .\preview-context.json
 ```
 
-The CLI reads at most 16 KiB and rejects unknown fields, including any secret
-or connection string. The server validates the typed context again. A successful
-result says it **would create one database** with the selected alias and exact
-metadata. It is hypothetical, cannot be applied, and creates no ChangeSet,
-Plan, deployment, generation or target database. This context is never saved as
-authoritative Provider state; the later active pilot requires server-owned
+The CLI reads at most 16 KiB, accepts UTF-8 with or without a BOM, and rejects
+unknown fields, including any secret or connection string. The server validates
+the typed context again. A successful result says it **would create one database**
+with the selected alias and exact metadata. It is hypothetical, cannot be
+applied, and creates no ChangeSet, Plan, deployment, generation or target
+database. This context is never saved as authoritative Provider state; the
+later active pilot requires server-owned
 durable inputs and a separately accepted Plan.

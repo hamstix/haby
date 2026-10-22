@@ -36,10 +36,11 @@ public sealed class PostgreSqlDatabaseProvisioner(InMemoryPostgreSqlConfiguratio
     ICheckpointProviderCapability, ICheckpointDatabaseProvisioner
 {
     public const string ImplementationId = PostgreSqlDatabaseCheckpointCapability.ImplementationId;
+    private static readonly PostgreSqlDatabaseCheckpointCapability Capability = new();
     private static readonly Regex NamePattern = new("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     public bool Supports(ProviderResolution selection, ResourceTypeId contract) =>
-        new PostgreSqlDatabaseCheckpointCapability().Supports(selection, contract);
+        Capability.Supports(selection, contract);
 
     public async ValueTask<CheckpointProvisionOutcome> CreateAsync(ProviderResolution exactProvider,
         string databaseName, CancellationToken cancellationToken)

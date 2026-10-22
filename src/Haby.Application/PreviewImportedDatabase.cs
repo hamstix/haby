@@ -53,10 +53,11 @@ public sealed class PreviewImportedDatabase(IManifestRevisionQuery revisions, IC
             alias => selected.GetValueOrDefault(alias), capability);
         return resolution switch
         {
-            PlanChangeSetResult.ProviderAliasNotResolved missing => new PreviewDatabaseResult.AliasNotResolved(missing.Alias.Value),
-            PlanChangeSetResult.ProviderCapabilityMismatch mismatch => new PreviewDatabaseResult.CapabilityMismatch(mismatch.Alias.Value),
-            PlanChangeSetResult => new PreviewDatabaseResult.UnsupportedShape(),
-            List<ResolvedProviderAlias> providers when providers.Count == 1 =>
+            CheckpointPlanningResolution.Blocked { Error: PlanChangeSetResult.ProviderAliasNotResolved missing } =>
+                new PreviewDatabaseResult.AliasNotResolved(missing.Alias.Value),
+            CheckpointPlanningResolution.Blocked { Error: PlanChangeSetResult.ProviderCapabilityMismatch mismatch } =>
+                new PreviewDatabaseResult.CapabilityMismatch(mismatch.Alias.Value),
+            CheckpointPlanningResolution.Resolved { Providers: { Count: 1 } providers } =>
                 new PreviewDatabaseResult.WouldCreate(environmentId, entry.Key.Value, name.Value,
                     providers[0].Alias.Value, providers[0].Resolution.ProviderInstanceId,
                     providers[0].Resolution.ConfigurationRevision, providers[0].Resolution.ImplementationId),
@@ -75,7 +76,7 @@ public sealed class PreviewImportedDatabase(IManifestRevisionQuery revisions, IC
             if (item is null || item.ConfigurationRevision <= 0 ||
                 item.InstanceId is null || !SafeInstance.IsMatch(item.InstanceId) ||
                 item.ImplementationId is null || item.ImplementationId.Length is < 1 or > 128 ||
-                item.ImplementationId.Any(char.IsControl)) return false;
+                item.ImplementationId.Any(character => character is < ' ' or > '~')) return false;
             ProviderAlias alias;
             try { alias = ProviderAlias.Create(item.Alias); }
             catch (ArgumentException) { return false; }

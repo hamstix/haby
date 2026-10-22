@@ -26,7 +26,10 @@ internal static class CliApplication
         if (count > MaxPreviewContextBytes) throw new InvalidDataException("Preview context exceeds the client size limit.");
         try
         {
-            using var document = JsonDocument.Parse(bytes.AsMemory(0, count));
+            var context = bytes.AsMemory(0, count);
+            if (count >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+                context = context[3..];
+            using var document = JsonDocument.Parse(context);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
                 !ExactProperties(root, "preview", "environmentId", "providers") ||

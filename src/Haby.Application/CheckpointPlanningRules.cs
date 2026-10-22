@@ -12,14 +12,21 @@ public sealed class PostgreSqlDatabaseCheckpointCapability : ICheckpointProvider
 }
 
 /// <summary>Shared checkpoint alias resolution and exact implementation capability rules.</summary>
+internal abstract record CheckpointPlanningResolution
+{
+    private CheckpointPlanningResolution() { }
+    internal sealed record Resolved(IReadOnlyList<ResolvedProviderAlias> Providers) : CheckpointPlanningResolution;
+    internal sealed record Blocked(PlanChangeSetResult Error) : CheckpointPlanningResolution;
+}
+
 internal static class CheckpointPlanningRules
 {
-    internal static object Resolve(NormalizedApplicationManifest declaration,
+    internal static CheckpointPlanningResolution Resolve(NormalizedApplicationManifest declaration,
         Func<ProviderAlias, ProviderResolution?> select, ICheckpointProviderCapability? capability)
     {
         if (declaration.Spec.Parameters.Count != 0 || declaration.Spec.Components.Values.Any(component =>
                 component.Bindings.Values.Any(binding => binding.Target is NormalizedApplicationExportTarget)))
-            return new PlanChangeSetResult.UnsupportedDependency();
+            return new CheckpointPlanningResolution.Blocked(new PlanChangeSetResult.UnsupportedDependency());
         var aliases = declaration.Spec.Resources.Values.Select(item => item.ProviderRef)
             .Concat(declaration.Spec.Components.Values.SelectMany(component => component.Workloads.Values.Select(item => item.ProviderRef)))
             .Distinct().OrderBy(item => item.Value, StringComparer.Ordinal);
@@ -27,7 +34,8 @@ internal static class CheckpointPlanningRules
         foreach (var alias in aliases)
         {
             var provider = select(alias);
-            if (provider is null) return new PlanChangeSetResult.ProviderAliasNotResolved(alias);
+            if (provider is null) return new CheckpointPlanningResolution.Blocked(
+                new PlanChangeSetResult.ProviderAliasNotResolved(alias));
             resolved.Add(new ResolvedProviderAlias(alias, provider));
         }
         foreach (var resource in declaration.Spec.Resources.Values)
@@ -35,8 +43,9 @@ internal static class CheckpointPlanningRules
             if (resource.Type != PostgreSqlDatabaseContract.Id) continue;
             var selected = resolved.Single(item => item.Alias == resource.ProviderRef);
             if (capability?.Supports(selected.Resolution, resource.Type) != true)
-                return new PlanChangeSetResult.ProviderCapabilityMismatch(resource.ProviderRef);
+                return new CheckpointPlanningResolution.Blocked(
+                    new PlanChangeSetResult.ProviderCapabilityMismatch(resource.ProviderRef));
         }
-        return resolved;
+        return new CheckpointPlanningResolution.Resolved(resolved);
     }
 }
