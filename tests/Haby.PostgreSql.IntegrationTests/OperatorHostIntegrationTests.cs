@@ -5,6 +5,7 @@ using System.Text;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Grpc.Reflection.V1Alpha;
 using Haby.Operator.Contracts;
 using Haby.Operator.Host;
 using Microsoft.AspNetCore.Builder;
@@ -16,6 +17,38 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
+    [Fact]
+    public async Task Reflection_is_available_only_in_development()
+    {
+        var connection = await NewDatabaseAsync();
+        using var certificate = Certificate();
+        var path = Path.Combine(Path.GetTempPath(), "haby-operator-" + Guid.NewGuid().ToString("N") + ".pfx");
+        await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, "test-only"));
+        try
+        {
+            await using (var development = await StartAsync(connection, path, "Development"))
+            {
+                using var channel = Channel(development, certificate);
+                var client = new ServerReflection.ServerReflectionClient(channel);
+                using var call = client.ServerReflectionInfo();
+                await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
+                Assert.True(await call.ResponseStream.MoveNext());
+                Assert.Contains(call.ResponseStream.Current.ListServicesResponse.Service,
+                    service => service.Name == "haby.operator.v1alpha1.ManifestOperator");
+            }
+            await using (var production = await StartAsync(connection, path, "Production"))
+            {
+                using var channel = Channel(production, certificate);
+                var client = new ServerReflection.ServerReflectionClient(channel);
+                using var call = client.ServerReflectionInfo();
+                await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
+                var error = await Assert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext());
+                Assert.Equal(StatusCode.Unimplemented, error.StatusCode);
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
     [Fact]
     public async Task Generated_client_uses_tls_and_durable_catalog_across_host_restart()
     {
@@ -72,7 +105,7 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                 var created = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(payload) });
                 Assert.Equal(ImportReply.OutcomeOneofCase.Created, created.OutcomeCase);
                 reference = created.Created.Revision.Reference;
-                Assert.Equal(Program.TechnicalActorId, created.Created.Revision.TechnicalActorId);
+                Assert.Equal(OperatorHostApplication.TechnicalActorId, created.Created.Revision.TechnicalActorId);
                 Assert.Equal("manifest.resource.unused", Assert.Single(created.Created.Revision.HistoricalWarnings.Diagnostics).Code);
                 var repeat = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(payload) });
                 Assert.Equal(ImportReply.OutcomeOneofCase.ExistingEquivalent, repeat.OutcomeCase);
@@ -83,7 +116,7 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                 Assert.Equal(ImportReply.OutcomeOneofCase.VersionContentConflict, conflict.OutcomeCase);
                 Assert.Contains("/spec/resources/db/properties/name", conflict.VersionContentConflict.ChangedPaths);
                 Assert.DoesNotContain("other_db", conflict.ToString());
-                var oversized = new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(new byte[Program.MaxReceiveBytes + 1]) };
+                var oversized = new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(new byte[OperatorHostApplication.MaxReceiveBytes + 1]) };
                 var error = await Assert.ThrowsAsync<RpcException>(async () => await client.ValidateAsync(oversized));
                 Assert.Equal(StatusCode.ResourceExhausted, error.StatusCode);
             }
@@ -94,7 +127,7 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                 var found = await client.GetRevisionAsync(new GetRevisionRequest { Reference = reference });
                 Assert.Equal(GetRevisionReply.OutcomeOneofCase.Found, found.OutcomeCase);
                 Assert.Equal("manifest.resource.unused", Assert.Single(found.Found.HistoricalWarnings.Diagnostics).Code);
-                Assert.Equal(Program.TechnicalActorId, found.Found.TechnicalActorId);
+                Assert.Equal(OperatorHostApplication.TechnicalActorId, found.Found.TechnicalActorId);
                 var absent = await client.GetRevisionAsync(new GetRevisionRequest
                 {
                     Reference = new RevisionReference
@@ -135,7 +168,7 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
         await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, "test-only"));
         try
         {
-            await Assert.ThrowsAsync<PostgresException>(() => Program.Main(Arguments(connection, path)));
+            await Assert.ThrowsAsync<PostgresException>(() => OperatorHostApplication.BuildMigratedAsync(Arguments(connection, path)));
         }
         finally { File.Delete(path); }
     }
@@ -144,12 +177,12 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
     public void Missing_tls_material_prevents_host_configuration()
     {
         var missing = Path.Combine(Path.GetTempPath(), "missing-haby-cert-" + Guid.NewGuid().ToString("N"));
-        var error = Assert.Throws<InvalidOperationException>(() => Program.Build(Arguments("Host=localhost", missing)));
+        var error = Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.Build(Arguments("Host=localhost", missing)));
         Assert.Contains("Haby:Tls:CertificatePath", error.Message);
         Assert.DoesNotContain("Host=localhost", error.Message);
         var invalidPort = Arguments("Host=localhost", missing);
-        invalidPort[^1] = "--Haby:Port=invalid";
-        var portError = Assert.Throws<InvalidOperationException>(() => Program.Build(invalidPort));
+        invalidPort[^2] = "--Haby:Port=invalid";
+        var portError = Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.Build(invalidPort));
         Assert.Contains("Haby:Port", portError.Message);
     }
 
@@ -178,14 +211,13 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
     }
 
-    private static string[] Arguments(string connection, string path) =>
+    private static string[] Arguments(string connection, string path, string environment = "Production") =>
         ["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:CertificatePath=" + path,
-            "--Haby:Tls:CertificatePassword=test-only", "--Haby:Port=0"];
+            "--Haby:Tls:CertificatePassword=test-only", "--Haby:Port=0", "--environment=" + environment];
 
-    private static async Task<WebApplication> StartAsync(string connection, string path)
+    private static async Task<WebApplication> StartAsync(string connection, string path, string environment = "Production")
     {
-        var app = Program.Build(Arguments(connection, path));
-        await app.Services.GetRequiredService<Haby.Persistence.PostgreSql.ManifestCatalogMigrationInitializer>().MigrateAsync();
+        var app = await OperatorHostApplication.BuildMigratedAsync(Arguments(connection, path, environment));
         await app.StartAsync();
         return app;
     }

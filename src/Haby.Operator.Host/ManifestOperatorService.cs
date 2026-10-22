@@ -34,7 +34,7 @@ public sealed class ManifestOperatorService(ManifestContractCatalog catalog, Imp
 
     public override async Task<ImportReply> Import(EnvelopeRequest request, ServerCallContext context)
     {
-        var result = await importer.ExecuteAsync(request.OriginalEnvelope.Memory, Program.TechnicalActorId,
+        var result = await importer.ExecuteAsync(request.OriginalEnvelope.Memory, OperatorHostApplication.TechnicalActorId,
             context.CancellationToken);
         return result switch
         {

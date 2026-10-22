@@ -39,6 +39,11 @@ $env:Haby__Port = '7443'
 dotnet run --project .\src\Haby.Operator.Host
 ```
 
+For local gRPC discovery, set `DOTNET_ENVIRONMENT=Development` before starting
+the host. The host then serves gRPC reflection on the same loopback TLS endpoint.
+Reflection is unavailable in other environments because it reveals the service
+and message contracts.
+
 In another PowerShell session set the URL and use a local UTF-8 import envelope.
 The client rejects files larger than 1,047,552 bytes before sending them. The
 server enforces a 1 MiB gRPC receive-message limit:
