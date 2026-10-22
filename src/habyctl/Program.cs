@@ -17,7 +17,11 @@ public static class Program
             var address = ParseEndpoint(Environment.GetEnvironmentVariable("HABY_OPERATOR_URL"));
             if (args.Length < 2 || args[0] != "manifest" || address is null)
                 return Usage();
-            using var channel = GrpcChannel.ForAddress(address);
+            var skipTlsValidation = SkipTlsCertificateValidation(
+                Environment.GetEnvironmentVariable("HABY_OPERATOR_SKIP_TLS_VALIDATION"));
+            using var channel = skipTlsValidation && address.Scheme == Uri.UriSchemeHttps
+                ? GrpcChannel.ForAddress(address, new GrpcChannelOptions { HttpHandler = CreateHttpHandler(true) })
+                : GrpcChannel.ForAddress(address);
             var client = new ManifestOperator.ManifestOperatorClient(channel);
             if (args.Length == 3 && args[1] is "validate" or "import")
             {
@@ -60,8 +64,19 @@ public static class Program
     }
 
     internal static Uri? ParseEndpoint(string? value) =>
-        Uri.TryCreate(value, UriKind.Absolute, out var address) && address.Scheme == Uri.UriSchemeHttps &&
+        Uri.TryCreate(value, UriKind.Absolute, out var address) &&
+        (address.Scheme == Uri.UriSchemeHttps || address.Scheme == Uri.UriSchemeHttp) &&
         IPAddressIsLoopback(address.Host) ? address : null;
+
+    internal static bool SkipTlsCertificateValidation(string? setting) =>
+        string.Equals(setting, "true", StringComparison.OrdinalIgnoreCase);
+
+    internal static HttpClientHandler CreateHttpHandler(bool skipTlsValidation) => new()
+    {
+        ServerCertificateCustomValidationCallback = skipTlsValidation
+            ? HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            : null
+    };
 
     internal static string SafeError(Exception error) => error is RpcException rpc
         ? $"RPC failed: {rpc.StatusCode}"
@@ -72,7 +87,7 @@ public static class Program
 
     private static int Usage()
     {
-        Console.Error.WriteLine("Set HABY_OPERATOR_URL=https://localhost:<port> with a trusted server certificate.");
+        Console.Error.WriteLine("Set HABY_OPERATOR_URL to a loopback HTTP or HTTPS endpoint.");
         Console.Error.WriteLine("Usage: habyctl manifest validate|import <file>");
         Console.Error.WriteLine("       habyctl manifest revision get <application-record-id> <number>");
         return 2;
