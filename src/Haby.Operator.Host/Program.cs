@@ -26,10 +26,14 @@ public static class Program
         var certificatePath = builder.Configuration["Haby:Tls:CertificatePath"];
         var certificatePassword = builder.Configuration["Haby:Tls:CertificatePassword"];
         var portText = builder.Configuration["Haby:Port"];
-        if (string.IsNullOrWhiteSpace(connection) || string.IsNullOrWhiteSpace(certificatePath) ||
-            !File.Exists(certificatePath) || !int.TryParse(portText, out var port) || port is < 0 or > 65535)
-            throw new InvalidOperationException("PostgreSQL connection, TLS certificate and loopback port must be configured.");
-        var certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath, certificatePassword);
+        var invalid = new List<string>();
+        if (string.IsNullOrWhiteSpace(connection)) invalid.Add("Haby:PostgreSql:ConnectionString");
+        if (string.IsNullOrWhiteSpace(certificatePath) || !File.Exists(certificatePath))
+            invalid.Add("Haby:Tls:CertificatePath");
+        if (!int.TryParse(portText, out var port) || port is < 0 or > 65535) invalid.Add("Haby:Port");
+        if (invalid.Count > 0)
+            throw new InvalidOperationException("Missing or invalid configuration keys: " + string.Join(", ", invalid));
+        var certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath!, certificatePassword);
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port, listen =>
         {
             listen.Protocols = HttpProtocols.Http2;
@@ -39,7 +43,7 @@ public static class Program
         builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition], [], [], []));
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ImportApplicationManifest>();
-        builder.Services.AddPostgreSqlManifestCatalog(connection);
+        builder.Services.AddPostgreSqlManifestCatalog(connection!);
         var app = builder.Build();
         app.MapGrpcService<ManifestOperatorService>();
         return app;

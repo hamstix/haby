@@ -41,6 +41,17 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                 Assert.Equal(ValidateReply.OutcomeOneofCase.Valid, valid.OutcomeCase);
                 Assert.Equal("manifest.resource.unused", Assert.Single(valid.Valid.Warnings.Diagnostics).Code);
 
+                var invalidValidationRequest = await client.ValidateAsync(new EnvelopeRequest
+                { OriginalEnvelope = ByteString.CopyFromUtf8("{bad secret-value") });
+                Assert.Equal(ValidateReply.OutcomeOneofCase.InvalidRequest, invalidValidationRequest.OutcomeCase);
+                Assert.DoesNotContain("secret-value", invalidValidationRequest.ToString());
+                var invalidValidationManifest = await client.ValidateAsync(new EnvelopeRequest
+                {
+                    OriginalEnvelope = ByteString.CopyFromUtf8(
+                        """{"applicationVersion":"v1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"Bad_Id"},"spec":{}}}""")
+                });
+                Assert.Equal(ValidateReply.OutcomeOneofCase.InvalidManifest, invalidValidationManifest.OutcomeCase);
+
                 var invalidRequest = await client.ImportAsync(new EnvelopeRequest
                 { OriginalEnvelope = ByteString.CopyFromUtf8("{bad secret-value") });
                 Assert.Equal(ImportReply.OutcomeOneofCase.InvalidRequest, invalidRequest.OutcomeCase);
@@ -90,6 +101,20 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
                     { ApplicationRecordId = reference.ApplicationRecordId, RevisionNumber = 100 }
                 });
                 Assert.Equal(GetRevisionReply.OutcomeOneofCase.NotFound, absent.OutcomeCase);
+                var invalidReference = await Assert.ThrowsAsync<RpcException>(async () => await client.GetRevisionAsync(
+                    new GetRevisionRequest
+                    {
+                        Reference = new RevisionReference
+                        { ApplicationRecordId = "Bad_Id", RevisionNumber = 1 }
+                    }));
+                Assert.Equal(StatusCode.InvalidArgument, invalidReference.StatusCode);
+                var zeroNumber = await Assert.ThrowsAsync<RpcException>(async () => await client.GetRevisionAsync(
+                    new GetRevisionRequest
+                    {
+                        Reference = new RevisionReference
+                        { ApplicationRecordId = reference.ApplicationRecordId, RevisionNumber = 0 }
+                    }));
+                Assert.Equal(StatusCode.InvalidArgument, zeroNumber.StatusCode);
             }
         }
         finally { File.Delete(path); }
@@ -119,7 +144,13 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture) : IC
     public void Missing_tls_material_prevents_host_configuration()
     {
         var missing = Path.Combine(Path.GetTempPath(), "missing-haby-cert-" + Guid.NewGuid().ToString("N"));
-        Assert.Throws<InvalidOperationException>(() => Program.Build(Arguments("Host=localhost", missing)));
+        var error = Assert.Throws<InvalidOperationException>(() => Program.Build(Arguments("Host=localhost", missing)));
+        Assert.Contains("Haby:Tls:CertificatePath", error.Message);
+        Assert.DoesNotContain("Host=localhost", error.Message);
+        var invalidPort = Arguments("Host=localhost", missing);
+        invalidPort[^1] = "--Haby:Port=invalid";
+        var portError = Assert.Throws<InvalidOperationException>(() => Program.Build(invalidPort));
+        Assert.Contains("Haby:Port", portError.Message);
     }
 
     private async Task<string> NewDatabaseAsync()

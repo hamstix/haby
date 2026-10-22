@@ -14,9 +14,8 @@ public static class Program
     {
         try
         {
-            if (args.Length < 2 || args[0] != "manifest" ||
-                !Uri.TryCreate(Environment.GetEnvironmentVariable("HABY_OPERATOR_URL"), UriKind.Absolute, out var address) ||
-                address.Scheme != Uri.UriSchemeHttps || !IPAddressIsLoopback(address.Host))
+            var address = ParseEndpoint(Environment.GetEnvironmentVariable("HABY_OPERATOR_URL"));
+            if (args.Length < 2 || args[0] != "manifest" || address is null)
                 return Usage();
             using var channel = GrpcChannel.ForAddress(address);
             var client = new ManifestOperator.ManifestOperatorClient(channel);
@@ -39,12 +38,12 @@ public static class Program
             HttpRequestException or InvalidDataException)
         {
             // Exception messages can contain paths, endpoint details, or TLS failure internals.
-            Console.Error.WriteLine(error is RpcException rpc ? $"RPC failed: {rpc.StatusCode}" : "Operation failed; check local file, TLS trust and server availability.");
+            Console.Error.WriteLine(SafeError(error));
             return 2;
         }
     }
 
-    private static async Task<byte[]> ReadEnvelopeAsync(string path)
+    internal static async Task<byte[]> ReadEnvelopeAsync(string path)
     {
         await using var stream = File.OpenRead(path);
         if (stream.Length > MaxEnvelopeBytes) throw new InvalidDataException("Manifest exceeds the client size limit.");
@@ -59,6 +58,14 @@ public static class Program
         if (count > MaxEnvelopeBytes) throw new InvalidDataException("Manifest exceeds the client size limit.");
         return bytes.AsSpan(0, count).ToArray();
     }
+
+    internal static Uri? ParseEndpoint(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var address) && address.Scheme == Uri.UriSchemeHttps &&
+        IPAddressIsLoopback(address.Host) ? address : null;
+
+    internal static string SafeError(Exception error) => error is RpcException rpc
+        ? $"RPC failed: {rpc.StatusCode}"
+        : "Operation failed; check local file, TLS trust and server availability.";
 
     private static bool IPAddressIsLoopback(string host) => host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
         System.Net.IPAddress.TryParse(host, out var address) && System.Net.IPAddress.IsLoopback(address);
