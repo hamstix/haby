@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
 using Grpc.Reflection.V1Alpha;
 using Haby.Operator.Host;
@@ -8,6 +10,28 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class OperatorHostConfigurationTests
 {
+    [Fact]
+    public async Task Wildcard_url_configuration_cannot_override_loopback_and_tls_defaults()
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+        var path = Path.Combine(Path.GetTempPath(), "haby-loopback-" + Guid.NewGuid().ToString("N") + ".pfx");
+        await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, "test-only"));
+        try
+        {
+            await using var app = OperatorHostApplication.Build(
+                ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0",
+                    "--Haby:Tls:CertificatePath=" + path, "--Haby:Tls:CertificatePassword=test-only",
+                    "--urls=http://0.0.0.0:7443"]);
+            await app.StartAsync();
+            var address = new Uri(Assert.Single(app.Urls));
+            Assert.Equal("https", address.Scheme);
+            Assert.Equal(IPAddress.Loopback, IPAddress.Parse(address.Host));
+        }
+        finally { File.Delete(path); }
+    }
+
     [Fact]
     public async Task Disabled_tls_serves_grpc_on_loopback_without_certificate_settings()
     {

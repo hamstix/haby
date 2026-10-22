@@ -16,6 +16,7 @@ $password = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
 $runAttempted = $false
 $oldMode = [Environment]::GetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL')
 $oldConnection = [Environment]::GetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONNECTION')
+$oldContainer = [Environment]::GetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONTAINER')
 try {
     $runAttempted = $true
     $null = & wslc run --detach --rm --name $name --publish "127.0.0.1:${port}:5432" `
@@ -29,6 +30,7 @@ try {
     $builder['Password'] = $password
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL', '1')
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONNECTION', $builder.ConnectionString)
+    [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONTAINER', $name)
     dotnet test .\tests\Haby.PostgreSql.IntegrationTests\Haby.PostgreSql.IntegrationTests.csproj `
         --artifacts-path .\.artifacts
     if ($LASTEXITCODE -ne 0) { throw 'The PostgreSQL integration tests failed.' }
@@ -36,6 +38,7 @@ try {
 finally {
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL', $oldMode)
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONNECTION', $oldConnection)
+    [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONTAINER', $oldContainer)
     if ($runAttempted) {
         $null = & wslc stop $name 2>&1
         if ($LASTEXITCODE -ne 0) { Write-Warning "Cleanup failed for test-owned container $name." }
