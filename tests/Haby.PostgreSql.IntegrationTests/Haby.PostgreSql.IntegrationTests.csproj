@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Haby.PostgreSql\Haby.PostgreSql.csproj" />
     <ProjectReference Include="..\..\src\Haby.Persistence.PostgreSql\Haby.Persistence.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\src\Haby.Operator.Host\Haby.Operator.Host.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\Haby.Manifest.Tests\Corpus\complete.json" LogicalName="Haby.PostgreSql.IntegrationTests.complete.json" />

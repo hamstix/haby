@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Grpc.Net.Client" />
+    <ProjectReference Include="..\Haby.Operator.Contracts\Haby.Operator.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -143,13 +143,13 @@ Dependency review (new packages only):
 
 | Package | Version | Purpose | License |
 | --- | --- | --- | --- |
-| `Grpc.AspNetCore.Server` | 2.83.0 | Private test RPC host | Apache-2.0 |
-| `Grpc.Net.Client` | 2.83.0 | Real generated test client transport | Apache-2.0 |
-| `Grpc.Tools` | 2.83.0 | Build-time protobuf and gRPC generation, private assets | Apache-2.0 |
-| `Google.Protobuf` | 3.33.5 | Generated message serialization | BSD-3-Clause |
+| `Grpc.AspNetCore.Server` | 2.84.0 | Private test RPC host | Apache-2.0 |
+| `Grpc.Net.Client` | 2.84.0 | Real generated test client transport | Apache-2.0 |
+| `Grpc.Tools` | 2.84.0 | Build-time protobuf and gRPC generation, private assets | Apache-2.0 |
+| `Google.Protobuf` | 3.36.2 | Generated message serialization | BSD-3-Clause |
 
 The resolved new runtime dependencies are `Grpc.Core.Api` and `Grpc.Net.Common`
-2.83.0, both Apache-2.0. The ASP.NET Core shared framework supplies Kestrel;
+2.84.0, both Apache-2.0. The ASP.NET Core shared framework supplies Kestrel;
 no TestHost or extra container package is needed. CI dependency review remains
 the advisory and license gate for the final package graph.
 

@@ -1,0 +1,69 @@
+syntax = "proto3";
+option csharp_namespace = "Haby.Operator.Contracts";
+package haby.operator.v1alpha1;
+
+// Internal alpha contract. No compatibility promise before M4.
+service ManifestOperator {
+  rpc Validate(EnvelopeRequest) returns (ValidateReply);
+  rpc Import(EnvelopeRequest) returns (ImportReply);
+  rpc GetRevision(GetRevisionRequest) returns (GetRevisionReply);
+}
+
+message EnvelopeRequest { bytes original_envelope = 1; }
+message SourceLocation { int32 line = 1; int32 column = 2; }
+message Diagnostic {
+  string code = 1;
+  string path = 2;
+  string message = 3;
+  string severity = 4;
+  map<string, string> parameters = 5;
+  repeated string related_paths = 6;
+  SourceLocation location = 7;
+}
+message DiagnosticReport { repeated Diagnostic diagnostics = 1; bool truncated = 2; }
+message RevisionReference { string application_record_id = 1; int64 revision_number = 2; }
+message RevisionSummary {
+  RevisionReference reference = 1;
+  string revision_id = 2;
+  string application_id = 3;
+  string application_version = 4;
+  string input_api_version = 5;
+  int32 normalized_model_version = 6;
+  DiagnosticReport historical_warnings = 7;
+  string technical_actor_id = 8;
+  string imported_at_utc = 9;
+}
+message ValidManifest { string application_id = 1; string application_version = 2; DiagnosticReport warnings = 3; }
+message InvalidManifest { DiagnosticReport report = 1; }
+message InvalidRequest { DiagnosticReport report = 1; }
+message ValidateReply {
+  oneof outcome {
+    ValidManifest valid = 1;
+    InvalidRequest invalid_request = 2;
+    InvalidManifest invalid_manifest = 3;
+  }
+}
+message ImportAccepted { RevisionSummary revision = 1; }
+message VersionContentConflict {
+  string application_id = 1;
+  string application_version = 2;
+  RevisionReference existing_revision = 3;
+  repeated string changed_paths = 4;
+  bool changed_paths_truncated = 5;
+}
+message ImportReply {
+  oneof outcome {
+    ImportAccepted created = 1;
+    ImportAccepted existing_equivalent = 2;
+    InvalidRequest invalid_request = 3;
+    InvalidManifest invalid_manifest = 4;
+    VersionContentConflict version_content_conflict = 5;
+  }
+}
+message GetRevisionRequest { RevisionReference reference = 1; }
+message GetRevisionReply {
+  oneof outcome {
+    RevisionSummary found = 1;
+    RevisionReference not_found = 2;
+  }
+}
