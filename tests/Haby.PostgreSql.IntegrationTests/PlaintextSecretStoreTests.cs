@@ -84,6 +84,73 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
     }
 
     [Fact]
+    public async Task Writes_reject_missing_or_wrong_environment_without_changing_versions()
+    {
+        var connection = await NewDatabaseAsync();
+        SecretRef first;
+        EnvironmentRecordId owner;
+        EnvironmentRecordId wrong;
+        await using (var services = Services(connection))
+        {
+            await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+            var store = services.GetRequiredService<ISecretStore>();
+            owner = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
+            wrong = await store.CreateEnvironmentAsync(EnvironmentId.Create("other"), default);
+            first = new SecretRef(SecretId.New(), SecretVersionId.New());
+            await store.CreateAsync(owner, first, new byte[] { 10 }, default);
+        }
+
+        await using (var services = Services(connection))
+        {
+            var store = services.GetRequiredService<ISecretStore>();
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await store.CreateAsync(EnvironmentRecordId.New(),
+                    new SecretRef(SecretId.New(), SecretVersionId.New()), new byte[] { 11 }, default));
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await store.AddVersionAsync(wrong,
+                    new SecretRef(first.SecretId, SecretVersionId.New()), new byte[] { 12 }, default));
+        }
+
+        await using var check = new NpgsqlConnection(connection);
+        await check.OpenAsync();
+        Assert.Equal(1, await CountAsync(check, "secrets"));
+        Assert.Equal(1, await CountAsync(check, "secret_versions"));
+        Assert.Equal(1, await CountAsync(check, "secret_payloads"));
+        await using var fresh = Services(connection);
+        Assert.Equal(new byte[] { 10 }, (await fresh.GetRequiredService<ISecretStore>()
+            .ResolveAsync(owner, first, default))!.CopyBytes());
+    }
+
+    [Fact]
+    public async Task Secret_migration_rolls_back_without_changing_manifest_catalog()
+    {
+        var connection = await NewDatabaseAsync();
+        await using (var services = Services(connection))
+        {
+            await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+            var store = services.GetRequiredService<ISecretStore>();
+            var environment = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
+            await store.CreateAsync(environment, new SecretRef(SecretId.New(), SecretVersionId.New()),
+                new byte[] { 13 }, default);
+        }
+
+        var options = new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options;
+        await using (var context = new ManifestCatalogDbContext(options))
+            await context.Database.MigrateAsync("20261021165200_InitialManifestCatalog");
+
+        await using var check = new NpgsqlConnection(connection);
+        await check.OpenAsync();
+        Assert.Equal(0, await CountAsync(check, "applications"));
+        Assert.Equal(0, await CountAsync(check, "manifest_revisions"));
+        Assert.Equal(1, await CountAsync(check, "\"__EFMigrationsHistory\""));
+        await using var absent = new NpgsqlCommand(
+            "SELECT to_regclass('public.environments') IS NULL AND to_regclass('public.secrets') IS NULL " +
+            "AND to_regclass('public.secret_versions') IS NULL AND to_regclass('public.secret_payloads') IS NULL " +
+            "AND to_regprocedure('public.reject_secret_version_mutation()') IS NULL", check);
+        Assert.True((bool)(await absent.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task Cancellation_during_first_payload_insert_rolls_back_parent_and_version()
     {
         var connection = await NewDatabaseAsync();
@@ -136,7 +203,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
         }
         var error = await Assert.ThrowsAsync<InvalidDataException>(async () =>
             await store.ResolveAsync(environment, first, default));
-        Assert.DoesNotContain("7", error.ToString());
+        Assert.Equal("Unsupported stored secret protection format.", error.Message);
         await using (var check = new NpgsqlConnection(connection))
         {
             await check.OpenAsync();

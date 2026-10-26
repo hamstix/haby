@@ -19,6 +19,12 @@ public sealed class SecretMaterialTests
     }
 
     [Fact]
+    public void Null_material_is_rejected()
+    {
+        Assert.Throws<ArgumentNullException>(() => new SecretMaterial(null!));
+    }
+
+    [Fact]
     public void Secret_ref_remains_exact_and_scope_identity_is_typed()
     {
         var secret = SecretId.New();

@@ -52,8 +52,8 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
         {
             Id = versionId,
             SecretId = secretId,
-            ProtectionFormat = "Plaintext",
-            FormatVersion = 1
+            ProtectionFormat = PlaintextProtectionFormat.Name,
+            FormatVersion = PlaintextProtectionFormat.Version
         });
         context.SecretPayloads.Add(new SecretPayloadRow { SecretVersionId = versionId, Bytes = bytes });
         try
@@ -93,8 +93,8 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
         {
             Id = versionId,
             SecretId = secretId,
-            ProtectionFormat = "Plaintext",
-            FormatVersion = 1
+            ProtectionFormat = PlaintextProtectionFormat.Name,
+            FormatVersion = PlaintextProtectionFormat.Version
         });
         context.SecretPayloads.Add(new SecretPayloadRow { SecretVersionId = versionId, Bytes = bytes });
         secret.CurrentVersionId = versionId;
@@ -125,8 +125,7 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
                          select new { version.ProtectionFormat, version.FormatVersion, payload.Bytes })
             .SingleOrDefaultAsync(cancellationToken);
         if (row is null) return null;
-        if (row.ProtectionFormat != "Plaintext" || row.FormatVersion != 1)
-            throw new InvalidDataException("Unsupported stored secret protection format.");
+        PlaintextProtectionFormat.ValidateForRead(row.ProtectionFormat, row.FormatVersion);
         return new SecretMaterial(row.Bytes);
     }
 
@@ -137,6 +136,18 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
         ArgumentNullException.ThrowIfNull(reference);
         ArgumentNullException.ThrowIfNull(material);
         cancellationToken.ThrowIfCancellationRequested();
+    }
+}
+
+internal static class PlaintextProtectionFormat
+{
+    internal const string Name = "Plaintext";
+    internal const int Version = 1;
+
+    internal static void ValidateForRead(string format, int version)
+    {
+        if (format != Name || version != Version)
+            throw new InvalidDataException("Unsupported stored secret protection format.");
     }
 }
 
