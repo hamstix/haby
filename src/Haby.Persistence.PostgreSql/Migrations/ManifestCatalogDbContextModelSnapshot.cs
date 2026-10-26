@@ -135,6 +135,124 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("manifest_revisions", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderConfigurationRevisionRow", b =>
+                {
+                    b.Property<Guid>("ProviderInstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_instance_id");
+
+                    b.Property<long>("RevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.Property<string>("ConfigurationShapeId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("configuration_shape_id");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("ImplementationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("implementation_id");
+
+                    b.Property<bool>("IsSealed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_sealed");
+
+                    b.Property<int>("PayloadFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("payload_format_version");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload_json");
+
+                    b.HasKey("ProviderInstanceId", "RevisionNumber");
+
+                    b.HasIndex("ProviderInstanceId", "EnvironmentRecordId");
+
+                    b.ToTable("provider_configuration_revisions", (string)null);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderInstanceRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("ProviderKindId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("provider_kind_id");
+
+                    b.Property<int>("TargetFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("target_format_version");
+
+                    b.Property<string>("TargetIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("target_identity");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentRecordId");
+
+                    b.ToTable("provider_instances", (string)null);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderRevisionSecretRefRow", b =>
+                {
+                    b.Property<Guid>("ProviderInstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_instance_id");
+
+                    b.Property<long>("RevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.Property<string>("Slot")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("slot");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<Guid>("SecretId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_id");
+
+                    b.Property<Guid>("SecretVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_version_id");
+
+                    b.HasKey("ProviderInstanceId", "RevisionNumber", "Slot");
+
+                    b.HasIndex("SecretId", "EnvironmentRecordId");
+
+                    b.HasIndex("SecretId", "SecretVersionId");
+
+                    b.HasIndex("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId");
+
+                    b.ToTable("provider_revision_secret_refs", (string)null);
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.SecretPayloadRow", b =>
                 {
                     b.Property<Guid>("SecretVersionId")
@@ -241,6 +359,49 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
                         .WithMany()
                         .HasForeignKey("ApplicationRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderConfigurationRevisionRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ProviderInstanceRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderInstanceId", "EnvironmentRecordId")
+                        .HasPrincipalKey("Id", "EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderInstanceRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderRevisionSecretRefRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.SecretRow", null)
+                        .WithMany()
+                        .HasForeignKey("SecretId", "EnvironmentRecordId")
+                        .HasPrincipalKey("Id", "EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.SecretVersionRow", null)
+                        .WithMany()
+                        .HasForeignKey("SecretId", "SecretVersionId")
+                        .HasPrincipalKey("SecretId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ProviderConfigurationRevisionRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
+                        .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

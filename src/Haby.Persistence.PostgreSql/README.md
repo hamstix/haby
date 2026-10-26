@@ -1,8 +1,9 @@
 # PostgreSQL manifest catalog
 
-This project is the EF Core persistence adapter for accepted Applications and
-immutable ManifestRevisions. It does not persist deployments or execute
-Providers. `IManifestImportStore` retains the existing import use case;
+This project is the EF Core persistence adapter for accepted Applications,
+immutable ManifestRevisions and Provider configuration revisions. It does not
+persist deployments or execute Providers. `IManifestImportStore` retains the
+existing import use case;
 `IManifestRevisionQuery` provides asynchronous inspection without changing the
 checkpoint planner's synchronous in-memory reader.
 
@@ -16,6 +17,24 @@ administrator credentials. Each `SecretRef` names one immutable version.
 The payload is stored as `bytea` in `secret_payloads`, apart from Secret and
 version metadata. Reads verify both Secret/version and Secret/Environment
 membership and reject unknown protection formats or format versions.
+
+`AddPostgreSqlProviderConfigurationStore()` registers the internal asynchronous
+Provider instance/revision store separately from the shadow-preview path. The
+generic instance stores an Environment, a versioned Provider kind and a
+versioned opaque target identity. Revisions store an exact implementation ID,
+shape ID, JSON payload-format version and immutable text snapshot. Stable-slot
+SecretRef association rows are inserted in the same transaction and have
+Environment and exact SecretVersion foreign keys. The store verifies ownership
+using metadata without selecting payload bytes. Registered typed codecs
+validate snapshots, derive target identity and compare exact associations when
+reading a revision. A deferred seal guard rejects incomplete revision commits;
+after sealing, association inserts and all revision edits are rejected by the
+database. `Haby.PostgreSql` owns the first closed PostgreSQL shape,
+source-generated JSON codec and host/port target rule; another Provider shape
+does not alter these tables. No alias, connection test or live Provider
+execution is involved.
+Internal PostgreSQL callers register `AddPostgreSqlProviderConfigurationCodec()`
+and the checkpoint capability alongside the store.
 
 **Plaintext is not encrypted.** Readers of `secret_payloads` and database
 backups can recover the credential bytes. Restrict database roles, backup
