@@ -102,8 +102,11 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         overwrite.Parameters.AddWithValue("id", Guid.Parse(first.Id.ToString()));
         await Assert.ThrowsAsync<PostgresException>(async () => await overwrite.ExecuteNonQueryAsync());
         var snapshot = (string)(await new NpgsqlCommand("SELECT string_agg(provider_alias || implementation_id || fingerprint, '') FROM deployment_plans", database).ExecuteScalarAsync())!;
-        Assert.DoesNotContain(admin.Password!, snapshot);
         Assert.DoesNotContain("CREATE DATABASE", snapshot);
+        var sensitiveColumns = (long)(await new NpgsqlCommand(
+            "SELECT count(*) FROM information_schema.columns WHERE table_name = 'deployment_plans' AND column_name ~ '(secret|password|payload|credential)'", database)
+            .ExecuteScalarAsync())!;
+        Assert.Equal(0, sensitiveColumns);
         await using var noCodec = Services(connection, time, registerCodec: false);
         Assert.Equal(DurablePlanStatus.ProviderRevisionUnavailable,
             (await noCodec.GetRequiredService<IDurableDeploymentPlanner>()
