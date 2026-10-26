@@ -14,6 +14,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<ProviderInstanceRow> ProviderInstances => Set<ProviderInstanceRow>();
     internal DbSet<ProviderConfigurationRevisionRow> ProviderConfigurationRevisions => Set<ProviderConfigurationRevisionRow>();
     internal DbSet<ProviderRevisionSecretRefRow> ProviderRevisionSecretRefs => Set<ProviderRevisionSecretRefRow>();
+    internal DbSet<ProviderAliasRow> ProviderAliases => Set<ProviderAliasRow>();
+    internal DbSet<ProviderAliasAuditRow> ProviderAliasAudits => Set<ProviderAliasAuditRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -147,6 +149,38 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                 .HasPrincipalKey(row => new { row.SecretId, row.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<ProviderAliasRow>(entity =>
+        {
+            entity.ToTable("provider_aliases");
+            entity.HasKey(row => new { row.EnvironmentRecordId, row.Alias });
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.Alias).HasColumnName("alias").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
+            entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
+            entity.HasIndex(row => row.ProviderInstanceId).IsUnique();
+            entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ProviderConfigurationRevisionRow>().WithMany()
+                .HasForeignKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProviderAliasAuditRow>(entity =>
+        {
+            entity.ToTable("provider_alias_audit");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.Alias).HasColumnName("alias").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.PreviousInstanceId).HasColumnName("previous_instance_id");
+            entity.Property(row => row.PreviousRevisionNumber).HasColumnName("previous_revision_number");
+            entity.Property(row => row.NewInstanceId).HasColumnName("new_instance_id");
+            entity.Property(row => row.NewRevisionNumber).HasColumnName("new_revision_number");
+            entity.Property(row => row.TechnicalActor).HasColumnName("technical_actor").HasMaxLength(256).IsRequired();
+            entity.Property(row => row.ChangedAt).HasColumnName("changed_at").HasColumnType("timestamp with time zone");
+            entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
 
@@ -212,6 +246,27 @@ internal sealed class ProviderRevisionSecretRefRow
     public Guid EnvironmentRecordId { get; set; }
     public Guid SecretId { get; set; }
     public Guid SecretVersionId { get; set; }
+}
+
+internal sealed class ProviderAliasRow
+{
+    public Guid EnvironmentRecordId { get; set; }
+    public required string Alias { get; set; }
+    public Guid ProviderInstanceId { get; set; }
+    public long RevisionNumber { get; set; }
+}
+
+internal sealed class ProviderAliasAuditRow
+{
+    public Guid Id { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public required string Alias { get; set; }
+    public Guid? PreviousInstanceId { get; set; }
+    public long? PreviousRevisionNumber { get; set; }
+    public Guid NewInstanceId { get; set; }
+    public long NewRevisionNumber { get; set; }
+    public required string TechnicalActor { get; set; }
+    public DateTimeOffset ChangedAt { get; set; }
 }
 
 internal sealed class ApplicationRow
