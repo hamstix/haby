@@ -1,8 +1,8 @@
 # ADR-024: Provider instances and immutable configuration revisions
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-26
-- Scope: One-instance active pilot; design only
+- Scope: One-instance active pilot; Provider configuration contract
 
 ## Context
 
@@ -14,12 +14,12 @@ Environment-local Provider aliases; ADR-022 requires execution to load the
 pinned Provider configuration without following a changed alias.
 
 The current `ProviderResolution` and alias catalog are in-memory checkpoint
-types, not persisted Provider aggregates. This proposal defines their durable
+types, not persisted Provider aggregates. This decision defines their durable
 identity and selection semantics before introducing tables or operator APIs.
 Secret storage follows the standard modes in ADR-006 rather than a pilot-only
 exception.
 
-## Proposed decision
+## Decision
 
 ### Environment-owned Provider instances
 
@@ -36,10 +36,15 @@ is deferred until a concrete use case justifies it. Alias reassignment between
 instances is explicit and audited; it never rewrites historical resolutions.
 
 The identity of the external target must not be silently changed by a new
-configuration revision. A revision that would select an unrelated target
-requires a different ProviderInstance. The exact pilot rule for recognizing
-the same PostgreSQL target must be specified before implementation; a
-successful connection test alone does not establish target identity.
+configuration revision. For the first PostgreSQL pilot, the configured host
+name or IP address and port form the immutable declared target of a
+ProviderInstance. Changing either requires a new ProviderInstance; changing
+credentials, maintenance-database settings or a compatible adapter creates a
+new configuration revision of the same instance. An operator must explicitly
+select the new instance through an alias switch. This rule protects against
+an unnoticed configuration edit; it does not prove that DNS or the server
+behind an unchanged endpoint still identifies the same PostgreSQL cluster.
+A successful connection test alone does not establish target identity.
 
 ### Immutable configuration revisions
 
@@ -52,7 +57,12 @@ overwrite operation.
 
 A revision records its exact `ImplementationId`, a versioned configuration
 shape, validated non-secret settings and exact `SecretRef` values for secret
-fields. It does not contain a plaintext administrative connection string.
+fields. The first PostgreSQL shape is a closed, versioned, typed contract,
+not arbitrary JSON: it explicitly models the declared host and port,
+non-secret connection settings and secret references. Any JSON serialization
+uses source-generated `System.Text.Json` metadata without reflection fallback.
+Unknown fields or unsupported shape versions fail closed. It does not contain
+a plaintext administrative connection string.
 The configured implementation must be registered in the build-time catalog
 and support the required Resource contract. `ImplementationId` denotes a
 compatible implementation, not a particular binary hash. Adapter authors
@@ -133,34 +143,41 @@ instance.
 
 Configuration revisions needed by accepted generation history or unfinished
 operations remain available, together with their required SecretVersions.
-An alias target is also protected. A valid open Plan may temporarily retain
-its exact inputs, but an uncommitted Plan must not block cleanup forever:
-Plans require explicit closure or an expiry policy, after which applying them
-is rejected and they no longer retain executable inputs. Audit metadata may
-remain without making a closed Plan executable again.
+An alias target is also protected. A valid open Plan temporarily retains its
+exact inputs. Plans support explicit closure and carry a persisted, finite
+expiry established when they are created. The pilot implementation must
+document its chosen duration before exposing Plan creation. Closing or
+expiring a Plan rejects subsequent apply attempts and releases its retention
+claim; neither event makes a committed generation or unfinished operation
+discardable. Audit metadata may remain without making a closed or expired
+Plan executable again.
 
 An unreferenced preparatory revision that was never selected or accepted may
 be deleted. Deletion must atomically check the alias, Plan, generation and
 operation references that protect it. The exact retention period, expiry
 policy and operation-state integration belong to the durable-state design;
-this proposal does not authorize unsafe garbage collection in advance.
+this decision does not authorize unsafe garbage collection in advance.
 
 ## Secret-storage dependency
 
 Provider administrative credentials use exact `SecretRef` identities under
-ADR-006. Its PostgreSQL SecretStore may use the standard `Plaintext` or
-`EnvelopeEncrypted` protection mode; this Provider proposal selects neither
-the deployment's write mode nor its implementation order. `Plaintext` exposes
-secret material to readers of the relevant database rows and backups. Prefer
+ADR-006. Its PostgreSQL SecretStore has the standard `Plaintext` and
+`EnvelopeEncrypted` protection modes. The first isolated active pilot may
+explicitly choose `Plaintext` once that mode is implemented and its database
+and backup access are restricted and documented. This does not make plaintext
+the default for other deployments. `Plaintext` exposes secret material to
+readers of the relevant database rows and backups; prefer
 `EnvelopeEncrypted` when that exposure is unacceptable. Neither mode permits
 plaintext in Provider configuration revisions, Plans, generations, diagnostics
 or ordinary read APIs. Active-pilot execution requires an implemented storage
 mode and an explicit operational decision about its threat and backup boundary.
 
-## Implementation sequence after acceptance
+## Implementation sequence
 
-1. Implement an accepted standard PostgreSQL secret-storage mode and its exact
-   SecretRef resolution boundary.
+1. Implement the standard PostgreSQL `Plaintext` secret-storage mode and its
+   exact SecretRef resolution boundary for the isolated pilot. Keep the stored
+   per-version protection format so a later encrypted mode does not require a
+   different SecretRef contract.
 2. Add typed Provider identities, immutable revision storage and Environment-
    scoped alias bindings with PostgreSQL uniqueness and compare-and-swap
    constraints. Preserve the existing shadow-preview API as hypothetical.
@@ -183,8 +200,10 @@ active-revision pointer. Revision preparation cannot disturb the selected
 configuration. The price is that each switch requires a server-side preflight
 and a durable, auditable alias compare-and-swap.
 
-Before implementation, resolve the exact external-target identity rule for a
-PostgreSQL ProviderInstance, the versioned representation of non-secret
-configuration settings, Plan closure/expiry policy, and the operational choice
-of secret-storage mode. The durable operation/recovery policy remains a
-separate decision and is not specified here.
+The endpoint-based target rule, typed versioned PostgreSQL configuration,
+finite Plan expiry with explicit closure, and optional `Plaintext` mode for
+the isolated pilot are accepted here. Implementation still must choose and
+document a concrete Plan duration and the pilot's operational database and
+backup controls. The durable operation/recovery policy remains a separate
+decision. This ADR authorizes Provider configuration storage and selection,
+not live Provider execution before that recovery policy is accepted.
