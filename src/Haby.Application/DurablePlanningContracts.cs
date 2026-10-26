@@ -2,10 +2,6 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
-/// <summary>Immutable one-member intent accepted by the durable pilot boundary.</summary>
-public sealed record DurableChangeSet(DeploymentChangeSetId Id, EnvironmentRecordId Environment,
-    DeploymentChangeSetMember Member, DateTimeOffset CreatedAt, string ActorId);
-
 /// <summary>Exact, non-secret inputs; the alias is retained only as selection provenance.</summary>
 public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, EnvironmentId EnvironmentKey,
     ManifestRevisionRef Revision, ProviderAlias Alias, ProviderInstanceId ProviderInstance,
@@ -14,15 +10,15 @@ public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, Envi
 /// <summary>A Plan is immutable; closure is stored separately from its original record.</summary>
 public sealed record DurablePlan(DeploymentPlanId Id, DeploymentChangeSetId ChangeSetId,
     DurablePlanningInputs Inputs, string Fingerprint, DateTimeOffset CreatedAt,
-    DateTimeOffset ExpiresAt, string ActorId, DateTimeOffset? ClosedAt);
+    DateTimeOffset ExpiresAt, string ActorId, DateTimeOffset? ClosedAt, string? ClosedByActorId);
 
 public enum DurableChangeSetCreateStatus
 {
     Created, EnvironmentNotFound, RevisionNotFound, RevisionNotOwnedByApplication,
-    ExpectedGenerationUnsupported, ChangeSetStale
+    ExpectedGenerationUnsupported
 }
 
-public sealed record DurableChangeSetCreateResult(DurableChangeSetCreateStatus Status, DurableChangeSet? ChangeSet = null);
+public sealed record DurableChangeSetCreateResult(DurableChangeSetCreateStatus Status, DeploymentChangeSet? ChangeSet = null);
 
 public enum DurablePlanStatus
 {
@@ -35,7 +31,7 @@ public sealed record DurablePlanResult(DurablePlanStatus Status, DurablePlan? Pl
 public enum DurablePlanCloseStatus { Closed, AlreadyClosed, PlanNotFound }
 public enum DurablePlanCurrentStatus
 {
-    Current, PlanNotFound, Closed, Expired, ChangeSetStale, PlanStale
+    Current, PlanNotFound, Closed, Expired, ChangeSetStale, PlanStale, PlanInputUnavailable
 }
 
 public interface IDurableDeploymentPlanner
@@ -45,8 +41,9 @@ public interface IDurableDeploymentPlanner
         string actorId, CancellationToken cancellationToken);
     ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId, string actorId,
         CancellationToken cancellationToken);
-    ValueTask<DurableChangeSet?> FindChangeSetAsync(DeploymentChangeSetId id, CancellationToken cancellationToken);
+    ValueTask<DeploymentChangeSet?> FindChangeSetAsync(DeploymentChangeSetId id, CancellationToken cancellationToken);
     ValueTask<DurablePlan?> FindPlanAsync(DeploymentPlanId id, CancellationToken cancellationToken);
-    ValueTask<DurablePlanCloseStatus> ClosePlanAsync(DeploymentPlanId id, CancellationToken cancellationToken);
+    ValueTask<DurablePlanCloseStatus> ClosePlanAsync(DeploymentPlanId id, string actorId,
+        CancellationToken cancellationToken);
     ValueTask<DurablePlanCurrentStatus> CheckPlanAsync(DeploymentPlanId id, CancellationToken cancellationToken);
 }

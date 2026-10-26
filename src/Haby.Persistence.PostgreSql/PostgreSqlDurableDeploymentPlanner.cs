@@ -6,6 +6,8 @@ using Haby.Domain;
 using Haby.Manifest;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 
 namespace Haby.Persistence.PostgreSql;
 
@@ -58,7 +60,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ActorId = actorId
         });
         await context.SaveChangesAsync(cancellationToken);
-        return new(DurableChangeSetCreateStatus.Created, new DurableChangeSet(id, environment,
+        return new(DurableChangeSetCreateStatus.Created, new DeploymentChangeSet(id, environment,
             new DeploymentChangeSetMember(application, revision, precondition), createdAt, actorId));
     }
 
@@ -71,6 +73,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var row = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == Guid.Parse(changeSetId.ToString()), cancellationToken);
         if (row is null) return new(DurablePlanStatus.ChangeSetNotFound);
+        // Defensive until durable deployments and ExpectedGeneration are implemented.
         if (!row.ExpectedAbsence) return new(DurablePlanStatus.ChangeSetStale);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
@@ -125,12 +128,13 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         };
         context.DurablePlans.Add(planRow);
         await context.SaveChangesAsync(cancellationToken);
-        return new(DurablePlanStatus.Planned, ToPlan(planRow, null));
+        return new(DurablePlanStatus.Planned, ToPlan(planRow, null, null));
     }
 
-    public async ValueTask<DurableChangeSet?> FindChangeSetAsync(DeploymentChangeSetId id,
+    public async ValueTask<DeploymentChangeSet?> FindChangeSetAsync(DeploymentChangeSetId id,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(id);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var row = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == Guid.Parse(id.ToString()), cancellationToken);
@@ -139,38 +143,50 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
 
     public async ValueTask<DurablePlan?> FindPlanAsync(DeploymentPlanId id, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(id);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var row = await context.DurablePlans.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == Guid.Parse(id.ToString()), cancellationToken);
         if (row is null) return null;
         var closure = await context.DurablePlanClosures.AsNoTracking().SingleOrDefaultAsync(item =>
             item.PlanId == row.Id, cancellationToken);
-        return ToPlan(row, closure?.ClosedAt);
+        return ToPlan(row, closure?.ClosedAt, closure?.ActorId);
     }
 
-    public async ValueTask<DurablePlanCloseStatus> ClosePlanAsync(DeploymentPlanId id,
+    public async ValueTask<DurablePlanCloseStatus> ClosePlanAsync(DeploymentPlanId id, string actorId,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(id);
+        ValidateActor(actorId);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var planId = Guid.Parse(id.ToString());
         if (!await context.DurablePlans.AsNoTracking().AnyAsync(item => item.Id == planId, cancellationToken))
             return DurablePlanCloseStatus.PlanNotFound;
-        context.DurablePlanClosures.Add(new DurablePlanClosureRow { PlanId = planId, ClosedAt = clock.GetUtcNow() });
+        context.DurablePlanClosures.Add(new DurablePlanClosureRow
+        {
+            PlanId = planId,
+            ClosedAt = clock.GetUtcNow(),
+            ActorId = actorId
+        });
         try { await context.SaveChangesAsync(cancellationToken); return DurablePlanCloseStatus.Closed; }
-        catch (DbUpdateException) when (!cancellationToken.IsCancellationRequested)
+        catch (DbUpdateException error) when (!cancellationToken.IsCancellationRequested &&
+            Postgres(error)?.SqlState == PostgresErrorCodes.UniqueViolation)
         { return DurablePlanCloseStatus.AlreadyClosed; }
     }
 
     public async ValueTask<DurablePlanCurrentStatus> CheckPlanAsync(DeploymentPlanId id,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(id);
         var plan = await FindPlanAsync(id, cancellationToken);
         if (plan is null) return DurablePlanCurrentStatus.PlanNotFound;
-        if (plan.ClosedAt is not null) return DurablePlanCurrentStatus.Closed;
         if (clock.GetUtcNow() >= plan.ExpiresAt) return DurablePlanCurrentStatus.Expired;
+        if (plan.ClosedAt is not null) return DurablePlanCurrentStatus.Closed;
         var result = await CreateCurrentInputsAsync(plan.ChangeSetId, cancellationToken);
         if (result.Status == DurablePlanStatus.ChangeSetStale) return DurablePlanCurrentStatus.ChangeSetStale;
-        if (result.Inputs is null || result.Inputs != plan.Inputs || Fingerprint(result.Inputs) != plan.Fingerprint)
+        if (result.Status != DurablePlanStatus.Planned || result.Inputs is null)
+            return DurablePlanCurrentStatus.PlanInputUnavailable;
+        if (result.Inputs != plan.Inputs || Fingerprint(result.Inputs) != plan.Fingerprint)
             return DurablePlanCurrentStatus.PlanStale;
         return DurablePlanCurrentStatus.Current;
     }
@@ -186,8 +202,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var revision = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
         var manifest = await revisions.FindAsync(revision, cancellationToken);
-        if (manifest is null || manifest.Declaration.Spec.Resources.Count != 1)
-            return (DurablePlanStatus.RevisionNotFound, null);
+        if (manifest is null) return (DurablePlanStatus.RevisionNotFound, null);
+        if (manifest.Declaration.Spec.Resources.Count != 1)
+            return (DurablePlanStatus.UnsupportedShape, null);
         var alias = manifest.Declaration.Spec.Resources.Single().Value.ProviderRef;
         var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == row.EnvironmentRecordId, cancellationToken);
@@ -244,7 +261,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         { return false; }
     }
 
-    private static DurableChangeSet ToChangeSet(DurableChangeSetRow row)
+    private static DeploymentChangeSet ToChangeSet(DurableChangeSetRow row)
     {
         var application = ApplicationRecordId.Parse(row.ApplicationRecordId.ToString());
         var revision = ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(row.RevisionNumber));
@@ -254,7 +271,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             row.CreatedAt, row.ActorId);
     }
 
-    private static DurablePlan ToPlan(DurablePlanRow row, DateTimeOffset? closedAt)
+    private static DurablePlan ToPlan(DurablePlanRow row, DateTimeOffset? closedAt, string? closedByActorId)
     {
         if (row.SnapshotFormatVersion != 1) throw new InvalidDataException("Planning snapshot version is unavailable.");
         var application = ApplicationRecordId.Parse(row.ApplicationRecordId.ToString());
@@ -265,10 +282,10 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
         if (Fingerprint(inputs) != row.Fingerprint) throw new InvalidDataException("Planning snapshot is inconsistent.");
         return new(DeploymentPlanId.Parse(row.Id.ToString()), DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()),
-            inputs, row.Fingerprint, row.CreatedAt, row.ExpiresAt, row.ActorId, closedAt);
+            inputs, row.Fingerprint, row.CreatedAt, row.ExpiresAt, row.ActorId, closedAt, closedByActorId);
     }
 
-    private static string Fingerprint(DurablePlanningInputs inputs)
+    internal static string Fingerprint(DurablePlanningInputs inputs)
     {
         var text = string.Join('\n', "haby-durable-plan-inputs/v1", inputs.Environment.ToString(),
             inputs.EnvironmentKey.Value, inputs.Revision.ApplicationRecordId.ToString(),
@@ -279,11 +296,18 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         return "v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 
-    private static void ValidateActor(string actorId)
+    internal static void ValidateActor(string actorId)
     {
         ArgumentNullException.ThrowIfNull(actorId);
         if (actorId.Length is 0 or > 256 || actorId.Any(char.IsControl))
             throw new ArgumentException("Actor identity must be bounded and nonempty.", nameof(actorId));
+    }
+
+    private static PostgresException? Postgres(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+            if (current is PostgresException postgres) return postgres;
+        return null;
     }
 }
 
@@ -291,6 +315,7 @@ public static class DurableDeploymentPlannerServiceCollectionExtensions
 {
     public static IServiceCollection AddPostgreSqlDurableDeploymentPlanner(this IServiceCollection services)
     {
+        services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IDurableDeploymentPlanner, PostgreSqlDurableDeploymentPlanner>();
         return services;
     }

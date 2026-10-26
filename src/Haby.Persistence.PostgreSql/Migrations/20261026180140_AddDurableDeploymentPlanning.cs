@@ -11,6 +11,10 @@ namespace Haby.Persistence.PostgreSql.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropIndex(
+                name: "IX_manifest_revisions_application_record_id_local_revision_num~",
+                table: "manifest_revisions");
+
             migrationBuilder.AddUniqueConstraint(
                 name: "AK_manifest_revisions_application_record_id_local_revision_num~",
                 table: "manifest_revisions",
@@ -93,7 +97,8 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 columns: table => new
                 {
                     plan_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    closed_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    closed_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    actor_id = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: false)
                 },
                 constraints: table =>
                 {
@@ -161,6 +166,12 @@ namespace Haby.Persistence.PostgreSql.Migrations
             migrationBuilder.DropUniqueConstraint(
                 name: "AK_manifest_revisions_application_record_id_local_revision_num~",
                 table: "manifest_revisions");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_manifest_revisions_application_record_id_local_revision_num~",
+                table: "manifest_revisions",
+                columns: new[] { "application_record_id", "local_revision_number" },
+                unique: true);
         }
     }
 }

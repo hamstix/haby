@@ -34,16 +34,26 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         ProviderAliasBinding oldBinding;
         ProviderAliasBinding newBinding;
         var admin = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
+        var providerPassword = "haby-test-" + Guid.NewGuid().ToString("N");
+        var providerUser = "haby_plan_" + Guid.NewGuid().ToString("N");
+        await using (var adminDatabase = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await adminDatabase.OpenAsync();
+            await new NpgsqlCommand($"CREATE ROLE \"{providerUser}\" LOGIN CREATEDB PASSWORD '{providerPassword}'", adminDatabase)
+                .ExecuteNonQueryAsync();
+        }
+        var target = new NpgsqlConnectionStringBuilder(admin.ConnectionString)
+        { Username = providerUser, Password = providerPassword };
         await using (var services = Services(connection, time))
         {
             await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
             var secrets = services.GetRequiredService<ISecretStore>();
             environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
             var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(admin.Password!), default);
+            await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(providerPassword), default);
             var provider = services.GetRequiredService<IProviderConfigurationStore>();
-            var configuration = new PostgreSqlProviderConfiguration(1, admin.Host!, admin.Port,
-                admin.Database!, admin.Username!, secret, Implementation);
+            var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
+                target.Database!, target.Username!, secret, Implementation);
             var instance = await provider.CreateInstanceAsync(environment, configuration, default);
             await provider.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1),
                 configuration, default);
@@ -57,8 +67,20 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
             var intent = await planner.CreateChangeSetAsync(environment, revision.ApplicationRecordId, revision,
                 new DeploymentPrecondition.ExpectedAbsence(), "tester", default);
-            changeSetId = Assert.IsType<DurableChangeSet>(intent.ChangeSet).Id;
+            changeSetId = Assert.IsType<DeploymentChangeSet>(intent.ChangeSet).Id;
             Assert.Equal(DurableChangeSetCreateStatus.Created, intent.Status);
+            var otherEnvironment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("other"), default);
+            var otherSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
+            await secrets.CreateAsync(otherEnvironment, otherSecret, Encoding.UTF8.GetBytes(providerPassword), default);
+            var otherConfiguration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
+                target.Database!, target.Username!, otherSecret, Implementation);
+            var otherInstance = await provider.CreateInstanceAsync(otherEnvironment, otherConfiguration, default);
+            await provider.AddRevisionAsync(otherEnvironment, otherInstance,
+                ProviderConfigurationRevisionNumber.Create(1), otherConfiguration, default);
+            Assert.Equal(ProviderAliasChangeOutcome.Changed,
+                (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(otherEnvironment, alias, null,
+                    new ProviderAliasBinding(otherInstance, ProviderConfigurationRevisionNumber.Create(1)),
+                    "tester", default)).Outcome);
             Assert.Equal(DurablePlanStatus.AliasNotResolved,
                 (await planner.CreatePlanAsync(changeSetId, "tester", default)).Status);
             Assert.Equal(ProviderAliasChangeOutcome.Changed,
@@ -87,10 +109,43 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
                 await planner.CreatePlanAsync(changeSetId, "tester", default)));
             Assert.All(concurrent, result => Assert.Equal(DurablePlanStatus.Planned, result.Status));
             Assert.NotEqual(concurrent[0].Plan!.Id, concurrent[1].Plan!.Id);
-            Assert.Equal(DurablePlanCloseStatus.Closed, await planner.ClosePlanAsync(first.Id, default));
-            Assert.Equal(DurablePlanCloseStatus.AlreadyClosed, await planner.ClosePlanAsync(first.Id, default));
+            await using (var noCodecServices = Services(connection, time, registerCodec: false))
+                Assert.Equal(DurablePlanCurrentStatus.PlanInputUnavailable,
+                    await noCodecServices.GetRequiredService<IDurableDeploymentPlanner>().CheckPlanAsync(second.Id, default));
+            await using (var noCapabilityServices = Services(connection, time, supportsCapability: false))
+                Assert.Equal(DurablePlanCurrentStatus.PlanInputUnavailable,
+                    await noCapabilityServices.GetRequiredService<IDurableDeploymentPlanner>().CheckPlanAsync(second.Id, default));
+            var closes = await Task.WhenAll(
+                planner.ClosePlanAsync(first.Id, "closer-a", default).AsTask(),
+                planner.ClosePlanAsync(first.Id, "closer-b", default).AsTask());
+            Assert.Contains(DurablePlanCloseStatus.Closed, closes);
+            Assert.Contains(DurablePlanCloseStatus.AlreadyClosed, closes);
+            Assert.Contains((await planner.FindPlanAsync(first.Id, default))!.ClosedByActorId,
+                new[] { "closer-a", "closer-b" });
             Assert.Equal(DurablePlanCurrentStatus.Closed, await planner.CheckPlanAsync(first.Id, default));
-            time.Advance(TimeSpan.FromHours(24));
+            await using (var failureConnection = new NpgsqlConnection(connection))
+            {
+                await failureConnection.OpenAsync();
+                await new NpgsqlCommand("""
+                    CREATE FUNCTION reject_plan_close_for_test() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN RAISE EXCEPTION 'test close failure'; END $$;
+                    CREATE TRIGGER reject_plan_close_for_test BEFORE INSERT ON deployment_plan_closures
+                    FOR EACH ROW EXECUTE FUNCTION reject_plan_close_for_test();
+                    """, failureConnection).ExecuteNonQueryAsync();
+                await Assert.ThrowsAsync<DbUpdateException>(async () =>
+                    await planner.ClosePlanAsync(second.Id, "tester", default));
+                Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(second.Id, default));
+                await new NpgsqlCommand("""
+                    DROP TRIGGER reject_plan_close_for_test ON deployment_plan_closures;
+                    DROP FUNCTION reject_plan_close_for_test();
+                    """, failureConnection).ExecuteNonQueryAsync();
+            }
+            time.Advance(TimeSpan.FromHours(24).Add(TimeSpan.FromSeconds(-1)));
+            Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(second.Id, default));
+            time.Advance(TimeSpan.FromSeconds(1));
+            Assert.Equal(DurablePlanCurrentStatus.Expired, await planner.CheckPlanAsync(second.Id, default));
+            Assert.Equal(DurablePlanCloseStatus.Closed,
+                await planner.ClosePlanAsync(second.Id, "late-closer", default));
             Assert.Equal(DurablePlanCurrentStatus.Expired, await planner.CheckPlanAsync(second.Id, default));
             Assert.NotNull(await planner.FindPlanAsync(second.Id, default));
         }
@@ -98,15 +153,31 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         await database.OpenAsync();
         var count = (long)(await new NpgsqlCommand("SELECT count(*) FROM deployment_plans", database).ExecuteScalarAsync())!;
         Assert.Equal(4, count);
-        await using var overwrite = new NpgsqlCommand("UPDATE deployment_plans SET actor_id = 'replacement' WHERE id = @id", database);
-        overwrite.Parameters.AddWithValue("id", Guid.Parse(first.Id.ToString()));
-        await Assert.ThrowsAsync<PostgresException>(async () => await overwrite.ExecuteNonQueryAsync());
-        var snapshot = (string)(await new NpgsqlCommand("SELECT string_agg(provider_alias || implementation_id || fingerprint, '') FROM deployment_plans", database).ExecuteScalarAsync())!;
-        Assert.DoesNotContain("CREATE DATABASE", snapshot);
+        await AssertRejected("UPDATE deployment_plans SET actor_id = 'replacement' WHERE id = @id",
+            Guid.Parse(first.Id.ToString()));
+        await AssertRejected("DELETE FROM deployment_plans WHERE id = @id",
+            Guid.Parse(first.Id.ToString()));
+        await AssertRejected("UPDATE deployment_change_sets SET actor_id = 'replacement' WHERE id = @id",
+            Guid.Parse(changeSetId.ToString()));
+        await AssertRejected("DELETE FROM deployment_change_sets WHERE id = @id",
+            Guid.Parse(changeSetId.ToString()));
+        await AssertRejected("UPDATE deployment_plan_closures SET actor_id = 'replacement' WHERE plan_id = @id",
+            Guid.Parse(first.Id.ToString()));
+        await AssertRejected("DELETE FROM deployment_plan_closures WHERE plan_id = @id",
+            Guid.Parse(first.Id.ToString()));
         var sensitiveColumns = (long)(await new NpgsqlCommand(
-            "SELECT count(*) FROM information_schema.columns WHERE table_name = 'deployment_plans' AND column_name ~ '(secret|password|payload|credential)'", database)
+            "SELECT count(*) FROM information_schema.columns WHERE table_name IN ('deployment_change_sets', 'deployment_plans', 'deployment_plan_closures') AND column_name ~ '(secret|password|payload|credential)'", database)
             .ExecuteScalarAsync())!;
         Assert.Equal(0, sensitiveColumns);
+        await using (var redaction = new NpgsqlCommand("""
+            SELECT (SELECT count(*) FROM deployment_change_sets AS t WHERE to_jsonb(t)::text LIKE '%' || @secret || '%')
+                 + (SELECT count(*) FROM deployment_plans AS t WHERE to_jsonb(t)::text LIKE '%' || @secret || '%')
+                 + (SELECT count(*) FROM deployment_plan_closures AS t WHERE to_jsonb(t)::text LIKE '%' || @secret || '%')
+            """, database))
+        {
+            redaction.Parameters.AddWithValue("secret", providerPassword);
+            Assert.Equal(0L, (long)(await redaction.ExecuteScalarAsync())!);
+        }
         await using var noCodec = Services(connection, time, registerCodec: false);
         Assert.Equal(DurablePlanStatus.ProviderRevisionUnavailable,
             (await noCodec.GetRequiredService<IDurableDeploymentPlanner>()
@@ -115,6 +186,14 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         Assert.Equal(DurablePlanStatus.ProviderCapabilityMismatch,
             (await noCapability.GetRequiredService<IDurableDeploymentPlanner>()
                 .CreatePlanAsync(changeSetId, "tester", default)).Status);
+
+        async Task AssertRejected(string sql, Guid id)
+        {
+            await using var command = new NpgsqlCommand(sql, database);
+            command.Parameters.AddWithValue("id", id);
+            var error = await Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteNonQueryAsync());
+            Assert.Equal("P0001", error.SqlState);
+        }
     }
 
     [Fact]

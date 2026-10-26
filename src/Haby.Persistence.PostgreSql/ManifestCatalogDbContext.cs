@@ -48,7 +48,6 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.ImportedAt).HasColumnName("imported_at").HasColumnType("timestamp with time zone");
             entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(row => new { row.ApplicationId, row.ApplicationVersion }).IsUnique();
-            entity.HasIndex(row => new { row.ApplicationRecordId, row.LocalRevisionNumber }).IsUnique();
         });
         modelBuilder.Entity<EnvironmentRow>(entity =>
         {
@@ -233,6 +232,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.HasKey(row => row.PlanId);
             entity.Property(row => row.PlanId).HasColumnName("plan_id");
             entity.Property(row => row.ClosedAt).HasColumnName("closed_at");
+            entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
             entity.HasOne<DurablePlanRow>().WithOne().HasForeignKey<DurablePlanClosureRow>(row => row.PlanId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
@@ -273,6 +273,7 @@ internal sealed class DurablePlanClosureRow
 {
     public Guid PlanId { get; set; }
     public DateTimeOffset ClosedAt { get; set; }
+    public required string ActorId { get; set; }
 }
 
 internal sealed class EnvironmentRow

@@ -90,6 +90,12 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.DurablePlanClosureRow", b =>
                 {
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
                     b.Property<Guid>("PlanId")
                         .HasColumnType("uuid")
                         .HasColumnName("plan_id");
@@ -269,9 +275,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ApplicationId", "ApplicationVersion")
-                        .IsUnique();
-
-                    b.HasIndex("ApplicationRecordId", "LocalRevisionNumber")
                         .IsUnique();
 
                     b.ToTable("manifest_revisions", (string)null);
