@@ -1,5 +1,6 @@
 using Haby.Application;
 using Haby.Domain;
+using Haby.PostgreSql;
 using Xunit;
 
 namespace Haby.Application.Tests;
@@ -29,5 +30,13 @@ public sealed class ProviderConfigurationIdentityTests
         Assert.DoesNotContain(secret.SecretId.ToString(), error.ToString());
         Assert.Throws<ArgumentException>(() => new PostgreSqlProviderConfiguration(1,
             "not a host", 5432, "postgres", "admin", secret, configuration.ImplementationId));
+        var codec = new PostgreSqlProviderConfigurationCodec(new PostgreSqlDatabaseCheckpointCapability());
+        var encoded = codec.Encode(configuration);
+        Assert.Equal(PostgreSqlProviderConfigurationCodec.Kind, encoded.ProviderKindId);
+        Assert.Equal(PostgreSqlProviderConfigurationCodec.Shape, encoded.ShapeId);
+        Assert.Equal(secret, Assert.Single(encoded.SecretReferences).Reference);
+        Assert.Equal(configuration, codec.DecodeTyped(encoded.PayloadJson));
+        Assert.Throws<InvalidDataException>(() => codec.DecodeTyped(encoded.PayloadJson.Insert(
+            encoded.PayloadJson.Length - 1, ",\"Unknown\":1")));
     }
 }

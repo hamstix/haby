@@ -13,6 +13,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<SecretPayloadRow> SecretPayloads => Set<SecretPayloadRow>();
     internal DbSet<ProviderInstanceRow> ProviderInstances => Set<ProviderInstanceRow>();
     internal DbSet<ProviderConfigurationRevisionRow> ProviderConfigurationRevisions => Set<ProviderConfigurationRevisionRow>();
+    internal DbSet<ProviderRevisionSecretRefRow> ProviderRevisionSecretRefs => Set<ProviderRevisionSecretRefRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -99,10 +100,11 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
-            entity.Property(row => row.Host).HasColumnName("host").HasMaxLength(255).IsRequired();
-            entity.Property(row => row.Port).HasColumnName("port");
+            entity.Property(row => row.ProviderKindId).HasColumnName("provider_kind_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.TargetFormatVersion).HasColumnName("target_format_version");
+            entity.Property(row => row.TargetIdentity).HasColumnName("target_identity").HasMaxLength(512).IsRequired();
             entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasAlternateKey(row => new { row.Id, row.EnvironmentRecordId, row.Host, row.Port });
+            entity.HasAlternateKey(row => new { row.Id, row.EnvironmentRecordId });
         });
         modelBuilder.Entity<ProviderConfigurationRevisionRow>(entity =>
         {
@@ -111,24 +113,37 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
             entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
-            entity.Property(row => row.Host).HasColumnName("host").HasMaxLength(255).IsRequired();
-            entity.Property(row => row.Port).HasColumnName("port");
-            entity.Property(row => row.ShapeVersion).HasColumnName("shape_version");
-            entity.Property(row => row.MaintenanceDatabase).HasColumnName("maintenance_database").HasMaxLength(63).IsRequired();
-            entity.Property(row => row.AdministratorUserName).HasColumnName("administrator_user_name").HasMaxLength(63).IsRequired();
-            entity.Property(row => row.AdministratorSecretId).HasColumnName("administrator_secret_id");
-            entity.Property(row => row.AdministratorSecretVersionId).HasColumnName("administrator_secret_version_id");
             entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ConfigurationShapeId).HasColumnName("configuration_shape_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.PayloadFormatVersion).HasColumnName("payload_format_version");
+            entity.Property(row => row.PayloadJson).HasColumnName("payload_json").HasColumnType("text").IsRequired();
+            entity.Property(row => row.IsSealed).HasColumnName("is_sealed");
             entity.HasOne<ProviderInstanceRow>().WithMany()
-                .HasForeignKey(row => new { row.ProviderInstanceId, row.EnvironmentRecordId, row.Host, row.Port })
-                .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId, row.Host, row.Port })
+                .HasForeignKey(row => new { row.ProviderInstanceId, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasAlternateKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId });
+        });
+        modelBuilder.Entity<ProviderRevisionSecretRefRow>(entity =>
+        {
+            entity.ToTable("provider_revision_secret_refs");
+            entity.HasKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.Slot });
+            entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
+            entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
+            entity.Property(row => row.Slot).HasColumnName("slot").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.SecretId).HasColumnName("secret_id");
+            entity.Property(row => row.SecretVersionId).HasColumnName("secret_version_id");
+            entity.HasOne<ProviderConfigurationRevisionRow>().WithMany()
+                .HasForeignKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<SecretRow>().WithMany()
-                .HasForeignKey(row => new { row.AdministratorSecretId, row.EnvironmentRecordId })
+                .HasForeignKey(row => new { row.SecretId, row.EnvironmentRecordId })
                 .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<SecretVersionRow>().WithMany()
-                .HasForeignKey(row => new { row.AdministratorSecretId, row.AdministratorSecretVersionId })
+                .HasForeignKey(row => new { row.SecretId, row.SecretVersionId })
                 .HasPrincipalKey(row => new { row.SecretId, row.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
@@ -172,8 +187,9 @@ internal sealed class ProviderInstanceRow
 {
     public Guid Id { get; set; }
     public Guid EnvironmentRecordId { get; set; }
-    public required string Host { get; set; }
-    public int Port { get; set; }
+    public required string ProviderKindId { get; set; }
+    public int TargetFormatVersion { get; set; }
+    public required string TargetIdentity { get; set; }
 }
 
 internal sealed class ProviderConfigurationRevisionRow
@@ -181,14 +197,21 @@ internal sealed class ProviderConfigurationRevisionRow
     public Guid ProviderInstanceId { get; set; }
     public long RevisionNumber { get; set; }
     public Guid EnvironmentRecordId { get; set; }
-    public required string Host { get; set; }
-    public int Port { get; set; }
-    public int ShapeVersion { get; set; }
-    public required string MaintenanceDatabase { get; set; }
-    public required string AdministratorUserName { get; set; }
-    public Guid AdministratorSecretId { get; set; }
-    public Guid AdministratorSecretVersionId { get; set; }
     public required string ImplementationId { get; set; }
+    public required string ConfigurationShapeId { get; set; }
+    public int PayloadFormatVersion { get; set; }
+    public required string PayloadJson { get; set; }
+    public bool IsSealed { get; set; }
+}
+
+internal sealed class ProviderRevisionSecretRefRow
+{
+    public Guid ProviderInstanceId { get; set; }
+    public long RevisionNumber { get; set; }
+    public required string Slot { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public Guid SecretId { get; set; }
+    public Guid SecretVersionId { get; set; }
 }
 
 internal sealed class ApplicationRow
