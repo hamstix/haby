@@ -17,6 +17,16 @@ The payload is stored as `bytea` in `secret_payloads`, apart from Secret and
 version metadata. Reads verify both Secret/version and Secret/Environment
 membership and reject unknown protection formats or format versions.
 
+`AddPostgreSqlProviderConfigurationStore()` registers the internal asynchronous
+Provider instance/revision store separately from the shadow-preview path. Its
+closed PostgreSQL shape has version 1, host, port, maintenance database,
+administrator user name, exact administrator-password `SecretRef` and exact
+implementation ID. Instance endpoint and Environment ownership are immutable;
+revisions are append-only and start at 1. The store verifies SecretVersion
+ownership through metadata without selecting payload bytes. It checks the
+registered checkpoint capability before accepting a revision. No alias,
+connection test or live Provider execution is involved.
+
 **Plaintext is not encrypted.** Readers of `secret_payloads` and database
 backups can recover the credential bytes. Restrict database roles, backup
 readers, storage and retention accordingly, and prefer an encrypted mode when

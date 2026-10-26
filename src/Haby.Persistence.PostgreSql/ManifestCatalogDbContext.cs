@@ -11,6 +11,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<SecretRow> Secrets => Set<SecretRow>();
     internal DbSet<SecretVersionRow> SecretVersions => Set<SecretVersionRow>();
     internal DbSet<SecretPayloadRow> SecretPayloads => Set<SecretPayloadRow>();
+    internal DbSet<ProviderInstanceRow> ProviderInstances => Set<ProviderInstanceRow>();
+    internal DbSet<ProviderConfigurationRevisionRow> ProviderConfigurationRevisions => Set<ProviderConfigurationRevisionRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +67,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.CurrentVersionId).HasColumnName("current_version_id");
             entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasAlternateKey(row => new { row.Id, row.EnvironmentRecordId });
             entity.HasOne<SecretVersionRow>().WithMany()
                 .HasForeignKey(row => new { row.Id, row.CurrentVersionId })
                 .HasPrincipalKey(row => new { row.SecretId, row.Id })
@@ -88,6 +91,45 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.SecretVersionId).HasColumnName("secret_version_id");
             entity.Property(row => row.Bytes).HasColumnName("bytes").HasColumnType("bytea").IsRequired();
             entity.HasOne<SecretVersionRow>().WithOne().HasForeignKey<SecretPayloadRow>(row => row.SecretVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ProviderInstanceRow>(entity =>
+        {
+            entity.ToTable("provider_instances");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.Host).HasColumnName("host").HasMaxLength(255).IsRequired();
+            entity.Property(row => row.Port).HasColumnName("port");
+            entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasAlternateKey(row => new { row.Id, row.EnvironmentRecordId, row.Host, row.Port });
+        });
+        modelBuilder.Entity<ProviderConfigurationRevisionRow>(entity =>
+        {
+            entity.ToTable("provider_configuration_revisions");
+            entity.HasKey(row => new { row.ProviderInstanceId, row.RevisionNumber });
+            entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
+            entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.Host).HasColumnName("host").HasMaxLength(255).IsRequired();
+            entity.Property(row => row.Port).HasColumnName("port");
+            entity.Property(row => row.ShapeVersion).HasColumnName("shape_version");
+            entity.Property(row => row.MaintenanceDatabase).HasColumnName("maintenance_database").HasMaxLength(63).IsRequired();
+            entity.Property(row => row.AdministratorUserName).HasColumnName("administrator_user_name").HasMaxLength(63).IsRequired();
+            entity.Property(row => row.AdministratorSecretId).HasColumnName("administrator_secret_id");
+            entity.Property(row => row.AdministratorSecretVersionId).HasColumnName("administrator_secret_version_id");
+            entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
+            entity.HasOne<ProviderInstanceRow>().WithMany()
+                .HasForeignKey(row => new { row.ProviderInstanceId, row.EnvironmentRecordId, row.Host, row.Port })
+                .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId, row.Host, row.Port })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SecretRow>().WithMany()
+                .HasForeignKey(row => new { row.AdministratorSecretId, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SecretVersionRow>().WithMany()
+                .HasForeignKey(row => new { row.AdministratorSecretId, row.AdministratorSecretVersionId })
+                .HasPrincipalKey(row => new { row.SecretId, row.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
@@ -124,6 +166,29 @@ internal sealed class SecretPayloadRow
 {
     public Guid SecretVersionId { get; set; }
     public required byte[] Bytes { get; set; }
+}
+
+internal sealed class ProviderInstanceRow
+{
+    public Guid Id { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public required string Host { get; set; }
+    public int Port { get; set; }
+}
+
+internal sealed class ProviderConfigurationRevisionRow
+{
+    public Guid ProviderInstanceId { get; set; }
+    public long RevisionNumber { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public required string Host { get; set; }
+    public int Port { get; set; }
+    public int ShapeVersion { get; set; }
+    public required string MaintenanceDatabase { get; set; }
+    public required string AdministratorUserName { get; set; }
+    public Guid AdministratorSecretId { get; set; }
+    public Guid AdministratorSecretVersionId { get; set; }
+    public required string ImplementationId { get; set; }
 }
 
 internal sealed class ApplicationRow
