@@ -1182,7 +1182,8 @@ The database keeps the following records separate:
 - Deployment change sets with exact membership, plans and input fingerprints;
 - parameter and operational overrides with provenance;
 - application sets, configuration-profile revisions and profile assignments;
-- provider instances, Secret metadata, encrypted Secret versions and SecretRefs;
+- provider instances, Secret metadata, Secret versions with explicit storage
+  protection formats, and SecretRefs;
 - desired resources, Resource exports and component bindings;
 - ManagedWorkloads with their Workload declaration reference, Component
   relationship, desired and observed state;

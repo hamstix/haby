@@ -77,15 +77,42 @@ storage mechanism. When a plugin generates a password or token, it writes the
 value directly to the secret service and returns a `SecretRef`. It must not
 return the plaintext through an ordinary generated-value contract.
 
-### PostgreSQL encrypted storage is the initial default
+### PostgreSQL secret storage has two standard protection modes
 
-The standard Haby distribution stores managed secret payloads in PostgreSQL
-using application-level envelope encryption. Database or disk encryption may be
-used in addition, but is not a substitute for this boundary.
+The standard PostgreSQL SecretStore supports two protection modes under the
+same Secret and SecretRef domain contract:
 
-Each SecretVersion uses a new cryptographically random data-encryption key
-(DEK). Haby encrypts the payload with AES-256-GCM and wraps the DEK with a
-key-encryption key (KEK). PostgreSQL stores only:
+- `Plaintext` stores recoverable secret material in PostgreSQL without
+  application-level encryption. It is a fully supported mode, not a pilot-only
+  exception or a compatibility fallback.
+- `EnvelopeEncrypted` stores application-level encrypted secret material in
+  PostgreSQL, with key-encryption material kept outside that database.
+
+The modes may be implemented in separate increments. This decision does not
+claim that either mode is already implemented, select the initial write-mode
+default, or define an operator configuration key. Those implementation choices
+must be explicit before secret writes are enabled.
+
+**Security warning:** In `Plaintext` mode, a party able to read the relevant
+database rows or a database backup can recover the secrets. Restrict database
+and backup access and handle both as secret-bearing assets. Prefer
+`EnvelopeEncrypted` whenever the threat model includes database or backup
+readers. Database or disk encryption can add protection against other threats,
+but does not provide the same boundary against an authorized database reader.
+
+Every persisted SecretVersion records its protection format and format version.
+The reader interprets that version using its stored format, never the current
+write-mode setting. Changing the write mode affects new writes only; it does
+not silently convert existing versions. A future explicit re-protection
+procedure must preserve the logical SecretVersion identity and its SecretRef
+when the secret material is unchanged. Its exact migration and recovery
+procedure remains a follow-up decision.
+
+### Envelope-encrypted PostgreSQL mode
+
+In `EnvelopeEncrypted` mode, each SecretVersion uses a new cryptographically
+random data-encryption key (DEK). Haby encrypts the payload with AES-256-GCM and
+wraps the DEK with a key-encryption key (KEK). PostgreSQL stores only:
 
 - ciphertext;
 - nonce and authentication tag;
@@ -103,9 +130,9 @@ The design supports cryptographic agility through persisted format and algorithm
 versions. New writes use the current approved format; old formats remain
 readable only for a controlled migration period.
 
-### The KEK is outside PostgreSQL
+### The KEK is outside PostgreSQL in encrypted mode
 
-No usable KEK is stored in the Haby database or its backups. The initial
+No usable KEK is stored in the Haby database or its backups. An encrypted
 standalone deployment reads a versioned key ring from an operator-provided
 bootstrap source such as:
 
@@ -136,8 +163,10 @@ Neither contract exposes EF Core entities, ASP.NET Core types, gRPC-generated
 types or a vendor SDK. Providers are selected through trusted Haby configuration
 and composed at build time under ADR-003.
 
-The initial implementations are PostgreSQL encrypted secret storage and a local
-bootstrap key-ring provider. External implementations may later provide:
+The first PostgreSQL implementation may support `Plaintext` before
+`EnvelopeEncrypted`; the latter also requires a local bootstrap key-ring
+provider. `IKeyEncryptionProvider` is not required to read or write plaintext
+versions. External implementations may later provide:
 
 - Vault or OpenBao KV storage through `ISecretStore`;
 - Vault or OpenBao Transit, or a cloud KMS, through
@@ -147,13 +176,14 @@ Dynamic credentials with leases, renewal and revocation have a different
 lifecycle. If required, they will use a separate leased-credential issuer
 contract rather than being hidden behind `ISecretStore`.
 
-### Plaintext exists only at controlled boundaries
+### Secret material remains controlled outside its selected storage mode
 
 Haby resolves a SecretRef only for an authorized operation that requires the
 value, such as provisioning a resource or materializing a configuration for an
 authorized workload.
 
-Plaintext secret material:
+Outside an explicitly selected `Plaintext` storage payload, plaintext secret
+material:
 
 - is never written to logs, traces, exception details, plans or audit payloads;
 - is never returned by ordinary read/list APIs;
@@ -189,9 +219,9 @@ operations.
 
 ### External stores are deferred implementations
 
-M2 establishes the domain model and interfaces, and the following reliability
-work implements encrypted PostgreSQL storage. Haby does not require Vault,
-OpenBao or a cloud KMS for its first usable distribution.
+M2 establishes the domain model and interfaces. Subsequent work implements the
+standard PostgreSQL storage modes in separately testable increments. Haby does
+not require Vault, OpenBao or a cloud KMS for its first usable distribution.
 
 External adapters are planned with standard provider integrations after the
 local model has been exercised. OpenBao is the preferred open-source validation
@@ -208,9 +238,11 @@ same provider it unlocks.
 
 ### Positive
 
-- A standalone Haby installation needs only PostgreSQL and separately supplied
-  key material.
-- A stolen database dump does not disclose secret plaintext without the KEK.
+- A standalone Haby installation can use the `Plaintext` mode with PostgreSQL
+  alone; `EnvelopeEncrypted` additionally requires separately supplied key
+  material.
+- In `EnvelopeEncrypted` mode, a database dump alone does not disclose secret
+  plaintext without the KEK.
 - Plugins, manifests and configuration history exchange stable references
   instead of confidential values.
 - KEK rotation can rewrap small DEKs instead of decrypting and re-encrypting all
@@ -222,9 +254,11 @@ same provider it unlocks.
 
 ### Negative
 
-- Operators must back up, restore and rotate a key ring separately from
-  PostgreSQL.
-- Losing the key ring permanently loses encrypted secrets.
+- `Plaintext` mode exposes secret material to readers of its database rows and
+  backups. It must not be represented as equivalent to encrypted storage.
+- In `EnvelopeEncrypted` mode, operators must back up, restore and rotate a key
+  ring separately from PostgreSQL.
+- Losing the key ring permanently loses affected encrypted secrets.
 - A compromised Haby process that is authorized to unwrap keys can still read
   plaintext; envelope encryption primarily protects the database and backups,
   not a fully compromised runtime.
@@ -236,10 +270,13 @@ same provider it unlocks.
 
 ## Rejected alternatives
 
-### Store plaintext in PostgreSQL and rely on database encryption
+### Treat database or disk encryption as equivalent to encrypted mode
 
-This exposes values to database readers, dumps, diagnostics and accidental JSON
-serialization and does not establish a domain boundary for secrets.
+Database or disk encryption does not replace application-level encryption for
+the threat of a database reader. It also does not remove the need for SecretRef
+domain boundaries, redaction and controlled materialization. `Plaintext` is
+accepted as a standard mode with its own explicitly documented exposure, not
+as an encrypted mode under another name.
 
 ### Require Vault or OpenBao for every installation
 
@@ -270,6 +307,8 @@ materialized only at a controlled delivery boundary.
 
 Separate ADRs are required before adding:
 
+- a default write-mode policy and operator configuration contract;
+- an explicit plaintext-to-encrypted re-protection and recovery procedure;
 - a production external KV secret-store adapter;
 - a Transit or cloud-KMS key-encryption provider;
 - dynamic credentials and lease renewal;

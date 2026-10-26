@@ -16,7 +16,8 @@ pinned Provider configuration without following a changed alias.
 The current `ProviderResolution` and alias catalog are in-memory checkpoint
 types, not persisted Provider aggregates. This proposal defines their durable
 identity and selection semantics before introducing tables or operator APIs.
-It does not accept the pilot secret-storage exception discussed below.
+Secret storage follows the standard modes in ADR-006 rather than a pilot-only
+exception.
 
 ## Proposed decision
 
@@ -147,19 +148,19 @@ this proposal does not authorize unsafe garbage collection in advance.
 ## Secret-storage dependency
 
 Provider administrative credentials use exact `SecretRef` identities under
-ADR-006. A separate pilot-secret-storage ADR must decide whether an isolated
-test pilot may explicitly opt into plaintext SecretVersion payloads in
-PostgreSQL. Such a mode would be a scoped exception to ADR-006's encrypted
-storage default, not an implicit interpretation of its existing text. It must
-define the threat boundary, backup handling, per-version storage format,
-future encryption migration and fail-closed startup policy. No active-pilot
-execution is enabled until that decision and the required secret storage are
-implemented. This ADR does not choose or implement a plaintext mode.
+ADR-006. Its PostgreSQL SecretStore may use the standard `Plaintext` or
+`EnvelopeEncrypted` protection mode; this Provider proposal selects neither
+the deployment's write mode nor its implementation order. `Plaintext` exposes
+secret material to readers of the relevant database rows and backups. Prefer
+`EnvelopeEncrypted` when that exposure is unacceptable. Neither mode permits
+plaintext in Provider configuration revisions, Plans, generations, diagnostics
+or ordinary read APIs. Active-pilot execution requires an implemented storage
+mode and an explicit operational decision about its threat and backup boundary.
 
 ## Implementation sequence after acceptance
 
-1. Implement the separately accepted pilot secret-storage contract and its
-   exact SecretRef resolution boundary.
+1. Implement an accepted standard PostgreSQL secret-storage mode and its exact
+   SecretRef resolution boundary.
 2. Add typed Provider identities, immutable revision storage and Environment-
    scoped alias bindings with PostgreSQL uniqueness and compare-and-swap
    constraints. Preserve the existing shadow-preview API as hypothetical.
@@ -184,6 +185,6 @@ and a durable, auditable alias compare-and-swap.
 
 Before implementation, resolve the exact external-target identity rule for a
 PostgreSQL ProviderInstance, the versioned representation of non-secret
-configuration settings, Plan closure/expiry policy, and the separate pilot
-secret-storage ADR. The durable operation/recovery policy remains a separate
-decision and is not specified here.
+configuration settings, Plan closure/expiry policy, and the operational choice
+of secret-storage mode. The durable operation/recovery policy remains a
+separate decision and is not specified here.
