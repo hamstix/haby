@@ -1,6 +1,7 @@
 using Haby.Application;
 using Haby.Domain;
 using Haby.Persistence.PostgreSql;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Haby.Persistence.PostgreSql.Tests;
@@ -11,7 +12,8 @@ public sealed class ProviderAliasGuardTests
     public async Task Every_attempt_preflights_exact_target_before_storage_and_returns_only_typed_outcome()
     {
         var preflight = new RejectingPreflight();
-        var store = new PostgreSqlProviderAliasStore(null!, preflight, TimeProvider.System);
+        var contexts = new ThrowingContextFactory();
+        var store = new PostgreSqlProviderAliasStore(contexts, preflight, TimeProvider.System);
         var environment = EnvironmentRecordId.New();
         var alias = ProviderAlias.Create("postgresql.primary");
         var first = new ProviderAliasBinding(ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1));
@@ -28,6 +30,22 @@ public sealed class ProviderAliasGuardTests
         Assert.All(preflight.Environments, value => Assert.Equal(environment, value));
         Assert.DoesNotContain("Password", string.Join(',', typeof(ProviderPreflightResult).GetProperties()
             .Select(property => property.Name)));
+        Assert.Equal(0, contexts.Calls);
+    }
+
+    [Fact]
+    public async Task Unexpected_preflight_exception_is_redacted_before_alias_storage()
+    {
+        var contexts = new ThrowingContextFactory();
+        var store = new PostgreSqlProviderAliasStore(contexts, new ThrowingPreflight(), TimeProvider.System);
+        var result = await store.ChangeAsync(EnvironmentRecordId.New(), ProviderAlias.Create("postgresql.primary"),
+            null, new(ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)),
+            "test-runner", default);
+
+        Assert.Equal(ProviderAliasChangeOutcome.PreflightFailed, result.Outcome);
+        Assert.Equal(ProviderPreflightOutcome.ConfigurationUnavailable, result.Preflight?.Outcome);
+        Assert.DoesNotContain("private-host-value", result.ToString());
+        Assert.Equal(0, contexts.Calls);
     }
 
     private sealed class RejectingPreflight : IProviderRevisionPreflight
@@ -40,6 +58,30 @@ public sealed class ProviderAliasGuardTests
             Environments.Add(environment);
             Targets.Add(target);
             return ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.AuthenticationFailed));
+        }
+    }
+
+    private sealed class ThrowingPreflight : IProviderRevisionPreflight
+    {
+        public ValueTask<ProviderPreflightResult> CheckAsync(EnvironmentRecordId environment,
+            ProviderAliasBinding target, CancellationToken cancellationToken) =>
+            throw new ObjectDisposedException("private-host-value");
+    }
+
+    private sealed class ThrowingContextFactory : IDbContextFactory<ManifestCatalogDbContext>
+    {
+        public int Calls { get; private set; }
+
+        public ManifestCatalogDbContext CreateDbContext()
+        {
+            Calls++;
+            throw new InvalidOperationException("Storage was accessed before preflight finished.");
+        }
+
+        public Task<ManifestCatalogDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new InvalidOperationException("Storage was accessed before preflight finished.");
         }
     }
 }

@@ -27,7 +27,41 @@ public sealed class PostgreSqlProviderRevisionPreflightTests
         Assert.Equal(nameof(ProviderPreflightOutcome), outcome.Outcome.GetType().Name);
     }
 
-    private sealed class InterruptingRevisionStore(bool available, SecretRef reference) : IProviderConfigurationStore
+    [Fact]
+    public async Task Unexpected_storage_exceptions_do_not_cross_preflight_boundary()
+    {
+        var reference = new SecretRef(SecretId.New(), SecretVersionId.New());
+        var environment = EnvironmentRecordId.New();
+        var binding = new ProviderAliasBinding(ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1));
+        var brokenRevision = new PostgreSqlProviderRevisionPreflight(
+            new InterruptingRevisionStore(false, reference, new ObjectDisposedException("private-host-value")),
+            new InterruptingSecretStore());
+        var brokenSecret = new PostgreSqlProviderRevisionPreflight(
+            new InterruptingRevisionStore(true, reference),
+            new InterruptingSecretStore(new Exception("private-user-value")));
+
+        var revisionResult = await brokenRevision.CheckAsync(environment, binding, default);
+        var secretResult = await brokenSecret.CheckAsync(environment, binding, default);
+
+        Assert.Equal(ProviderPreflightOutcome.ConfigurationUnavailable, revisionResult.Outcome);
+        Assert.Equal(ProviderPreflightOutcome.SecretUnavailable, secretResult.Outcome);
+        Assert.DoesNotContain("private-host-value", revisionResult.ToString());
+        Assert.DoesNotContain("private-user-value", secretResult.ToString());
+    }
+
+    [Fact]
+    public void Disposed_secret_material_cannot_be_copied()
+    {
+        var source = new byte[] { 1, 2, 3 };
+        var material = new SecretMaterial(source);
+        material.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => material.CopyBytes());
+        Assert.Equal(new byte[] { 1, 2, 3 }, source);
+    }
+
+    private sealed class InterruptingRevisionStore(bool available, SecretRef reference, Exception? error = null)
+        : IProviderConfigurationStore
     {
         public ValueTask<ProviderInstanceId> CreateInstanceAsync<TConfiguration>(EnvironmentRecordId environment,
             TConfiguration configuration, CancellationToken cancellationToken) where TConfiguration : class =>
@@ -43,7 +77,7 @@ public sealed class PostgreSqlProviderRevisionPreflightTests
             ProviderConfigurationRevisionNumber revision, CancellationToken cancellationToken)
             where TConfiguration : class
         {
-            if (!available) throw new OperationCanceledException("private storage diagnostic");
+            if (!available) throw error ?? new OperationCanceledException("private storage diagnostic");
             var configuration = new PostgreSqlProviderConfiguration(1, "localhost", 5432, "postgres",
                 "administrator", reference, PostgreSqlDatabaseProvisioner.ImplementationId);
             return ValueTask.FromResult<ProviderConfigurationRevision<TConfiguration>?>(
@@ -51,7 +85,7 @@ public sealed class PostgreSqlProviderRevisionPreflightTests
         }
     }
 
-    private sealed class InterruptingSecretStore : ISecretStore
+    private sealed class InterruptingSecretStore(Exception? error = null) : ISecretStore
     {
         public bool ResolveCalled { get; private set; }
         public ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id,
@@ -64,7 +98,7 @@ public sealed class PostgreSqlProviderRevisionPreflightTests
             CancellationToken cancellationToken)
         {
             ResolveCalled = true;
-            throw new OperationCanceledException("private secret diagnostic");
+            throw error ?? new OperationCanceledException("private secret diagnostic");
         }
     }
 }

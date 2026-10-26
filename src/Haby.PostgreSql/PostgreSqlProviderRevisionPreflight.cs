@@ -24,35 +24,41 @@ public sealed class PostgreSqlProviderRevisionPreflight(IProviderConfigurationSt
             configuration = (await revisions.FindRevisionAsync<PostgreSqlProviderConfiguration>(environment,
                 target.InstanceId, target.RevisionNumber, deadline.Token))?.Configuration;
         }
-        catch (InvalidDataException) { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
-        catch (InvalidOperationException) { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
-        catch (NpgsqlException) { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException(cancellationToken); }
+        catch (Exception) when (deadline.IsCancellationRequested)
+        { return new(ProviderPreflightOutcome.DeadlineExceeded); }
+        catch (Exception) { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deadline.IsCancellationRequested) return new(ProviderPreflightOutcome.DeadlineExceeded);
         if (configuration is null) return new(ProviderPreflightOutcome.RevisionUnavailable);
 
         SecretMaterial? material;
         try { material = await secrets.ResolveAsync(environment, configuration.AdministratorPassword, deadline.Token); }
-        catch (InvalidDataException) { return new(ProviderPreflightOutcome.SecretUnavailable); }
-        catch (NpgsqlException) { return new(ProviderPreflightOutcome.SecretUnavailable); }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { return new(ProviderPreflightOutcome.SecretUnavailable); }
-        if (material is null) return new(ProviderPreflightOutcome.SecretUnavailable);
-
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException(cancellationToken); }
+        catch (Exception) when (deadline.IsCancellationRequested)
+        { return new(ProviderPreflightOutcome.DeadlineExceeded); }
+        catch (Exception) { return new(ProviderPreflightOutcome.SecretUnavailable); }
         using var ownedMaterial = material;
-        var bytes = material.CopyBytes();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (deadline.IsCancellationRequested) return new(ProviderPreflightOutcome.DeadlineExceeded);
+        if (material is null) return new(ProviderPreflightOutcome.SecretUnavailable);
+        byte[]? bytes = null;
         try
         {
+            bytes = material.CopyBytes();
             var builder = new NpgsqlConnectionStringBuilder
             {
                 Host = configuration.Host,
                 Port = configuration.Port,
                 Database = configuration.MaintenanceDatabase,
                 Username = configuration.AdministratorUserName,
-                Password = Encoding.UTF8.GetString(bytes),
                 Pooling = false,
                 Timeout = 5,
-                CommandTimeout = 5
+                CommandTimeout = 5,
+                // Npgsql requires a managed string; clearing byte buffers and disabling pooling limits its lifetime.
+                Password = Encoding.UTF8.GetString(bytes)
             };
             try
             {
@@ -62,22 +68,25 @@ public sealed class PostgreSqlProviderRevisionPreflight(IProviderConfigurationSt
                     "SELECT rolcreatedb OR rolsuper FROM pg_roles WHERE rolname = current_user", connection)
                 { CommandTimeout = 5 };
                 var eligible = await command.ExecuteScalarAsync(deadline.Token);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (deadline.IsCancellationRequested) return new(ProviderPreflightOutcome.DeadlineExceeded);
                 return new(eligible is true ? ProviderPreflightOutcome.Ready :
                     ProviderPreflightOutcome.InsufficientPrivilege);
             }
             finally { builder.Password = null; }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException(cancellationToken); }
+        catch (Exception) when (deadline.IsCancellationRequested)
+        { return new(ProviderPreflightOutcome.DeadlineExceeded); }
         catch (PostgresException error) when (error.SqlState.StartsWith("28", StringComparison.Ordinal))
         { return new(ProviderPreflightOutcome.AuthenticationFailed); }
         catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.InsufficientPrivilege)
         { return new(ProviderPreflightOutcome.InsufficientPrivilege); }
         catch (Exception error) when (error is ArgumentException or FormatException)
         { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
-        catch (Exception error) when (error is NpgsqlException or TimeoutException or OperationCanceledException or
-            System.IO.IOException)
-        { return new(ProviderPreflightOutcome.ServerUnavailable); }
-        finally { Array.Clear(bytes); }
+        catch (Exception) { return new(ProviderPreflightOutcome.ServerUnavailable); }
+        finally { if (bytes is not null) Array.Clear(bytes); }
     }
 }
 

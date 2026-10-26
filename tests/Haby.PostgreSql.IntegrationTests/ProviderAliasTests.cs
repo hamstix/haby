@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Haby.Application;
 using Haby.Domain;
@@ -53,12 +54,14 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
                 (await aliases.ChangeAsync(environment, alias, null, first, "test-runner", default)).Outcome);
             Assert.Equal(ProviderAliasChangeOutcome.Changed,
                 (await aliases.ChangeAsync(environment, alias, first, second, "test-runner", default)).Outcome);
+            Assert.Equal(ProviderAliasChangeOutcome.Unchanged,
+                (await aliases.ChangeAsync(environment, alias, second, second, "test-runner", default)).Outcome);
             Assert.Equal(ProviderAliasChangeOutcome.StaleExpectation,
                 (await aliases.ChangeAsync(environment, alias, first, first, "test-runner", default)).Outcome);
             Assert.Equal(ProviderAliasChangeOutcome.InstanceAlreadyBound,
                 (await aliases.ChangeAsync(environment, ProviderAlias.Create("postgresql.other"), null,
                     first, "test-runner", default)).Outcome);
-            Assert.Equal(ProviderAliasChangeOutcome.PreflightFailed,
+            Assert.Equal(ProviderAliasChangeOutcome.TargetUnavailable,
                 (await aliases.ChangeAsync(environment, alias, second,
                     new(instance, Number(99)), "test-runner", default)).Outcome);
             Assert.Equal(before, await DatabaseCountAsync(fixture.ConnectionString));
@@ -92,6 +95,20 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
         var good = await CreateAsync(Encoding.UTF8.GetBytes(administrator.Password!), administrator, environment);
         Assert.Equal(ProviderPreflightOutcome.Ready, (await check.CheckAsync(environment, good, default)).Outcome);
         Assert.Equal(ProviderPreflightOutcome.RevisionUnavailable, (await check.CheckAsync(other, good, default)).Outcome);
+        await using (var catalog = new NpgsqlConnection(connection))
+        {
+            await catalog.OpenAsync();
+            await using var crossEnvironment = new NpgsqlCommand("""
+                INSERT INTO provider_aliases (environment_record_id, alias, provider_instance_id, revision_number)
+                VALUES (@environment, 'postgresql.cross', @instance, @revision)
+                """, catalog);
+            crossEnvironment.Parameters.AddWithValue("environment", Guid.Parse(other.ToString()));
+            crossEnvironment.Parameters.AddWithValue("instance", Guid.Parse(good.InstanceId.ToString()));
+            crossEnvironment.Parameters.AddWithValue("revision", good.RevisionNumber.Value);
+            var rejected = await Assert.ThrowsAsync<PostgresException>(async () =>
+                await crossEnvironment.ExecuteNonQueryAsync());
+            Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, rejected.SqlState);
+        }
         var bad = await CreateAsync(Encoding.UTF8.GetBytes("incorrect"), administrator, environment);
         Assert.Equal(ProviderPreflightOutcome.AuthenticationFailed, (await check.CheckAsync(environment, bad, default)).Outcome);
         var unavailable = new NpgsqlConnectionStringBuilder(administrator.ConnectionString) { Port = 1 };
@@ -112,6 +129,7 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
         Assert.Equal(ProviderPreflightOutcome.InsufficientPrivilege,
             (await check.CheckAsync(environment, restricted, default)).Outcome);
         var missingSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
+        // Immutable versions and revision associations make a stored missing payload unreachable through supported APIs.
         var missingInstance = await revisions.CreateInstanceAsync(environment, Config(administrator, missingSecret), default);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await revisions.AddRevisionAsync(environment, missingInstance, Number(1),
@@ -187,10 +205,124 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
                 """, catalog).ExecuteNonQueryAsync();
         }
         var alternate = new ProviderAliasBinding(instance, Number(winner.RevisionNumber.Value == 2 ? 3 : 2));
-        await Assert.ThrowsAnyAsync<Exception>(async () =>
-            await store.ChangeAsync(environment, alias, winner, alternate, "test-runner", default));
+        Assert.Equal(ProviderAliasChangeOutcome.StoreUnavailable,
+            (await store.ChangeAsync(environment, alias, winner, alternate, "test-runner", default)).Outcome);
         Assert.Equal(winner, (await store.ResolveAsync(environment, alias, default))!.Binding);
         Assert.Equal(2L, await CountAsync(connection, "provider_alias_audit"));
+    }
+
+    [Fact]
+    public async Task Concurrent_expected_absence_has_one_winner_and_audits_once()
+    {
+        var connection = await NewDatabaseAsync();
+        var admin = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
+        await using var services = Services(connection);
+        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        var secrets = services.GetRequiredService<ISecretStore>();
+        var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
+        var reference = new SecretRef(SecretId.New(), SecretVersionId.New());
+        await secrets.CreateAsync(environment, reference, Encoding.UTF8.GetBytes(admin.Password!), default);
+        var revisions = services.GetRequiredService<IProviderConfigurationStore>();
+        var instance = await revisions.CreateInstanceAsync(environment, Config(admin, reference), default);
+        await revisions.AddRevisionAsync(environment, instance, Number(1), Config(admin, reference), default);
+        var proposed = new ProviderAliasBinding(instance, Number(1));
+        var alias = ProviderAlias.Create("postgresql.primary");
+        var store = services.GetRequiredService<IProviderAliasStore>();
+
+        var results = await Task.WhenAll(
+            store.ChangeAsync(environment, alias, null, proposed, "test-runner", default).AsTask(),
+            store.ChangeAsync(environment, alias, null, proposed, "test-runner", default).AsTask());
+
+        Assert.Single(results, result => result.Outcome == ProviderAliasChangeOutcome.Changed);
+        Assert.Single(results, result => result.Outcome == ProviderAliasChangeOutcome.StaleExpectation);
+        Assert.Equal(proposed, (await store.ResolveAsync(environment, alias, default))!.Binding);
+        Assert.Equal(1L, await CountAsync(connection, "provider_alias_audit"));
+    }
+
+    [Fact]
+    public async Task Blocked_CAS_is_bounded_and_leaves_binding_and_audit_unchanged()
+    {
+        var connection = await NewDatabaseAsync();
+        var admin = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
+        await using var services = Services(connection);
+        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        var secrets = services.GetRequiredService<ISecretStore>();
+        var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
+        var reference = new SecretRef(SecretId.New(), SecretVersionId.New());
+        await secrets.CreateAsync(environment, reference, Encoding.UTF8.GetBytes(admin.Password!), default);
+        var revisions = services.GetRequiredService<IProviderConfigurationStore>();
+        var instance = await revisions.CreateInstanceAsync(environment, Config(admin, reference), default);
+        await revisions.AddRevisionAsync(environment, instance, Number(1), Config(admin, reference), default);
+        await revisions.AddRevisionAsync(environment, instance, Number(2), Config(admin, reference), default);
+        var first = new ProviderAliasBinding(instance, Number(1));
+        var second = new ProviderAliasBinding(instance, Number(2));
+        var alias = ProviderAlias.Create("postgresql.primary");
+        var store = services.GetRequiredService<IProviderAliasStore>();
+        Assert.Equal(ProviderAliasChangeOutcome.Changed,
+            (await store.ChangeAsync(environment, alias, null, first, "test-runner", default)).Outcome);
+        await using (var blocker = new NpgsqlConnection(connection))
+        {
+            await blocker.OpenAsync();
+            await using var lockTransaction = await blocker.BeginTransactionAsync();
+            await using var hold = new NpgsqlCommand("""
+                UPDATE provider_aliases SET revision_number = revision_number
+                WHERE environment_record_id = @environment AND alias = @alias
+                """, blocker, lockTransaction);
+            hold.Parameters.AddWithValue("environment", Guid.Parse(environment.ToString()));
+            hold.Parameters.AddWithValue("alias", alias.Value);
+            Assert.Equal(1, await hold.ExecuteNonQueryAsync());
+
+            var result = await store.ChangeAsync(environment, alias, first, second, "test-runner", default);
+            Assert.Equal(ProviderAliasChangeOutcome.StoreUnavailable, result.Outcome);
+            await lockTransaction.RollbackAsync();
+        }
+        Assert.Equal(first, (await store.ResolveAsync(environment, alias, default))!.Binding);
+        Assert.Equal(1L, await CountAsync(connection, "provider_alias_audit"));
+    }
+
+    [Fact]
+    public async Task Deadline_cancels_a_real_PostgreSql_secret_read_without_creating_a_database()
+    {
+        var connection = await NewDatabaseAsync();
+        var admin = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
+        await using var services = Services(connection);
+        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        var secrets = services.GetRequiredService<ISecretStore>();
+        var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
+        var reference = new SecretRef(SecretId.New(), SecretVersionId.New());
+        await secrets.CreateAsync(environment, reference, Encoding.UTF8.GetBytes(admin.Password!), default);
+        var revisions = services.GetRequiredService<IProviderConfigurationStore>();
+        var instance = await revisions.CreateInstanceAsync(environment, Config(admin, reference), default);
+        await revisions.AddRevisionAsync(environment, instance, Number(1), Config(admin, reference), default);
+        var preflight = new PostgreSqlProviderRevisionPreflight(revisions, new SlowSecretStore(connection));
+        var before = await DatabaseCountAsync(fixture.ConnectionString);
+
+        var elapsed = Stopwatch.StartNew();
+        var result = await preflight.CheckAsync(environment, new(instance, Number(1)), default);
+        elapsed.Stop();
+
+        Assert.Equal(ProviderPreflightOutcome.DeadlineExceeded, result.Outcome);
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(12));
+        Assert.Equal(before, await DatabaseCountAsync(fixture.ConnectionString));
+    }
+
+    private sealed class SlowSecretStore(string connectionString) : ISecretStore
+    {
+        public ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask CreateAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask AddVersionAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+        public async ValueTask<SecretMaterial?> ResolveAsync(EnvironmentRecordId environment, SecretRef reference,
+            CancellationToken cancellationToken)
+        {
+            await using var database = new NpgsqlConnection(connectionString);
+            await database.OpenAsync(cancellationToken);
+            await using var sleep = new NpgsqlCommand("SELECT pg_sleep(12)", database) { CommandTimeout = 20 };
+            await sleep.ExecuteNonQueryAsync(cancellationToken);
+            return null;
+        }
     }
 
     private static ProviderConfigurationRevisionNumber Number(long value) => ProviderConfigurationRevisionNumber.Create(value);

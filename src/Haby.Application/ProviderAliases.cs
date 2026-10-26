@@ -18,7 +18,8 @@ public enum ProviderPreflightOutcome
     AuthenticationFailed,
     ServerUnavailable,
     InsufficientPrivilege,
-    ConfigurationUnavailable
+    ConfigurationUnavailable,
+    DeadlineExceeded
 }
 
 /// <summary>Bounded, value-free point-in-time evidence. No driver detail crosses this boundary.</summary>
@@ -36,10 +37,12 @@ public interface IProviderRevisionPreflight
 public enum ProviderAliasChangeOutcome
 {
     Changed,
+    Unchanged,
     PreflightFailed,
     StaleExpectation,
     TargetUnavailable,
-    InstanceAlreadyBound
+    InstanceAlreadyBound,
+    StoreUnavailable
 }
 
 public sealed record ProviderAliasChangeResult(ProviderAliasChangeOutcome Outcome,

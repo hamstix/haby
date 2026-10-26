@@ -22,81 +22,115 @@ public sealed class PostgreSqlProviderAliasStore(
         if (string.IsNullOrWhiteSpace(technicalActor) || technicalActor.Length > 256)
             throw new ArgumentException("Invalid technical actor.", nameof(technicalActor));
         cancellationToken.ThrowIfCancellationRequested();
-        var check = await preflight.CheckAsync(environment, proposed, cancellationToken);
+        ProviderPreflightResult check;
+        try { check = await preflight.CheckAsync(environment, proposed, cancellationToken); }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException(cancellationToken); }
+        catch (Exception)
+        {
+            return new(ProviderAliasChangeOutcome.PreflightFailed,
+                new ProviderPreflightResult(ProviderPreflightOutcome.ConfigurationUnavailable));
+        }
+        if (check.Outcome == ProviderPreflightOutcome.RevisionUnavailable)
+            return new(ProviderAliasChangeOutcome.TargetUnavailable, check);
         if (!check.IsReady) return new(ProviderAliasChangeOutcome.PreflightFailed, check);
         cancellationToken.ThrowIfCancellationRequested();
 
         var environmentId = Guid.Parse(environment.ToString());
         var newInstanceId = Guid.Parse(proposed.InstanceId.ToString());
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var available = await context.ProviderConfigurationRevisions.AsNoTracking().AnyAsync(row =>
-            row.EnvironmentRecordId == environmentId && row.ProviderInstanceId == newInstanceId &&
-            row.RevisionNumber == proposed.RevisionNumber.Value && row.IsSealed, cancellationToken);
-        if (!available) return new(ProviderAliasChangeOutcome.TargetUnavailable);
+        try
+        {
+            await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            await context.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '2s'", cancellationToken);
+            await context.Database.ExecuteSqlRawAsync("SET LOCAL statement_timeout = '10s'", cancellationToken);
+            var available = await context.ProviderConfigurationRevisions.AsNoTracking().AnyAsync(row =>
+                row.EnvironmentRecordId == environmentId && row.ProviderInstanceId == newInstanceId &&
+                row.RevisionNumber == proposed.RevisionNumber.Value && row.IsSealed, cancellationToken);
+            if (!available) return new(ProviderAliasChangeOutcome.TargetUnavailable);
 
-        if (expected is null)
-        {
-            context.ProviderAliases.Add(new ProviderAliasRow
+            if (expected is null)
             {
-                EnvironmentRecordId = environmentId,
-                Alias = alias.Value,
-                ProviderInstanceId = newInstanceId,
-                RevisionNumber = proposed.RevisionNumber.Value
-            });
-        }
-        else
-        {
-            var previousId = Guid.Parse(expected.InstanceId.ToString());
-            int changed;
-            try
+                context.ProviderAliases.Add(new ProviderAliasRow
+                {
+                    EnvironmentRecordId = environmentId,
+                    Alias = alias.Value,
+                    ProviderInstanceId = newInstanceId,
+                    RevisionNumber = proposed.RevisionNumber.Value
+                });
+            }
+            else
             {
-                changed = await context.ProviderAliases
+                var previousId = Guid.Parse(expected.InstanceId.ToString());
+                var changed = await context.ProviderAliases
                     .Where(row => row.EnvironmentRecordId == environmentId && row.Alias == alias.Value &&
                         row.ProviderInstanceId == previousId && row.RevisionNumber == expected.RevisionNumber.Value)
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(row => row.ProviderInstanceId, newInstanceId)
                         .SetProperty(row => row.RevisionNumber, proposed.RevisionNumber.Value), cancellationToken);
+                if (changed != 1) return new(ProviderAliasChangeOutcome.StaleExpectation);
+                if (expected == proposed)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await transaction.CommitAsync(CancellationToken.None);
+                    return new(ProviderAliasChangeOutcome.Unchanged);
+                }
             }
-            catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.UniqueViolation)
-            { return new(ProviderAliasChangeOutcome.InstanceAlreadyBound); }
-            if (changed != 1) return new(ProviderAliasChangeOutcome.StaleExpectation);
-        }
 
-        context.ProviderAliasAudits.Add(new ProviderAliasAuditRow
-        {
-            Id = Guid.CreateVersion7(),
-            EnvironmentRecordId = environmentId,
-            Alias = alias.Value,
-            PreviousInstanceId = expected is null ? null : Guid.Parse(expected.InstanceId.ToString()),
-            PreviousRevisionNumber = expected?.RevisionNumber.Value,
-            NewInstanceId = newInstanceId,
-            NewRevisionNumber = proposed.RevisionNumber.Value,
-            TechnicalActor = technicalActor,
-            ChangedAt = clock.GetUtcNow()
-        });
-        try
-        {
+            context.ProviderAliasAudits.Add(new ProviderAliasAuditRow
+            {
+                Id = Guid.CreateVersion7(),
+                EnvironmentRecordId = environmentId,
+                Alias = alias.Value,
+                PreviousInstanceId = expected is null ? null : Guid.Parse(expected.InstanceId.ToString()),
+                PreviousRevisionNumber = expected?.RevisionNumber.Value,
+                NewInstanceId = newInstanceId,
+                NewRevisionNumber = proposed.RevisionNumber.Value,
+                TechnicalActor = technicalActor,
+                ChangedAt = clock.GetUtcNow()
+            });
             await context.SaveChangesAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             return new(ProviderAliasChangeOutcome.Changed);
         }
-        catch (DbUpdateException error) when (error.InnerException is PostgresException postgres &&
-            postgres.SqlState == PostgresErrorCodes.UniqueViolation)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException(cancellationToken); }
+        catch (Exception error) when (Postgres(error)?.SqlState == PostgresErrorCodes.UniqueViolation)
         {
-            return new(postgres.ConstraintName == "IX_provider_aliases_provider_instance_id" ?
-                ProviderAliasChangeOutcome.InstanceAlreadyBound : ProviderAliasChangeOutcome.StaleExpectation);
-        }
-        catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.UniqueViolation)
-        {
+            if (expected is null)
+            {
+                try
+                {
+                    if (await AliasExistsAsync(environmentId, alias.Value, cancellationToken))
+                        return new(ProviderAliasChangeOutcome.StaleExpectation);
+                }
+                catch (Exception) when (cancellationToken.IsCancellationRequested)
+                { throw new OperationCanceledException(cancellationToken); }
+                catch (Exception) { return new(ProviderAliasChangeOutcome.StoreUnavailable); }
+            }
             return new(ProviderAliasChangeOutcome.InstanceAlreadyBound);
         }
-        catch (DbUpdateException error) when (error.InnerException is PostgresException postgres &&
-            postgres.SqlState == PostgresErrorCodes.ForeignKeyViolation)
-        {
-            return new(ProviderAliasChangeOutcome.TargetUnavailable);
-        }
+        catch (Exception error) when (Postgres(error)?.SqlState == PostgresErrorCodes.ForeignKeyViolation)
+        { return new(ProviderAliasChangeOutcome.TargetUnavailable); }
+        catch (Exception error) when (Postgres(error)?.SqlState is "40P01" or "55P03" or "57014")
+        { return new(ProviderAliasChangeOutcome.StoreUnavailable); }
+        catch (Exception)
+        { return new(ProviderAliasChangeOutcome.StoreUnavailable); }
+    }
+
+    private async Task<bool> AliasExistsAsync(Guid environmentId, string alias, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        return await context.ProviderAliases.AsNoTracking()
+            .AnyAsync(row => row.EnvironmentRecordId == environmentId && row.Alias == alias, cancellationToken);
+    }
+
+    private static PostgresException? Postgres(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+            if (current is PostgresException postgres) return postgres;
+        return null;
     }
 
     public async ValueTask<PersistedProviderAliasResolution?> ResolveAsync(EnvironmentRecordId environment,

@@ -6,12 +6,29 @@ namespace Haby.Application;
 public sealed class SecretMaterial : IDisposable
 {
     private readonly byte[] _bytes;
+    private readonly object _gate = new();
+    private bool _disposed;
 
     public SecretMaterial(byte[] bytes) => _bytes = (byte[])(bytes ?? throw new ArgumentNullException(nameof(bytes))).Clone();
 
-    public byte[] CopyBytes() => (byte[])_bytes.Clone();
+    public byte[] CopyBytes()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return (byte[])_bytes.Clone();
+        }
+    }
 
-    public void Dispose() => Array.Clear(_bytes);
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            Array.Clear(_bytes);
+            _disposed = true;
+        }
+    }
 
     public override string ToString() => nameof(SecretMaterial);
 }
