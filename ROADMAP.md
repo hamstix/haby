@@ -18,7 +18,8 @@ Haby OSS owns:
 - environment-specific application deployments and exact deployment change sets;
 - provider instances, resources, resource exports, bindings, workloads and lifecycle policies;
 - configuration documents, rendering, revisions and publication;
-- generated values, encrypted secret versions, observed resource state and references to secrets;
+- generated values, versioned secrets with explicit storage protection modes,
+  observed resource state and references to secrets;
 - provisioning and configuration publication abstractions;
 - PostgreSQL persistence and database migrations;
 - versioned REST and gRPC APIs;
@@ -50,7 +51,11 @@ Generic improvements should be proposed upstream. A downstream source mirror mus
 - Keep manifest import side-effect free and apply only exact, planned ChangeSet membership.
 - Treat provisioning as an idempotent, retryable operation, not as a side effect of a request handler.
 - Never store plaintext secrets in logs, operation results or ordinary configuration documents.
-- Store managed secret payloads encrypted in PostgreSQL by default, keep key-encryption keys outside the database and exchange only SecretRefs across domain boundaries.
+- Support `Plaintext` and `EnvelopeEncrypted` as standard PostgreSQL
+  secret-storage modes under ADR-006; never imply that plaintext protects
+  against database or backup readers. Keep key-encryption keys outside the
+  database in encrypted mode and exchange only SecretRefs across domain
+  boundaries.
 - Keep PostgreSQL as the default source of truth. Kubernetes support is an integration and an optional deployment mode, not the only storage model.
 - Use semantic versioning for public contracts and plugin abstractions.
 - Use MudBlazor for standard UI components; implement only Haby-specific UX components locally.
@@ -230,7 +235,9 @@ Objective: prevent request failures from leaving unknown external state.
 - [ ] Add idempotency keys, retries, timeouts and cancellation.
 - [ ] Add leases so multiple Haby replicas cannot execute the same operation concurrently.
 - [ ] Persist structured per-step results without leaking secrets.
-- [ ] Implement the default encrypted PostgreSQL secret store with per-version DEKs, AES-256-GCM payload encryption and externally supplied versioned KEKs.
+- [ ] Implement the `EnvelopeEncrypted` PostgreSQL secret-store mode with
+  per-version DEKs, AES-256-GCM payload encryption and externally supplied
+  versioned KEKs; preserve compatibility with the standard `Plaintext` mode.
 - [ ] Add durable KEK rotation and DEK rewrap operations that retain old keys until verification completes.
 - [ ] Model secret rotation separately from key rotation and reconcile affected resources and workloads.
 - [ ] Audit secret writes, resolutions, rotations and deletions without recording values.
@@ -252,7 +259,9 @@ Exit criteria:
 - restarting Haby does not lose in-progress operations;
 - repeated application of the same desired state is safe;
 - partial external failures are visible and recoverable;
-- a PostgreSQL backup does not disclose secret plaintext without the separately managed key ring;
+- a PostgreSQL backup of encrypted SecretVersions does not disclose their
+  plaintext without the separately managed key ring; backups containing
+  plaintext SecretVersions must be protected as secret-bearing assets;
 - key rotation can resume safely after interruption.
 
 ### M4 — Public API and security
@@ -469,7 +478,15 @@ Extend the same single-instance deployment with persisted ChangeSet, Plan,
 generation and execution records sufficient to recover honestly after a
 process restart. Keep exact Provider selection and configuration revisions
 pinned; operator-owned credentials must be protected and remain outside the
-manifest, Plan and ordinary diagnostics. Execute only the supported
+manifest, Plan, generation, diagnostics and ordinary read APIs. ADR-006 permits
+`Plaintext` as a standard PostgreSQL SecretStore mode, not just a pilot
+exception. It exposes secrets to readers of the relevant database rows and
+backups, so restrict those readers and protect backup copies. Prefer
+`EnvelopeEncrypted` wherever that exposure is unacceptable. The pilot must
+explicitly choose an implemented storage mode and document its operational
+threat boundary before enabling credential-dependent execution.
+
+Execute only the supported
 `postgresql.database/v1alpha1` shape after desired-state commit.
 
 Before enabling execution, define how an interrupted or uncertain CREATE is
@@ -634,7 +651,9 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-004](docs/adr/0004-operator-api-transport-strategy.md): gRPC-first
   internal alpha operator API; defer REST Minimal API and stable public contracts.
 - ADR-005: Background operation and reconciliation model.
-- [ADR-006](docs/adr/0006-secret-storage-and-encryption.md): Secret storage, envelope encryption and external provider boundary.
+- [ADR-006](docs/adr/0006-secret-storage-and-encryption.md): Secret storage,
+  standard plaintext and envelope-encrypted modes, and external provider
+  boundary.
 - ADR-007: MudBlazor as the UI component foundation.
 - ADR-008: Scope and ownership of Kubernetes operator mode.
 - [ADR-009](docs/adr/0009-application-manifest-domain-model.md): Application, Component, Resource, Resource export, Binding, Workload and Configuration-document model.
@@ -659,7 +678,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - Migration of prototype data or preservation of its EF migration history.
 - A writable long-lived downstream fork of the OSS repository.
 - Dynamic installation of untrusted plugin assemblies.
-- External secret-store implementations before the encrypted PostgreSQL model and provider-neutral contracts are validated.
+- External secret-store implementations before the PostgreSQL secret model and provider-neutral contracts are validated.
 - Dynamic credential leasing and renewal before durable secret and operation lifecycles are established.
 - Runtime provider protocols and out-of-process plugin lifecycle management.
 - Configuration publisher implementations and the complete pull-delivery endpoint in the first M2 contract change.
