@@ -44,6 +44,12 @@ secret-bearing assets. The disposable restore test verifies exact bytes after
 restore and removes its test archive; operators must protect their own backups.
 
 Register the adapter with `AddPostgreSqlManifestCatalog(connectionString)`.
+Before a single-instance pilot host accepts requests, await
+`ManifestCatalogMigrationInitializer.MigrateAsync(cancellationToken)`. A failed
+migration must fail startup. Do not call `EnsureCreated`. The database principal
+needs DDL rights for EF's migration history table and catalog tables,
+indexes and constraints, plus normal read/write rights. The pilot deployment
+must restrict schema migration to one Haby instance.
 
 ## Durable one-Application planning
 
@@ -60,16 +66,10 @@ configuration payload is copied into a Plan.
 Every Plan expires 24 hours after creation. `ClosePlanAsync` records an
 independent, immutable closure. Closed and expired Plans remain readable for
 audit but `CheckPlanAsync` rejects them. No retention deletion runs in this
-slice. `CheckPlanAsync` compares the exact typed inputs after checking the
-fingerprint; an alias switch makes the prior Plan stale and a new Plan can be
+slice. `CheckPlanAsync` compares the exact typed inputs and fingerprint; an
+alias switch makes the prior Plan stale and a new Plan can be
 created for the same ChangeSet. The application boundary exposes no desired
 state commit or Provider execution.
-Before a single-instance pilot host accepts requests, await
-`ManifestCatalogMigrationInitializer.MigrateAsync(cancellationToken)`. A failed
-migration must fail startup. Do not call `EnsureCreated`. The database principal
-needs DDL rights for EF's migration history table and catalog tables,
-indexes and constraints, plus normal read/write rights. The pilot deployment
-must restrict schema migration to one Haby instance.
 
 EF migration tooling uses `ManifestCatalogDesignTimeFactory` to inspect or add
 migrations without a database connection. Supply a connection explicitly when

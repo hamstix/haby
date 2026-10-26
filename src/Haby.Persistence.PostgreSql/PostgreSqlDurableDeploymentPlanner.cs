@@ -217,9 +217,11 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             item.Id == revision.ProviderInstanceId && item.EnvironmentRecordId == revision.EnvironmentRecordId,
             cancellationToken);
         if (instance is null) return false;
-        var codec = _codecs.SingleOrDefault(item => item.ProviderKindId == instance.ProviderKindId &&
-            item.ShapeId == revision.ConfigurationShapeId && item.PayloadFormatVersion == revision.PayloadFormatVersion);
-        if (codec is null) return false;
+        var matches = _codecs.Where(item => item.ProviderKindId == instance.ProviderKindId &&
+            item.ShapeId == revision.ConfigurationShapeId && item.PayloadFormatVersion == revision.PayloadFormatVersion)
+            .Take(2).ToArray();
+        if (matches.Length != 1) return false;
+        var codec = matches[0];
         var references = await context.ProviderRevisionSecretRefs.AsNoTracking().Where(item =>
             item.ProviderInstanceId == revision.ProviderInstanceId && item.RevisionNumber == revision.RevisionNumber)
             .ToListAsync(cancellationToken);
@@ -238,7 +240,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
                     item.SecretId == Guid.Parse(reference.Reference.SecretId.ToString()) &&
                     item.SecretVersionId == Guid.Parse(reference.Reference.SecretVersionId.ToString())));
         }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or FormatException or System.Text.Json.JsonException)
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or InvalidDataException or FormatException or System.Text.Json.JsonException)
         { return false; }
     }
 
