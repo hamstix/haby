@@ -6,11 +6,29 @@ Providers. `IManifestImportStore` retains the existing import use case;
 `IManifestRevisionQuery` provides asynchronous inspection without changing the
 checkpoint planner's synchronous in-memory reader.
 
+`AddPostgreSqlPlaintextSecretStore()` explicitly registers the internal
+PostgreSQL `Plaintext` implementation. It is not registered by the host or by
+`AddPostgreSqlManifestCatalog`, so this slice does not select a global write
+mode or expose a credential endpoint. Callers must supply a trusted, already
+authorized `EnvironmentRecordId`; this storage contract does not authenticate
+or authorize operators. It accepts only Environment-owned, managed Provider
+administrator credentials. Each `SecretRef` names one immutable version.
+The payload is stored as `bytea` in `secret_payloads`, apart from Secret and
+version metadata. Reads verify both Secret/version and Secret/Environment
+membership and reject unknown protection formats or format versions.
+
+**Plaintext is not encrypted.** Readers of `secret_payloads` and database
+backups can recover the credential bytes. Restrict database roles, backup
+readers, storage and retention accordingly, and prefer an encrypted mode when
+those readers are in the threat model. `pg_dump` archives of this catalog are
+secret-bearing assets. The disposable restore test verifies exact bytes after
+restore and removes its test archive; operators must protect their own backups.
+
 Register the adapter with `AddPostgreSqlManifestCatalog(connectionString)`.
 Before a single-instance pilot host accepts requests, await
 `ManifestCatalogMigrationInitializer.MigrateAsync(cancellationToken)`. A failed
 migration must fail startup. Do not call `EnsureCreated`. The database principal
-needs DDL rights for EF's migration history table, the two catalog tables,
+needs DDL rights for EF's migration history table and catalog tables,
 indexes and constraints, plus normal read/write rights. The pilot deployment
 must restrict schema migration to one Haby instance.
 
@@ -29,9 +47,10 @@ createdb haby_catalog_restore_check
 pg_restore --no-owner --no-privileges --dbname=haby_catalog_restore_check manifest-catalog.dump
 ```
 
-Use a separate empty restore-check database and compare Application/revision row
-counts and `__EFMigrationsHistory` to the source. Confirm the restored revision
-can be read before relying on the backup. The configured migration principal
+Use a separate empty restore-check database and compare Application/revision,
+Environment, Secret, version and payload row counts plus
+`__EFMigrationsHistory` to the source. Confirm the restored revision and exact
+SecretVersion can be read before relying on the backup. The configured migration principal
 must have `USAGE` and `CREATE` on the target schema and ownership or equivalent
 DDL rights on existing catalog objects. Check schema privileges with
 `SELECT has_schema_privilege(current_user, 'public', 'USAGE'),
