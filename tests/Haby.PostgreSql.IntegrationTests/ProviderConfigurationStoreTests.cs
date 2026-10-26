@@ -219,6 +219,40 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
                 .FindRevisionAsync<PostgreSqlProviderConfiguration>(environment, instance, Number(1), default));
     }
 
+    [Fact]
+    public async Task Direct_revision_insert_requires_unsealed_object_payload()
+    {
+        var connection = await NewDatabaseAsync();
+        await using var services = Services(connection);
+        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        var environment = await services.GetRequiredService<ISecretStore>()
+            .CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
+        var instance = await services.GetRequiredService<IProviderConfigurationStore>()
+            .CreateInstanceAsync(environment, new SampleConfiguration("sample-target", "sample.impl/v1"), default);
+        await using var database = new NpgsqlConnection(connection);
+        await database.OpenAsync();
+        foreach (var payload in new[] { "[]", "null", "{bad" })
+            await Assert.ThrowsAsync<PostgresException>(async () => await InsertAsync(payload, false));
+        await Assert.ThrowsAsync<PostgresException>(async () => await InsertAsync("{}", true));
+        Assert.Equal(0L, (long)(await new NpgsqlCommand(
+            "SELECT count(*) FROM provider_configuration_revisions", database).ExecuteScalarAsync())!);
+
+        async Task InsertAsync(string payload, bool sealedAtInsert)
+        {
+            await using var insert = new NpgsqlCommand("""
+                INSERT INTO provider_configuration_revisions
+                    (provider_instance_id, revision_number, environment_record_id, implementation_id,
+                     configuration_shape_id, payload_format_version, payload_json, is_sealed)
+                SELECT id, 1, environment_record_id, 'sample.impl/v1', 'sample.configuration/v1', 1,
+                    @payload, @sealed_at_insert FROM provider_instances WHERE id = @id
+                """, database);
+            insert.Parameters.AddWithValue("id", Guid.Parse(instance.ToString()));
+            insert.Parameters.AddWithValue("payload", payload);
+            insert.Parameters.AddWithValue("sealed_at_insert", sealedAtInsert);
+            await insert.ExecuteNonQueryAsync();
+        }
+    }
+
     private const string Implementation = "haby.postgresql.database/v1alpha1";
     private static ProviderConfigurationRevisionNumber Number(long value) => ProviderConfigurationRevisionNumber.Create(value);
     private static PostgreSqlProviderConfiguration Configuration(SecretRef secret, string host = "localhost",

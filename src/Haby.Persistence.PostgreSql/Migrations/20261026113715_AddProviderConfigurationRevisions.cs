@@ -174,6 +174,9 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 CREATE FUNCTION check_provider_revision_insert() RETURNS trigger LANGUAGE plpgsql AS $$
                 DECLARE latest bigint;
                 BEGIN
+                    IF NEW.is_sealed THEN
+                        RAISE EXCEPTION 'Provider revision must be inserted unsealed';
+                    END IF;
                     PERFORM 1 FROM provider_instances WHERE id = NEW.provider_instance_id FOR UPDATE;
                     SELECT max(revision_number) INTO latest FROM provider_configuration_revisions
                         WHERE provider_instance_id = NEW.provider_instance_id;

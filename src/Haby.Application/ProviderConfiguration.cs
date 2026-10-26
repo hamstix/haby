@@ -27,6 +27,11 @@ public sealed record PreparedProviderConfiguration(string ProviderKindId, Provid
     IReadOnlyList<ProviderConfigurationSecretReference> SecretReferences);
 
 /// <summary>Build-time registered typed codec. Payloads never contain secret material.</summary>
+/// <remarks>
+/// A persisted kind, shape and format triple is a frozen byte contract: exact reads re-encode and compare
+/// the JSON text. The current registry permits one codec per configuration CLR type. Changing its serialized
+/// bytes requires an explicit compatibility reader or migration before historical revisions can be used.
+/// </remarks>
 public interface IProviderConfigurationCodec
 {
     Type ConfigurationType { get; }
