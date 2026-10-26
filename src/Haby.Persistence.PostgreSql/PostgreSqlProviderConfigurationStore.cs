@@ -62,8 +62,8 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
         var id = Guid.Parse(instanceId.ToString());
         await using var context = await _contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var instance = await context.ProviderInstances.FromSqlInterpolated(
-            $"SELECT * FROM provider_instances WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(cancellationToken);
+        var instance = await context.ProviderInstances.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.Id == id, cancellationToken);
         if (instance is null || instance.EnvironmentRecordId != environmentId)
             throw new InvalidOperationException("Provider instance is unavailable in this Environment.");
         if (instance.ProviderKindId != prepared.ProviderKindId ||
@@ -110,10 +110,9 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
         { throw new OperationCanceledException(cancellationToken); }
         catch (DbUpdateException) { throw new InvalidOperationException("Provider revision write failed."); }
         cancellationToken.ThrowIfCancellationRequested();
-        var sealedRows = await context.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE provider_configuration_revisions SET is_sealed = TRUE
-            WHERE provider_instance_id = {id} AND revision_number = {revision.Value} AND is_sealed = FALSE
-            """, cancellationToken);
+        var sealedRows = await context.ProviderConfigurationRevisions
+            .Where(row => row.ProviderInstanceId == id && row.RevisionNumber == revision.Value && !row.IsSealed)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.IsSealed, true), cancellationToken);
         if (sealedRows != 1) throw new InvalidOperationException("Provider revision sealing failed.");
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
