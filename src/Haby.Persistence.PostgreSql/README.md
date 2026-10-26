@@ -44,6 +44,26 @@ secret-bearing assets. The disposable restore test verifies exact bytes after
 restore and removes its test archive; operators must protect their own backups.
 
 Register the adapter with `AddPostgreSqlManifestCatalog(connectionString)`.
+
+## Durable one-Application planning
+
+`AddPostgreSqlDurableDeploymentPlanner()` registers the internal asynchronous
+`IDurableDeploymentPlanner` boundary. It stores one exact Manifest revision and
+an `ExpectedAbsence` precondition per ChangeSet. `ExpectedGeneration` is
+explicitly unsupported until durable ApplicationDeployments exist. Planning
+accepts only one `postgresql.database/v1alpha1` Resource with a validated
+database name. It resolves an Environment-local Provider alias to one sealed,
+decodable configuration revision and registered implementation, then stores
+only the exact identities and a versioned fingerprint. No credential or
+configuration payload is copied into a Plan.
+
+Every Plan expires 24 hours after creation. `ClosePlanAsync` records an
+independent, immutable closure. Closed and expired Plans remain readable for
+audit but `CheckPlanAsync` rejects them. No retention deletion runs in this
+slice. `CheckPlanAsync` compares the exact typed inputs after checking the
+fingerprint; an alias switch makes the prior Plan stale and a new Plan can be
+created for the same ChangeSet. The application boundary exposes no desired
+state commit or Provider execution.
 Before a single-instance pilot host accepts requests, await
 `ManifestCatalogMigrationInitializer.MigrateAsync(cancellationToken)`. A failed
 migration must fail startup. Do not call `EnsureCreated`. The database principal
