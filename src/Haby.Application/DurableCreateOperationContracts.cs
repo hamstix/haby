@@ -103,7 +103,8 @@ public abstract record DurableCreateMarkerResult
 
 /// <summary>
 /// The durable journal behind the dispatch barrier. Every transition is a compare-and-transition
-/// guard; terminal rows are never rewritten and attempts are never erased.
+/// guard; only the separate, audited PostgreSQL recovery path may change
+/// <c>NeedsAttention</c> to <c>Succeeded</c>. Attempts are never erased.
 /// </summary>
 public interface IDurableCreateOperationJournal
 {

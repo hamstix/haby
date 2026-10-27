@@ -24,6 +24,314 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         [], [], []);
 
     [Fact]
+    public async Task Explicit_assignment_of_independently_created_database_is_atomic_and_idempotent()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_ok");
+        var attemptId = await MakeUncertainAsync(prepared);
+        await using (var admin = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await admin.OpenAsync();
+            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{prepared.Database}\"", admin);
+            await create.ExecuteNonQueryAsync();
+        }
+        // The pinned login can read pg_database but cannot create anything during assignment.
+        await AlterRoleAsync(prepared.User, "NOCREATEDB");
+        PostgreSqlDatabaseRecoveryReceipt receipt;
+        await using (var services = Services(prepared.Connection, prepared.Time))
+        {
+            var recovery = services.GetRequiredService<IPostgreSqlDatabaseRecovery>();
+            var preview = await recovery.InspectAsync(prepared.Key, default);
+            Assert.NotNull(preview);
+            Assert.Equal(prepared.Database, preview.DatabaseName);
+            Assert.Equal(prepared.Binding.InstanceId, preview.ProviderInstance);
+            Assert.Equal(attemptId, preview.UncertainAttemptId);
+            Assert.Equal(DurableCreateOperationState.NeedsAttention, preview.State);
+            Assert.Null(await ScalarAsync(prepared.Connection,
+                "SELECT applied_generation FROM application_deployments"));
+
+            var command = Assignment(prepared, attemptId);
+            var result = await recovery.AssignExistingDatabaseAsync(command, default);
+            Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Assigned, result.Outcome);
+            receipt = Assert.IsType<PostgreSqlDatabaseRecoveryReceipt>(result.Decision);
+            Assert.Equal(attemptId, receipt.AttemptId);
+            Assert.DoesNotContain("operator note", result.ToString(), StringComparison.Ordinal);
+        }
+        Assert.Equal("Succeeded", await ScalarAsync(prepared.Connection,
+            "SELECT state FROM durable_create_operations"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+        Assert.Equal(["Uncertain"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions"));
+        await using (var restarted = Services(prepared.Connection, prepared.Time))
+        {
+            var recovery = restarted.GetRequiredService<IPostgreSqlDatabaseRecovery>();
+            await AlterRoleAsync(prepared.User, "NOLOGIN");
+            var retry = await recovery.AssignExistingDatabaseAsync(Assignment(prepared, attemptId), default);
+            Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.AlreadyAssigned, retry.Outcome);
+            Assert.Equal(receipt, retry.Decision);
+            var audit = await restarted.GetRequiredService<IPostgreSqlDatabaseRecoveryJournal>()
+                .FindDecisionAsync(prepared.Key, attemptId, default);
+            Assert.Equal("operator note", audit!.Note);
+            Assert.True(audit.Acknowledged);
+            Assert.Equal(nameof(PostgreSqlDatabaseRecoveryAudit), audit.ToString());
+        }
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions"));
+        await AssertRejectedAsync(prepared.Connection,
+            "UPDATE postgresql_database_recovery_decisions SET note = 'rewritten'");
+        await AssertRejectedAsync(prepared.Connection,
+            "DELETE FROM postgresql_database_recovery_decisions");
+        await AssertRejectedAsync(prepared.Connection,
+            "UPDATE durable_create_operations SET state = 'Pending'");
+    }
+
+    [Fact]
+    public async Task Rejected_assignments_leave_operation_attempt_audit_and_applied_generation_unchanged()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_no");
+        var attemptId = await MakeUncertainAsync(prepared);
+        var before = await RecoveryRowsAsync(prepared.Connection);
+        await using var services = Services(prepared.Connection, prepared.Time);
+        var recovery = services.GetRequiredService<IPostgreSqlDatabaseRecovery>();
+        var command = Assignment(prepared, attemptId);
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await recovery.AssignExistingDatabaseAsync(command with { Acknowledged = false }, default));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await recovery.AssignExistingDatabaseAsync(command with { Note = " " }, default));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await recovery.AssignExistingDatabaseAsync(command with { Note = new string('x', 513) }, default));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await recovery.AssignExistingDatabaseAsync(command with { Note = "password=hidden" }, default));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await recovery.AssignExistingDatabaseAsync(command with { Note = "bad\u202evalue" }, default));
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Rejected,
+            (await recovery.AssignExistingDatabaseAsync(command with { ExpectedAttemptId = Guid.NewGuid() },
+                default)).Outcome);
+        var wrongKey = prepared.Key with { ResourceId = ManifestLocalId.Create("other") };
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Rejected,
+            (await recovery.AssignExistingDatabaseAsync(command with { Key = wrongKey }, default)).Outcome);
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.DatabaseAbsent,
+            (await recovery.AssignExistingDatabaseAsync(command, default)).Outcome);
+        Assert.Equal(before, await RecoveryRowsAsync(prepared.Connection));
+
+        await AlterRoleAsync(prepared.User, "NOLOGIN");
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable,
+            (await recovery.AssignExistingDatabaseAsync(command, default)).Outcome);
+        Assert.Equal(before, await RecoveryRowsAsync(prepared.Connection));
+    }
+
+    [Fact]
+    public async Task Recovery_database_guard_rejects_unaudited_or_arbitrary_terminal_rewrites()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_guard");
+        await MakeUncertainAsync(prepared);
+        await AssertRejectedAsync(prepared.Connection,
+            "UPDATE durable_create_operations SET state = 'Succeeded', reason_code = NULL");
+        await AssertRejectedAsync(prepared.Connection,
+            "UPDATE durable_create_operations SET state = 'Pending', reason_code = NULL, finalized_at = NULL");
+        await AssertRejectedAsync(prepared.Connection,
+            "DELETE FROM durable_create_operations");
+        await AssertRejectedAsync(prepared.Connection, """
+            INSERT INTO postgresql_database_recovery_decisions
+                (id, deployment_id, generation, resource_id, action, attempt_id,
+                 reason, note, technical_actor, acknowledged, decided_at)
+            SELECT gen_random_uuid(), o.deployment_id, o.generation, o.resource_id, o.action,
+                   o.current_attempt_id, 'OperatorAcceptedExistingDatabase', 'checked',
+                   'tester', true, now()
+            FROM durable_create_operations o
+            """);
+        Assert.Equal("NeedsAttention", await ScalarAsync(prepared.Connection,
+            "SELECT state FROM durable_create_operations"));
+        Assert.Null(await ScalarAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions"));
+    }
+
+    [Fact]
+    public async Task Concurrent_assignment_commits_one_decision_and_returns_the_same_receipt()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_race");
+        var attemptId = await MakeUncertainAsync(prepared);
+        await CreateIndependentDatabaseAsync(prepared.Database);
+        await using var first = Services(prepared.Connection, prepared.Time);
+        await using var second = Services(prepared.Connection, prepared.Time);
+        var command = Assignment(prepared, attemptId);
+        var results = await Task.WhenAll(
+            first.GetRequiredService<IPostgreSqlDatabaseRecovery>()
+                .AssignExistingDatabaseAsync(command, default).AsTask(),
+            second.GetRequiredService<IPostgreSqlDatabaseRecovery>()
+                .AssignExistingDatabaseAsync(command, default).AsTask());
+        Assert.Contains(results, result => result.Outcome == PostgreSqlDatabaseAssignmentOutcome.Assigned);
+        Assert.All(results, result => Assert.NotNull(result.Decision));
+        Assert.Equal(results[0].Decision, results[1].Decision);
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+        Assert.Equal(["Uncertain"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts"));
+    }
+
+    [Fact]
+    public async Task Failed_final_write_rolls_back_audit_and_operation_transition()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_rollback");
+        var attemptId = await MakeUncertainAsync(prepared);
+        await CreateIndependentDatabaseAsync(prepared.Database);
+        var before = await RecoveryRowsAsync(prepared.Connection);
+        await ExecuteSqlAsync(prepared.Connection, """
+            CREATE FUNCTION fail_recovery_advance() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF NEW.applied_generation IS NOT NULL THEN
+                    RAISE EXCEPTION 'injected advance failure';
+                END IF;
+                RETURN NEW;
+            END $$;
+            CREATE TRIGGER fail_recovery_advance_before_update BEFORE UPDATE ON application_deployments
+                FOR EACH ROW EXECUTE FUNCTION fail_recovery_advance();
+            """);
+        try
+        {
+            await using var services = Services(prepared.Connection, prepared.Time);
+            var recovery = services.GetRequiredService<IPostgreSqlDatabaseRecovery>();
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await recovery.AssignExistingDatabaseAsync(Assignment(prepared, attemptId), default));
+            Assert.Equal(before, await RecoveryRowsAsync(prepared.Connection));
+        }
+        finally
+        {
+            await ExecuteSqlAsync(prepared.Connection, """
+                DROP TRIGGER fail_recovery_advance_before_update ON application_deployments;
+                DROP FUNCTION fail_recovery_advance();
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task Preexisting_database_conflict_and_wrong_environment_cannot_be_assigned()
+    {
+        var conflict = await PrepareExecutionAsync("haby_recover_conflict");
+        await CreateIndependentDatabaseAsync(conflict.Database);
+        await using (var services = Services(conflict.Connection, conflict.Time))
+        {
+            Assert.Equal(DurableCreateExecutionOutcome.Failed,
+                (await ExecuteAsync(services, conflict.Key, default)).Outcome);
+            var attemptId = (await services.GetRequiredService<IDurableCreateOperationJournal>()
+                .FindAttemptsAsync(conflict.Key, default)).Single().AttemptId;
+            var before = await RecoveryRowsAsync(conflict.Connection);
+            var recovery = services.GetRequiredService<IPostgreSqlDatabaseRecovery>();
+            Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Rejected,
+                (await recovery.AssignExistingDatabaseAsync(Assignment(conflict, attemptId), default)).Outcome);
+            Assert.Equal(before, await RecoveryRowsAsync(conflict.Connection));
+        }
+        var uncertain = await PrepareExecutionAsync("haby_recover_env");
+        var uncertainAttempt = await MakeUncertainAsync(uncertain);
+        var initial = await RecoveryRowsAsync(uncertain.Connection);
+        await using var restarted = Services(uncertain.Connection, uncertain.Time);
+        var wrongEnvironment = Assignment(uncertain, uncertainAttempt) with
+        {
+            Environment = EnvironmentRecordId.Parse(Guid.CreateVersion7().ToString())
+        };
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Rejected,
+            (await restarted.GetRequiredService<IPostgreSqlDatabaseRecovery>()
+                .AssignExistingDatabaseAsync(wrongEnvironment, default)).Outcome);
+        Assert.Equal(initial, await RecoveryRowsAsync(uncertain.Connection));
+    }
+
+    [Fact]
+    public async Task Assignment_uses_pinned_provider_after_alias_switch()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_pin");
+        var attemptId = await MakeUncertainAsync(prepared);
+        await CreateIndependentDatabaseAsync(prepared.Database);
+        await using var services = Services(prepared.Connection, prepared.Time);
+        var otherPassword = "haby-test-" + Guid.NewGuid().ToString("N");
+        var otherUser = "haby_recover_" + Guid.NewGuid().ToString("N");
+        await using (var admin = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await admin.OpenAsync();
+            await using var role = new NpgsqlCommand(
+                $"""CREATE ROLE "{otherUser}" LOGIN CREATEDB PASSWORD '{otherPassword}'""", admin);
+            await role.ExecuteNonQueryAsync();
+        }
+        var secrets = services.GetRequiredService<ISecretStore>();
+        var otherSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
+        await secrets.CreateAsync(prepared.Environment, otherSecret, Encoding.UTF8.GetBytes(otherPassword), default);
+        var provider = services.GetRequiredService<IProviderConfigurationStore>();
+        var adminTarget = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
+        var other = new PostgreSqlProviderConfiguration(1, adminTarget.Host!, adminTarget.Port,
+            adminTarget.Database!, otherUser, otherSecret, Implementation);
+        var otherInstance = await provider.CreateInstanceAsync(prepared.Environment, other, default);
+        await provider.AddRevisionAsync(prepared.Environment, otherInstance,
+            ProviderConfigurationRevisionNumber.Create(1), other, default);
+        Assert.Equal(ProviderAliasChangeOutcome.Changed,
+            (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(prepared.Environment,
+                ProviderAlias.Create("postgresql.primary"), prepared.Binding,
+                new ProviderAliasBinding(otherInstance, ProviderConfigurationRevisionNumber.Create(1)),
+                "tester", default)).Outcome);
+        await AlterRoleAsync(otherUser, "NOLOGIN");
+        await AlterRoleAsync(prepared.User, "NOCREATEDB");
+
+        var result = await services.GetRequiredService<IPostgreSqlDatabaseRecovery>()
+            .AssignExistingDatabaseAsync(Assignment(prepared, attemptId), default);
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Assigned, result.Outcome);
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+        Assert.Equal(["Uncertain"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts"));
+    }
+
+    private async Task CreateIndependentDatabaseAsync(string name)
+    {
+        await using var admin = new NpgsqlConnection(fixture.ConnectionString);
+        await admin.OpenAsync();
+        await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", admin);
+        await create.ExecuteNonQueryAsync();
+    }
+
+    private static async Task ExecuteSqlAsync(string connection, string sql)
+    {
+        await using var database = new NpgsqlConnection(connection);
+        await database.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, database);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static AssignExistingPostgreSqlDatabase Assignment(Prepared prepared, Guid attemptId) =>
+        new(prepared.Key, prepared.Environment, attemptId, true,
+            PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "operator note", "tester");
+
+    private async Task<Guid> MakeUncertainAsync(Prepared prepared)
+    {
+        await using var services = Services(prepared.Connection, prepared.Time);
+        var journal = services.GetRequiredService<IDurableCreateOperationJournal>();
+        var started = Assert.IsType<DurableCreateBeginAttemptResult.Started>(
+            await journal.TryBeginAttemptAsync(prepared.Key, prepared.Time.GetUtcNow(), default));
+        Assert.IsType<DurableCreateMarkerResult.Committed>(
+            await journal.TryCommitDispatchMarkerAsync(prepared.Key, started.AttemptId,
+                prepared.Time.GetUtcNow(), default));
+        Assert.True(await journal.TryRecoverDispatchingAsync(prepared.Key,
+            prepared.Time.GetUtcNow(), default));
+        return started.AttemptId;
+    }
+
+    private static async Task<string> RecoveryRowsAsync(string connection)
+    {
+        var operation = await ScalarAsync(connection,
+            "SELECT row_to_json(o)::text FROM durable_create_operations o");
+        var attempt = await ScalarAsync(connection,
+            "SELECT row_to_json(a)::text FROM durable_create_operation_attempts a");
+        var deployment = await ScalarAsync(connection,
+            "SELECT row_to_json(d)::text FROM application_deployments d");
+        var decisions = await ScalarLongAsync(connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions");
+        return $"{operation}|{attempt}|{deployment}|{decisions}";
+    }
+
+    [Fact]
     public async Task Success_advances_applied_generation_once_and_retry_sends_no_second_create()
     {
         var prepared = await PrepareExecutionAsync("haby_exec_ok");
@@ -548,7 +856,9 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         services.AddPostgreSqlProviderRevisionPreflight()
             .AddPostgreSqlDurableDesiredStateCommitter()
             .AddPostgreSqlDurableCreateOperationJournal()
-            .AddPostgreSqlDurableCreateOperationExecution();
+            .AddPostgreSqlDurableCreateOperationExecution()
+            .AddPostgreSqlDatabaseRecoveryJournal()
+            .AddPostgreSqlDatabaseRecovery();
         if (hooks is not null) services.AddSingleton(hooks);
         return services.BuildServiceProvider();
     }

@@ -597,6 +597,83 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("manifest_revisions", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.PostgreSqlDatabaseRecoveryDecisionRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Acknowledged")
+                        .HasColumnType("boolean")
+                        .HasColumnName("acknowledged");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("action");
+
+                    b.Property<Guid>("AttemptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attempt_id");
+
+                    b.Property<DateTimeOffset>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("ResourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("resource_id");
+
+                    b.Property<string>("TechnicalActor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("technical_actor");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttemptId")
+                        .IsUnique();
+
+                    b.HasIndex("DeploymentId", "Generation", "ResourceId", "Action")
+                        .IsUnique();
+
+                    b.ToTable("postgresql_database_recovery_decisions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_postgresql_recovery_acknowledged", "acknowledged = true");
+
+                            t.HasCheckConstraint("CK_postgresql_recovery_actor", "length(btrim(technical_actor)) > 0 AND length(technical_actor) <= 256");
+
+                            t.HasCheckConstraint("CK_postgresql_recovery_note", "length(btrim(note)) > 0 AND length(note) <= 512");
+
+                            t.HasCheckConstraint("CK_postgresql_recovery_reason", "reason = 'OperatorAcceptedExistingDatabase'");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderAliasAuditRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1038,6 +1115,22 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasForeignKey("ApplicationRecordId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.PostgreSqlDatabaseRecoveryDecisionRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableCreateOperationAttemptRow", null)
+                        .WithMany()
+                        .HasForeignKey("AttemptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableCreateOperationRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation", "ResourceId", "Action")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_postgresql_database_recovery_decisions_durable_create_oper~1");
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderAliasAuditRow", b =>

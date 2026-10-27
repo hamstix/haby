@@ -183,7 +183,8 @@ journal, and `AddPostgreSqlDurableCreateOperationExecution()` (in
 Provider instance, configuration revision and implementation, revalidates the
 database name from the pinned Manifest revision, and rejects bounded invalid
 inputs before any SQL. It is not exposed through the operator host; there is no
-operator endpoint, no scheduler and no manual assignment from `NeedsAttention`.
+operator endpoint or scheduler. The separate internal recovery boundary below
+can assign a verified existing database from `NeedsAttention` with explicit consent.
 
 State transitions (all compare-and-transition updates, never read-modify-write):
 
@@ -216,8 +217,9 @@ State transitions (all compare-and-transition updates, never read-modify-write):
   to `NeedsAttention` without touching the Provider, even if the database is
   present.
 
-Terminal rows and closed attempt outcomes are immutable through database
-guards: update triggers reject identity changes and terminal rewrites, attempt
+Terminal rows and closed attempt outcomes are protected through database
+guards: update triggers reject identity changes and terminal rewrites except
+the audited `NeedsAttention -> Succeeded` recovery transition, attempt
 history is append-only, and check constraints bind `Dispatching` to
 `dispatched_at` without `finalized_at`, attempt numbering to the current
 attempt identity, and `UncertainAfterDispatch` to `NeedsAttention`.
@@ -228,9 +230,22 @@ If recording a confirmed success fails, the operation remains `Dispatching`
 recorded and independently verified.
 
 Restart procedure for a `NeedsAttention` create operation: stop the pilot
-writer, inspect the operation and its attempts plus `pg_database` for the exact
-name to establish what actually happened, and resolve it manually as part of a
-reviewed operational action. This slice deliberately provides no automatic
-retry, no adoption and no operator command for that resolution; the retained
-attempt identities, timestamps and bounded reason codes exist to make that
-manual decision safe.
+writer and inspect the exact operation through `IPostgreSqlDatabaseRecovery.InspectAsync`
+before deciding. The internal `AssignExistingDatabaseAsync` command requires the
+same Environment and uncertain attempt, affirmative acknowledgment, the fixed
+`OperatorAcceptedExistingDatabase` reason, a required note of at most 512
+characters and a trusted technical actor. It checks database existence through
+the pinned Provider revision and SecretRef without issuing `CREATE DATABASE`.
+The database's presence does not prove that Haby created it. The operator accepts
+that provenance risk; if unsure, leave the operation in `NeedsAttention`.
+
+The note is protected audit data, available through the internal journal's
+`FindDecisionAsync` only. Do not include credentials, connection strings,
+Provider payloads or driver errors. Input validation rejects obvious patterns
+but cannot prove the text is secret-free. The technical actor records the
+allowed caller's claim; it does not authenticate a person. The single-instance,
+network-restricted operator boundary remains necessary. A successful decision,
+`Succeeded` and `AppliedGeneration` commit together; the uncertain attempt stays
+unchanged. A lost-response retry returns the original receipt without a new
+Provider check. No operator gRPC or CLI API exposes this command yet, and absent
+databases have no authorized retry path in this slice.

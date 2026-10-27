@@ -25,6 +25,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<DurableCreateOperationRow> DurableCreateOperations => Set<DurableCreateOperationRow>();
     internal DbSet<DurableCreateOperationAttemptRow> DurableCreateOperationAttempts =>
         Set<DurableCreateOperationAttemptRow>();
+    internal DbSet<PostgreSqlDatabaseRecoveryDecisionRow> PostgreSqlDatabaseRecoveryDecisions =>
+        Set<PostgreSqlDatabaseRecoveryDecisionRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -375,6 +377,38 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                 .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action })
                 .OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<PostgreSqlDatabaseRecoveryDecisionRow>(entity =>
+        {
+            entity.ToTable("postgresql_database_recovery_decisions", table =>
+            {
+                table.HasCheckConstraint("CK_postgresql_recovery_acknowledged", "acknowledged = true");
+                table.HasCheckConstraint("CK_postgresql_recovery_reason",
+                    "reason = 'OperatorAcceptedExistingDatabase'");
+                table.HasCheckConstraint("CK_postgresql_recovery_note",
+                    "length(btrim(note)) > 0 AND length(note) <= 512");
+                table.HasCheckConstraint("CK_postgresql_recovery_actor",
+                    "length(btrim(technical_actor)) > 0 AND length(technical_actor) <= 256");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(row => row.Generation).HasColumnName("generation");
+            entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
+            entity.Property(row => row.AttemptId).HasColumnName("attempt_id");
+            entity.Property(row => row.Reason).HasColumnName("reason").HasMaxLength(48).IsRequired();
+            entity.Property(row => row.Note).HasColumnName("note").HasMaxLength(512).IsRequired();
+            entity.Property(row => row.TechnicalActor).HasColumnName("technical_actor").HasMaxLength(256).IsRequired();
+            entity.Property(row => row.Acknowledged).HasColumnName("acknowledged");
+            entity.Property(row => row.DecidedAt).HasColumnName("decided_at");
+            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action }).IsUnique();
+            entity.HasIndex(row => row.AttemptId).IsUnique();
+            entity.HasOne<DurableCreateOperationRow>().WithMany()
+                .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<DurableCreateOperationAttemptRow>().WithMany()
+                .HasForeignKey(row => row.AttemptId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
 
@@ -483,6 +517,21 @@ internal sealed class DurableCreateOperationAttemptRow
     public DateTimeOffset? DispatchedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Outcome { get; set; }
+}
+
+internal sealed class PostgreSqlDatabaseRecoveryDecisionRow
+{
+    public Guid Id { get; set; }
+    public Guid DeploymentId { get; set; }
+    public long Generation { get; set; }
+    public required string ResourceId { get; set; }
+    public required string Action { get; set; }
+    public Guid AttemptId { get; set; }
+    public required string Reason { get; set; }
+    public required string Note { get; set; }
+    public required string TechnicalActor { get; set; }
+    public bool Acknowledged { get; set; }
+    public DateTimeOffset DecidedAt { get; set; }
 }
 
 internal sealed class EnvironmentRow
