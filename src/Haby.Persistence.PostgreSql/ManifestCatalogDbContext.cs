@@ -22,6 +22,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<ApplicationDeploymentRow> ApplicationDeployments => Set<ApplicationDeploymentRow>();
     internal DbSet<DeploymentGenerationRow> DeploymentGenerations => Set<DeploymentGenerationRow>();
     internal DbSet<ChangeSetCommitRow> ChangeSetCommits => Set<ChangeSetCommitRow>();
+    internal DbSet<DurableCreateOperationRow> DurableCreateOperations => Set<DurableCreateOperationRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -298,6 +299,25 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.HasOne<DeploymentGenerationRow>().WithOne().HasForeignKey<ChangeSetCommitRow>(row => new { row.DeploymentId, row.Generation })
                 .OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<DurableCreateOperationRow>(entity =>
+        {
+            entity.ToTable("durable_create_operations", table =>
+            {
+                table.HasCheckConstraint("CK_durable_create_operations_action", "action = 'Create'");
+                table.HasCheckConstraint("CK_durable_create_operations_state", "state = 'Pending'");
+                table.HasCheckConstraint("CK_durable_create_operations_resource_id", "length(resource_id) > 0");
+            });
+            entity.HasKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action });
+            entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(row => row.Generation).HasColumnName("generation");
+            entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
+            entity.Property(row => row.State).HasColumnName("state").HasMaxLength(32).IsRequired();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasOne<DeploymentGenerationRow>().WithMany()
+                .HasForeignKey(row => new { row.DeploymentId, row.Generation })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
 
@@ -376,6 +396,16 @@ internal sealed class ChangeSetCommitRow
     public long Generation { get; set; }
     public DateTimeOffset CommittedAt { get; set; }
     public required string ActorId { get; set; }
+}
+
+internal sealed class DurableCreateOperationRow
+{
+    public Guid DeploymentId { get; set; }
+    public long Generation { get; set; }
+    public required string ResourceId { get; set; }
+    public required string Action { get; set; }
+    public required string State { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 internal sealed class EnvironmentRow

@@ -98,9 +98,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (spec.Resources.Count != 1 || spec.Components.Count != 0 || spec.Exports.Count != 0 ||
             spec.Parameters.Count != 0) return new(DurablePlanStatus.UnsupportedShape);
         var resource = spec.Resources.Single().Value;
-        if (resource.Type != PostgreSqlDatabaseContract.Id || resource.Properties.Members.Count != 1 ||
-            !resource.Properties.Members.TryGetValue("name", out var value) ||
-            value is not ConfigurationString name || !SafeDatabase.IsMatch(name.Value))
+        if (!IsSupportedDatabaseResource(resource))
             return new(DurablePlanStatus.UnsupportedShape);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
         var resolved = await aliases.ResolveAsync(environmentId, resource.ProviderRef, cancellationToken);
@@ -144,6 +142,11 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         await transaction.CommitAsync(CancellationToken.None);
         return new(DurablePlanStatus.Planned, ToPlan(planRow, null, null));
     }
+
+    internal static bool IsSupportedDatabaseResource(NormalizedResource resource) =>
+        resource.Type == PostgreSqlDatabaseContract.Id && resource.Properties.Members.Count == 1 &&
+        resource.Properties.Members.TryGetValue("name", out var value) &&
+        value is ConfigurationString name && SafeDatabase.IsMatch(name.Value);
 
     public async ValueTask<DeploymentChangeSet?> FindChangeSetAsync(DeploymentChangeSetId id,
         CancellationToken cancellationToken)

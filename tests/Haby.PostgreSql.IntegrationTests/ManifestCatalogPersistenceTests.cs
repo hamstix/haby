@@ -78,7 +78,7 @@ public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) :
         await check.OpenAsync();
         Assert.Equal(1, await ScalarAsync(check, "SELECT count(*) FROM applications"));
         Assert.Equal(2, await ScalarAsync(check, "SELECT count(*) FROM manifest_revisions"));
-        Assert.Equal(6, await ScalarAsync(check, "SELECT count(*) FROM \"__EFMigrationsHistory\""));
+        Assert.Equal(7, await ScalarAsync(check, "SELECT count(*) FROM \"__EFMigrationsHistory\""));
         Assert.Equal(2, await ScalarAsync(check, "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'IX_%' AND indexdef LIKE '%UNIQUE INDEX%' AND tablename IN ('applications','manifest_revisions')"));
         Assert.Equal(1, await ScalarAsync(check, "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'AK_%' AND indexdef LIKE '%UNIQUE INDEX%' AND tablename='manifest_revisions'"));
     }

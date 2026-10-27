@@ -1,6 +1,7 @@
 using Haby.Application;
 using Haby.Domain;
 using Haby.Persistence.PostgreSql;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -8,6 +9,18 @@ namespace Haby.Persistence.PostgreSql.Tests;
 
 public sealed class DurablePlannerGuardTests
 {
+    [Fact]
+    public void Operation_envelope_has_a_composite_key_and_no_provider_payload_columns()
+    {
+        using var context = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>()
+            .UseNpgsql().Options);
+        var entity = context.Model.FindEntityType(typeof(DurableCreateOperationRow))!;
+        Assert.Equal(["DeploymentId", "Generation", "ResourceId", "Action"],
+            entity.FindPrimaryKey()!.Properties.Select(property => property.Name).ToArray());
+        Assert.Equal(["Action", "CreatedAt", "DeploymentId", "Generation", "ResourceId", "State"],
+            entity.GetProperties().Select(property => property.Name).OrderBy(name => name).ToArray());
+    }
+
     [Fact]
     public void Registration_supplies_a_clock_without_replacing_an_explicit_clock()
     {

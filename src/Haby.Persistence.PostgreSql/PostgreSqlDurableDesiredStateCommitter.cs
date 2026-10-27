@@ -98,6 +98,21 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             plan.Fingerprint != PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs))
             return new DurableCommitResult.PlanStale();
 
+        var manifestRow = await context.Revisions.AsNoTracking().SingleOrDefaultAsync(row =>
+            row.ApplicationRecordId == change.ApplicationRecordId &&
+            row.LocalRevisionNumber == change.RevisionNumber, cancellationToken);
+        if (manifestRow is null) return new DurableCommitResult.PlanInputUnavailable();
+        var declaration = NormalizedSnapshotCodec.Decode(manifestRow.Snapshot, manifestRow.InputApiVersion,
+            manifestRow.NormalizedModelVersion, manifestRow.ApplicationId, manifestRow.SnapshotFormatVersion);
+        var spec = declaration.Spec;
+        if (spec.Resources.Count != 1 || spec.Components.Count != 0 || spec.Exports.Count != 0 ||
+            spec.Parameters.Count != 0) return new DurableCommitResult.UnsupportedShape();
+        var resource = spec.Resources.Single();
+        if (!PostgreSqlDurableDeploymentPlanner.IsSupportedDatabaseResource(resource.Value))
+            return new DurableCommitResult.UnsupportedShape();
+        if (resource.Value.ProviderRef.Value != plan.ProviderAlias)
+            return new DurableCommitResult.PlanStale();
+
         cancellationToken.ThrowIfCancellationRequested();
         var deploymentId = ApplicationDeploymentId.New();
         var deploymentGuid = Guid.Parse(deploymentId.ToString());
@@ -140,6 +155,15 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             ActorId = actorId
         };
         context.ChangeSetCommits.Add(commit);
+        context.DurableCreateOperations.Add(new DurableCreateOperationRow
+        {
+            DeploymentId = deploymentGuid,
+            Generation = 1,
+            ResourceId = resource.Key.Value,
+            Action = nameof(DurableOperationAction.Create),
+            State = nameof(DurableCreateOperationState.Pending),
+            CreatedAt = committedAt
+        });
         await context.SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
@@ -193,6 +217,7 @@ public static class DurableDesiredStateCommitterServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDurableDesiredStateCommitter(this IServiceCollection services)
     {
         services.AddPostgreSqlDurableDeploymentPlanner();
+        services.AddPostgreSqlDurableCreateOperationQuery();
         services.TryAddSingleton<IDurableDesiredStateCommitter, PostgreSqlDurableDesiredStateCommitter>();
         return services;
     }

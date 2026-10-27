@@ -260,6 +260,48 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("deployment_change_sets", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableCreateOperationRow", b =>
+                {
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("ResourceId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("resource_id");
+
+                    b.Property<string>("Action")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("action");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("state");
+
+                    b.HasKey("DeploymentId", "Generation", "ResourceId", "Action");
+
+                    b.ToTable("durable_create_operations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_durable_create_operations_action", "action = 'Create'");
+
+                            t.HasCheckConstraint("CK_durable_create_operations_resource_id", "length(resource_id) > 0");
+
+                            t.HasCheckConstraint("CK_durable_create_operations_state", "state = 'Pending'");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.DurablePlanClosureRow", b =>
                 {
                     b.Property<Guid>("PlanId")
@@ -839,6 +881,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .WithMany()
                         .HasForeignKey("ApplicationRecordId", "RevisionNumber")
                         .HasPrincipalKey("ApplicationRecordId", "LocalRevisionNumber")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableCreateOperationRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
