@@ -52,7 +52,6 @@ public sealed class PostgreSqlDatabaseProvisioner(InMemoryPostgreSqlConfiguratio
             return CheckpointProvisionOutcome.ConfigurationUnavailable;
 
         NpgsqlConnectionStringBuilder builder;
-        var dispatched = false;
         try
         {
             builder = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false };
@@ -65,43 +64,31 @@ public sealed class PostgreSqlDatabaseProvisioner(InMemoryPostgreSqlConfiguratio
 
         try
         {
-            await using var connection = new NpgsqlConnection(builder.ConnectionString);
-            await connection.OpenAsync(cancellationToken);
-            await using (var exists = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = $1", connection))
-            {
-                exists.Parameters.AddWithValue(databaseName);
-                if (await exists.ExecuteScalarAsync(cancellationToken) is not null)
-                    return CheckpointProvisionOutcome.Conflict;
-            }
+            // The absence read and the command are separate dedicated-connection operations;
+            // presence before dispatch is a conflict and is never adopted.
+            var absence = await PostgreSqlDatabaseGateway.CheckAbsentAsync(builder, databaseName, cancellationToken);
+            if (absence == DatabaseAbsenceOutcome.Present) return CheckpointProvisionOutcome.Conflict;
+            if (absence == DatabaseAbsenceOutcome.Connectivity) return CheckpointProvisionOutcome.PreDispatchFailure;
 
             cancellationToken.ThrowIfCancellationRequested();
-            using var quote = new NpgsqlCommandBuilder();
-            var sql = "CREATE DATABASE " + quote.QuoteIdentifier(databaseName);
-            // From this point, a cancellation or transport error cannot prove that creation did not occur.
-            try
+            return await PostgreSqlDatabaseGateway.CreateDatabaseAsync(builder, databaseName, null, cancellationToken)
+                switch
             {
-                await using var create = new NpgsqlCommand(sql, connection);
-                dispatched = true;
-                await create.ExecuteNonQueryAsync(cancellationToken);
-                return CheckpointProvisionOutcome.Created;
-            }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.DuplicateDatabase)
-            {
-                return CheckpointProvisionOutcome.Conflict;
-            }
-            catch (PostgresException)
-            {
-                // PostgreSQL answered the CREATE command with an error; it did not create this database.
-                return CheckpointProvisionOutcome.ServerRejected;
-            }
-            catch (Exception ex) when (ex is NpgsqlException or OperationCanceledException or System.IO.IOException)
-            {
-                return CheckpointProvisionOutcome.UncertainOutcome;
-            }
+                DatabaseCreateOutcome.Created => CheckpointProvisionOutcome.Created,
+                DatabaseCreateOutcome.Conflict => CheckpointProvisionOutcome.Conflict,
+                DatabaseCreateOutcome.ServerRejected => CheckpointProvisionOutcome.ServerRejected,
+                // No session was established, so the command provably never reached the server.
+                DatabaseCreateOutcome.OpenFailed => CheckpointProvisionOutcome.PreDispatchFailure,
+                _ => CheckpointProvisionOutcome.UncertainOutcome
+            };
         }
-        catch (Exception ex) when (ex is NpgsqlException or OperationCanceledException or System.IO.IOException or InvalidOperationException)
+        catch (OperationCanceledException)
         {
-            return dispatched ? CheckpointProvisionOutcome.UncertainOutcome : CheckpointProvisionOutcome.PreDispatchFailure;
+            return CheckpointProvisionOutcome.PreDispatchFailure;
+        }
+        catch (Exception ex) when (ex is NpgsqlException or System.IO.IOException or InvalidOperationException)
+        {
+            return CheckpointProvisionOutcome.PreDispatchFailure;
         }
     }
 

@@ -17,8 +17,24 @@ public sealed class DurablePlannerGuardTests
         var entity = context.Model.FindEntityType(typeof(DurableCreateOperationRow))!;
         Assert.Equal(["DeploymentId", "Generation", "ResourceId", "Action"],
             entity.FindPrimaryKey()!.Properties.Select(property => property.Name).ToArray());
-        Assert.Equal(["Action", "CreatedAt", "DeploymentId", "Generation", "ResourceId", "State"],
+        Assert.Equal(["Action", "AttemptNumber", "CreatedAt", "CurrentAttemptId", "DeploymentId", "DispatchedAt",
+            "FinalizedAt", "Generation", "ReasonCode", "ResourceId", "State", "UpdatedAt"],
             entity.GetProperties().Select(property => property.Name).OrderBy(name => name).ToArray());
+    }
+
+    [Fact]
+    public void Attempt_history_is_attributable_by_identity_and_numbered_per_operation()
+    {
+        using var context = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>()
+            .UseNpgsql().Options);
+        var entity = context.Model.FindEntityType(typeof(DurableCreateOperationAttemptRow))!;
+        Assert.Equal(["AttemptId"], entity.FindPrimaryKey()!.Properties.Select(p => p.Name).ToArray());
+        Assert.Equal(["Action", "AttemptId", "AttemptNumber", "DeploymentId", "DispatchedAt", "FinishedAt",
+            "Generation", "Outcome", "ResourceId", "StartedAt"],
+            entity.GetProperties().Select(property => property.Name).OrderBy(name => name).ToArray());
+        Assert.Contains(entity.GetIndexes(), index => index.IsUnique &&
+            index.Properties.Select(p => p.Name).SequenceEqual(
+                ["DeploymentId", "Generation", "ResourceId", "Action", "AttemptNumber"]));
     }
 
     [Fact]

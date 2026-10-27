@@ -121,9 +121,9 @@ attempt has crossed the dispatch barrier. The operation references the immutable
 generation for its exact ProviderInstance, configuration revision and
 ImplementationId; reads do not resolve the current alias. The journal stores no
 Provider configuration payload, SecretVersion material or connection string.
-The pilot journal row rejects deletion; later ADR-025 state transitions will
-update the retained row.
-This slice does not dispatch SQL or advance `AppliedGeneration`.
+The pilot journal row rejects deletion. ADR-025 state transitions update the
+retained row; see the next section.
+This commit transaction does not dispatch SQL or advance `AppliedGeneration`.
 
 Before applying a reviewed migration, stop catalog writes and take a verified
 database backup. With PostgreSQL client environment variables supplied by the
@@ -172,3 +172,61 @@ read-back time need not match the original `DateTimeOffset` tick for tick.
 The real PostgreSQL integration tests use the existing disposable container
 suite and Windows WSLc helper documented in
 [`docs/development/postgresql-integration-tests.md`](../../docs/development/postgresql-integration-tests.md).
+
+## Durable create dispatch barrier (ADR-025)
+
+`AddPostgreSqlDurableCreateOperationJournal()` registers the typed operation
+journal, and `AddPostgreSqlDurableCreateOperationExecution()` (in
+`Haby.PostgreSql`) registers the internal single-instance executor over it.
+`PostgreSqlDurableCreateOperationExecutor.ExecuteAsync` runs one exact
+`DurableCreateOperationKey`: it re-reads the accepted generation's pinned
+Provider instance, configuration revision and implementation, revalidates the
+database name from the pinned Manifest revision, and rejects bounded invalid
+inputs before any SQL. It is not exposed through the operator host; there is no
+operator endpoint, no scheduler and no manual assignment from `NeedsAttention`.
+
+State transitions (all compare-and-transition updates, never read-modify-write):
+
+- `Pending -> Preparing`: `TryBeginAttemptAsync` opens a new attempt row in
+  `durable_create_operation_attempts` with its own attempt identity and number;
+  an earlier attempt that never reached the barrier is closed as
+  `AbandonedBeforeDispatch`. Preparing is resumable after a restart.
+- `Preparing -> Dispatching`: `TryCommitDispatchMarkerAsync` commits the unique
+  attempt's `Dispatching` marker in Haby PostgreSQL immediately before Npgsql
+  `CREATE DATABASE` is sent. If the marker commit outcome is uncertain, no SQL
+  is sent and the operation stays recoverable.
+- `Preparing -> Failed`: definitive pre-dispatch rejection (present database,
+  invalid name, unsupported shape, unavailable pinned input or secret,
+  connectivity) records a safe reason code and closes the attempt.
+- `Dispatching -> Succeeded`: requires the confirmed `CREATE` response, an
+  independent existence read and `AppliedGeneration` advanced from null to the
+  generation in the same transaction. A preexisting database is a conflict,
+  never an adoption.
+- `Dispatching -> Failed`: a definitive server rejection including
+  `duplicate_database` records `Conflict` or `ServerRejected` without adoption.
+- `Dispatching -> NeedsAttention`: after a committed marker, cancellation,
+  connection loss or any uncertainty records `UncertainAfterDispatch`. Nothing
+  is retried automatically and no false success is recorded, even when the
+  database exists.
+- Restart over `Dispatching`: `TryRecoverDispatchingAsync` moves the operation
+  to `NeedsAttention` without touching the Provider, even if the database is
+  present.
+
+Terminal rows and closed attempt outcomes are immutable through database
+guards: update triggers reject identity changes and terminal rewrites, attempt
+history is append-only, and check constraints bind `Dispatching` to
+`dispatched_at` without `finalized_at`, attempt numbering to the current
+attempt identity, and `UncertainAfterDispatch` to `NeedsAttention`.
+
+`AppliedGeneration` is never advanced for an uncertain or interrupted window.
+If recording a confirmed success fails, the operation remains `Dispatching`
+(recoverable) instead of leaving an applied generation that was not durably
+recorded and independently verified.
+
+Restart procedure for a `NeedsAttention` create operation: stop the pilot
+writer, inspect the operation and its attempts plus `pg_database` for the exact
+name to establish what actually happened, and resolve it manually as part of a
+reviewed operational action. This slice deliberately provides no automatic
+retry, no adoption and no operator command for that resolution; the retained
+attempt identities, timestamps and bounded reason codes exist to make that
+manual decision safe.

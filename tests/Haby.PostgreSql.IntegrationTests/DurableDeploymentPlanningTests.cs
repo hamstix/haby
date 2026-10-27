@@ -120,12 +120,14 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         await AssertConstraintRejected(database,
             "UPDATE durable_create_operations SET state = 'Dispatching' WHERE deployment_id = @id",
             PostgresErrorCodes.CheckViolation, deploymentGuid);
-        await AssertConstraintRejected(database,
+        // The dispatch-barrier identity trigger rejects tampering with the operation identity
+        // before any check constraint is reached.
+        await AssertImmutableRejected(database,
             "UPDATE durable_create_operations SET action = 'Delete' WHERE deployment_id = @id",
-            PostgresErrorCodes.CheckViolation, deploymentGuid);
-        await AssertConstraintRejected(database,
+            deploymentGuid);
+        await AssertImmutableRejected(database,
             "UPDATE durable_create_operations SET resource_id = '' WHERE deployment_id = @id",
-            PostgresErrorCodes.CheckViolation, deploymentGuid);
+            deploymentGuid);
         await AssertConstraintRejected(database, """
             INSERT INTO durable_create_operations (deployment_id, generation, resource_id, action, state, created_at)
             VALUES (@id, 1, 'db', 'Create', 'Pending', now())
