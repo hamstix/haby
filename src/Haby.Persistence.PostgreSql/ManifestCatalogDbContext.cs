@@ -23,6 +23,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<DeploymentGenerationRow> DeploymentGenerations => Set<DeploymentGenerationRow>();
     internal DbSet<ChangeSetCommitRow> ChangeSetCommits => Set<ChangeSetCommitRow>();
     internal DbSet<DurableCreateOperationRow> DurableCreateOperations => Set<DurableCreateOperationRow>();
+    internal DbSet<DurableCreateOperationAttemptRow> DurableCreateOperationAttempts =>
+        Set<DurableCreateOperationAttemptRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -242,7 +244,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
         });
         modelBuilder.Entity<ApplicationDeploymentRow>(entity =>
         {
-            entity.ToTable("application_deployments", table => table.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND applied_generation IS NULL"));
+            entity.ToTable("application_deployments", table => table.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND (applied_generation IS NULL OR applied_generation = 1)"));
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
@@ -304,8 +306,21 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.ToTable("durable_create_operations", table =>
             {
                 table.HasCheckConstraint("CK_durable_create_operations_action", "action = 'Create'");
-                table.HasCheckConstraint("CK_durable_create_operations_state", "state = 'Pending'");
+                table.HasCheckConstraint("CK_durable_create_operations_state",
+                    "state IN ('Pending', 'Preparing', 'Dispatching', 'Succeeded', 'Failed', 'NeedsAttention')");
                 table.HasCheckConstraint("CK_durable_create_operations_resource_id", "length(resource_id) > 0");
+                table.HasCheckConstraint("CK_durable_create_operations_attempt",
+                    "attempt_number >= 0 AND (attempt_number = 0) = (current_attempt_id IS NULL)");
+                table.HasCheckConstraint("CK_durable_create_operations_dispatch",
+                    "(state = 'Dispatching') = (dispatched_at IS NOT NULL AND finalized_at IS NULL)");
+                table.HasCheckConstraint("CK_durable_create_operations_final",
+                    "(state IN ('Succeeded', 'Failed', 'NeedsAttention')) = (finalized_at IS NOT NULL)");
+                table.HasCheckConstraint("CK_durable_create_operations_reason",
+                    "reason_code IS NULL OR reason_code IN ('ProviderInputUnavailable', 'SecretUnavailable', " +
+                    "'UnsupportedShape', 'DatabaseNameInvalid', 'Connectivity', 'Conflict', 'ServerRejected', " +
+                    "'UncertainAfterDispatch')");
+                table.HasCheckConstraint("CK_durable_create_operations_needs_attention",
+                    "reason_code IS DISTINCT FROM 'UncertainAfterDispatch' OR state = 'NeedsAttention'");
             });
             entity.HasKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action });
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
@@ -313,9 +328,51 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
             entity.Property(row => row.State).HasColumnName("state").HasMaxLength(32).IsRequired();
+            entity.Property(row => row.ReasonCode).HasColumnName("reason_code").HasMaxLength(32);
+            entity.Property(row => row.CurrentAttemptId).HasColumnName("current_attempt_id");
+            entity.Property(row => row.AttemptNumber).HasColumnName("attempt_number");
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(row => row.DispatchedAt).HasColumnName("dispatched_at");
+            entity.Property(row => row.FinalizedAt).HasColumnName("finalized_at");
             entity.HasOne<DeploymentGenerationRow>().WithMany()
                 .HasForeignKey(row => new { row.DeploymentId, row.Generation })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DurableCreateOperationAttemptRow>(entity =>
+        {
+            entity.ToTable("durable_create_operation_attempts", table =>
+            {
+                table.HasCheckConstraint("CK_durable_create_operation_attempts_action", "action = 'Create'");
+                table.HasCheckConstraint("CK_durable_create_operation_attempts_number", "attempt_number > 0");
+                table.HasCheckConstraint("CK_durable_create_operation_attempts_outcome",
+                    "outcome IS NULL OR outcome IN ('Succeeded', 'Conflict', 'ServerRejected', 'Uncertain', " +
+                    "'CanceledBeforeDispatch', 'AbandonedBeforeDispatch', 'FailedBeforeDispatch')");
+                table.HasCheckConstraint("CK_durable_create_operation_attempts_close",
+                    "(outcome IS NULL) = (finished_at IS NULL)");
+            });
+            entity.HasKey(row => row.AttemptId);
+            entity.Property(row => row.AttemptId).HasColumnName("attempt_id");
+            entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(row => row.Generation).HasColumnName("generation");
+            entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
+            entity.Property(row => row.AttemptNumber).HasColumnName("attempt_number");
+            entity.Property(row => row.StartedAt).HasColumnName("started_at");
+            entity.Property(row => row.DispatchedAt).HasColumnName("dispatched_at");
+            entity.Property(row => row.FinishedAt).HasColumnName("finished_at");
+            entity.Property(row => row.Outcome).HasColumnName("outcome").HasMaxLength(32);
+            entity.HasIndex(row => new
+            {
+                row.DeploymentId,
+                row.Generation,
+                row.ResourceId,
+                row.Action,
+                row.AttemptNumber
+            }).IsUnique();
+            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action });
+            entity.HasOne<DurableCreateOperationRow>().WithMany()
+                .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action })
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
@@ -405,7 +462,27 @@ internal sealed class DurableCreateOperationRow
     public required string ResourceId { get; set; }
     public required string Action { get; set; }
     public required string State { get; set; }
+    public string? ReasonCode { get; set; }
+    public Guid? CurrentAttemptId { get; set; }
+    public long AttemptNumber { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
+    public DateTimeOffset? DispatchedAt { get; set; }
+    public DateTimeOffset? FinalizedAt { get; set; }
+}
+
+internal sealed class DurableCreateOperationAttemptRow
+{
+    public Guid AttemptId { get; set; }
+    public Guid DeploymentId { get; set; }
+    public long Generation { get; set; }
+    public required string ResourceId { get; set; }
+    public required string Action { get; set; }
+    public long AttemptNumber { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset? DispatchedAt { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+    public string? Outcome { get; set; }
 }
 
 internal sealed class EnvironmentRow

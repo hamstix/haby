@@ -58,7 +58,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.ToTable("application_deployments", null, t =>
                         {
-                            t.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND applied_generation IS NULL");
+                            t.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND (applied_generation IS NULL OR applied_generation = 1)");
                         });
                 });
 
@@ -260,6 +260,74 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("deployment_change_sets", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableCreateOperationAttemptRow", b =>
+                {
+                    b.Property<Guid>("AttemptId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("attempt_id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("action");
+
+                    b.Property<long>("AttemptNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("attempt_number");
+
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatched_at");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("outcome");
+
+                    b.Property<string>("ResourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("resource_id");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.HasKey("AttemptId");
+
+                    b.HasIndex("DeploymentId", "Generation", "ResourceId", "Action");
+
+                    b.HasIndex("DeploymentId", "Generation", "ResourceId", "Action", "AttemptNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_durable_create_operation_attempts_deployment_id_generation~1");
+
+                    b.ToTable("durable_create_operation_attempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_durable_create_operation_attempts_action", "action = 'Create'");
+
+                            t.HasCheckConstraint("CK_durable_create_operation_attempts_close", "(outcome IS NULL) = (finished_at IS NULL)");
+
+                            t.HasCheckConstraint("CK_durable_create_operation_attempts_number", "attempt_number > 0");
+
+                            t.HasCheckConstraint("CK_durable_create_operation_attempts_outcome", "outcome IS NULL OR outcome IN ('Succeeded', 'Conflict', 'ServerRejected', 'Uncertain', 'CanceledBeforeDispatch', 'AbandonedBeforeDispatch', 'FailedBeforeDispatch')");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableCreateOperationRow", b =>
                 {
                     b.Property<Guid>("DeploymentId")
@@ -280,9 +348,30 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("action");
 
+                    b.Property<long>("AttemptNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("attempt_number");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CurrentAttemptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("current_attempt_id");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatched_at");
+
+                    b.Property<DateTimeOffset?>("FinalizedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finalized_at");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("reason_code");
 
                     b.Property<string>("State")
                         .IsRequired()
@@ -290,15 +379,29 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("state");
 
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
                     b.HasKey("DeploymentId", "Generation", "ResourceId", "Action");
 
                     b.ToTable("durable_create_operations", null, t =>
                         {
                             t.HasCheckConstraint("CK_durable_create_operations_action", "action = 'Create'");
 
+                            t.HasCheckConstraint("CK_durable_create_operations_attempt", "attempt_number >= 0 AND (attempt_number = 0) = (current_attempt_id IS NULL)");
+
+                            t.HasCheckConstraint("CK_durable_create_operations_dispatch", "(state = 'Dispatching') = (dispatched_at IS NOT NULL AND finalized_at IS NULL)");
+
+                            t.HasCheckConstraint("CK_durable_create_operations_final", "(state IN ('Succeeded', 'Failed', 'NeedsAttention')) = (finalized_at IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_durable_create_operations_needs_attention", "reason_code IS DISTINCT FROM 'UncertainAfterDispatch' OR state = 'NeedsAttention'");
+
+                            t.HasCheckConstraint("CK_durable_create_operations_reason", "reason_code IS NULL OR reason_code IN ('ProviderInputUnavailable', 'SecretUnavailable', 'UnsupportedShape', 'DatabaseNameInvalid', 'Connectivity', 'Conflict', 'ServerRejected', 'UncertainAfterDispatch')");
+
                             t.HasCheckConstraint("CK_durable_create_operations_resource_id", "length(resource_id) > 0");
 
-                            t.HasCheckConstraint("CK_durable_create_operations_state", "state = 'Pending'");
+                            t.HasCheckConstraint("CK_durable_create_operations_state", "state IN ('Pending', 'Preparing', 'Dispatching', 'Succeeded', 'Failed', 'NeedsAttention')");
                         });
                 });
 
@@ -881,6 +984,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .WithMany()
                         .HasForeignKey("ApplicationRecordId", "RevisionNumber")
                         .HasPrincipalKey("ApplicationRecordId", "LocalRevisionNumber")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableCreateOperationAttemptRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableCreateOperationRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation", "ResourceId", "Action")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

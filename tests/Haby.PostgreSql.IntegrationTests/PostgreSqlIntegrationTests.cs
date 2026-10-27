@@ -32,7 +32,9 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
             _externalContainer = Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_CONTAINER");
             if (string.IsNullOrWhiteSpace(_externalContainer))
                 throw new InvalidOperationException("The ephemeral external container name is missing.");
-            ConnectionString = supplied;
+            // Every test creates unique catalog databases; pooled idle sessions otherwise
+            // accumulate across the suite and can exhaust the disposable server's client limit.
+            ConnectionString = new NpgsqlConnectionStringBuilder(supplied) { Pooling = false }.ConnectionString;
             // The WSLc helper starts the container; Npgsql readiness is checked here.
             for (var attempt = 0; attempt < 30; attempt++)
             {
@@ -52,7 +54,8 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
         }
         _container = new PostgreSqlBuilder("postgres:17.6-alpine").Build();
         await _container.StartAsync();
-        ConnectionString = _container.GetConnectionString();
+        ConnectionString = new NpgsqlConnectionStringBuilder(_container.GetConnectionString())
+        { Pooling = false }.ConnectionString;
     }
 
     public async Task DisposeAsync()
