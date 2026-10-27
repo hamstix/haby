@@ -119,9 +119,10 @@ public interface IDurableCreateOperationJournal
     ValueTask<DurableCreateMarkerResult> TryCommitDispatchMarkerAsync(DurableCreateOperationKey key, Guid attemptId,
         DateTimeOffset at, CancellationToken cancellationToken);
 
-    /// <summary>Closes one still-<c>Preparing</c> attempt as before-dispatch while keeping it resumable.</summary>
+    /// <summary>Closes one still-<c>Preparing</c> attempt while retaining a bounded retryable reason.</summary>
     ValueTask<bool> TryCloseAttemptBeforeDispatchAsync(DurableCreateOperationKey key, Guid attemptId,
-        DurableCreateAttemptOutcome outcome, DateTimeOffset at, CancellationToken cancellationToken);
+        DurableCreateAttemptOutcome outcome, DurableCreateOperationReason? reason, DateTimeOffset at,
+        CancellationToken cancellationToken);
 
     /// <summary>Records a definitive pre-dispatch failure or a post-dispatch uncertain outcome.</summary>
     ValueTask<bool> TryFinalizeFailureAsync(DurableCreateOperationKey key, Guid attemptId,
@@ -187,6 +188,8 @@ public enum DurableCreateExecutionOutcome
 {
     Succeeded,
     Failed,
+    /// <summary>A pre-dispatch dependency is unavailable; the same operation can start another attempt.</summary>
+    RetryableFailure,
     NeedsAttention,
     OperationNotFound,
     /// <summary>The dispatch marker commit result was uncertain; no SQL was sent and the state remains recoverable.</summary>

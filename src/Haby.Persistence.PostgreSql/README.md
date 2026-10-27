@@ -195,9 +195,13 @@ State transitions (all compare-and-transition updates, never read-modify-write):
   attempt's `Dispatching` marker in Haby PostgreSQL immediately before Npgsql
   `CREATE DATABASE` is sent. If the marker commit outcome is uncertain, no SQL
   is sent and the operation stays recoverable.
-- `Preparing -> Failed`: definitive pre-dispatch rejection (present database,
-  invalid name, unsupported shape, unavailable pinned input or secret,
-  connectivity) records a safe reason code and closes the attempt.
+- `Preparing -> Preparing`: an unavailable Provider input, SecretStore read or
+  target connection closes only the attempt with a bounded reason. A later call
+  opens a new attempt against the same pinned generation and clears that reason;
+  no marker or Create was sent for the closed attempt.
+- `Preparing -> Failed`: a definitive pre-dispatch rejection (present database,
+  invalid name, unsupported or corrupt immutable Manifest shape) records a safe
+  reason code and closes the operation.
 - `Dispatching -> Succeeded`: requires the confirmed `CREATE` response, an
   independent existence read and `AppliedGeneration` advanced from null to the
   generation in the same transaction. A preexisting database is a conflict,

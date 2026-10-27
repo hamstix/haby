@@ -449,6 +449,7 @@ public sealed class DurableCreateExecutorTests
                 State = DurableCreateOperationState.Preparing,
                 AttemptId = attemptId,
                 AttemptNumber = number,
+                Reason = null,
                 UpdatedAt = at
             };
             Attempts.Add(new DurableCreateOperationAttempt(attemptId, number, at, null, null, null));
@@ -475,11 +476,13 @@ public sealed class DurableCreateExecutorTests
         }
 
         public ValueTask<bool> TryCloseAttemptBeforeDispatchAsync(DurableCreateOperationKey key, Guid attemptId,
-            DurableCreateAttemptOutcome outcome, DateTimeOffset at, CancellationToken cancellationToken)
+            DurableCreateAttemptOutcome outcome, DurableCreateOperationReason? reason, DateTimeOffset at,
+            CancellationToken cancellationToken)
         {
             if (cancellationToken.IsCancellationRequested) return new ValueTask<bool>(false);
             if (Operation.State != DurableCreateOperationState.Preparing || Operation.AttemptId != attemptId)
                 return new ValueTask<bool>(false);
+            Operation = Operation with { Reason = reason, UpdatedAt = at };
             CloseAttempt(attemptId, at, outcome: outcome);
             return new ValueTask<bool>(true);
         }

@@ -378,14 +378,17 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
     }
 
     [Fact]
-    public async Task An_unreadable_pinned_revision_fails_with_a_bounded_reason_before_dispatch()
+    public async Task An_unavailable_codec_closes_the_attempt_and_can_resume_with_the_same_pinned_revision()
     {
         var prepared = await PrepareExecutionAsync("haby_exec_nr");
-        await using var noCodec = Services(prepared.Connection, prepared.Time, registerCodec: false);
-        var result = await ExecuteAsync(noCodec, prepared.Key, default);
+        await using (var noCodec = Services(prepared.Connection, prepared.Time, registerCodec: false))
+        {
+            var result = await ExecuteAsync(noCodec, prepared.Key, default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.ProviderInputUnavailable, result.Operation!.Reason);
+            Assert.Equal(DurableCreateExecutionOutcome.RetryableFailure, result.Outcome);
+            Assert.Equal(DurableCreateOperationState.Preparing, result.Operation!.State);
+            Assert.Equal(DurableCreateOperationReason.ProviderInputUnavailable, result.Operation.Reason);
+        }
         Assert.Null(await ScalarAsync(prepared.Connection, "SELECT dispatched_at FROM durable_create_operations"));
         Assert.Null(await ScalarAsync(prepared.Connection, "SELECT applied_generation FROM application_deployments"));
         Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
@@ -393,6 +396,49 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
             command => command.Parameters.AddWithValue("name", prepared.Database)));
         Assert.Equal(["FailedBeforeDispatch"], await ScalarsAsync(prepared.Connection,
             "SELECT outcome FROM durable_create_operation_attempts"));
+
+        await using var restored = Services(prepared.Connection, prepared.Time);
+        var retry = await ExecuteAsync(restored, prepared.Key, default);
+        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, retry.Outcome);
+        Assert.Equal(["FailedBeforeDispatch", "Succeeded"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts ORDER BY attempt_number"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM durable_create_operation_attempts WHERE dispatched_at IS NOT NULL"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+    }
+
+    [Fact]
+    public async Task Lost_provider_connectivity_before_dispatch_can_be_restored_and_retried()
+    {
+        var prepared = await PrepareExecutionAsync("haby_exec_rc");
+        await AlterRoleAsync(prepared.User, "NOLOGIN");
+        await using (var unavailable = Services(prepared.Connection, prepared.Time))
+        {
+            var first = await ExecuteAsync(unavailable, prepared.Key, default);
+            Assert.Equal(DurableCreateExecutionOutcome.RetryableFailure, first.Outcome);
+            Assert.Equal(DurableCreateOperationState.Preparing, first.Operation!.State);
+            Assert.Equal(DurableCreateOperationReason.Connectivity, first.Operation.Reason);
+        }
+        Assert.Null(await ScalarAsync(prepared.Connection, "SELECT dispatched_at FROM durable_create_operations"));
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM pg_database WHERE datname = @name",
+            command => command.Parameters.AddWithValue("name", prepared.Database)));
+
+        await AlterRoleAsync(prepared.User, "LOGIN");
+        await using var restored = Services(prepared.Connection, prepared.Time);
+        var retry = await ExecuteAsync(restored, prepared.Key, default);
+        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, retry.Outcome);
+        Assert.Null(retry.Operation!.Reason);
+        Assert.Equal(["FailedBeforeDispatch", "Succeeded"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts ORDER BY attempt_number"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM durable_create_operation_attempts WHERE dispatched_at IS NOT NULL"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM pg_database WHERE datname = @name",
+            command => command.Parameters.AddWithValue("name", prepared.Database)));
     }
 
     private sealed record Prepared(string Connection, AdjustableTimeProvider Time, EnvironmentRecordId Environment,

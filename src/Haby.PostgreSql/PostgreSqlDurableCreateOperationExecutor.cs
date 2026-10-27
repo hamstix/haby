@@ -81,23 +81,26 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
                 }
         }
 
-        // Pre-dispatch: typed rejections are definitive; unexpected failures leave a resumable
-        // Preparing state, and caller cancellation closes only the attempt, never the operation.
+        // Before the barrier, temporary dependency failures close only this attempt. Immutable
+        // input defects and a confirmed preexisting database are definitive terminal failures.
         DurableCreateTargetInput input;
         try
         {
             var shape = await ResolveInputAsync(key, operation, cancellationToken);
             if (shape.Reason is { } rejection)
-                return await FailBeforeDispatchAsync(key, attemptId, rejection, cancellationToken);
+                return await FailBeforeDispatchAsync(key, attemptId, rejection, shape.Definitive,
+                    cancellationToken);
             input = shape.Input!;
             var absence = await target.CheckDatabaseAbsentAsync(input, cancellationToken);
             if (absence != DurableCreateAbsenceOutcome.Absent)
-                return await FailBeforeDispatchAsync(key, attemptId, MapAbsenceFailure(absence), cancellationToken);
+                return await FailBeforeDispatchAsync(key, attemptId, MapAbsenceFailure(absence),
+                    absence is DurableCreateAbsenceOutcome.Present or DurableCreateAbsenceOutcome.DatabaseNameInvalid,
+                    cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await journal.TryCloseAttemptBeforeDispatchAsync(key, attemptId,
-                DurableCreateAttemptOutcome.CanceledBeforeDispatch, clock.GetUtcNow(), CancellationToken.None);
+                DurableCreateAttemptOutcome.CanceledBeforeDispatch, null, clock.GetUtcNow(), CancellationToken.None);
             throw;
         }
 
@@ -227,10 +230,14 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
     }
 
     private async ValueTask<DurableCreateExecutionResult> FailBeforeDispatchAsync(DurableCreateOperationKey key,
-        Guid attemptId, DurableCreateOperationReason reason, CancellationToken cancellationToken)
+        Guid attemptId, DurableCreateOperationReason reason, bool definitive, CancellationToken cancellationToken)
     {
-        await journal.TryFinalizeFailureAsync(key, attemptId, DurableCreateOperationState.Failed, reason,
-            clock.GetUtcNow(), cancellationToken);
+        if (definitive)
+            await journal.TryFinalizeFailureAsync(key, attemptId, DurableCreateOperationState.Failed, reason,
+                clock.GetUtcNow(), cancellationToken);
+        else
+            await journal.TryCloseAttemptBeforeDispatchAsync(key, attemptId,
+                DurableCreateAttemptOutcome.FailedBeforeDispatch, reason, clock.GetUtcNow(), cancellationToken);
         return await RereadResultAsync(key, cancellationToken);
     }
 
@@ -267,7 +274,8 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
             : MapObserved(operation);
     }
 
-    private async ValueTask<(DurableCreateTargetInput? Input, DurableCreateOperationReason? Reason)> ResolveInputAsync(
+    private async ValueTask<(DurableCreateTargetInput? Input, DurableCreateOperationReason? Reason, bool Definitive)>
+        ResolveInputAsync(
         DurableCreateOperationKey key, DurableCreateOperation operation, CancellationToken cancellationToken)
     {
         ManifestRevision? revision;
@@ -278,25 +286,25 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         catch (InvalidDataException)
         {
             // A corrupt retained snapshot cannot be replaced by a current revision or alias.
-            return (null, DurableCreateOperationReason.ProviderInputUnavailable);
+            return (null, DurableCreateOperationReason.ProviderInputUnavailable, true);
         }
         if (revision is null)
-            return (null, DurableCreateOperationReason.ProviderInputUnavailable);
+            return (null, DurableCreateOperationReason.ProviderInputUnavailable, false);
         var spec = revision.Declaration.Spec;
         if (spec.Resources.Count != 1 || spec.Components.Count != 0 || spec.Exports.Count != 0 ||
             spec.Parameters.Count != 0)
-            return (null, DurableCreateOperationReason.UnsupportedShape);
+            return (null, DurableCreateOperationReason.UnsupportedShape, true);
         var entry = spec.Resources.Single();
-        if (entry.Key != key.ResourceId) return (null, DurableCreateOperationReason.UnsupportedShape);
+        if (entry.Key != key.ResourceId) return (null, DurableCreateOperationReason.UnsupportedShape, true);
         var resource = entry.Value;
         if (resource.Type != PostgreSqlDatabaseContract.Id || resource.Properties.Members.Count != 1 ||
             !resource.Properties.Members.TryGetValue("name", out var value) ||
             value is not ConfigurationString name)
-            return (null, DurableCreateOperationReason.UnsupportedShape);
+            return (null, DurableCreateOperationReason.UnsupportedShape, true);
         if (!SafeDatabase.IsMatch(name.Value))
-            return (null, DurableCreateOperationReason.DatabaseNameInvalid);
+            return (null, DurableCreateOperationReason.DatabaseNameInvalid, true);
         return (new DurableCreateTargetInput(operation.Environment, operation.ProviderInstance,
-            operation.ConfigurationRevision, operation.ImplementationId, name.Value), null);
+            operation.ConfigurationRevision, operation.ImplementationId, name.Value), null, false);
     }
 
     private static DurableCreateOperationReason MapAbsenceFailure(DurableCreateAbsenceOutcome absence) =>
@@ -310,7 +318,11 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         };
 
     private static DurableCreateExecutionResult MapObserved(DurableCreateOperation operation) => new(
-        MapTerminal(operation.State), operation);
+        operation.State == DurableCreateOperationState.Preparing &&
+        operation.Reason is DurableCreateOperationReason.ProviderInputUnavailable or
+            DurableCreateOperationReason.SecretUnavailable or DurableCreateOperationReason.Connectivity
+            ? DurableCreateExecutionOutcome.RetryableFailure
+            : MapTerminal(operation.State), operation);
 
     private static DurableCreateExecutionOutcome MapTerminal(DurableCreateOperationState state) => state switch
     {

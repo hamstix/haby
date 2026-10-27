@@ -53,6 +53,7 @@ public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<Ma
                 .SetProperty(row => row.State, nameof(DurableCreateOperationState.Preparing))
                 .SetProperty(row => row.CurrentAttemptId, (Guid?)attemptId)
                 .SetProperty(row => row.AttemptNumber, row => row.AttemptNumber + 1)
+                .SetProperty(row => row.ReasonCode, (string?)null)
                 .SetProperty(row => row.UpdatedAt, at), cancellationToken);
         if (affected == 0)
         {
@@ -123,13 +124,16 @@ public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<Ma
     }
 
     public async ValueTask<bool> TryCloseAttemptBeforeDispatchAsync(DurableCreateOperationKey key, Guid attemptId,
-        DurableCreateAttemptOutcome outcome, DateTimeOffset at, CancellationToken cancellationToken)
+        DurableCreateAttemptOutcome outcome, DurableCreateOperationReason? reason, DateTimeOffset at,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
-        if (outcome is not (DurableCreateAttemptOutcome.CanceledBeforeDispatch or
-                DurableCreateAttemptOutcome.FailedBeforeDispatch or
-                DurableCreateAttemptOutcome.Conflict or
-                DurableCreateAttemptOutcome.ServerRejected))
+        if ((outcome == DurableCreateAttemptOutcome.CanceledBeforeDispatch && reason is not null) ||
+            (outcome == DurableCreateAttemptOutcome.FailedBeforeDispatch &&
+             reason is not (DurableCreateOperationReason.ProviderInputUnavailable or
+                 DurableCreateOperationReason.SecretUnavailable or DurableCreateOperationReason.Connectivity)) ||
+            outcome is not (DurableCreateAttemptOutcome.CanceledBeforeDispatch or
+                DurableCreateAttemptOutcome.FailedBeforeDispatch))
             throw new ArgumentOutOfRangeException(nameof(outcome));
         var (deployment, generation, resourceId, action) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
@@ -139,7 +143,9 @@ public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<Ma
                           row.ResourceId == resourceId && row.Action == action &&
                           row.State == nameof(DurableCreateOperationState.Preparing) &&
                           row.CurrentAttemptId == attemptId)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.UpdatedAt, at), cancellationToken);
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.ReasonCode, reason == null ? null : reason.ToString())
+                .SetProperty(row => row.UpdatedAt, at), cancellationToken);
         if (held == 0)
         {
             await transaction.RollbackAsync(cancellationToken);
