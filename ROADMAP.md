@@ -494,6 +494,10 @@ recovered without automatic adoption or a blind retry, how the exact Provider
 configuration revision remains available, and how operators inspect and
 resolve failures. Single-instance operation defers distributed leases, not
 durability, idempotency or the distinction between desired and applied state.
+For the first active pilot, [ADR-025](docs/adr/0025-pilot-durable-postgresql-create-recovery.md)
+defines a durable dispatch barrier and manual, operator-consented assignment
+after an uncertain result; it never treats a matching database name alone as
+proof of ownership.
 
 Exit criteria:
 
@@ -670,6 +674,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-020](docs/adr/0020-versioned-application-manifest-json-contract.md): Strict versioned Application manifest JSON, import envelope, checked-in schema and normalized-model persistence boundary.
 - [ADR-021](docs/adr/0021-application-manifest-validation-and-import-use-cases.md): Shared manifest validation and import use cases, typed outcomes, atomic revision creation and safe version-conflict reporting.
 - [ADR-022](docs/adr/0022-postgresql-database-checkpoint-execution.md): Narrow PostgreSQL database contract, post-commit execution, uncertain outcomes and real-database integration tests.
+- [ADR-025](docs/adr/0025-pilot-durable-postgresql-create-recovery.md): Durable single-database dispatch barrier and explicitly consented manual recovery after an uncertain outcome.
 
 ## Out of scope for the first milestones
 

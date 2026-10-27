@@ -92,16 +92,18 @@ ADR-005 and later persistence work.
 
 ### Existing databases and uncertain outcomes
 
-The executor never adopts a database that existed before its own confirmed
-successful operation. Encountering such a database is a conflict, not
-idempotent success. In particular, matching the requested name does not prove
-ownership.
+The checkpoint executor never adopts a database that existed before its own
+confirmed successful operation. Encountering such a database is a conflict,
+not idempotent success. In particular, matching the requested name does not
+prove ownership. The later durable pilot permits an explicit operator-consented
+assignment only for an uncertain attempt under [ADR-025](0025-pilot-durable-postgresql-create-recovery.md);
+it does not turn this checkpoint's conflict into success.
 
 If connection loss, cancellation or another interruption occurs after a
 creation command may have reached PostgreSQL but before success is confirmed
 and recorded, the result is `NeedsAttention`. Haby must not report success,
-automatically adopt the database or blindly retry creation. A later manual or
-durable recovery workflow may resolve that state. In this checkpoint, a process
+automatically adopt the database or blindly retry creation. The explicit
+manual recovery policy is defined in ADR-025. In this checkpoint, a process
 restart can similarly lose the in-memory confirmation and cause a conflict;
 restart-safe recovery is explicitly out of scope.
 
