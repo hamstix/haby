@@ -89,6 +89,31 @@ migrations without a database connection. Supply a connection explicitly when
 running a database operation through the CLI; normal startup migrations use
 the registered context and its configured connection.
 
+## First durable desired generation
+
+`IDurableDesiredStateCommitter` accepts only a persisted one-Application
+`ExpectedAbsence` Plan. The additive migration stores one deployment, immutable
+generation-1 snapshot and one ChangeSetCommit. The snapshot contains exact
+Manifest and Provider identities, explicit `Present` presence, alias provenance
+and the Plan fingerprint;
+it has no Provider configuration payload or credential. AppliedGeneration stays
+null. Provider execution and operator transport remain separate.
+
+Commit uses a PostgreSQL transaction at READ COMMITTED. It locks the ChangeSet
+row, then takes a transaction-scoped advisory lock keyed by Environment and
+Application to serialize competing expected-absence commits before a deployment
+row exists. A unique deployment index backs up that ordering. It reads an
+existing ChangeSetCommit before validating the requested Plan, so retries return
+the original Plan and generation. The Plan row is locked against closure, and
+the alias row is locked `FOR SHARE` through exact-input comparison and all
+writes. Alias compare-and-swap updates therefore serialize with commit: a
+switch ordered first makes the old Plan stale; one ordered later preserves the
+old pinned revision. The generation and commit rows reject update and delete.
+The alias store retains its existing two-second database lock timeout: a switch
+that cannot acquire the alias row lock returns `StoreUnavailable`, and the
+operator may retry it after the commit finishes. This is not a reservation or
+an external Provider effect.
+
 Before applying a reviewed migration, stop catalog writes and take a verified
 database backup. With PostgreSQL client environment variables supplied by the
 operator's secret management, a PowerShell procedure is:

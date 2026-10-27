@@ -19,6 +19,9 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<DurableChangeSetRow> DurableChangeSets => Set<DurableChangeSetRow>();
     internal DbSet<DurablePlanRow> DurablePlans => Set<DurablePlanRow>();
     internal DbSet<DurablePlanClosureRow> DurablePlanClosures => Set<DurablePlanClosureRow>();
+    internal DbSet<ApplicationDeploymentRow> ApplicationDeployments => Set<ApplicationDeploymentRow>();
+    internal DbSet<DeploymentGenerationRow> DeploymentGenerations => Set<DeploymentGenerationRow>();
+    internal DbSet<ChangeSetCommitRow> ChangeSetCommits => Set<ChangeSetCommitRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -236,6 +239,65 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.HasOne<DurablePlanRow>().WithOne().HasForeignKey<DurablePlanClosureRow>(row => row.PlanId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<ApplicationDeploymentRow>(entity =>
+        {
+            entity.ToTable("application_deployments", table => table.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND applied_generation IS NULL"));
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
+            entity.Property(row => row.DesiredGeneration).HasColumnName("desired_generation");
+            entity.Property(row => row.AppliedGeneration).HasColumnName("applied_generation");
+            entity.Property(row => row.ConcurrencyToken).HasColumnName("concurrency_token");
+            entity.HasIndex(row => new { row.EnvironmentRecordId, row.ApplicationRecordId }).IsUnique();
+            entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DeploymentGenerationRow>(entity =>
+        {
+            entity.ToTable("application_deployment_generations", table => table.HasCheckConstraint("CK_deployment_generations_first", "generation = 1 AND presence = 'Present'"));
+            entity.HasKey(row => new { row.DeploymentId, row.Generation });
+            entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(row => row.Generation).HasColumnName("generation");
+            entity.Property(row => row.Presence).HasColumnName("presence").HasMaxLength(16).IsRequired();
+            entity.Property(row => row.PlanId).HasColumnName("plan_id");
+            entity.Property(row => row.ChangeSetId).HasColumnName("change_set_id");
+            entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
+            entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.EnvironmentKey).HasColumnName("environment_key").HasMaxLength(64).IsRequired();
+            entity.Property(row => row.ProviderAlias).HasColumnName("provider_alias").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
+            entity.Property(row => row.ConfigurationRevisionNumber).HasColumnName("configuration_revision_number");
+            entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
+            entity.Property(row => row.AcceptedAt).HasColumnName("accepted_at");
+            entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
+            entity.HasOne<ApplicationDeploymentRow>().WithMany().HasForeignKey(row => row.DeploymentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<DurablePlanRow>().WithMany().HasForeignKey(row => row.PlanId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<DurableChangeSetRow>().WithMany().HasForeignKey(row => row.ChangeSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ManifestRevisionRow>().WithMany().HasForeignKey(row => new { row.ApplicationRecordId, row.RevisionNumber })
+                .HasPrincipalKey(row => new { row.ApplicationRecordId, row.LocalRevisionNumber }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ProviderConfigurationRevisionRow>().WithMany()
+                .HasForeignKey(row => new { row.ProviderInstanceId, RevisionNumber = row.ConfigurationRevisionNumber, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ChangeSetCommitRow>(entity =>
+        {
+            entity.ToTable("change_set_commits", table => table.HasCheckConstraint("CK_change_set_commits_first", "generation = 1"));
+            entity.HasKey(row => row.ChangeSetId);
+            entity.Property(row => row.ChangeSetId).HasColumnName("change_set_id");
+            entity.Property(row => row.PlanId).HasColumnName("plan_id");
+            entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(row => row.Generation).HasColumnName("generation");
+            entity.Property(row => row.CommittedAt).HasColumnName("committed_at");
+            entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
+            entity.HasOne<DurableChangeSetRow>().WithOne().HasForeignKey<ChangeSetCommitRow>(row => row.ChangeSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<DurablePlanRow>().WithMany().HasForeignKey(row => row.PlanId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<DeploymentGenerationRow>().WithOne().HasForeignKey<ChangeSetCommitRow>(row => new { row.DeploymentId, row.Generation })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
 
@@ -273,6 +335,46 @@ internal sealed class DurablePlanClosureRow
 {
     public Guid PlanId { get; set; }
     public DateTimeOffset ClosedAt { get; set; }
+    public required string ActorId { get; set; }
+}
+
+internal sealed class ApplicationDeploymentRow
+{
+    public Guid Id { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public Guid ApplicationRecordId { get; set; }
+    public long DesiredGeneration { get; set; }
+    public long? AppliedGeneration { get; set; }
+    public long ConcurrencyToken { get; set; }
+}
+
+internal sealed class DeploymentGenerationRow
+{
+    public Guid DeploymentId { get; set; }
+    public long Generation { get; set; }
+    public required string Presence { get; set; }
+    public Guid PlanId { get; set; }
+    public Guid ChangeSetId { get; set; }
+    public Guid ApplicationRecordId { get; set; }
+    public long RevisionNumber { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public required string EnvironmentKey { get; set; }
+    public required string ProviderAlias { get; set; }
+    public Guid ProviderInstanceId { get; set; }
+    public long ConfigurationRevisionNumber { get; set; }
+    public required string ImplementationId { get; set; }
+    public required string Fingerprint { get; set; }
+    public DateTimeOffset AcceptedAt { get; set; }
+    public required string ActorId { get; set; }
+}
+
+internal sealed class ChangeSetCommitRow
+{
+    public Guid ChangeSetId { get; set; }
+    public Guid PlanId { get; set; }
+    public Guid DeploymentId { get; set; }
+    public long Generation { get; set; }
+    public DateTimeOffset CommittedAt { get; set; }
     public required string ActorId { get; set; }
 }
 

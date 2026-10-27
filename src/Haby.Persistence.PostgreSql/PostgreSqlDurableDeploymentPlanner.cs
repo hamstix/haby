@@ -70,9 +70,21 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         ArgumentNullException.ThrowIfNull(changeSetId);
         ValidateActor(actorId);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        var changeId = Guid.Parse(changeSetId.ToString());
+        // Commit takes FOR UPDATE on this row. Planning holds FOR SHARE through
+        // insertion so a Plan cannot be created after this ChangeSet commits.
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT id FROM deployment_change_sets WHERE id = {changeId} FOR SHARE", cancellationToken);
         var row = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.Id == Guid.Parse(changeSetId.ToString()), cancellationToken);
+            item.Id == changeId, cancellationToken);
         if (row is null) return new(DurablePlanStatus.ChangeSetNotFound);
+        if (await context.ChangeSetCommits.AsNoTracking().AnyAsync(item => item.ChangeSetId == changeId,
+            cancellationToken)) return new(DurablePlanStatus.ChangeSetStale);
+        if (await context.ApplicationDeployments.AsNoTracking().AnyAsync(item =>
+            item.EnvironmentRecordId == row.EnvironmentRecordId &&
+            item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken))
+            return new(DurablePlanStatus.ChangeSetStale);
         // Defensive until durable deployments and ExpectedGeneration are implemented.
         if (!row.ExpectedAbsence) return new(DurablePlanStatus.ChangeSetStale);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
@@ -128,6 +140,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         };
         context.DurablePlans.Add(planRow);
         await context.SaveChangesAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await transaction.CommitAsync(CancellationToken.None);
         return new(DurablePlanStatus.Planned, ToPlan(planRow, null, null));
     }
 
@@ -199,6 +213,10 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var row = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == Guid.Parse(id.ToString()), cancellationToken);
         if (row is null || !row.ExpectedAbsence) return (DurablePlanStatus.ChangeSetStale, null);
+        if (await context.ApplicationDeployments.AsNoTracking().AnyAsync(item =>
+            item.EnvironmentRecordId == row.EnvironmentRecordId &&
+            item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken))
+            return (DurablePlanStatus.ChangeSetStale, null);
         var revision = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
         var manifest = await revisions.FindAsync(revision, cancellationToken);
@@ -227,7 +245,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             resolution.Binding.RevisionNumber, resolution.ImplementationId));
     }
 
-    private async Task<bool> CodecAvailableAsync(ManifestCatalogDbContext context,
+    internal async Task<bool> CodecAvailableAsync(ManifestCatalogDbContext context,
         ProviderConfigurationRevisionRow revision, CancellationToken cancellationToken)
     {
         var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(item =>
@@ -316,7 +334,9 @@ public static class DurableDeploymentPlannerServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDurableDeploymentPlanner(this IServiceCollection services)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
-        services.AddSingleton<IDurableDeploymentPlanner, PostgreSqlDurableDeploymentPlanner>();
+        services.TryAddSingleton<PostgreSqlDurableDeploymentPlanner>();
+        services.TryAddSingleton<IDurableDeploymentPlanner>(provider =>
+            provider.GetRequiredService<PostgreSqlDurableDeploymentPlanner>());
         return services;
     }
 }

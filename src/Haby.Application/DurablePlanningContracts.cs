@@ -47,3 +47,38 @@ public interface IDurableDeploymentPlanner
         CancellationToken cancellationToken);
     ValueTask<DurablePlanCurrentStatus> CheckPlanAsync(DeploymentPlanId id, CancellationToken cancellationToken);
 }
+
+/// <summary>The persisted first desired generation and its exact, non-secret Plan inputs.</summary>
+public sealed record DurableDesiredGeneration(ApplicationDeploymentId DeploymentId,
+    DeploymentGeneration Generation, DesiredPresence Presence, DurablePlanningInputs Inputs, DeploymentPlanId PlanId,
+    DeploymentChangeSetId ChangeSetId, DateTimeOffset AcceptedAt, string ActorId);
+
+public sealed record DurableChangeSetCommit(DeploymentChangeSetId ChangeSetId, DeploymentPlanId PlanId,
+    ApplicationDeploymentId DeploymentId, DeploymentGeneration Generation, DateTimeOffset CommittedAt,
+    string ActorId);
+
+public abstract record DurableCommitResult
+{
+    private DurableCommitResult() { }
+    public sealed record Committed(DurableChangeSetCommit Commit) : DurableCommitResult;
+    public sealed record ChangeSetNotFound : DurableCommitResult;
+    public sealed record PlanNotFound : DurableCommitResult;
+    public sealed record PlanDoesNotBelongToChangeSet : DurableCommitResult;
+    public sealed record Closed : DurableCommitResult;
+    public sealed record Expired : DurableCommitResult;
+    public sealed record ChangeSetStale(DeploymentGeneration? ActualGeneration) : DurableCommitResult;
+    public sealed record PlanStale : DurableCommitResult;
+    public sealed record PlanInputUnavailable : DurableCommitResult;
+    public sealed record UnsupportedPrecondition : DurableCommitResult;
+}
+
+/// <summary>Internal durable desired-state boundary; it does not execute Providers.</summary>
+public interface IDurableDesiredStateCommitter
+{
+    ValueTask<DurableCommitResult> CommitAsync(DeploymentChangeSetId changeSetId,
+        DeploymentPlanId planId, string actorId, CancellationToken cancellationToken);
+    ValueTask<DurableChangeSetCommit?> FindCommitAsync(DeploymentChangeSetId changeSetId,
+        CancellationToken cancellationToken);
+    ValueTask<DurableDesiredGeneration?> FindGenerationAsync(ApplicationDeploymentId deploymentId,
+        DeploymentGeneration generation, CancellationToken cancellationToken);
+}
