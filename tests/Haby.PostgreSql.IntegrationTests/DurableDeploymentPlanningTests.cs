@@ -116,6 +116,20 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             var error = await Assert.ThrowsAsync<PostgresException>(async () => await duplicate.ExecuteNonQueryAsync());
             Assert.Equal(PostgresErrorCodes.UniqueViolation, error.SqlState);
         }
+        var deploymentGuid = Guid.Parse(original.DeploymentId.ToString());
+        await AssertConstraintRejected(database,
+            "UPDATE durable_create_operations SET state = 'Dispatching' WHERE deployment_id = @id",
+            PostgresErrorCodes.CheckViolation, deploymentGuid);
+        await AssertConstraintRejected(database,
+            "UPDATE durable_create_operations SET action = 'Delete' WHERE deployment_id = @id",
+            PostgresErrorCodes.CheckViolation, deploymentGuid);
+        await AssertConstraintRejected(database,
+            "UPDATE durable_create_operations SET resource_id = '' WHERE deployment_id = @id",
+            PostgresErrorCodes.CheckViolation, deploymentGuid);
+        await AssertConstraintRejected(database, """
+            INSERT INTO durable_create_operations (deployment_id, generation, resource_id, action, state, created_at)
+            VALUES (@id, 1, 'db', 'Create', 'Pending', now())
+            """, PostgresErrorCodes.ForeignKeyViolation, Guid.NewGuid());
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT desired_generation FROM application_deployments", database).ExecuteScalarAsync())!);
         Assert.Equal(DBNull.Value, await new NpgsqlCommand("SELECT applied_generation FROM application_deployments", database).ExecuteScalarAsync());
         Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = 'sample_db'", database).ExecuteScalarAsync())!);
@@ -131,6 +145,9 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         await AssertImmutableRejected(database,
             "DELETE FROM change_set_commits WHERE change_set_id = @id",
             Guid.Parse(changeSetId.ToString()));
+        await AssertImmutableRejected(database,
+            "DELETE FROM durable_create_operations WHERE deployment_id = @id", deploymentGuid);
+        Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
         Assert.Equal(0L, (long)(await new NpgsqlCommand("""
             SELECT count(*) FROM information_schema.columns
             WHERE table_name IN ('application_deployments', 'application_deployment_generations', 'change_set_commits', 'durable_create_operations')
@@ -524,6 +541,15 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         command.Parameters.AddWithValue("id", id);
         var error = await Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteNonQueryAsync());
         Assert.Equal("P0001", error.SqlState);
+    }
+
+    private static async Task AssertConstraintRejected(NpgsqlConnection database, string sql,
+        string expectedSqlState, Guid id)
+    {
+        await using var command = new NpgsqlCommand(sql, database);
+        command.Parameters.AddWithValue("id", id);
+        var error = await Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteNonQueryAsync());
+        Assert.Equal(expectedSqlState, error.SqlState);
     }
 
     private async Task<(string Connection, AdjustableTimeProvider Time, EnvironmentRecordId Environment,

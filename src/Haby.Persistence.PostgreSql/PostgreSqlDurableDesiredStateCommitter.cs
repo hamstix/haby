@@ -108,9 +108,10 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         if (spec.Resources.Count != 1 || spec.Components.Count != 0 || spec.Exports.Count != 0 ||
             spec.Parameters.Count != 0) return new DurableCommitResult.UnsupportedShape();
         var resource = spec.Resources.Single();
-        if (!PostgreSqlDurableDeploymentPlanner.IsSupportedDatabaseResource(resource.Value) ||
-            resource.Value.ProviderRef.Value != plan.ProviderAlias)
+        if (!PostgreSqlDurableDeploymentPlanner.IsSupportedDatabaseResource(resource.Value))
             return new DurableCommitResult.UnsupportedShape();
+        if (resource.Value.ProviderRef.Value != plan.ProviderAlias)
+            return new DurableCommitResult.PlanStale();
 
         cancellationToken.ThrowIfCancellationRequested();
         var deploymentId = ApplicationDeploymentId.New();

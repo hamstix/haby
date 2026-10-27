@@ -121,6 +121,8 @@ attempt has crossed the dispatch barrier. The operation references the immutable
 generation for its exact ProviderInstance, configuration revision and
 ImplementationId; reads do not resolve the current alias. The journal stores no
 Provider configuration payload, SecretVersion material or connection string.
+The pilot journal row rejects deletion; later ADR-025 state transitions will
+update the retained row.
 This slice does not dispatch SQL or advance `AppliedGeneration`.
 
 Before applying a reviewed migration, stop catalog writes and take a verified

@@ -20,6 +20,7 @@ public sealed class DurablePlannerGuardTests
         Assert.Equal(["Action", "CreatedAt", "DeploymentId", "Generation", "ResourceId", "State"],
             entity.GetProperties().Select(property => property.Name).OrderBy(name => name).ToArray());
     }
+
     [Fact]
     public void Registration_supplies_a_clock_without_replacing_an_explicit_clock()
     {

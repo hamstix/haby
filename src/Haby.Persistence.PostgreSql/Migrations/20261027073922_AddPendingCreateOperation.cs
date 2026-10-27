@@ -35,11 +35,17 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         principalColumns: new[] { "deployment_id", "generation" },
                         onDelete: ReferentialAction.Restrict);
                 });
+
+            migrationBuilder.Sql("""
+                CREATE TRIGGER durable_create_operations_before_delete BEFORE DELETE ON durable_create_operations
+                    FOR EACH ROW EXECUTE FUNCTION reject_deployment_planning_mutation();
+                """);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql("DROP TRIGGER durable_create_operations_before_delete ON durable_create_operations;");
             migrationBuilder.DropTable(
                 name: "durable_create_operations");
         }
