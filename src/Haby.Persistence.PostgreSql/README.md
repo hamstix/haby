@@ -51,6 +51,39 @@ needs DDL rights for EF's migration history table and catalog tables,
 indexes and constraints, plus normal read/write rights. The pilot deployment
 must restrict schema migration to one Haby instance.
 
+## Durable one-Application planning
+
+`AddPostgreSqlDurableDeploymentPlanner()` registers the internal asynchronous
+`IDurableDeploymentPlanner` boundary. It stores one exact Manifest revision and
+an `ExpectedAbsence` precondition per ChangeSet. `ExpectedGeneration` is
+explicitly unsupported until durable ApplicationDeployments exist. Planning
+accepts only one `postgresql.database/v1alpha1` Resource with a validated
+database name. It resolves an Environment-local Provider alias to one sealed,
+decodable configuration revision and registered implementation, then stores
+only the exact identities and a versioned fingerprint. No credential or
+configuration payload is copied into a Plan.
+
+Every Plan expires 24 hours after creation. `ClosePlanAsync` records an
+independent, immutable closure with its technical actor. Closed and expired
+Plans remain readable for audit but `CheckPlanAsync` rejects them. Expiry wins
+when both conditions hold; closing an expired Plan still records the actor.
+No retention deletion runs in this
+slice. `CheckPlanAsync` compares the exact typed inputs and fingerprint; an
+alias switch makes the prior Plan stale and a new Plan can be
+created for the same ChangeSet. The application boundary exposes no desired
+state commit or Provider execution.
+
+Planning reads several durable records through separate contexts, so it is not
+snapshot-isolated across a concurrent alias switch. A Plan may therefore be
+stale immediately after creation; callers must check it again before any
+future desired-state acceptance. In this slice no durable deployment exists,
+so only expected absence is stored and a ChangeSet-stale mismatch has no
+reachable producer. A later deployment/commit slice must add the actual
+generation mismatch detail required by ADR-016. Corrupt historical Plan rows
+fail closed with `InvalidDataException`; a future operator transport must map
+that to a redacted typed error. `ImplementationId` remains a string to match
+the current Provider alias resolver; these contracts are internal pilot APIs.
+
 EF migration tooling uses `ManifestCatalogDesignTimeFactory` to inspect or add
 migrations without a database connection. Supply a connection explicitly when
 running a database operation through the CLI; normal startup migrations use

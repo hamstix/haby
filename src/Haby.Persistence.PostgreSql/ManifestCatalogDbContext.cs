@@ -16,6 +16,9 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<ProviderRevisionSecretRefRow> ProviderRevisionSecretRefs => Set<ProviderRevisionSecretRefRow>();
     internal DbSet<ProviderAliasRow> ProviderAliases => Set<ProviderAliasRow>();
     internal DbSet<ProviderAliasAuditRow> ProviderAliasAudits => Set<ProviderAliasAuditRow>();
+    internal DbSet<DurableChangeSetRow> DurableChangeSets => Set<DurableChangeSetRow>();
+    internal DbSet<DurablePlanRow> DurablePlans => Set<DurablePlanRow>();
+    internal DbSet<DurablePlanClosureRow> DurablePlanClosures => Set<DurablePlanClosureRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -45,7 +48,6 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.ImportedAt).HasColumnName("imported_at").HasColumnType("timestamp with time zone");
             entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(row => new { row.ApplicationId, row.ApplicationVersion }).IsUnique();
-            entity.HasIndex(row => new { row.ApplicationRecordId, row.LocalRevisionNumber }).IsUnique();
         });
         modelBuilder.Entity<EnvironmentRow>(entity =>
         {
@@ -181,7 +183,97 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<DurableChangeSetRow>(entity =>
+        {
+            entity.ToTable("deployment_change_sets");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
+            entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
+            entity.Property(row => row.ExpectedAbsence).HasColumnName("expected_absence");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
+            entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ManifestRevisionRow>().WithMany()
+                .HasForeignKey(row => new { row.ApplicationRecordId, row.RevisionNumber })
+                .HasPrincipalKey(row => new { row.ApplicationRecordId, row.LocalRevisionNumber })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DurablePlanRow>(entity =>
+        {
+            entity.ToTable("deployment_plans");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.ChangeSetId).HasColumnName("change_set_id");
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.EnvironmentKey).HasColumnName("environment_key").HasMaxLength(64).IsRequired();
+            entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
+            entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
+            entity.Property(row => row.ProviderAlias).HasColumnName("provider_alias").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
+            entity.Property(row => row.ConfigurationRevisionNumber).HasColumnName("configuration_revision_number");
+            entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.SnapshotFormatVersion).HasColumnName("snapshot_format_version");
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
+            entity.HasOne<DurableChangeSetRow>().WithMany().HasForeignKey(row => row.ChangeSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ProviderConfigurationRevisionRow>().WithMany()
+                .HasForeignKey(row => new { row.ProviderInstanceId, RevisionNumber = row.ConfigurationRevisionNumber, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<DurablePlanClosureRow>(entity =>
+        {
+            entity.ToTable("deployment_plan_closures");
+            entity.HasKey(row => row.PlanId);
+            entity.Property(row => row.PlanId).HasColumnName("plan_id");
+            entity.Property(row => row.ClosedAt).HasColumnName("closed_at");
+            entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
+            entity.HasOne<DurablePlanRow>().WithOne().HasForeignKey<DurablePlanClosureRow>(row => row.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
+}
+
+internal sealed class DurableChangeSetRow
+{
+    public Guid Id { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public Guid ApplicationRecordId { get; set; }
+    public long RevisionNumber { get; set; }
+    public bool ExpectedAbsence { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public required string ActorId { get; set; }
+}
+
+internal sealed class DurablePlanRow
+{
+    public Guid Id { get; set; }
+    public Guid ChangeSetId { get; set; }
+    public Guid EnvironmentRecordId { get; set; }
+    public required string EnvironmentKey { get; set; }
+    public Guid ApplicationRecordId { get; set; }
+    public long RevisionNumber { get; set; }
+    public required string ProviderAlias { get; set; }
+    public Guid ProviderInstanceId { get; set; }
+    public long ConfigurationRevisionNumber { get; set; }
+    public required string ImplementationId { get; set; }
+    public int SnapshotFormatVersion { get; set; }
+    public required string Fingerprint { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public required string ActorId { get; set; }
+}
+
+internal sealed class DurablePlanClosureRow
+{
+    public Guid PlanId { get; set; }
+    public DateTimeOffset ClosedAt { get; set; }
+    public required string ActorId { get; set; }
 }
 
 internal sealed class EnvironmentRow

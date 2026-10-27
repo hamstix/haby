@@ -43,6 +43,151 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("applications", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableChangeSetRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<Guid>("ApplicationRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<bool>("ExpectedAbsence")
+                        .HasColumnType("boolean")
+                        .HasColumnName("expected_absence");
+
+                    b.Property<long>("RevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentRecordId");
+
+                    b.HasIndex("ApplicationRecordId", "RevisionNumber");
+
+                    b.ToTable("deployment_change_sets", (string)null);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurablePlanClosureRow", b =>
+                {
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plan_id");
+
+                    b.Property<DateTimeOffset>("ClosedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at");
+
+                    b.HasKey("PlanId");
+
+                    b.ToTable("deployment_plan_closures", (string)null);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurablePlanRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<Guid>("ApplicationRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
+
+                    b.Property<Guid>("ChangeSetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("change_set_id");
+
+                    b.Property<long>("ConfigurationRevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("configuration_revision_number");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EnvironmentKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("environment_key");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(67)
+                        .HasColumnType("character varying(67)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<string>("ImplementationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("implementation_id");
+
+                    b.Property<string>("ProviderAlias")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("provider_alias");
+
+                    b.Property<Guid>("ProviderInstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_instance_id");
+
+                    b.Property<long>("RevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.Property<int>("SnapshotFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("snapshot_format_version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChangeSetId");
+
+                    b.HasIndex("ProviderInstanceId", "ConfigurationRevisionNumber", "EnvironmentRecordId");
+
+                    b.ToTable("deployment_plans", (string)null);
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.EnvironmentRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -127,9 +272,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ApplicationId", "ApplicationVersion")
-                        .IsUnique();
-
-                    b.HasIndex("ApplicationRecordId", "LocalRevisionNumber")
                         .IsUnique();
 
                     b.ToTable("manifest_revisions", (string)null);
@@ -431,6 +573,53 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("secret_versions", (string)null);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableChangeSetRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
+                        .WithMany()
+                        .HasForeignKey("ApplicationRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ManifestRevisionRow", null)
+                        .WithMany()
+                        .HasForeignKey("ApplicationRecordId", "RevisionNumber")
+                        .HasPrincipalKey("ApplicationRecordId", "LocalRevisionNumber")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurablePlanClosureRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DurablePlanRow", null)
+                        .WithOne()
+                        .HasForeignKey("Haby.Persistence.PostgreSql.DurablePlanClosureRow", "PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.DurablePlanRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableChangeSetRow", null)
+                        .WithMany()
+                        .HasForeignKey("ChangeSetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ProviderConfigurationRevisionRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderInstanceId", "ConfigurationRevisionNumber", "EnvironmentRecordId")
+                        .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ManifestRevisionRow", b =>
