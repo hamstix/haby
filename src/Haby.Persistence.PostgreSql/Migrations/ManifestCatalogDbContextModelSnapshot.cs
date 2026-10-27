@@ -56,6 +56,9 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasIndex("EnvironmentRecordId", "ApplicationRecordId")
                         .IsUnique();
 
+                    b.HasIndex("Id", "AppliedGeneration")
+                        .IsUnique();
+
                     b.ToTable("application_deployments", null, t =>
                         {
                             t.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND (applied_generation IS NULL OR applied_generation = 1)");
@@ -316,6 +319,9 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_durable_create_operation_attempts_deployment_id_generation~1");
 
+                    b.HasIndex("AttemptId", "DeploymentId", "Generation", "ResourceId", "Action", "AttemptNumber", "Outcome")
+                        .IsUnique();
+
                     b.ToTable("durable_create_operation_attempts", null, t =>
                         {
                             t.HasCheckConstraint("CK_durable_create_operation_attempts_action", "action = 'Create'");
@@ -325,6 +331,8 @@ namespace Haby.Persistence.PostgreSql.Migrations
                             t.HasCheckConstraint("CK_durable_create_operation_attempts_number", "attempt_number > 0");
 
                             t.HasCheckConstraint("CK_durable_create_operation_attempts_outcome", "outcome IS NULL OR outcome IN ('Succeeded', 'Conflict', 'ServerRejected', 'Uncertain', 'CanceledBeforeDispatch', 'AbandonedBeforeDispatch', 'FailedBeforeDispatch')");
+
+                            t.HasCheckConstraint("CK_durable_create_operation_attempts_uncertain_dispatch", "outcome IS DISTINCT FROM 'Uncertain' OR dispatched_at IS NOT NULL");
                         });
                 });
 
@@ -384,6 +392,13 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnName("updated_at");
 
                     b.HasKey("DeploymentId", "Generation", "ResourceId", "Action");
+
+                    b.HasIndex("DeploymentId", "Generation", "ResourceId", "Action", "State")
+                        .IsUnique();
+
+                    b.HasIndex("DeploymentId", "Generation", "ResourceId", "Action", "CurrentAttemptId", "State")
+                        .IsUnique()
+                        .HasDatabaseName("IX_durable_create_operations_deployment_id_generation_resourc~1");
 
                     b.ToTable("durable_create_operations", null, t =>
                         {
@@ -614,9 +629,27 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("action");
 
+                    b.Property<long>("AppliedGeneration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L)
+                        .HasColumnName("applied_generation");
+
                     b.Property<Guid>("AttemptId")
                         .HasColumnType("uuid")
                         .HasColumnName("attempt_id");
+
+                    b.Property<long>("AttemptNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("attempt_number");
+
+                    b.Property<string>("AttemptOutcome")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("Uncertain")
+                        .HasColumnName("attempt_outcome");
 
                     b.Property<DateTimeOffset>("DecidedAt")
                         .HasColumnType("timestamp with time zone")
@@ -635,6 +668,14 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)")
                         .HasColumnName("note");
+
+                    b.Property<string>("OperationState")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("Succeeded")
+                        .HasColumnName("operation_state");
 
                     b.Property<string>("Reason")
                         .IsRequired()
@@ -668,9 +709,13 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                             t.HasCheckConstraint("CK_postgresql_recovery_actor", "length(btrim(technical_actor)) > 0 AND length(technical_actor) <= 256");
 
+                            t.HasCheckConstraint("CK_postgresql_recovery_committed_state", "operation_state = 'Succeeded' AND applied_generation = generation");
+
                             t.HasCheckConstraint("CK_postgresql_recovery_note", "length(btrim(note)) > 0 AND length(note) <= 512");
 
                             t.HasCheckConstraint("CK_postgresql_recovery_reason", "reason = 'OperatorAcceptedExistingDatabase'");
+
+                            t.HasCheckConstraint("CK_postgresql_recovery_uncertain_attempt", "attempt_outcome = 'Uncertain'");
                         });
                 });
 

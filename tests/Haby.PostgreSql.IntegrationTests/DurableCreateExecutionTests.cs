@@ -4,6 +4,7 @@ using Haby.Domain;
 using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
@@ -88,6 +89,30 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
     }
 
     [Fact]
+    public async Task Existing_uncertain_attempt_survives_upgrade_from_merged_migration_history()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_upgrade", migrateToPrevious: true);
+        var attemptId = await MakeUncertainAsync(prepared);
+        var before = await RecoveryRowsBeforeMigrationAsync(prepared.Connection);
+        await using (var upgrade = Services(prepared.Connection, prepared.Time))
+            await upgrade.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        Assert.Equal(before, await RecoveryRowsBeforeMigrationAsync(prepared.Connection));
+        await CreateIndependentDatabaseAsync(prepared.Database);
+        await using var restarted = Services(prepared.Connection, prepared.Time);
+        var assigned = await restarted.GetRequiredService<IPostgreSqlDatabaseRecovery>()
+            .AssignExistingDatabaseAsync(Assignment(prepared, attemptId), default);
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Assigned, assigned.Outcome);
+        Assert.Equal("Succeeded", await ScalarAsync(prepared.Connection,
+            "SELECT state FROM durable_create_operations"));
+        Assert.Equal(["Uncertain"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions"));
+    }
+
+    [Fact]
     public async Task Rejected_assignments_leave_operation_attempt_audit_and_applied_generation_unchanged()
     {
         var prepared = await PrepareExecutionAsync("haby_recover_no");
@@ -127,6 +152,7 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
     {
         var prepared = await PrepareExecutionAsync("haby_recover_guard");
         await MakeUncertainAsync(prepared);
+        var before = await RecoveryRowsAsync(prepared.Connection);
         await AssertRejectedAsync(prepared.Connection,
             "UPDATE durable_create_operations SET state = 'Succeeded', reason_code = NULL");
         await AssertRejectedAsync(prepared.Connection,
@@ -135,19 +161,20 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
             "DELETE FROM durable_create_operations");
         await AssertRejectedAsync(prepared.Connection, """
             INSERT INTO postgresql_database_recovery_decisions
-                (id, deployment_id, generation, resource_id, action, attempt_id,
+                (id, deployment_id, generation, resource_id, action, attempt_id, attempt_number,
                  reason, note, technical_actor, acknowledged, decided_at)
             SELECT gen_random_uuid(), o.deployment_id, o.generation, o.resource_id, o.action,
-                   o.current_attempt_id, 'OperatorAcceptedExistingDatabase', 'checked',
+                   o.current_attempt_id, o.attempt_number, 'OperatorAcceptedExistingDatabase', 'checked',
                    'tester', true, now()
             FROM durable_create_operations o
-            """);
+            """, "23503");
         Assert.Equal("NeedsAttention", await ScalarAsync(prepared.Connection,
             "SELECT state FROM durable_create_operations"));
         Assert.Null(await ScalarAsync(prepared.Connection,
             "SELECT applied_generation FROM application_deployments"));
         Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
             "SELECT count(*) FROM postgresql_database_recovery_decisions"));
+        Assert.Equal(before, await RecoveryRowsAsync(prepared.Connection));
     }
 
     [Fact]
@@ -331,6 +358,17 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         return $"{operation}|{attempt}|{deployment}|{decisions}";
     }
 
+    private static async Task<string> RecoveryRowsBeforeMigrationAsync(string connection)
+    {
+        var operation = await ScalarAsync(connection,
+            "SELECT row_to_json(o)::text FROM durable_create_operations o");
+        var attempt = await ScalarAsync(connection,
+            "SELECT row_to_json(a)::text FROM durable_create_operation_attempts a");
+        var deployment = await ScalarAsync(connection,
+            "SELECT row_to_json(d)::text FROM application_deployments d");
+        return $"{operation}|{attempt}|{deployment}";
+    }
+
     [Fact]
     public async Task Success_advances_applied_generation_once_and_retry_sends_no_second_create()
     {
@@ -384,6 +422,17 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
             "SELECT count(*) FROM pg_database WHERE datname = @name",
             command => command.Parameters.AddWithValue("name", prepared.Database)));
+        await AssertRejectedAsync(prepared.Connection, """
+            INSERT INTO postgresql_database_recovery_decisions
+                (id, deployment_id, generation, resource_id, action, attempt_id, attempt_number,
+                 reason, note, technical_actor, acknowledged, decided_at)
+            SELECT gen_random_uuid(), o.deployment_id, o.generation, o.resource_id, o.action,
+                   o.current_attempt_id, o.attempt_number, 'OperatorAcceptedExistingDatabase', 'false recovery',
+                   'tester', true, now()
+            FROM durable_create_operations o
+            """, "23503");
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions"));
         // Terminal history is immutable at the database boundary too.
         await AssertRejectedAsync(prepared.Connection,
             "UPDATE durable_create_operations SET state = 'Pending' WHERE state = 'Succeeded'");
@@ -753,14 +802,22 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         DurableCreateOperationKey Key, string Database, string User, string Password,
         ProviderAliasBinding Binding);
 
-    private async Task<Prepared> PrepareExecutionAsync(string prefix)
+    private async Task<Prepared> PrepareExecutionAsync(string prefix, bool migrateToPrevious = false)
     {
         var database = prefix + "_" + Guid.NewGuid().ToString("N");
         var connection = await NewDatabaseAsync(prefix);
         var time = new AdjustableTimeProvider();
         await using (var services = Services(connection, time))
         {
-            await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+            if (migrateToPrevious)
+            {
+                await using var context = await services
+                    .GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()
+                    .CreateDbContextAsync();
+                await context.Database.MigrateAsync("20261027101647_AddDurableCreateDispatchBarrier");
+            }
+            else
+                await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
             var secrets = services.GetRequiredService<ISecretStore>();
             var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
             var password = "haby-test-" + Guid.NewGuid().ToString("N");
@@ -894,12 +951,13 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         return [.. values];
     }
 
-    private static async Task AssertRejectedAsync(string connection, string sql)
+    private static async Task AssertRejectedAsync(string connection, string sql,
+        string expectedSqlState = "P0001")
     {
         await using var database = await OpenAsync(connection);
         await using var command = new NpgsqlCommand(sql, database);
         var error = await Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteNonQueryAsync());
-        Assert.Equal("P0001", error.SqlState);
+        Assert.Equal(expectedSqlState, error.SqlState);
     }
 
     private sealed class CrashException : Exception

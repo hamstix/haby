@@ -249,3 +249,13 @@ network-restricted operator boundary remains necessary. A successful decision,
 unchanged. A lost-response retry returns the original receipt without a new
 Provider check. No operator gRPC or CLI API exposes this command yet, and absent
 databases have no authorized retry path in this slice.
+
+Under ADR-026, the recovery journal uses an EF Core transaction and conditional
+updates for the assignment. Declarative checks and deferred foreign keys tie a
+committed decision to the exact current `Uncertain` attempt, `Succeeded` state,
+and applied generation. The only new trigger prevents UPDATE/DELETE of retained
+decisions; the existing terminal-operation guard gains only the audited recovery
+transition. These guards prevent rewriting retained rows, but do not authenticate
+a privileged database writer or make an inserted decision proof of a human's
+identity. PostgreSQL-specific deferred foreign-key DDL and the exact row lock
+remain because EF Core cannot express those semantics directly.

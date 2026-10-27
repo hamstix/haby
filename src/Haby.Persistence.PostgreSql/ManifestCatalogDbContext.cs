@@ -255,6 +255,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.AppliedGeneration).HasColumnName("applied_generation");
             entity.Property(row => row.ConcurrencyToken).HasColumnName("concurrency_token");
             entity.HasIndex(row => new { row.EnvironmentRecordId, row.ApplicationRecordId }).IsUnique();
+            entity.HasIndex(row => new { row.Id, row.AppliedGeneration }).IsUnique();
             entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -337,6 +338,17 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
             entity.Property(row => row.DispatchedAt).HasColumnName("dispatched_at");
             entity.Property(row => row.FinalizedAt).HasColumnName("finalized_at");
+            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action, row.State })
+                .IsUnique();
+            entity.HasIndex(row => new
+            {
+                row.DeploymentId,
+                row.Generation,
+                row.ResourceId,
+                row.Action,
+                row.CurrentAttemptId,
+                row.State
+            }).IsUnique();
             entity.HasOne<DeploymentGenerationRow>().WithMany()
                 .HasForeignKey(row => new { row.DeploymentId, row.Generation })
                 .OnDelete(DeleteBehavior.Restrict);
@@ -352,6 +364,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                     "'CanceledBeforeDispatch', 'AbandonedBeforeDispatch', 'FailedBeforeDispatch')");
                 table.HasCheckConstraint("CK_durable_create_operation_attempts_close",
                     "(outcome IS NULL) = (finished_at IS NULL)");
+                table.HasCheckConstraint("CK_durable_create_operation_attempts_uncertain_dispatch",
+                    "outcome IS DISTINCT FROM 'Uncertain' OR dispatched_at IS NOT NULL");
             });
             entity.HasKey(row => row.AttemptId);
             entity.Property(row => row.AttemptId).HasColumnName("attempt_id");
@@ -373,6 +387,16 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                 row.AttemptNumber
             }).IsUnique();
             entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action });
+            entity.HasIndex(row => new
+            {
+                row.AttemptId,
+                row.DeploymentId,
+                row.Generation,
+                row.ResourceId,
+                row.Action,
+                row.AttemptNumber,
+                row.Outcome
+            }).IsUnique();
             entity.HasOne<DurableCreateOperationRow>().WithMany()
                 .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action })
                 .OnDelete(DeleteBehavior.Restrict);
@@ -388,6 +412,10 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                     "length(btrim(note)) > 0 AND length(note) <= 512");
                 table.HasCheckConstraint("CK_postgresql_recovery_actor",
                     "length(btrim(technical_actor)) > 0 AND length(technical_actor) <= 256");
+                table.HasCheckConstraint("CK_postgresql_recovery_committed_state",
+                    "operation_state = 'Succeeded' AND applied_generation = generation");
+                table.HasCheckConstraint("CK_postgresql_recovery_uncertain_attempt",
+                    "attempt_outcome = 'Uncertain'");
             });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
@@ -396,11 +424,18 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
             entity.Property(row => row.AttemptId).HasColumnName("attempt_id");
+            entity.Property(row => row.AttemptNumber).HasColumnName("attempt_number");
+            entity.Property(row => row.AttemptOutcome).HasColumnName("attempt_outcome")
+                .HasMaxLength(32).HasDefaultValue("Uncertain").IsRequired();
             entity.Property(row => row.Reason).HasColumnName("reason").HasMaxLength(48).IsRequired();
             entity.Property(row => row.Note).HasColumnName("note").HasMaxLength(512).IsRequired();
             entity.Property(row => row.TechnicalActor).HasColumnName("technical_actor").HasMaxLength(256).IsRequired();
             entity.Property(row => row.Acknowledged).HasColumnName("acknowledged");
             entity.Property(row => row.DecidedAt).HasColumnName("decided_at");
+            entity.Property(row => row.OperationState).HasColumnName("operation_state")
+                .HasMaxLength(32).HasDefaultValue("Succeeded").IsRequired();
+            entity.Property(row => row.AppliedGeneration).HasColumnName("applied_generation")
+                .HasDefaultValue(1L);
             entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action }).IsUnique();
             entity.HasIndex(row => row.AttemptId).IsUnique();
             entity.HasOne<DurableCreateOperationRow>().WithMany()
@@ -527,11 +562,15 @@ internal sealed class PostgreSqlDatabaseRecoveryDecisionRow
     public required string ResourceId { get; set; }
     public required string Action { get; set; }
     public Guid AttemptId { get; set; }
+    public long AttemptNumber { get; set; }
+    public required string AttemptOutcome { get; set; }
     public required string Reason { get; set; }
     public required string Note { get; set; }
     public required string TechnicalActor { get; set; }
     public bool Acknowledged { get; set; }
     public DateTimeOffset DecidedAt { get; set; }
+    public required string OperationState { get; set; }
+    public long AppliedGeneration { get; set; }
 }
 
 internal sealed class EnvironmentRow

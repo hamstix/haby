@@ -75,11 +75,15 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                 ResourceId = resource,
                 Action = action,
                 AttemptId = command.ExpectedAttemptId,
+                AttemptNumber = operation.AttemptNumber,
+                AttemptOutcome = nameof(DurableCreateAttemptOutcome.Uncertain),
                 Reason = command.Reason.ToString(),
                 Note = command.Note,
                 TechnicalActor = command.TechnicalActor,
                 Acknowledged = command.Acknowledged,
-                DecidedAt = at
+                DecidedAt = at,
+                OperationState = nameof(DurableCreateOperationState.Succeeded),
+                AppliedGeneration = generation
             };
             context.PostgreSqlDatabaseRecoveryDecisions.Add(decision);
             await context.SaveChangesAsync(cancellationToken);
