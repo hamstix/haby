@@ -113,6 +113,46 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
     }
 
     [Fact]
+    public async Task Recovery_audit_survives_later_applied_generation()
+    {
+        var prepared = await PrepareExecutionAsync("haby_recover_next");
+        var attemptId = await MakeUncertainAsync(prepared);
+        await CreateIndependentDatabaseAsync(prepared.Database);
+        await using (var services = Services(prepared.Connection, prepared.Time))
+            Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Assigned,
+                (await services.GetRequiredService<IPostgreSqlDatabaseRecovery>()
+                    .AssignExistingDatabaseAsync(Assignment(prepared, attemptId), default)).Outcome);
+
+        // The pilot currently admits only generation 1. Relax that pilot-only CHECK in this
+        // disposable catalog to exercise ADR-016's later-generation pointer semantics.
+        await ExecuteSqlAsync(prepared.Connection, """
+            ALTER TABLE application_deployments
+                DROP CONSTRAINT "CK_application_deployments_desired_generation";
+            ALTER TABLE application_deployment_generations
+                DROP CONSTRAINT "CK_deployment_generations_first";
+            INSERT INTO application_deployment_generations
+                (deployment_id, generation, presence, plan_id, change_set_id,
+                 application_record_id, revision_number, environment_record_id,
+                 environment_key, provider_alias, provider_instance_id,
+                 configuration_revision_number, implementation_id, fingerprint,
+                 accepted_at, actor_id)
+            SELECT deployment_id, 2, presence, plan_id, change_set_id,
+                   application_record_id, revision_number, environment_record_id,
+                   environment_key, provider_alias, provider_instance_id,
+                   configuration_revision_number, implementation_id, fingerprint,
+                   now(), actor_id
+            FROM application_deployment_generations WHERE generation = 1;
+            UPDATE application_deployments
+                SET desired_generation = 2, applied_generation = 2,
+                    concurrency_token = concurrency_token + 1;
+            """);
+        Assert.Equal(2L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT generation FROM postgresql_database_recovery_decisions"));
+    }
+
+    [Fact]
     public async Task Rejected_assignments_leave_operation_attempt_audit_and_applied_generation_unchanged()
     {
         var prepared = await PrepareExecutionAsync("haby_recover_no");
@@ -168,6 +208,19 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
                    'tester', true, now()
             FROM durable_create_operations o
             """, "23503");
+        await AssertRejectedAsync(prepared.Connection, """
+            BEGIN;
+            INSERT INTO postgresql_database_recovery_decisions
+                (id, deployment_id, generation, resource_id, action, attempt_id, attempt_number,
+                 reason, note, technical_actor, acknowledged, decided_at)
+            SELECT gen_random_uuid(), o.deployment_id, o.generation, o.resource_id, o.action,
+                   o.current_attempt_id, o.attempt_number, 'OperatorAcceptedExistingDatabase',
+                   'checked', 'tester', true, now()
+            FROM durable_create_operations o;
+            UPDATE durable_create_operations
+                SET state = 'Succeeded', reason_code = NULL;
+            COMMIT;
+            """);
         Assert.Equal("NeedsAttention", await ScalarAsync(prepared.Connection,
             "SELECT state FROM durable_create_operations"));
         Assert.Null(await ScalarAsync(prepared.Connection,
@@ -766,6 +819,46 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
     }
 
     [Fact]
+    public async Task Transient_manifest_read_failure_closes_only_attempt_and_resumes()
+    {
+        var prepared = await PrepareExecutionAsync("haby_exec_manifest_retry");
+        await using var services = Services(prepared.Connection, prepared.Time, failManifestReadOnce: true);
+        var first = await ExecuteAsync(services, prepared.Key, default);
+        Assert.Equal(DurableCreateExecutionOutcome.RetryableFailure, first.Outcome);
+        Assert.Equal(DurableCreateOperationState.Preparing, first.Operation!.State);
+        Assert.Equal(DurableCreateOperationReason.ProviderInputUnavailable, first.Operation.Reason);
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM durable_create_operation_attempts WHERE dispatched_at IS NOT NULL"));
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM pg_database WHERE datname = @name",
+            command => command.Parameters.AddWithValue("name", prepared.Database)));
+
+        var resumed = await ExecuteAsync(services, prepared.Key, default);
+        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, resumed.Outcome);
+        Assert.Equal(["FailedBeforeDispatch", "Succeeded"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts ORDER BY attempt_number"));
+        Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
+            "SELECT applied_generation FROM application_deployments"));
+    }
+
+    [Fact]
+    public async Task Corrupt_stored_manifest_is_definitive_before_dispatch()
+    {
+        var prepared = await PrepareExecutionAsync("haby_exec_manifest_corrupt");
+        await ExecuteSqlAsync(prepared.Connection,
+            "UPDATE manifest_revisions SET snapshot_format_version = 1, snapshot = '{bad'");
+        await using var services = Services(prepared.Connection, prepared.Time);
+        var result = await ExecuteAsync(services, prepared.Key, default);
+        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
+        Assert.Equal(DurableCreateOperationReason.ProviderInputUnavailable, result.Operation!.Reason);
+        Assert.Equal(["FailedBeforeDispatch"], await ScalarsAsync(prepared.Connection,
+            "SELECT outcome FROM durable_create_operation_attempts"));
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM pg_database WHERE datname = @name",
+            command => command.Parameters.AddWithValue("name", prepared.Database)));
+    }
+
+    [Fact]
     public async Task Lost_provider_connectivity_before_dispatch_can_be_restored_and_retried()
     {
         var prepared = await PrepareExecutionAsync("haby_exec_rc");
@@ -900,7 +993,7 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
     }
 
     private static ServiceProvider Services(string connection, TimeProvider clock, bool registerCodec = true,
-        IDurableCreateDispatchFaultHooks? hooks = null)
+        IDurableCreateDispatchFaultHooks? hooks = null, bool failManifestReadOnce = false)
     {
         var services = new ServiceCollection()
             .AddSingleton(clock)
@@ -910,6 +1003,9 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
             .AddPostgreSqlProviderAliasStore()
             .AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         if (registerCodec) services.AddPostgreSqlProviderConfigurationCodec();
+        if (failManifestReadOnce)
+            services.AddSingleton<IManifestRevisionQuery>(provider => new FailOnceManifestRevisionQuery(
+                provider.GetRequiredService<PostgreSqlManifestImportStore>()));
         services.AddPostgreSqlProviderRevisionPreflight()
             .AddPostgreSqlDurableDesiredStateCommitter()
             .AddPostgreSqlDurableCreateOperationJournal()
@@ -918,6 +1014,22 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
             .AddPostgreSqlDatabaseRecovery();
         if (hooks is not null) services.AddSingleton(hooks);
         return services.BuildServiceProvider();
+    }
+
+    private sealed class FailOnceManifestRevisionQuery(IManifestRevisionQuery inner) : IManifestRevisionQuery
+    {
+        private bool failed;
+
+        public ValueTask<ManifestRevision?> FindAsync(ManifestRevisionRef reference,
+            CancellationToken cancellationToken = default)
+        {
+            if (!failed)
+            {
+                failed = true;
+                throw new IOException("Temporary manifest store outage");
+            }
+            return inner.FindAsync(reference, cancellationToken);
+        }
     }
 
     private static async Task<NpgsqlConnection> OpenAsync(string connection)

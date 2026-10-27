@@ -17,9 +17,13 @@ internal sealed class PostgreSqlDurableCreateInputResolver(IManifestRevisionQuer
         ManifestRevision? revision;
         try { revision = await manifests.FindAsync(operation.Revision, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception)
+        catch (InvalidDataException)
         {
             return (null, DurableCreateOperationReason.ProviderInputUnavailable, true);
+        }
+        catch (Exception)
+        {
+            return (null, DurableCreateOperationReason.ProviderInputUnavailable, false);
         }
         if (revision is null)
             return (null, DurableCreateOperationReason.ProviderInputUnavailable, false);

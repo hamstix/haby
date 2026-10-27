@@ -253,9 +253,13 @@ databases have no authorized retry path in this slice.
 Under ADR-026, the recovery journal uses an EF Core transaction and conditional
 updates for the assignment. Declarative checks and deferred foreign keys tie a
 committed decision to the exact current `Uncertain` attempt, `Succeeded` state,
-and applied generation. The only new trigger prevents UPDATE/DELETE of retained
-decisions; the existing terminal-operation guard gains only the audited recovery
-transition. These guards prevent rewriting retained rows, but do not authenticate
+and immutable generation history. The transaction advances `AppliedGeneration`
+before the guarded operation transition; the terminal guard requires that
+pointer to match at transition time. Later generations may advance the pointer
+without invalidating the retained decision. The only new trigger prevents
+UPDATE/DELETE of retained decisions; the existing terminal-operation guard gains
+only the audited recovery transition. These guards prevent rewriting retained
+rows, but do not authenticate
 a privileged database writer or make an inserted decision proof of a human's
 identity. PostgreSQL-specific deferred foreign-key DDL and the exact row lock
 remain because EF Core cannot express those semantics directly.

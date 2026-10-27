@@ -255,7 +255,6 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.AppliedGeneration).HasColumnName("applied_generation");
             entity.Property(row => row.ConcurrencyToken).HasColumnName("concurrency_token");
             entity.HasIndex(row => new { row.EnvironmentRecordId, row.ApplicationRecordId }).IsUnique();
-            entity.HasIndex(row => new { row.Id, row.AppliedGeneration }).IsUnique();
             entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
         });

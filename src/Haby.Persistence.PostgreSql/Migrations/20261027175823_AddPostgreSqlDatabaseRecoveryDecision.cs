@@ -78,12 +78,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 sql: "outcome IS DISTINCT FROM 'Uncertain' OR dispatched_at IS NOT NULL");
 
             migrationBuilder.CreateIndex(
-                name: "IX_application_deployments_id_applied_generation",
-                table: "application_deployments",
-                columns: new[] { "id", "applied_generation" },
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_postgresql_database_recovery_decisions_attempt_id",
                 table: "postgresql_database_recovery_decisions",
                 column: "attempt_id",
@@ -96,7 +90,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 unique: true);
             // EF Core does not expose PostgreSQL's DEFERRABLE foreign key mode. The decision is
             // inserted before the guarded operation/deployment updates in one transaction; these
-            // declarative constraints require the four rows to agree at commit, including for a
+            // declarative constraints require the immutable rows to agree at commit, including for a
             // direct writer. They replace the prior cross-table insertion and deferred triggers.
             migrationBuilder.Sql("""
                 ALTER TABLE postgresql_database_recovery_decisions
@@ -114,9 +108,9 @@ namespace Haby.Persistence.PostgreSql.Migrations
                          attempt_number, outcome)
                     DEFERRABLE INITIALLY DEFERRED;
                 ALTER TABLE postgresql_database_recovery_decisions
-                    ADD CONSTRAINT FK_postgresql_recovery_applied_generation
+                    ADD CONSTRAINT FK_postgresql_recovery_generation_snapshot
                     FOREIGN KEY (deployment_id, applied_generation)
-                    REFERENCES application_deployments (id, applied_generation)
+                    REFERENCES application_deployment_generations (deployment_id, generation)
                     DEFERRABLE INITIALLY DEFERRED;
                 """);
 
@@ -164,6 +158,10 @@ namespace Haby.Persistence.PostgreSql.Migrations
                        AND NEW.dispatched_at IS NOT DISTINCT FROM OLD.dispatched_at
                        AND NEW.finalized_at IS NOT DISTINCT FROM OLD.finalized_at
                        AND NEW.updated_at >= OLD.updated_at
+                       AND EXISTS (
+                           SELECT 1 FROM application_deployments deployment
+                           WHERE deployment.id = OLD.deployment_id
+                             AND deployment.applied_generation = OLD.generation)
                        AND EXISTS (
                            SELECT 1 FROM postgresql_database_recovery_decisions d
                            JOIN durable_create_operation_attempts a ON a.attempt_id = d.attempt_id
@@ -243,9 +241,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 name: "CK_durable_create_operation_attempts_uncertain_dispatch",
                 table: "durable_create_operation_attempts");
 
-            migrationBuilder.DropIndex(
-                name: "IX_application_deployments_id_applied_generation",
-                table: "application_deployments");
         }
     }
 }

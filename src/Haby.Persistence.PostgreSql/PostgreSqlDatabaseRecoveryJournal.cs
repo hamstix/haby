@@ -88,6 +88,15 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
             context.PostgreSqlDatabaseRecoveryDecisions.Add(decision);
             await context.SaveChangesAsync(cancellationToken);
 
+            var advanced = await context.ApplicationDeployments
+                .Where(row => row.Id == deployment && row.EnvironmentRecordId == environment &&
+                    row.DesiredGeneration == generation && row.AppliedGeneration == null)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(row => row.AppliedGeneration, generation)
+                    .SetProperty(row => row.ConcurrencyToken, row => row.ConcurrencyToken + 1),
+                    cancellationToken);
+            if (advanced != 1) return Rejected();
+
             var updated = await context.DurableCreateOperations
                 .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
                     row.ResourceId == resource && row.Action == action &&
@@ -99,14 +108,6 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                     .SetProperty(row => row.ReasonCode, (string?)null)
                     .SetProperty(row => row.UpdatedAt, at), cancellationToken);
             if (updated != 1) return Rejected();
-            var advanced = await context.ApplicationDeployments
-                .Where(row => row.Id == deployment && row.EnvironmentRecordId == environment &&
-                    row.DesiredGeneration == generation && row.AppliedGeneration == null)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(row => row.AppliedGeneration, generation)
-                    .SetProperty(row => row.ConcurrencyToken, row => row.ConcurrencyToken + 1),
-                    cancellationToken);
-            if (advanced != 1) return Rejected();
 
             await transaction.CommitAsync(CancellationToken.None);
             return new(PostgreSqlDatabaseAssignmentOutcome.Assigned, ToAudit(key, decision).Receipt);

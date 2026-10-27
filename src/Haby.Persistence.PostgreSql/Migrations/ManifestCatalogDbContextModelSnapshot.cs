@@ -56,9 +56,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasIndex("EnvironmentRecordId", "ApplicationRecordId")
                         .IsUnique();
 
-                    b.HasIndex("Id", "AppliedGeneration")
-                        .IsUnique();
-
                     b.ToTable("application_deployments", null, t =>
                         {
                             t.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND (applied_generation IS NULL OR applied_generation = 1)");
