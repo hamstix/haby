@@ -70,6 +70,7 @@ public abstract record DurableCommitResult
     public sealed record PlanStale : DurableCommitResult;
     public sealed record PlanInputUnavailable : DurableCommitResult;
     public sealed record UnsupportedPrecondition : DurableCommitResult;
+    public sealed record UnsupportedShape : DurableCommitResult;
 }
 
 /// <summary>Internal durable desired-state boundary; it does not execute Providers.</summary>

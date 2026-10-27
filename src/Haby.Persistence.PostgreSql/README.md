@@ -114,6 +114,15 @@ that cannot acquire the alias row lock returns `StoreUnavailable`, and the
 operator may retry it after the commit finishes. This is not a reservation or
 an external Provider effect.
 
+The first desired-generation transaction also inserts one `durable_create_operations`
+row for the exact local database Resource ID. Its composite primary key is the
+deployment, generation, Resource ID and `Create` action. `Pending` means no
+attempt has crossed the dispatch barrier. The operation references the immutable
+generation for its exact ProviderInstance, configuration revision and
+ImplementationId; reads do not resolve the current alias. The journal stores no
+Provider configuration payload, SecretVersion material or connection string.
+This slice does not dispatch SQL or advance `AppliedGeneration`.
+
 Before applying a reviewed migration, stop catalog writes and take a verified
 database backup. With PostgreSQL client environment variables supplied by the
 operator's secret management, a PowerShell procedure is:

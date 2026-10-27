@@ -31,6 +31,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         DurablePlan first;
         DurablePlan alternative;
         DurablePlan retryPlan;
+        DurablePlan winningPlan;
         DurableChangeSetCommit original;
         await using (var services = Services(connection, time))
         {
@@ -59,7 +60,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             var firstWon = results[0] is DurableCommitResult.Committed;
             var winner = Assert.IsType<DurableCommitResult.Committed>(results[firstWon ? 0 : 1]);
             changeSetId = firstWon ? changeSetId : competing;
-            var winningPlan = firstWon ? first : competingPlan;
+            winningPlan = firstWon ? first : competingPlan;
             retryPlan = firstWon ? alternative : competingAlternative;
             original = winner.Commit;
             Assert.Equal(winningPlan.Id, original.PlanId);
@@ -80,6 +81,18 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         await using (var restarted = Services(connection, time))
         {
             var committer = restarted.GetRequiredService<IDurableDesiredStateCommitter>();
+            var operation = await restarted.GetRequiredService<IDurableCreateOperationQuery>().FindAsync(
+                new DurableCreateOperationKey(original.DeploymentId, original.Generation,
+                    ManifestLocalId.Create("db"), DurableOperationAction.Create), default);
+            Assert.NotNull(operation);
+            Assert.Equal(DurableCreateOperationState.Pending, operation.State);
+            Assert.Equal(ManifestLocalId.Create("db"), operation.Key.ResourceId);
+            Assert.Equal(DurableOperationAction.Create, operation.Key.Action);
+            Assert.Equal(winningPlan.Inputs.ProviderInstance, operation.ProviderInstance);
+            Assert.Equal(winningPlan.Inputs.ConfigurationRevision, operation.ConfigurationRevision);
+            Assert.Equal(winningPlan.Inputs.ImplementationId, operation.ImplementationId);
+            Assert.Null(await restarted.GetRequiredService<IDurableCreateOperationQuery>().FindAsync(
+                operation.Key with { ResourceId = ManifestLocalId.Create("other") }, default));
             Assert.Equal(original, await committer.FindCommitAsync(changeSetId, default));
             Assert.Equal(firstBinding.RevisionNumber, (await committer.FindGenerationAsync(original.DeploymentId,
                 original.Generation, default))!.Inputs.ConfigurationRevision);
@@ -91,6 +104,18 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployments", database).ExecuteScalarAsync())!);
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployment_generations", database).ExecuteScalarAsync())!);
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM change_set_commits", database).ExecuteScalarAsync())!);
+        Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
+        Assert.Equal("db", await new NpgsqlCommand("SELECT resource_id FROM durable_create_operations", database).ExecuteScalarAsync());
+        Assert.Equal("Pending", await new NpgsqlCommand("SELECT state FROM durable_create_operations", database).ExecuteScalarAsync());
+        await using (var duplicate = new NpgsqlCommand("""
+            INSERT INTO durable_create_operations (deployment_id, generation, resource_id, action, state, created_at)
+            SELECT deployment_id, generation, resource_id, action, state, created_at
+            FROM durable_create_operations
+            """, database))
+        {
+            var error = await Assert.ThrowsAsync<PostgresException>(async () => await duplicate.ExecuteNonQueryAsync());
+            Assert.Equal(PostgresErrorCodes.UniqueViolation, error.SqlState);
+        }
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT desired_generation FROM application_deployments", database).ExecuteScalarAsync())!);
         Assert.Equal(DBNull.Value, await new NpgsqlCommand("SELECT applied_generation FROM application_deployments", database).ExecuteScalarAsync());
         Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = 'sample_db'", database).ExecuteScalarAsync())!);
@@ -108,13 +133,14 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             Guid.Parse(changeSetId.ToString()));
         Assert.Equal(0L, (long)(await new NpgsqlCommand("""
             SELECT count(*) FROM information_schema.columns
-            WHERE table_name IN ('application_deployments', 'application_deployment_generations', 'change_set_commits')
+            WHERE table_name IN ('application_deployments', 'application_deployment_generations', 'change_set_commits', 'durable_create_operations')
               AND column_name ~ '(secret|password|payload|credential)'
             """, database).ExecuteScalarAsync())!);
         await using var redaction = new NpgsqlCommand("""
             SELECT (SELECT count(*) FROM application_deployments AS t WHERE to_jsonb(t)::text LIKE '%' || @secret || '%')
                  + (SELECT count(*) FROM application_deployment_generations AS t WHERE to_jsonb(t)::text LIKE '%' || @secret || '%')
                  + (SELECT count(*) FROM change_set_commits AS t WHERE to_jsonb(t)::text LIKE '%' || @secret || '%')
+                 + (SELECT count(*) FROM durable_create_operations AS t WHERE to_jsonb(t)::text LIKE '%' || @secret || '%')
             """, database);
         redaction.Parameters.AddWithValue("secret", providerPassword);
         Assert.Equal(0L, (long)(await redaction.ExecuteScalarAsync())!);
@@ -155,6 +181,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployments", database).ExecuteScalarAsync())!);
             Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployment_generations", database).ExecuteScalarAsync())!);
             Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM change_set_commits", database).ExecuteScalarAsync())!);
+            Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
         }
         var newPlan = (await planner.CreatePlanAsync(changeSetId, "tester", default)).Plan!;
         Assert.Equal(secondBinding.RevisionNumber, newPlan.Inputs.ConfigurationRevision);
@@ -220,6 +247,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployments", database).ExecuteScalarAsync())!);
             Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployment_generations", database).ExecuteScalarAsync())!);
             Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM change_set_commits", database).ExecuteScalarAsync())!);
+            Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
         }
         Assert.Equal(ProviderAliasChangeOutcome.Changed,
             (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environment,
@@ -254,6 +282,34 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployments", database).ExecuteScalarAsync())!);
         Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployment_generations", database).ExecuteScalarAsync())!);
         Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM change_set_commits", database).ExecuteScalarAsync())!);
+        Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task Operation_insert_failure_rolls_back_generation_and_commit()
+    {
+        var (connection, time, environment, revision, _, _, _) = await PrepareCommitAsync();
+        await using var services = Services(connection, time);
+        var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
+        var changeSet = (await planner.CreateChangeSetAsync(environment, revision.ApplicationRecordId,
+            revision, new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).ChangeSet!;
+        var plan = (await planner.CreatePlanAsync(changeSet.Id, "tester", default)).Plan!;
+        await using var database = new NpgsqlConnection(connection);
+        await database.OpenAsync();
+        await new NpgsqlCommand("""
+            CREATE FUNCTION reject_pilot_operation() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected operation insert failure'; END $$;
+            CREATE TRIGGER reject_pilot_operation BEFORE INSERT ON durable_create_operations
+            FOR EACH ROW EXECUTE FUNCTION reject_pilot_operation();
+            """, database).ExecuteNonQueryAsync();
+
+        await Assert.ThrowsAsync<DbUpdateException>(async () =>
+            await services.GetRequiredService<IDurableDesiredStateCommitter>()
+                .CommitAsync(changeSet.Id, plan.Id, "tester", default));
+        Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployments", database).ExecuteScalarAsync())!);
+        Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployment_generations", database).ExecuteScalarAsync())!);
+        Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM change_set_commits", database).ExecuteScalarAsync())!);
+        Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
     }
 
     [Fact]
