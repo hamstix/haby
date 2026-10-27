@@ -182,6 +182,12 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("plan_id");
 
+                    b.Property<string>("Presence")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("presence");
+
                     b.Property<string>("ProviderAlias")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -208,7 +214,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.ToTable("application_deployment_generations", null, t =>
                         {
-                            t.HasCheckConstraint("CK_deployment_generations_first", "generation = 1");
+                            t.HasCheckConstraint("CK_deployment_generations_first", "generation = 1 AND presence = 'Present'");
                         });
                 });
 

@@ -50,7 +50,7 @@ public interface IDurableDeploymentPlanner
 
 /// <summary>The persisted first desired generation and its exact, non-secret Plan inputs.</summary>
 public sealed record DurableDesiredGeneration(ApplicationDeploymentId DeploymentId,
-    DeploymentGeneration Generation, DurablePlanningInputs Inputs, DeploymentPlanId PlanId,
+    DeploymentGeneration Generation, DesiredPresence Presence, DurablePlanningInputs Inputs, DeploymentPlanId PlanId,
     DeploymentChangeSetId ChangeSetId, DateTimeOffset AcceptedAt, string ActorId);
 
 public sealed record DurableChangeSetCommit(DeploymentChangeSetId ChangeSetId, DeploymentPlanId PlanId,

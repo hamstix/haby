@@ -3,6 +3,7 @@ using Haby.Domain;
 using Haby.Manifest;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.Persistence.PostgreSql;
 
@@ -114,6 +115,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         {
             DeploymentId = deploymentGuid,
             Generation = 1,
+            Presence = nameof(DesiredPresence.Present),
             ChangeSetId = changeId,
             PlanId = requestedPlanId,
             ApplicationRecordId = change.ApplicationRecordId,
@@ -166,6 +168,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             .SingleOrDefaultAsync(item => item.DeploymentId == id && item.Generation == generation.Value,
                 cancellationToken);
         if (row is null) return null;
+        if (row.Presence != nameof(DesiredPresence.Present))
+            throw new InvalidDataException("Generation presence is unsupported.");
         var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
             EnvironmentId.Create(row.EnvironmentKey),
             ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
@@ -174,7 +178,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
         if (row.Fingerprint != PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs))
             throw new InvalidDataException("Generation snapshot is inconsistent.");
-        return new(deploymentId, generation, inputs, DeploymentPlanId.Parse(row.PlanId.ToString()),
+        return new(deploymentId, generation, DesiredPresence.Present, inputs, DeploymentPlanId.Parse(row.PlanId.ToString()),
             DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()), row.AcceptedAt, row.ActorId);
     }
 
@@ -188,7 +192,8 @@ public static class DurableDesiredStateCommitterServiceCollectionExtensions
 {
     public static IServiceCollection AddPostgreSqlDurableDesiredStateCommitter(this IServiceCollection services)
     {
-        services.AddSingleton<IDurableDesiredStateCommitter, PostgreSqlDurableDesiredStateCommitter>();
+        services.AddPostgreSqlDurableDeploymentPlanner();
+        services.TryAddSingleton<IDurableDesiredStateCommitter, PostgreSqlDurableDesiredStateCommitter>();
         return services;
     }
 }

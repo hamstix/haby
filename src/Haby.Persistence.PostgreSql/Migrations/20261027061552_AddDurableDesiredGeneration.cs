@@ -46,6 +46,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 {
                     deployment_id = table.Column<Guid>(type: "uuid", nullable: false),
                     generation = table.Column<long>(type: "bigint", nullable: false),
+                    presence = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                     plan_id = table.Column<Guid>(type: "uuid", nullable: false),
                     change_set_id = table.Column<Guid>(type: "uuid", nullable: false),
                     application_record_id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -63,7 +64,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_application_deployment_generations", x => new { x.deployment_id, x.generation });
-                    table.CheckConstraint("CK_deployment_generations_first", "generation = 1");
+                    table.CheckConstraint("CK_deployment_generations_first", "generation = 1 AND presence = 'Present'");
                     table.ForeignKey(
                         name: "FK_application_deployment_generations_application_deployments_~",
                         column: x => x.deployment_id,

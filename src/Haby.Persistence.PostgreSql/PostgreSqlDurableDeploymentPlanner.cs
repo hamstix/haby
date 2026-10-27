@@ -334,8 +334,8 @@ public static class DurableDeploymentPlannerServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDurableDeploymentPlanner(this IServiceCollection services)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
-        services.AddSingleton<PostgreSqlDurableDeploymentPlanner>();
-        services.AddSingleton<IDurableDeploymentPlanner>(provider =>
+        services.TryAddSingleton<PostgreSqlDurableDeploymentPlanner>();
+        services.TryAddSingleton<IDurableDeploymentPlanner>(provider =>
             provider.GetRequiredService<PostgreSqlDurableDeploymentPlanner>());
         return services;
     }

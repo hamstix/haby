@@ -255,10 +255,11 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
         });
         modelBuilder.Entity<DeploymentGenerationRow>(entity =>
         {
-            entity.ToTable("application_deployment_generations", table => table.HasCheckConstraint("CK_deployment_generations_first", "generation = 1"));
+            entity.ToTable("application_deployment_generations", table => table.HasCheckConstraint("CK_deployment_generations_first", "generation = 1 AND presence = 'Present'"));
             entity.HasKey(row => new { row.DeploymentId, row.Generation });
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
             entity.Property(row => row.Generation).HasColumnName("generation");
+            entity.Property(row => row.Presence).HasColumnName("presence").HasMaxLength(16).IsRequired();
             entity.Property(row => row.PlanId).HasColumnName("plan_id");
             entity.Property(row => row.ChangeSetId).HasColumnName("change_set_id");
             entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
@@ -351,6 +352,7 @@ internal sealed class DeploymentGenerationRow
 {
     public Guid DeploymentId { get; set; }
     public long Generation { get; set; }
+    public required string Presence { get; set; }
     public Guid PlanId { get; set; }
     public Guid ChangeSetId { get; set; }
     public Guid ApplicationRecordId { get; set; }

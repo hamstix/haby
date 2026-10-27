@@ -215,6 +215,9 @@ public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture, ITes
                 await using var deployment = new NpgsqlCommand(
                     "SELECT count(*) FROM application_deployments", check);
                 Assert.Equal(0L, await deployment.ExecuteScalarAsync());
+                await using var operations = new NpgsqlCommand(
+                    "SELECT count(*) FROM information_schema.tables WHERE table_name = 'operations'", check);
+                Assert.Equal(0L, await operations.ExecuteScalarAsync());
                 await using var plans = new NpgsqlCommand("SELECT (SELECT count(*) FROM deployment_change_sets) + (SELECT count(*) FROM deployment_plans)", check);
                 Assert.Equal(0L, await plans.ExecuteScalarAsync());
             }
