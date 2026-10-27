@@ -278,6 +278,82 @@ public sealed class DurableCreateExecutorTests
     }
 
     [Fact]
+    public async Task Manual_recovery_requires_consent_and_never_dispatches_create()
+    {
+        var (_, journal, target, _) = Harness(new Fixture { Absence = DurableCreateAbsenceOutcome.Present });
+        var attemptId = Guid.CreateVersion7();
+        journal.SeedUncertain(attemptId);
+        var decisions = new FakeRecoveryDecisions();
+        var recovery = new PostgreSqlDatabaseRecovery(journal, decisions,
+            new FakeManifests(Prepare(OneResource), false), target,
+            new FixedClock(DateTimeOffset.UnixEpoch));
+        var preview = await recovery.InspectAsync(journal.Operation.Key, default);
+        Assert.Equal("appdb", preview!.DatabaseName);
+        Assert.Equal(attemptId, preview.UncertainAttemptId);
+        Assert.Empty(target.Inputs);
+        var command = new AssignExistingPostgreSqlDatabase(journal.Operation.Key,
+            journal.Operation.Environment, attemptId, true,
+            PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "verified by operator", "tester");
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await recovery.AssignExistingDatabaseAsync(command with { Acknowledged = false }, default));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await recovery.AssignExistingDatabaseAsync(command with { Note = "token=secret" }, default));
+        Assert.Empty(target.Inputs);
+        Assert.Equal(0, decisions.AssignCalls);
+        var result = await recovery.AssignExistingDatabaseAsync(command, default);
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Assigned, result.Outcome);
+        Assert.Single(target.Inputs);
+        Assert.DoesNotContain("create", journal.Log);
+        Assert.Equal(1, decisions.AssignCalls);
+        Assert.DoesNotContain(command.Note, command.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(DurableCreateOperationState.Pending)]
+    [InlineData(DurableCreateOperationState.Preparing)]
+    [InlineData(DurableCreateOperationState.Dispatching)]
+    [InlineData(DurableCreateOperationState.Failed)]
+    [InlineData(DurableCreateOperationState.Succeeded)]
+    public async Task Manual_recovery_rejects_non_uncertain_states_before_provider_access(
+        DurableCreateOperationState state)
+    {
+        var (_, journal, target, _) = Harness(new Fixture { State = state });
+        var decisions = new FakeRecoveryDecisions();
+        var recovery = new PostgreSqlDatabaseRecovery(journal, decisions,
+            new FakeManifests(Prepare(OneResource), false), target,
+            new FixedClock(DateTimeOffset.UnixEpoch));
+        var command = new AssignExistingPostgreSqlDatabase(journal.Operation.Key,
+            journal.Operation.Environment, Guid.CreateVersion7(), true,
+            PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "checked", "tester");
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Rejected,
+            (await recovery.AssignExistingDatabaseAsync(command, default)).Outcome);
+        Assert.Empty(target.Inputs);
+        Assert.Equal(0, decisions.AssignCalls);
+    }
+
+    [Fact]
+    public async Task Corrupt_pinned_manifest_rejects_recovery_without_provider_access()
+    {
+        var (_, journal, target, _) = Harness();
+        var attemptId = Guid.CreateVersion7();
+        journal.SeedUncertain(attemptId);
+        var decisions = new FakeRecoveryDecisions();
+        var recovery = new PostgreSqlDatabaseRecovery(journal, decisions,
+            new FakeManifests(Prepare(OneResource), true), target,
+            new FixedClock(DateTimeOffset.UnixEpoch));
+        var preview = await recovery.InspectAsync(journal.Operation.Key, default);
+        Assert.Null(preview!.DatabaseName);
+        Assert.Equal(DurableCreateOperationReason.ProviderInputUnavailable, preview.Reason);
+        var command = new AssignExistingPostgreSqlDatabase(journal.Operation.Key,
+            journal.Operation.Environment, attemptId, true,
+            PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "checked", "tester");
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable,
+            (await recovery.AssignExistingDatabaseAsync(command, default)).Outcome);
+        Assert.Empty(target.Inputs);
+        Assert.Equal(0, decisions.AssignCalls);
+    }
+
+    [Fact]
     public async Task Concurrent_execution_on_one_key_dispatches_exactly_once()
     {
         var (executor, journal, _, _) = Harness();
@@ -417,6 +493,21 @@ public sealed class DurableCreateExecutorTests
         public bool ThrowOnRecordSuccess { get; init; }
         public bool AppliedGenerationAdvanced { get; private set; }
         public DurableCreateOperation Operation { get; private set; } = operation;
+
+        public void SeedUncertain(Guid attemptId)
+        {
+            Operation = Operation with
+            {
+                State = DurableCreateOperationState.NeedsAttention,
+                Reason = DurableCreateOperationReason.UncertainAfterDispatch,
+                AttemptId = attemptId,
+                AttemptNumber = 1,
+                DispatchedAt = DateTimeOffset.UnixEpoch,
+                FinalizedAt = DateTimeOffset.UnixEpoch
+            };
+            Attempts.Add(new DurableCreateOperationAttempt(attemptId, 1, DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, DurableCreateAttemptOutcome.Uncertain));
+        }
 
         public ValueTask<DurableCreateOperation?> FindAsync(DurableCreateOperationKey key,
             CancellationToken cancellationToken)
@@ -559,6 +650,21 @@ public sealed class DurableCreateExecutorTests
                         FinishedAt = outcome is null ? Attempts[index].FinishedAt : at,
                         Outcome = outcome ?? Attempts[index].Outcome
                     };
+        }
+    }
+
+    private sealed class FakeRecoveryDecisions : IPostgreSqlDatabaseRecoveryJournal
+    {
+        public int AssignCalls { get; private set; }
+        public ValueTask<PostgreSqlDatabaseRecoveryAudit?> FindDecisionAsync(DurableCreateOperationKey key,
+            Guid attemptId, CancellationToken cancellationToken) => new((PostgreSqlDatabaseRecoveryAudit?)null);
+        public ValueTask<PostgreSqlDatabaseAssignmentResult> TryAssignAsync(
+            AssignExistingPostgreSqlDatabase command, DateTimeOffset at, CancellationToken cancellationToken)
+        {
+            AssignCalls++;
+            return new(new PostgreSqlDatabaseAssignmentResult(PostgreSqlDatabaseAssignmentOutcome.Assigned,
+                new PostgreSqlDatabaseRecoveryReceipt(Guid.CreateVersion7(), command.Key,
+                    command.ExpectedAttemptId, command.Reason, command.TechnicalActor, at)));
         }
     }
 

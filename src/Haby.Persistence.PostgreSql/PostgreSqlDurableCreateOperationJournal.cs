@@ -9,7 +9,8 @@ namespace Haby.Persistence.PostgreSql;
 /// <summary>
 /// The durable journal behind the ADR-025 dispatch barrier. Every transition is a conditional
 /// single-row update, so a stale observer can never overwrite a newer durable state. Terminal
-/// rows and retained attempts are never rewritten; reads never consult the Provider alias.
+/// rows are changed only by the separate audited recovery path; retained attempts are never
+/// rewritten and reads never consult the Provider alias.
 /// </summary>
 public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<ManifestCatalogDbContext> contexts)
     : IDurableCreateOperationJournal, IDurableCreateOperationQuery
