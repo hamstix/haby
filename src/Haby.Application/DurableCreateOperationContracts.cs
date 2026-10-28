@@ -206,7 +206,7 @@ public sealed record DurableCreateExecutionResult(DurableCreateExecutionOutcome 
 
 /// <summary>
 /// The internal single-instance execution boundary for one exact <see cref="DurableCreateOperationKey"/>.
-/// It is not exposed through the operator host or CLI and never dispatches SQL before a committed marker.
+/// The operator adapters delegate here; SQL is never dispatched before a committed marker.
 /// </summary>
 public interface IDurableCreateOperationExecutor
 {

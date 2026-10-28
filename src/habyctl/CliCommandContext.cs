@@ -25,6 +25,15 @@ internal sealed class CliCommandContext(
     internal int PrintCommit(string command, CommitReply reply) =>
         jsonOutput() ? jsonPresenter.PrintCommit(command, reply) : presenter.PrintCommit(command, reply);
 
+    internal int PrintOperation(string command, OperationReply reply) =>
+        jsonOutput() ? jsonPresenter.PrintOperation(command, reply) : presenter.PrintOperation(command, reply);
+
+    internal int InvalidOperationAction()
+    {
+        error.WriteLine("Unsupported action. Use create.");
+        return CliApplication.UsageError;
+    }
+
     internal Task<int> ExecutePlanningAsync(
         Func<IRegistryClient, string, CancellationToken, Task<int>> action, CancellationToken cancellationToken) =>
         ExecuteResolvedAsync(action, requireContext: true, cancellationToken);

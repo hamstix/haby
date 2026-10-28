@@ -30,9 +30,16 @@ public static class OperatorHostApplication
         }
     }
 
-    public static WebApplication Build(string[] args)
+    public static WebApplication Build(string[] args) => Build(args, null);
+
+    // Tests use the real composition with deterministic internal fault hooks, never a production setting or RPC.
+    internal static WebApplication Build(string[] args, Action<IServiceCollection>? configureServices)
     {
         var builder = WebApplication.CreateBuilder(args);
+        // Driver/EF diagnostics can contain connection settings, payloads and raw exceptions even
+        // when the application catches a bounded failure. Keep them outside the operator log surface.
+        builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.None);
+        builder.Logging.AddFilter("Npgsql", LogLevel.None);
 
         var connection = builder.Configuration["Haby:PostgreSql:ConnectionString"];
         var tlsEnabledText = builder.Configuration["Haby:Tls:Enabled"];
@@ -66,11 +73,17 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         builder.Services.AddSingleton<PreviewImportedDatabase>();
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
-        // Planning and commit need codecs and alias reads; no preflight, secret resolver or executor.
+        // Execution resolves only the committed exact Provider revision and SecretVersion.
         builder.Services.AddPostgreSqlProviderConfigurationCodec();
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
         builder.Services.AddPostgreSqlDurableDesiredStateCommitter();
+        // Explicit pilot storage choice under ADR-006: database rows and backups contain recoverable secrets.
+        builder.Services.AddPostgreSqlPlaintextSecretStore();
+        builder.Services.AddPostgreSqlProviderConfigurationStore();
+        builder.Services.AddPostgreSqlDurableCreateOperationJournal();
+        builder.Services.AddPostgreSqlDurableCreateOperationExecution();
 
+        configureServices?.Invoke(builder.Services);
         var app = builder.Build();
         app.MapGrpcService<ManifestOperatorService>();
         app.MapGrpcReflectionService();

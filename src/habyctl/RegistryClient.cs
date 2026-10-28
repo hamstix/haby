@@ -17,6 +17,8 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<OperationReply> ExecuteOperationAsync(OperationRequest request, CancellationToken cancellationToken);
+    Task<OperationReply> GetOperationAsync(OperationRequest request, CancellationToken cancellationToken);
     Task<CommitReply> CommitDesiredStateAsync(CommitDesiredStateRequest request, CancellationToken cancellationToken);
     Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken);
     Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
@@ -90,6 +92,12 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
 
     public async Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) =>
         await _client.GetGenerationAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<OperationReply> ExecuteOperationAsync(OperationRequest request, CancellationToken cancellationToken) =>
+        await _client.ExecuteOperationAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<OperationReply> GetOperationAsync(OperationRequest request, CancellationToken cancellationToken) =>
+        await _client.GetOperationAsync(request, cancellationToken: cancellationToken);
 
     public void Dispose() => channel.Dispose();
 }

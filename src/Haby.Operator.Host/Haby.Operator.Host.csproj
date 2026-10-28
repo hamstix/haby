@@ -5,5 +5,6 @@
     <ProjectReference Include="..\Haby.Operator.Contracts\Haby.Operator.Contracts.csproj" />
     <ProjectReference Include="..\Haby.Persistence.PostgreSql\Haby.Persistence.PostgreSql.csproj" />
     <ProjectReference Include="..\Haby.PostgreSql\Haby.PostgreSql.csproj" />
+    <InternalsVisibleTo Include="Haby.PostgreSql.IntegrationTests" />
   </ItemGroup>
 </Project>

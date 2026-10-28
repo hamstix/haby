@@ -77,9 +77,10 @@ public sealed partial class OperatorHostIntegrationTests
         {
             await using (var host = await StartAsync(restricted, certificatePath))
             {
-                Assert.Null(host.Services.GetService<ISecretStore>());
+                Assert.NotNull(host.Services.GetService<ISecretStore>());
                 Assert.Null(host.Services.GetService<IProviderRevisionPreflight>());
-                Assert.Null(host.Services.GetService<IDurableCreateOperationExecutor>());
+                Assert.Same(host.Services.GetRequiredService<IDurableCreateOperationExecutor>(),
+                    host.Services.GetRequiredService<IDurableCreateOperationExecutor>());
                 using var channel = Channel(host, certificate);
                 var client = new ManifestOperator.ManifestOperatorClient(channel);
                 var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(Envelope("durable-commit")) });

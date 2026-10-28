@@ -356,15 +356,43 @@ public sealed class DurableCreateExecutorTests
     [Fact]
     public async Task Concurrent_execution_on_one_key_dispatches_exactly_once()
     {
-        var (executor, journal, _, _) = Harness();
+        var (executor, journal, _, hooks) = Harness();
+        var key = journal.Operation.Key;
+        var markerCommitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        hooks.AfterMarker = async token =>
+        {
+            markerCommitted.TrySetResult();
+            await releaseFirst.Task.WaitAsync(token);
+        };
 
-        var results = await Task.WhenAll(
-            executor.ExecuteAsync(HarnessKey(), default).AsTask(),
-            executor.ExecuteAsync(HarnessKey(), default).AsTask());
+        var first = executor.ExecuteAsync(key, timeout.Token).AsTask();
+        await markerCommitted.Task.WaitAsync(timeout.Token);
+        // The first call holds the exact key's gate after the durable marker and before SQL.
+        // Fake dependencies complete synchronously, so an unserialized second call would finish
+        // recovery immediately rather than waiting here. No scheduling delay is needed.
+        var second = executor.ExecuteAsync(key, timeout.Token).AsTask();
+        try
+        {
+            Assert.False(second.IsCompleted);
+            Assert.Equal(DurableCreateOperationState.Dispatching, journal.Operation.State);
+            Assert.Single(journal.Attempts);
+            Assert.False(journal.AppliedGenerationAdvanced);
+            Assert.DoesNotContain("create", journal.Log);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+            await Task.WhenAll(first, second).WaitAsync(timeout.Token);
+        }
 
-        Assert.All(results, result => Assert.Equal(DurableCreateExecutionOutcome.Succeeded, result.Outcome));
+        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await first).Outcome);
+        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await second).Outcome);
+        Assert.Equal(DurableCreateOperationState.Succeeded, journal.Operation.State);
+        Assert.True(journal.AppliedGenerationAdvanced);
         Assert.Equal(1, journal.Log.Count(entry => entry == "create"));
-        Assert.Single(journal.Attempts);
+        Assert.Equal(DurableCreateAttemptOutcome.Succeeded, Assert.Single(journal.Attempts).Outcome);
     }
 
     [Fact]
