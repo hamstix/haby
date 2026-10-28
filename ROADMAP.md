@@ -430,15 +430,16 @@ for an existing configuration registry.
 Accepted pilot boundaries:
 
 - Run exactly one Haby instance. High availability, leader election and
-  distributed execution leases remain outside both pilots.
+  distributed execution leases remain outside all pilot stages.
 - Start with the internal alpha gRPC API and `habyctl` in ADR-004. Its contract
   may be rewritten or replaced in full; it is not the stable API promised by M4.
 - Develop `habyctl` as a Native AOT operator CLI under ADR-027, with an
   explicit command tree, named contexts, and secret-safe output. This does not
   make the alpha server AOT-ready or authorize a plaintext secret-reveal API.
-- In the first active pilot, provision only one explicitly named PostgreSQL
-  database Resource. Do not create principals, generate credentials, deliver
-  application configuration or deprovision the database.
+- The database-only active pilot is an infrastructure checkpoint. The next
+  usable alpha pilot extends it with an application role, generated credentials
+  and configuration retrieval as defined below. Database deprovisioning remains
+  deferred.
 - Keep import, planning, desired-state commit and external execution separate.
   Unsupported manifest and operation shapes fail closed.
 
@@ -511,12 +512,61 @@ Exit criteria:
 - backups, schema upgrades and a manual failure-recovery procedure are tested
   for this limited deployment profile.
 
-These pilots do not make an Application operational from Haby alone. Issuing a
-database principal, storing its secret and delivering a usable Configuration
-document remain separate work before replacing an existing registry. After the
-database-only active pilot, prioritize those credential and delivery slices
-over a general operator authentication framework, while retaining the strict
-network boundary until application-level access control is introduced.
+### Usable alpha pilot - database, application credentials and configuration
+
+The next useful real-world pilot must let one Component obtain a working
+PostgreSQL configuration from Haby and connect using its own application role.
+The database-only path above remains a checkpoint, not completion of this goal.
+Keep the single-instance, isolated-environment and internal alpha API boundaries.
+
+Required end-to-end path:
+
+1. Accept and plan an Application manifest against prepared Environment and
+   exact Provider inputs, then explicitly commit and execute the desired work.
+2. Create the declared database and generate credentials for an application
+   login role. Persist generated secret material through the SecretStore and
+   retain exact SecretRef identities independently from rendered JSON.
+3. Create the PostgreSQL role and grant the agreed application privileges on the
+   intended database. Never give the application the Provider administrator's
+   credentials or infer broad privileges from administrative connectivity.
+4. Render the Component's Configuration document from resource outputs,
+   bindings and templates, with confidential values resolved only at the
+   explicitly permitted delivery boundary.
+5. Let a microservice or representative client retrieve that document through
+   an API and use it to connect to the database as the generated role.
+
+Exit criteria:
+
+- A real client retrieves the configuration and connects using the generated
+  application identity; an independent PostgreSQL query verifies its identity
+  and the agreed permitted/denied access, including isolation from another
+  application's database.
+- A Host restart and safe retry preserve generated credentials, exact references
+  and successful work. Re-rendering or retrieval does not silently regenerate a
+  password or create another role. Partial failure remains observable and
+  recoverable without claiming the whole path succeeded.
+- Ordinary Plan, operation, inspection, logs and diagnostics do not expose
+  credentials. Configuration retrieval is a distinct secret-bearing API with
+  explicit scope and transport controls, not a generic secret-reveal option.
+- The operator can prepare the isolated installation and reproduce the path
+  using documented supported interfaces, without manual catalog-row editing.
+
+Before implementing the new effects, agree the role/database ownership and
+grant model, resource dependencies, generated-secret persistence and retry
+boundaries, and handling of uncertain role creation or password changes. Before
+delivery, agree the exact Component/document/revision selection and a minimal
+explicit access policy for confidential configuration. Deferring Kubernetes
+Runtime Identity does not authorize an unrestricted plaintext configuration API;
+the existing unauthenticated operator API is not automatically a delivery API.
+Kubernetes authentication and a general operator authorization framework are
+not prerequisites for this isolated pilot.
+
+Deliver this goal in narrow vertical slices. Finish operation/recovery restore
+rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize
+credential provisioning, configuration rendering and API retrieval. Use the
+complete pilot to guide later CLI orchestration improvements. HA, UI, additional
+Providers, general rotation, deprovisioning and production delivery remain outside
+this goal. This pilot does not claim replacement of an existing registry.
 
 ADR-023 fixes the PostgreSQL manifest-catalog persistence and single-instance
 startup-migration policy. ADR-004 fixes the alpha API transport. Before exposing
