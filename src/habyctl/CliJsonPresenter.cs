@@ -37,11 +37,12 @@ internal sealed record CliCurrentContextData([property: JsonIgnore(Condition = J
 [JsonSerializable(typeof(CliEnvelope<CliImportData>))]
 [JsonSerializable(typeof(CliEnvelope<CliGetRevisionData>))]
 [JsonSerializable(typeof(CliEnvelope<CliPreviewData>))]
+[JsonSerializable(typeof(CliEnvelope<CliPlanningData>))]
 [JsonSerializable(typeof(CliEnvelope<CliConfigData>))]
 [JsonSerializable(typeof(CliEnvelope<CliCurrentContextData>))]
 internal partial class CliOutputJsonContext : JsonSerializerContext;
 
-internal sealed class CliJsonPresenter(TextWriter output)
+internal sealed partial class CliJsonPresenter(TextWriter output)
 {
     private static readonly CliDiagnostic[] NoDiagnostics = [];
 

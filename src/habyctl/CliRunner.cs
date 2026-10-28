@@ -23,7 +23,7 @@ internal sealed partial class CliApplication(
             output.WriteLine(typeof(CliApplication).Assembly.GetName().Version);
             return Success;
         }
-        var root = new RootCommand("Inspect and import manifests through a local registry.");
+        var root = new RootCommand("Inspect manifests and plan deployments through a local registry.");
         var configFile = new Option<string?>("--config") { Description = "CLI configuration file.", Recursive = true };
         var contextName = new Option<string?>("--context") { Description = "Context for this invocation.", Recursive = true };
         var outputFormat = new Option<string?>("--output", "-o")
@@ -38,6 +38,8 @@ internal sealed partial class CliApplication(
             () => (parsed!.GetValue(configFile), parsed.GetValue(contextName)),
             () => parsed!.GetValue(outputFormat) == "json");
         root.Subcommands.Add(ManifestCommands.Create(commands));
+        root.Subcommands.Add(Commands.Planning.PlanningCommands.ChangeSet(commands));
+        root.Subcommands.Add(Commands.Planning.PlanningCommands.Plan(commands));
         root.Subcommands.Add(Commands.Config.ConfigCommands.Create(commands));
         registerAdditionalCommands?.Invoke(root);
 

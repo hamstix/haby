@@ -17,7 +17,7 @@ using Xunit.Abstractions;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class OperatorHostIntegrationTests(PostgreSqlFixture fixture, ITestOutputHelper output) : IClassFixture<PostgreSqlFixture>
+public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixture, ITestOutputHelper output) : IClassFixture<PostgreSqlFixture>
 {
     [Fact]
     public async Task Pg_dump_restore_preserves_revision_warnings_and_preview_in_fresh_host()
