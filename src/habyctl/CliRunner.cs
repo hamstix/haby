@@ -8,7 +8,8 @@ internal sealed partial class CliApplication(
     IRegistryClientFactory clientFactory,
     TextWriter output,
     TextWriter error,
-    Action<RootCommand>? registerAdditionalCommands = null)
+    Action<RootCommand>? registerAdditionalCommands = null,
+    IConfigEnvironment? configEnvironment = null)
 {
     internal const int Success = 0;
     internal const int Rejected = 1;
@@ -17,12 +18,25 @@ internal sealed partial class CliApplication(
 
     internal async Task<int> RunAsync(string[] args, CancellationToken cancellationToken = default)
     {
-        var commands = new CliCommandContext(endpointSource, clientFactory, new CliTextPresenter(output), error);
+        if (args is ["--version"] or ["--version", "--config", _] or ["--config", _, "--version"])
+        {
+            output.WriteLine(typeof(CliApplication).Assembly.GetName().Version);
+            return Success;
+        }
         var root = new RootCommand("Inspect and import manifests through a local registry.");
+        var configFile = new Option<string?>("--config") { Description = "CLI configuration file.", Recursive = true };
+        var contextName = new Option<string?>("--context") { Description = "Context for this invocation.", Recursive = true };
+        root.Options.Add(configFile);
+        root.Options.Add(contextName);
+        var configuration = new CliConfigurationService(configEnvironment ?? new CliConfigEnvironment());
+        System.CommandLine.ParseResult? parsed = null;
+        var commands = new CliCommandContext(endpointSource, clientFactory, new CliTextPresenter(output),
+            output, error, configuration, () => (parsed!.GetValue(configFile), parsed.GetValue(contextName)));
         root.Subcommands.Add(ManifestCommands.Create(commands));
+        root.Subcommands.Add(Commands.Config.ConfigCommands.Create(commands));
         registerAdditionalCommands?.Invoke(root);
 
-        var parsed = root.Parse(args);
+        parsed = root.Parse(args);
         if (parsed.Errors.Count > 0 || args.Length == 0)
         {
             error.WriteLine("Invalid command syntax. Use --help to see available commands.");

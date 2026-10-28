@@ -13,6 +13,15 @@ public sealed class CliCommandTests
         public string? GetSkipTlsValidation() => null;
     }
 
+    private sealed class MissingConfig : IConfigEnvironment
+    {
+        private readonly string _path = Path.Combine(Path.GetTempPath(),
+            "haby-cli-missing-" + Guid.NewGuid().ToString("N"), "config.yaml");
+
+        public string? GetConfigPath() => null;
+        public string GetDefaultPath() => _path;
+    }
+
     private sealed class FakeFactory : IRegistryClientFactory
     {
         public int Created { get; private set; }
@@ -83,7 +92,8 @@ public sealed class CliCommandTests
     }
 
     private static CliApplication Create(FakeFactory factory, StringWriter output, StringWriter error,
-        string? address = "http://localhost:7443") => new(new Endpoint(address), factory, output, error);
+        string? address = "http://localhost:7443") => new(new Endpoint(address), factory, output, error,
+            configEnvironment: new MissingConfig());
 
     [Fact]
     public async Task Build_time_registration_adds_command_without_registry_connection()

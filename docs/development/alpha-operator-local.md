@@ -17,8 +17,68 @@ successful result, `1` for an expected registry rejection, `2` for invalid
 syntax, local input or endpoint configuration, and `3` for transport failure
 or cancellation. The current gRPC contract cannot classify an unset or
 unknown outcome as a typed registry rejection; the CLI reports it as a safe
-local error. `HABY_OPERATOR_URL` remains the endpoint source. Named contexts,
-configuration commands and JSON output are later slices.
+local error. The CLI can select a local registry through a named context.
+JSON output remains a later slice.
+
+## Read-only local contexts
+
+The first CLI configuration format is YAML with `formatVersion: 1`. Save this
+secret-free example as `config.yaml`:
+
+```yaml
+formatVersion: 1
+currentContext: local-a
+instances:
+  local-a:
+    endpoint: https://localhost:7443
+  local-b:
+    endpoint: https://127.0.0.1:8443
+contexts:
+  local-a:
+    instance: local-a
+    environmentId: development-a
+  local-b:
+    instance: local-b
+    environmentId: development-b
+```
+
+The `environmentId` is selected locally; current manifest RPCs do not accept
+it, so the CLI does not add it to those requests. The configuration contains no
+credentials, tokens or private keys. Both endpoints must be HTTP or HTTPS
+loopback addresses with no user information, path, query or fragment. HTTPS
+certificate validation remains enabled unless the local debug setting below is
+explicitly set. The alpha API is unauthenticated; do not forward it to a remote
+or broadly reachable address.
+
+The file path order is `--config`, then `HABYCTL_CONFIG`, then the per-user
+default at `%APPDATA%\habyctl\config.yaml` on Windows or
+`~/.config/habyctl/config.yaml` on Linux. A missing explicitly selected file
+fails; a missing default file permits the legacy no-config behavior. The
+context order is `--context`, then `currentContext`. A selected context uses its
+named instance endpoint even if `HABY_OPERATOR_URL` is set. An unknown context
+or instance fails without a fallback. Only with no selected context can
+`HABY_OPERATOR_URL` provide the transitional endpoint. Invocation overrides do
+not edit the file.
+
+```powershell
+dotnet run --project .\src\habyctl -- config view --config .\config.yaml
+dotnet run --project .\src\habyctl -- config current-context --config .\config.yaml
+dotnet run --project .\src\habyctl -- manifest revision get '<application-record-id>' 1 --config .\config.yaml --context local-b
+```
+
+The two `config` commands work offline. `config view` renders the validated
+typed fields rather than the source YAML, so comments and formatting are not
+reproduced. The reader accepts one UTF-8 mapping document of at most 64 KiB
+and rejects unknown or duplicate fields, anchors, aliases, merge keys, custom
+tags, malformed encoding and invalid references. This slice has no config
+write commands. YamlDotNet 18.1.0 (MIT) provides the low-level YAML
+representation model; Haby maps it explicitly into typed records, without
+reflection-based object activation. The parser path was published and executed
+as a Windows Native AOT spike before it was selected. With
+`HABY_AOT_CLI_PATH` set to a published executable, the loopback tests also
+exercise that binary against two disposable hosts. The current CI runs those
+tests without the executable; an automated AOT gate is deferred to ADR-027's
+later delivery slice.
 
 Use an isolated local PostgreSQL catalog database and a principal with the
 migration rights described in the [catalog guide](../../src/Haby.Persistence.PostgreSql/README.md).
