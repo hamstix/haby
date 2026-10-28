@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Text.Json;
 using Grpc.Core;
 using Haby.Operator.Contracts;
 using Microsoft.AspNetCore.Builder;
@@ -21,7 +22,20 @@ public sealed class CliLoopbackTests
             Assert.Equal("{}", request.OriginalEnvelope.ToStringUtf8());
             return Task.FromResult(new ValidateReply
             {
-                InvalidManifest = new InvalidManifest { Report = new DiagnosticReport() }
+                InvalidManifest = new InvalidManifest
+                {
+                    Report = new DiagnosticReport
+                    {
+                        Diagnostics =
+                        {
+                            new Diagnostic
+                            {
+                                Code = "invalid", Path = "/spec", Message = "Invalid declaration",
+                                Severity = "Error", Parameters = { ["secretValue"] = "sensitive-sentinel" }
+                            }
+                        }
+                    }
+                }
             });
         }
     }
@@ -88,6 +102,7 @@ public sealed class CliLoopbackTests
                 new GrpcRegistryClientFactory(), output, error);
             Assert.Equal(CliApplication.Rejected, await cli.RunAsync(["manifest", "validate", envelope, "--config", config]));
             Assert.Contains("InvalidManifest", output.ToString());
+            Assert.DoesNotContain("sensitive-sentinel", output.ToString());
             output.GetStringBuilder().Clear();
             Assert.Equal(CliApplication.Success, await cli.RunAsync(["manifest", "validate", envelope,
                 "--config", config, "--context", "second"]));
@@ -152,6 +167,24 @@ public sealed class CliLoopbackTests
             if (binary is not null)
             {
                 Assert.True(File.Exists(binary), $"AOT binary is missing: {binary}");
+                using (var configProcess = new Process())
+                {
+                    configProcess.StartInfo = new ProcessStartInfo(binary)
+                    {
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    foreach (var argument in new[] { "config", "view", "--config", config, "-o", "json" })
+                        configProcess.StartInfo.ArgumentList.Add(argument);
+                    Assert.True(configProcess.Start());
+                    using var configTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    await configProcess.WaitForExitAsync(configTimeout.Token);
+                    Assert.Equal(0, configProcess.ExitCode);
+                    using var configJson = JsonDocument.Parse(await configProcess.StandardOutput.ReadToEndAsync(configTimeout.Token));
+                    Assert.Equal("config view", configJson.RootElement.GetProperty("command").GetString());
+                    Assert.Equal("", await configProcess.StandardError.ReadToEndAsync(configTimeout.Token));
+                }
                 using var process = new Process();
                 process.StartInfo = new ProcessStartInfo(binary)
                 {
@@ -164,13 +197,17 @@ public sealed class CliLoopbackTests
                 process.StartInfo.ArgumentList.Add(path);
                 process.StartInfo.ArgumentList.Add("--config");
                 process.StartInfo.ArgumentList.Add(config);
+                process.StartInfo.ArgumentList.Add("-o");
+                process.StartInfo.ArgumentList.Add("json");
                 process.StartInfo.Environment["HABY_OPERATOR_URL"] = address;
                 process.StartInfo.Environment.Remove("HABYCTL_CONFIG");
                 Assert.True(process.Start());
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 await process.WaitForExitAsync(timeout.Token);
                 Assert.Equal(CliApplication.Rejected, process.ExitCode);
-                Assert.Contains("InvalidManifest", await process.StandardOutput.ReadToEndAsync(timeout.Token));
+                using var result = JsonDocument.Parse(await process.StandardOutput.ReadToEndAsync(timeout.Token));
+                Assert.Equal("invalidManifest", result.RootElement.GetProperty("outcome").GetString());
+                Assert.DoesNotContain("sensitive-sentinel", result.RootElement.GetRawText());
                 Assert.Equal("", await process.StandardError.ReadToEndAsync(timeout.Token));
             }
         }

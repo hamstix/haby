@@ -21,7 +21,7 @@ internal static class GetRevisionCommand
                         RevisionNumber = parse.GetRequiredValue(number)
                     }
                 }, token);
-                return context.Presenter.Print(reply);
+                return context.Print(reply);
             }, cancellationToken));
         return command;
     }

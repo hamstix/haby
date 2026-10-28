@@ -18,7 +18,7 @@ internal sealed partial class CliApplication(
 
     internal async Task<int> RunAsync(string[] args, CancellationToken cancellationToken = default)
     {
-        if (args is ["--version"] or ["--version", "--config", _] or ["--config", _, "--version"])
+        if (VersionOnly(args))
         {
             output.WriteLine(typeof(CliApplication).Assembly.GetName().Version);
             return Success;
@@ -26,12 +26,17 @@ internal sealed partial class CliApplication(
         var root = new RootCommand("Inspect and import manifests through a local registry.");
         var configFile = new Option<string?>("--config") { Description = "CLI configuration file.", Recursive = true };
         var contextName = new Option<string?>("--context") { Description = "Context for this invocation.", Recursive = true };
+        var outputFormat = new Option<string?>("--output", "-o")
+        { Description = "Result format: text (default) or json. Help and version stay human-readable.", Recursive = true };
         root.Options.Add(configFile);
         root.Options.Add(contextName);
+        root.Options.Add(outputFormat);
         var configuration = new CliConfigurationService(configEnvironment ?? new CliConfigEnvironment());
         System.CommandLine.ParseResult? parsed = null;
         var commands = new CliCommandContext(endpointSource, clientFactory, new CliTextPresenter(output),
-            output, error, configuration, () => (parsed!.GetValue(configFile), parsed.GetValue(contextName)));
+            new CliJsonPresenter(output), output, error, configuration,
+            () => (parsed!.GetValue(configFile), parsed.GetValue(contextName)),
+            () => parsed!.GetValue(outputFormat) == "json");
         root.Subcommands.Add(ManifestCommands.Create(commands));
         root.Subcommands.Add(Commands.Config.ConfigCommands.Create(commands));
         registerAdditionalCommands?.Invoke(root);
@@ -42,8 +47,30 @@ internal sealed partial class CliApplication(
             error.WriteLine("Invalid command syntax. Use --help to see available commands.");
             return UsageError;
         }
+        if (parsed.GetValue(outputFormat) is { } selectedFormat && selectedFormat is not ("text" or "json"))
+        {
+            error.WriteLine("Invalid output format. Use text or json.");
+            return UsageError;
+        }
 
         // Help is handled before any command action or endpoint lookup.
         return await parsed.InvokeAsync(new InvocationConfiguration { Output = output, Error = error }, cancellationToken);
+    }
+
+    private static bool VersionOnly(string[] args)
+    {
+        var version = false;
+        for (var index = 0; index < args.Length; index++)
+        {
+            if (args[index] == "--version" && !version) version = true;
+            else if (args[index] is "--config" or "--output" or "-o" && index + 1 < args.Length)
+            {
+                if (args[index] is "--output" or "-o" && args[index + 1] is not ("text" or "json"))
+                    return false;
+                index++;
+            }
+            else return false;
+        }
+        return version;
     }
 }

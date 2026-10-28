@@ -15,7 +15,7 @@ internal static class ImportCommand
             var bytes = await CliApplication.ReadEnvelopeAsync(parse.GetRequiredValue(file), token);
             var reply = await client.ImportAsync(
                 new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(bytes) }, token);
-            return context.Presenter.Print(reply);
+            return context.Print(reply);
         }, cancellationToken));
         return command;
     }
