@@ -35,12 +35,14 @@ public sealed class CliCommandTests
         public bool ThrowRpc { get; set; }
         public bool WaitForCancellation { get; set; }
         public bool ReturnSuccess { get; set; }
+        public bool ReturnUnsetOutcome { get; set; }
         public void Dispose() { }
 
         public Task<ValidateReply> ValidateAsync(EnvelopeRequest request, CancellationToken cancellationToken)
         {
             Record("validate", cancellationToken);
             Assert.Equal("{}", request.OriginalEnvelope.ToStringUtf8());
+            if (ReturnUnsetOutcome) return Task.FromResult(new ValidateReply());
             return Task.FromResult(ReturnSuccess
                 ? new ValidateReply
                 {
@@ -112,13 +114,15 @@ public sealed class CliCommandTests
         using var output = new StringWriter();
         using var error = new StringWriter();
         Assert.Equal(CliApplication.Success, await Create(factory, output, error, null).RunAsync(command.Split(' ')));
-        Assert.Contains("Usage", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--help", output.ToString());
         Assert.Equal(0, factory.Created);
         Assert.Equal("", error.ToString());
     }
 
     [Theory]
     [InlineData("manifest validate")]
+    [InlineData("manifest")]
+    [InlineData("manifest revision")]
     [InlineData("manifest revision get id")]
     [InlineData("manifest revision get id invalid")]
     [InlineData("manifest revision get id 0")]
@@ -206,6 +210,43 @@ public sealed class CliCommandTests
             File.Delete(path);
             Assert.Equal(CliApplication.UsageError, await cli.RunAsync(["manifest", "validate", path]));
             Assert.DoesNotContain(path, error.ToString());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Unset_server_outcome_is_a_safe_local_error()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "haby-cli-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await File.WriteAllTextAsync(path, "{}");
+            var factory = new FakeFactory();
+            factory.Client.ReturnUnsetOutcome = true;
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            Assert.Equal(CliApplication.UsageError,
+                await Create(factory, output, error).RunAsync(["manifest", "validate", path]));
+            Assert.Equal("", output.ToString());
+            Assert.Contains("Operation failed", error.ToString());
+            Assert.DoesNotContain(path, error.ToString());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task File_reads_observe_cancellation()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "haby-cli-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await File.WriteAllTextAsync(path, "{}");
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => CliApplication.ReadEnvelopeAsync(path, cancellation.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => CliApplication.ReadPreviewContextAsync(path, new RevisionReference(), cancellation.Token));
         }
         finally { File.Delete(path); }
     }
