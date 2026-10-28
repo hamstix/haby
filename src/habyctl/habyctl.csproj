@@ -6,6 +6,7 @@
   <ItemGroup>
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="YamlDotNet" />
     <ProjectReference Include="..\Haby.Operator.Contracts\Haby.Operator.Contracts.csproj" />
   </ItemGroup>
 </Project>

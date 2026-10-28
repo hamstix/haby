@@ -11,6 +11,8 @@ public sealed class CliGuardTests
     [InlineData("http://example.com:7443")]
     [InlineData("https://example.com:7443")]
     [InlineData("https://0.0.0.0:7443")]
+    [InlineData("http://user:secret@localhost:7443")]
+    [InlineData("http://localhost:7443/?token=secret")]
     public void Endpoint_must_use_loopback(string address) => Assert.Null(CliApplication.ParseEndpoint(address));
 
     [Theory]

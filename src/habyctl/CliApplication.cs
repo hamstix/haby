@@ -91,6 +91,8 @@ internal sealed partial class CliApplication
     internal static Uri? ParseEndpoint(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var address) &&
         (address.Scheme == Uri.UriSchemeHttps || address.Scheme == Uri.UriSchemeHttp) &&
+        address.UserInfo.Length == 0 && address.Query.Length == 0 && address.Fragment.Length == 0 &&
+        address.AbsolutePath == "/" &&
         IPAddressIsLoopback(address.Host) ? address : null;
 
     internal static bool SkipTlsCertificateValidation(string? setting) =>
