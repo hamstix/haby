@@ -44,6 +44,24 @@ unsupported stored snapshots fail visibly; they are not silently replaced from
 an incoming manifest. The first slice need not persist original source bytes or
 introduce a fingerprint optimization.
 
+### Trust the catalog's immutable history
+
+Persisted immutable revisions are trusted inputs for planning, descriptions,
+commit and execution. Here, corrupt or unsupported snapshot detection means
+failures detectable by the stored-format contract: decoding, supported version,
+identity consistency and applicable structural/shape validation. It does not
+promise detection of a direct database edit that substitutes another valid
+value while preserving those contracts.
+
+Direct catalog edits by a developer or administrator are privileged maintenance
+outside the managed immutable-revision workflow. The maintainer performing
+them owns consistency with existing Plans, generations and external effects.
+Haby need not detect such edits, authenticate historical content independently
+of its database, or add checksums to support Plan descriptions. Immutability
+guarantees assume history has not been rewritten outside the supported APIs.
+This boundary does not relax ordinary validation, secret redaction, exact
+reference resolution or safeguards against unintended writes through Haby.
+
 ### Preserve atomic compare-and-create
 
 The first accepted revision and its Application record commit atomically.
