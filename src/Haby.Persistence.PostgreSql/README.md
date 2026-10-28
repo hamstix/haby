@@ -247,8 +247,9 @@ allowed caller's claim; it does not authenticate a person. The single-instance,
 network-restricted operator boundary remains necessary. A successful decision,
 `Succeeded` and `AppliedGeneration` commit together; the uncertain attempt stays
 unchanged. A lost-response retry returns the original receipt without a new
-Provider check. No operator gRPC or CLI API exposes this command yet, and absent
-databases have no authorized retry path in this slice.
+Provider check. The [alpha operator recovery commands](../../docs/development/alpha-operator-local.md#explicit-recovery-of-one-uncertain-operation)
+adapt this command without changing those decisions. Absent databases have no
+authorized retry path in this slice.
 
 Under ADR-026, the recovery journal uses an EF Core transaction and conditional
 updates for the assignment. Declarative checks and deferred foreign keys tie a

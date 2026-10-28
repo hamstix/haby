@@ -9,8 +9,9 @@ imports, reads immutable manifest revisions and previews one supported database
 Resource against hypothetical request metadata. It also creates and reads durable
 ChangeSets and Plans, checks exact planning inputs, closes Plans and explicitly
 commits desired state with Pending work. Explicit operation execution can create that
-one database through the existing durable executor. Secret generation, recovery
-commands and configuration delivery remain unavailable through this API.
+one database through the existing durable executor. Explicit manual recovery can
+assign an existing target after uncertainty. Secret generation and configuration
+delivery remain unavailable through this API.
 
 The CLI accepts `--help` at the root and at every command level without an
 endpoint. Command results go to standard output; syntax, local-file and
@@ -31,7 +32,7 @@ is requested.
 Every result from `manifest validate`, `manifest import`, `manifest revision get`,
 `manifest revision preview`, `changeset create|get`, `plan create|get|check|close`,
 `changeset commit`, `changeset commit get`, `deployment generation get`,
-`operation execute|get`, `config view` and `config current-context` emits one
+`operation execute|get`, `operation recovery inspect|assign-existing`, `config view` and `config current-context` emits one
 complete JSON object and one newline to stdout with these ordered fields:
 
 ```json
@@ -371,7 +372,7 @@ contains no Provider payload, SecretRef material, credential or driver error.
 Malformed canonical IDs return `invalidRequest`; missing Environment, revision,
 ChangeSet, Plan or alias and unsupported inputs remain typed results. An unknown
 server status is a safe local error. Execution is a separate explicit command below;
-no recovery command is exposed.
+recovery is a separate explicit workflow below.
 
 ### Explicit desired-state acceptance
 
@@ -397,7 +398,7 @@ immutable ChangeSetCommit and one Pending Create operation. It leaves
 AppliedGeneration absent and performs no Provider contact, secret-material read,
 execution attempt or dispatch. The target database has not been created.
 Execution is a separate explicit step below. Generation `2`, updates,
-removal, bootstrap, recovery and background work remain outside this surface.
+removal, bootstrap and background work remain outside this surface.
 No schema migration is needed for these adapters.
 
 If the response is lost, repeat the **same ChangeSet ID**, or read it with
@@ -489,15 +490,89 @@ matching database exists. Neither its presence nor its absence authorizes a
 blind retry, adoption or success claim. Only confirmed success advances
 AppliedGeneration; desired-generation history is unchanged by execution.
 
-Manual assignment and audited retry remain internal recovery capabilities under
-[ADR-025](../adr/0025-pilot-durable-postgresql-create-recovery.md); this slice exposes
-no recovery RPC or CLI command. Leave uncertain operations in `NeedsAttention`
-until a separately reviewed, explicit recovery workflow is available. Do not edit
-journal rows or delete/recreate an operation to bypass the barrier. Full active-pilot
-operational readiness still requires that recovery surface and an operation/attempt/
+Manual assignment is available through the explicit recovery workflow below.
+Do not edit journal rows or delete/recreate an operation to bypass the barrier.
+Full active-pilot operational readiness still requires an operation/attempt/
 recovery-history backup/restore rehearsal. The shadow catalog restore rehearsal
 alone does not establish those guarantees. TLS/loopback isolation, one instance,
 no authentication and technical rather than human attribution remain unchanged.
+
+### Explicit recovery of one uncertain operation
+
+First inspect the exact operation. Inspection is read-only: it does not contact
+the Provider, change `Dispatching` to `NeedsAttention`, dispatch Create or assign
+anything. If a previous process died in `Dispatching`, the existing explicit
+`operation execute` path records `NeedsAttention` without sending SQL; inspect
+again afterwards. An ordinary definitive `conflict` is ineligible for assignment.
+
+```powershell
+& $cli operation recovery inspect $deploymentId 1 db --action create --config .\config.yaml -o json
+```
+
+Record the exact `preview.operation.environmentRecordId` and
+`preview.uncertainAttemptId`. Independently investigate the Environment,
+Application, generation, Resource, pinned Provider instance/configuration,
+implementation, target name and uncertain attempt shown by inspection. Database
+existence is necessary but does not prove that Haby created it. Proceed only
+when the operator accepts responsibility for the provenance and assignment of
+this exact target. If that judgment cannot be made, leave it `NeedsAttention`.
+
+Prepare a separate UTF-8 note file containing a short explanation with no
+credentials, connection strings, tokens, Provider payloads or driver errors.
+The CLI bounds the actual read to 2048 bytes; the server independently requires
+1-512 characters, rejects blank text, controls/bidi and known credential patterns.
+These checks cannot prove arbitrary prose secret-free: excluding secrets remains
+the caller's responsibility. The note is protected audit input and is never
+echoed in text/JSON, stderr, validation errors or ordinary reads. A trailing
+newline is a control character and is rejected; save the note without it.
+
+```powershell
+& $cli operation recovery assign-existing $deploymentId 1 db --action create `
+    --environment-record-id $environmentRecordId --expected-attempt-id $uncertainAttemptId `
+    --acknowledge-assignment --reason operatorAcceptedExistingDatabase `
+    --note-file .\recovery-note.txt --config .\config.yaml -o json
+```
+
+There is no inherited yes, prompt acceptance, default consent, Provider override
+or actor argument. Before submission the CLI re-inspects and writes the safe
+target/attempt/uncertainty summary to stderr. Stdout remains one JSON envelope.
+It never replaces supplied expected identities with newer preview identities.
+Deployment and Environment record IDs require canonical lowercase UUIDv7.
+Attempt IDs use D-format UUID syntax; hex case does not change their identity,
+and the CLI submits the caller's original spelling.
+Preview is not authorization: the server independently checks consent, exact
+Environment/attempt, eligible uncertainty, fresh existence on the pinned target
+and authoritative transaction guards. A competing state change fails closed.
+No Create is dispatched by assignment, and no new execution attempt is added.
+
+The server selects the compile-time adapter using the operation's immutable
+implementation, Resource contract and action. Only PostgreSQL database Create
+is registered initially. It never follows the current alias or defaults an
+unsupported operation to PostgreSQL. The adapter delegates to
+`IPostgreSqlDatabaseRecovery`; the existing atomic transaction records one
+immutable decision and advances `Succeeded`/`AppliedGeneration` together.
+The original uncertain attempt remains retained.
+
+| Recovery outcome | Meaning |
+| --- | --- |
+| `found` | Safe read-only preview and any original value-free receipt; exit 0. |
+| `assigned` / `alreadyAssigned` | Immutable receipt; exit 0. |
+| `invalidRequest` / `rejected` | Invalid consent/reason/note or stale/mismatched identity/state; exit 1. |
+| `targetAbsent` | Leave uncertainty unresolved; absence does not authorize another Create. |
+| `targetUnavailable` | Exact pinned inputs/target could not be verified; restore those inputs, never substitute another alias target. |
+| `operationNotFound` / `unsupportedRecoveryAction` | No matching operation or no registered handler for that pinned contract/action. |
+
+Other typed rejections exit 1. Local syntax/file/unknown-wire errors exit 2;
+transport/cancellation failures exit 3 and do not establish rollback. The CLI
+never retries automatically. After a lost response inspect, then repeat the
+same complete assignment command with the original Environment and attempt.
+A successful retry reaches application idempotency and returns the original
+receipt, including after restart, without a new Provider existence check.
+The receipt has the decision/operation/attempt identities, controlled reason,
+server-owned technical actor and timestamp; it contains no free-text note.
+That actor attributes activity to the permitted Host, not to an authenticated
+human. Network isolation and the operator-controlled console remain required.
+No automatic adoption, reset/delete or retry-after-uncertainty policy is added.
 
 ### Disposable persistence and native executable rehearsal
 
@@ -540,3 +615,14 @@ pinned secret access, read-only Dispatching observation, and deterministic test-
 crash/cancellation windows around the dispatch barrier. The native CLI smoke gates
 exercise operation outcomes and safe text/source-generated JSON on Windows and Linux.
 Fault hooks have no production configuration or RPC surface.
+
+`OperatorRecoveryIntegrationTests` exercises deterministic uncertain-after-CREATE
+recovery through production Host/generated client and the published native CLI,
+concurrent decisions, restart/lost-response receipts with the Provider login
+disabled, atomic rejection/failure, unavailable/absent targets, stale previews
+and unsupported pinned implementations. Independent catalog reads verify one
+retained uncertain attempt, one decision and applied-generation advancement;
+assignment also succeeds with a pinned login lacking CREATEDB. Both native
+loopback gates exercise recovery commands, consent, bounded UTF-8 input, safe
+text/JSON and transport failures. Full recovery-history backup/restore remains
+separate follow-up work.

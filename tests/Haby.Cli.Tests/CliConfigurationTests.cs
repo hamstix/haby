@@ -76,6 +76,8 @@ public sealed class CliConfigurationTests
             throw new NotImplementedException();
         public Task<OperationReply> GetOperationAsync(OperationRequest request, CancellationToken cancellationToken) =>
             throw new NotImplementedException();
+        public Task<RecoveryReply> InspectOperationRecoveryAsync(OperationRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<RecoveryReply> AssignExistingOperationAsync(AssignExistingOperationRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public void Dispose() { }
     }
 

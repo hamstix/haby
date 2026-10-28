@@ -17,6 +17,8 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<RecoveryReply> InspectOperationRecoveryAsync(OperationRequest request, CancellationToken cancellationToken);
+    Task<RecoveryReply> AssignExistingOperationAsync(AssignExistingOperationRequest request, CancellationToken cancellationToken);
     Task<OperationReply> ExecuteOperationAsync(OperationRequest request, CancellationToken cancellationToken);
     Task<OperationReply> GetOperationAsync(OperationRequest request, CancellationToken cancellationToken);
     Task<CommitReply> CommitDesiredStateAsync(CommitDesiredStateRequest request, CancellationToken cancellationToken);
@@ -53,6 +55,12 @@ internal sealed class GrpcRegistryClientFactory : IRegistryClientFactory
 internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
 {
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
+
+    public async Task<RecoveryReply> InspectOperationRecoveryAsync(OperationRequest request, CancellationToken cancellationToken) =>
+        await _client.InspectOperationRecoveryAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<RecoveryReply> AssignExistingOperationAsync(AssignExistingOperationRequest request, CancellationToken cancellationToken) =>
+        await _client.AssignExistingOperationAsync(request, cancellationToken: cancellationToken);
 
     public async Task<ValidateReply> ValidateAsync(EnvelopeRequest request, CancellationToken cancellationToken) =>
         await _client.ValidateAsync(request, cancellationToken: cancellationToken);

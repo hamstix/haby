@@ -28,6 +28,17 @@ internal sealed class CliCommandContext(
     internal int PrintOperation(string command, OperationReply reply) =>
         jsonOutput() ? jsonPresenter.PrintOperation(command, reply) : presenter.PrintOperation(command, reply);
 
+    internal int PrintRecovery(string command, RecoveryReply reply) =>
+        jsonOutput() ? jsonPresenter.PrintRecovery(command, reply) : presenter.PrintRecovery(command, reply);
+
+    internal void ShowRecoverySummary(RecoveryReply reply) => new CliTextPresenter(error).PrintRecovery("operation recovery inspect", reply);
+
+    internal int InvalidRecoveryInput()
+    {
+        error.WriteLine("Explicit assignment acknowledgment and controlled recovery reason are required.");
+        return CliApplication.UsageError;
+    }
+
     internal int InvalidOperationAction()
     {
         error.WriteLine("Unsupported action. Use create.");

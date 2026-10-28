@@ -111,7 +111,7 @@ jobs:
         run: docker info
       - name: Install Native AOT prerequisites
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
-      - name: Publish native CLI for persisted planning, commit and execution rehearsals
+      - name: Publish native CLI for persisted planning, commit, execution and recovery rehearsals
         run: dotnet publish ./src/habyctl/habyctl.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true -o ./.artifacts/aot/linux-x64
       - name: Restore PostgreSQL integration tests
         run: dotnet restore ./tests/Haby.PostgreSql.IntegrationTests/Haby.PostgreSql.IntegrationTests.csproj --artifacts-path ./.artifacts

@@ -34,6 +34,7 @@ internal static class OperationCommands
             });
             group.Subcommands.Add(command);
         }
+        group.Subcommands.Add(RecoveryCommands.Create(context));
         return group;
     }
 }

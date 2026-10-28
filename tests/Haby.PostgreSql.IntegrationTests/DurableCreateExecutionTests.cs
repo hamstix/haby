@@ -51,6 +51,9 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
                 "SELECT applied_generation FROM application_deployments"));
 
             var command = Assignment(prepared, attemptId);
+            // PostgreSQL stores microseconds. The first receipt must equal a later persisted read
+            // even when the server clock has sub-microsecond ticks.
+            prepared.Time.Advance(TimeSpan.FromTicks(1));
             var result = await recovery.AssignExistingDatabaseAsync(command, default);
             Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Assigned, result.Outcome);
             receipt = Assert.IsType<PostgreSqlDatabaseRecoveryReceipt>(result.Decision);

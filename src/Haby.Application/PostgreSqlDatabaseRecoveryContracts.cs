@@ -9,7 +9,11 @@ public sealed record PostgreSqlDatabaseRecoveryPreview(DurableCreateOperationKey
     EnvironmentRecordId Environment, ApplicationRecordId Application, string? DatabaseName,
     ProviderInstanceId ProviderInstance, ProviderConfigurationRevisionNumber ConfigurationRevision,
     string ImplementationId, Guid? UncertainAttemptId, DurableCreateOperationState State,
-    DurableCreateOperationReason? Reason);
+    DurableCreateOperationReason? Reason)
+{
+    /// <summary>The single read used for this preview, so adapters cannot mix attempt/state snapshots.</summary>
+    public required DurableCreateOperation Snapshot { get; init; }
+}
 
 /// <summary>The caller must affirmatively accept provenance responsibility for this exact attempt.</summary>
 public sealed record AssignExistingPostgreSqlDatabase(DurableCreateOperationKey Key,
@@ -42,7 +46,7 @@ public sealed record PostgreSqlDatabaseRecoveryAudit(PostgreSqlDatabaseRecoveryR
     public override string ToString() => nameof(PostgreSqlDatabaseRecoveryAudit);
 }
 
-/// <summary>Internal single-instance manual recovery boundary; no operator transport is registered.</summary>
+/// <summary>Single-instance manual recovery boundary. Operator adapters delegate validation and decisions here.</summary>
 public interface IPostgreSqlDatabaseRecovery
 {
     ValueTask<PostgreSqlDatabaseRecoveryPreview?> InspectAsync(DurableCreateOperationKey key,
