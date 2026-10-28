@@ -1,5 +1,8 @@
 # Single-instance shadow-pilot rehearsal
 
+For durable operations, attempts and manual recovery history, continue with
+the [active-pilot restore rehearsal](active-pilot-restore-rehearsal.md).
+
 This procedure uses one Haby host and one developer console on the same
 machine. The alpha gRPC endpoint has no user authentication. Keep it bound to
 IPv4 loopback; do not forward the port or publish it through a proxy. The

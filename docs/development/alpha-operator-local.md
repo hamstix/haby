@@ -492,9 +492,9 @@ AppliedGeneration; desired-generation history is unchanged by execution.
 
 Manual assignment is available through the explicit recovery workflow below.
 Do not edit journal rows or delete/recreate an operation to bypass the barrier.
-Full active-pilot operational readiness still requires an operation/attempt/
-recovery-history backup/restore rehearsal. The shadow catalog restore rehearsal
-alone does not establish those guarantees. TLS/loopback isolation, one instance,
+The [active-pilot catalog restore rehearsal](active-pilot-restore-rehearsal.md)
+covers operation, attempt and recovery history through a fresh Host after real
+pg_dump/pg_restore. Broader pilot readiness remains separate. TLS/loopback isolation, one instance,
 no authentication and technical rather than human attribution remain unchanged.
 
 ### Explicit recovery of one uncertain operation
@@ -624,5 +624,6 @@ and unsupported pinned implementations. Independent catalog reads verify one
 retained uncertain attempt, one decision and applied-generation advancement;
 assignment also succeeds with a pinned login lacking CREATEDB. Both native
 loopback gates exercise recovery commands, consent, bounded UTF-8 input, safe
-text/JSON and transport failures. Full recovery-history backup/restore remains
-separate follow-up work.
+text/JSON and transport failures. The
+[active-pilot restore checkpoint](active-pilot-restore-rehearsal.md) additionally
+proves recovery-history preservation without Provider access or replay.
