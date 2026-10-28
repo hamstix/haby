@@ -13,6 +13,8 @@ using Haby.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
+using DescriptionStatus = Haby.Operator.Contracts.PlanDescriptionStatus;
+using ActionKind = Haby.Operator.Contracts.IntendedActionKind;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
@@ -41,6 +43,7 @@ public sealed partial class OperatorHostIntegrationTests
         var providerPort = ((IPEndPoint)providerTrap.LocalEndpoint).Port;
         var providerContact = providerTrap.AcceptTcpClientAsync();
         const string material = "planning-secret-sentinel";
+        using var logs = new ExecutionLogs();
         await using var setup = new ServiceCollection().AddPostgreSqlManifestCatalog(connection)
             .AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationCodec()
             .AddPostgreSqlProviderConfigurationStore().AddPostgreSqlProviderAliasStore()
@@ -61,7 +64,26 @@ public sealed partial class OperatorHostIntegrationTests
         var aliasStore = setup.GetRequiredService<IProviderAliasStore>();
         var alias = ProviderAlias.Create("postgresql.primary");
         var firstBinding = new ProviderAliasBinding(instance, ProviderConfigurationRevisionNumber.Create(1));
-        var nextBinding = new ProviderAliasBinding(instance, ProviderConfigurationRevisionNumber.Create(2));
+        var nextConfiguration = new PostgreSqlProviderConfiguration(1, "localhost", providerPort,
+            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var nextInstance = await providers.CreateInstanceAsync(environment, nextConfiguration, default);
+        await providers.AddRevisionAsync(environment, nextInstance, ProviderConfigurationRevisionNumber.Create(1), nextConfiguration, default);
+        await providers.AddRevisionAsync(environment, nextInstance, ProviderConfigurationRevisionNumber.Create(2), nextConfiguration, default);
+        var nextBinding = new ProviderAliasBinding(nextInstance, ProviderConfigurationRevisionNumber.Create(2));
+        var role = "planning_host_" + Guid.NewGuid().ToString("N");
+        await using (var admin = new NpgsqlConnection(connection))
+        {
+            await admin.OpenAsync();
+            await new NpgsqlCommand($"CREATE ROLE {role}; GRANT ALL ON SCHEMA public TO {role}; GRANT ALL ON ALL TABLES IN SCHEMA public TO {role}; REVOKE SELECT ON secret_payloads FROM {role}", admin).ExecuteNonQueryAsync();
+        }
+        var restricted = new NpgsqlConnectionStringBuilder(connection) { Options = "-c role=" + role }.ConnectionString;
+        await using (var denied = new NpgsqlConnection(restricted))
+        {
+            await denied.OpenAsync();
+            var error = await Assert.ThrowsAsync<PostgresException>(async () =>
+                await new NpgsqlCommand("SELECT * FROM secret_payloads", denied).ExecuteNonQueryAsync());
+            Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
+        }
         using var certificate = Certificate();
         var certificatePath = Path.Combine(Path.GetTempPath(), "haby-planning-" + Guid.NewGuid().ToString("N") + ".pfx");
         await File.WriteAllBytesAsync(certificatePath, certificate.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, "test-only"));
@@ -70,14 +92,14 @@ public sealed partial class OperatorHostIntegrationTests
         DurablePlanSummary replacement;
         try
         {
-            await using (var host = await StartAsync(connection, certificatePath))
+            await using (var host = await StartExecutionLoggedHost(restricted, certificatePath, logs))
             {
                 Assert.NotNull(host.Services.GetService<ISecretStore>());
                 Assert.Null(host.Services.GetService<IProviderRevisionPreflight>());
                 Assert.NotNull(host.Services.GetService<IDurableDesiredStateCommitter>());
                 using var channel = Channel(host, certificate);
                 var client = new ManifestOperator.ManifestOperatorClient(channel);
-                var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(Envelope("durable-operator")) });
+                var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFromUtf8(Encoding.UTF8.GetString(Envelope("durable-operator")).Replace("\"id\":\"durable-operator\"", "\"id\":\"durable-operator\",\"displayName\":\"unrelated-secret-sentinel\"", StringComparison.Ordinal)) });
                 var reference = imported.Created.Revision.Reference;
                 var create = new CreateChangeSetRequest
                 {
@@ -106,7 +128,13 @@ public sealed partial class OperatorHostIntegrationTests
                 var planned = await client.CreatePlanAsync(changeRequest);
                 Assert.Equal(PlanningStatus.Planned, planned.Status);
                 Assert.DoesNotContain(material, planned.ToString());
+                Assert.DoesNotContain("unrelated-secret-sentinel", planned.ToString());
                 original = planned.Plan;
+                AssertIntendedDatabase(original);
+                Assert.Equal("pilot", original.EnvironmentId);
+                Assert.Equal(environment.ToString(), original.EnvironmentRecordId);
+                Assert.Equal("postgresql.primary", original.ProviderAlias);
+                Assert.Equal(PostgreSqlDatabaseCheckpointCapability.ImplementationId, original.ImplementationId);
                 Assert.Equal(1, original.ConfigurationRevision);
                 Assert.Equal(instance.ToString(), original.ProviderInstanceId);
                 Assert.Equal(reference, original.Reference);
@@ -118,6 +146,8 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(PlanningStatus.PlanStale, (await client.CheckPlanAsync(planRequest)).Status);
                 Assert.Equal(original, (await client.GetPlanAsync(planRequest)).Plan);
                 replacement = (await client.CreatePlanAsync(changeRequest)).Plan;
+                AssertIntendedDatabase(replacement);
+                Assert.Equal(nextInstance.ToString(), replacement.ProviderInstanceId);
                 Assert.Equal(2, replacement.ConfigurationRevision);
                 Assert.NotEqual(original.PlanId, replacement.PlanId);
                 Assert.Equal(PlanningStatus.Closed, (await client.ClosePlanAsync(planRequest)).Status);
@@ -160,7 +190,7 @@ public sealed partial class OperatorHostIntegrationTests
                 .AddPostgreSqlDurableDeploymentPlanner().BuildServiceProvider();
             var expired = (await past.GetRequiredService<IDurableDeploymentPlanner>().CreatePlanAsync(
                 DeploymentChangeSetId.Parse(change.ChangeSetId), "fixture", default)).Plan!;
-            await using (var restarted = await StartAsync(connection, certificatePath))
+            await using (var restarted = await StartExecutionLoggedHost(restricted, certificatePath, logs))
             {
                 using var channel = Channel(restarted, certificate);
                 var client = new ManifestOperator.ManifestOperatorClient(channel);
@@ -172,10 +202,48 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(OperatorHostApplication.TechnicalActorId, closed.Plan.ClosedByTechnicalActorId);
                 Assert.Equal(replacement, (await client.GetPlanAsync(new PlanRequest { PlanId = replacement.PlanId })).Plan);
                 var expiredRequest = new PlanRequest { PlanId = expired.Id.ToString() };
-                Assert.Equal(PlanningStatus.Expired, (await client.GetPlanAsync(expiredRequest)).Status);
+                var expiredRead = await client.GetPlanAsync(expiredRequest);
+                Assert.Equal(PlanningStatus.Expired, expiredRead.Status);
+                AssertIntendedDatabase(expiredRead.Plan);
                 Assert.Equal(PlanningStatus.Expired, (await client.CheckPlanAsync(expiredRequest)).Status);
-                await NativePlanningSmoke(restarted.Urls.Single(), change, material);
+                await NativePlanningSmoke(restarted.Urls.Single(), change, material, nextInstance.ToString(), original, expired.Id.ToString());
+                // Reads run with catalog writes denied, in addition to secret-material reads denied.
+                await using var admin = new NpgsqlConnection(connection);
+                await admin.OpenAsync();
+                await new NpgsqlCommand($"REVOKE INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM {role}", admin).ExecuteNonQueryAsync();
+                AssertIntendedDatabase((await client.GetPlanAsync(new PlanRequest { PlanId = replacement.PlanId })).Plan);
+                // Simulate unavailable historical inputs only in this disposable catalog. Keep Plan rows untouched.
+                var snapshot = (string)(await new NpgsqlCommand("SELECT snapshot FROM manifest_revisions WHERE application_record_id = '" + change.Reference.ApplicationRecordId + "'", admin).ExecuteScalarAsync())!;
+                async Task SetSnapshot(string value)
+                {
+                    await using var command = new NpgsqlCommand("UPDATE manifest_revisions SET snapshot = @snapshot WHERE application_record_id = @application", admin);
+                    command.Parameters.AddWithValue("snapshot", value);
+                    command.Parameters.AddWithValue("application", Guid.Parse(change.Reference.ApplicationRecordId));
+                    await command.ExecuteNonQueryAsync();
+                }
+                foreach (var (value, outcome) in new[]
+                {
+                    ("{corrupt-secret-sentinel", DescriptionStatus.InputCorrupt),
+                    (snapshot.Replace("sample_db", "invalid-secret-sentinel", StringComparison.Ordinal), DescriptionStatus.UnsupportedShape)
+                })
+                {
+                    await SetSnapshot(value);
+                    var unavailable = await client.GetPlanAsync(new PlanRequest { PlanId = original.PlanId });
+                    Assert.Equal(PlanningStatus.Closed, unavailable.Status);
+                    Assert.Equal(original.PlanId, unavailable.Plan.PlanId);
+                    Assert.Equal(original.Fingerprint, unavailable.Plan.Fingerprint);
+                    Assert.Equal(outcome, unavailable.Plan.IntendedWork.Status);
+                    Assert.Null(unavailable.Plan.IntendedWork.Action);
+                    Assert.DoesNotContain("secret-sentinel", unavailable.ToString());
+                    var openRead = await client.GetPlanAsync(new PlanRequest { PlanId = replacement.PlanId });
+                    Assert.Equal(outcome == DescriptionStatus.InputCorrupt ? PlanningStatus.PlanInputUnavailable : PlanningStatus.Current, openRead.Status);
+                    Assert.Equal(outcome, openRead.Plan.IntendedWork.Status);
+                    Assert.Equal(PlanningStatus.Expired, (await client.GetPlanAsync(expiredRequest)).Status);
+                }
+                await SetSnapshot(snapshot);
+                Assert.Equal(original, WithoutClosure((await client.GetPlanAsync(new PlanRequest { PlanId = original.PlanId })).Plan));
             }
+            Assert.DoesNotContain("secret-sentinel", logs.Text);
             Assert.False(providerContact.IsCompleted, "Planning must not contact the Provider endpoint.");
             await using var check = new NpgsqlConnection(connection);
             await check.OpenAsync();
@@ -197,7 +265,17 @@ public sealed partial class OperatorHostIntegrationTests
         var copy = plan.Clone(); copy.ClearClosedAtUtc(); copy.ClearClosedByTechnicalActorId(); return copy;
     }
 
-    private static async Task NativePlanningSmoke(string endpoint, DurableChangeSetSummary change, string material)
+    private static void AssertIntendedDatabase(DurablePlanSummary plan)
+    {
+        Assert.Equal(DescriptionStatus.Available, plan.IntendedWork.Status);
+        Assert.Equal(ActionKind.Create, plan.IntendedWork.Action.Kind);
+        Assert.Equal("db", plan.IntendedWork.Action.ResourceId);
+        Assert.Equal("postgresql.database/v1alpha1", plan.IntendedWork.Action.ResourceType);
+        Assert.Equal("sample_db", plan.IntendedWork.Action.PostgresqlDatabase.DatabaseName);
+    }
+
+    private static async Task NativePlanningSmoke(string endpoint, DurableChangeSetSummary change, string material, string providerInstance,
+        DurablePlanSummary original, string expiredId)
     {
         var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
         if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
@@ -232,8 +310,19 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(expected, process.ExitCode);
                 Assert.Equal("", await stderr);
                 Assert.DoesNotContain(material, text);
+                Assert.DoesNotContain("unrelated-secret-sentinel", text);
                 return text;
             }
+            using var historical = JsonDocument.Parse(await Run(0, "plan", "get", original.PlanId, "-o", "json"));
+            Assert.Equal("closed", historical.RootElement.GetProperty("outcome"u8).GetString());
+            var historicalPlan = historical.RootElement.GetProperty("data"u8).GetProperty("plan"u8);
+            Assert.Equal(original.ProviderInstanceId, historicalPlan.GetProperty("providerInstanceId"u8).GetString());
+            Assert.Equal(1, historicalPlan.GetProperty("configurationRevision"u8).GetInt64());
+            Assert.Equal("sample_db", historicalPlan.GetProperty("intendedWork"u8).GetProperty("action"u8)
+                .GetProperty("postgreSqlDatabase"u8).GetProperty("databaseName"u8).GetString());
+            var expiredText = await Run(0, "plan", "get", expiredId);
+            Assert.Contains("expired", expiredText);
+            Assert.Contains("Intended action: Create; Resource: db", expiredText);
             var created = await Run(0, "changeset", "create", change.Reference.ApplicationRecordId,
                 change.Reference.RevisionNumber.ToString(), "--expected-absence", "-o", "json");
             using var changesetJson = JsonDocument.Parse(created);
@@ -244,7 +333,22 @@ public sealed partial class OperatorHostIntegrationTests
             var plan = planJson.RootElement.GetProperty("data"u8).GetProperty("plan"u8);
             var planId = plan.GetProperty("planId"u8).GetString()!;
             Assert.Equal(2, plan.GetProperty("configurationRevision"u8).GetInt64());
-            Assert.Contains(planId, await Run(0, "plan", "get", planId));
+            Assert.Equal("pilot", plan.GetProperty("environmentId"u8).GetString());
+            Assert.Equal(providerInstance, plan.GetProperty("providerInstanceId"u8).GetString());
+            Assert.Equal("haby.postgresql.database/v1alpha1", plan.GetProperty("implementationId"u8).GetString());
+            var intended = plan.GetProperty("intendedWork"u8);
+            Assert.Equal("available", intended.GetProperty("status"u8).GetString());
+            var action = intended.GetProperty("action"u8);
+            Assert.Equal("create", action.GetProperty("kind"u8).GetString());
+            Assert.Equal("db", action.GetProperty("resourceId"u8).GetString());
+            Assert.Equal("postgresql.database/v1alpha1", action.GetProperty("resourceType"u8).GetString());
+            Assert.Equal("sample_db", action.GetProperty("postgreSqlDatabase"u8).GetProperty("databaseName"u8).GetString());
+            var readText = await Run(0, "plan", "get", planId);
+            Assert.Contains(planId, readText);
+            Assert.Contains("Intended action: Create; Resource: db; type: postgresql.database/v1alpha1; database: sample_db", readText);
+            Assert.Contains("no Provider preflight", readText);
+            using var readJson = JsonDocument.Parse(await Run(0, "plan", "get", planId, "-o", "json"));
+            Assert.Equal(intended.GetRawText(), readJson.RootElement.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("intendedWork"u8).GetRawText());
             Assert.Contains("current", await Run(0, "plan", "check", planId, "-o", "json"));
             Assert.Contains("closed", await Run(0, "plan", "close", planId, "-o", "json"));
             Assert.Contains("closed", await Run(1, "plan", "check", planId));

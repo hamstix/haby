@@ -354,6 +354,45 @@ a stale Plan, call `plan create` again with the same ChangeSet ID. A changed ali
 makes the old Plan `planStale`; the new Plan pins the new exact revision. It never
 rewrites the old Plan. A stale ChangeSet instead requires new intent.
 
+`plan create` and `plan get` include server-owned `intendedWork` alongside the
+Plan identity, fingerprint, current status, Environment and exact pinned Provider
+instance/configuration revision/implementation. The current pilot describes only
+Create of one local `postgresql.database/v1alpha1` Resource, with an explicitly
+typed PostgreSQL database name. It derives these fields from the Plan's exact
+immutable ManifestRevision, using the same supported-shape/name rules as planning.
+It never follows a changed alias to describe an old Plan. Restart preserves the
+same intended work. No new persisted snapshot or migration is involved.
+
+Before committing, review the existing Plan (illustrative non-secret output for
+the `postgres_demo_db` example; actual IDs and timestamps are also printed):
+
+```text
+current
+Plan: <plan-id>; ChangeSet: <change-set-id>
+Environment: pilot; record: <environment-record-id>
+Revision: <application-record-id> 1
+Provider: postgresql.primary -> <provider-instance-id> revision 1; implementation: haby.postgresql.database/v1alpha1
+Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.
+Intended action: Create; Resource: database; type: postgresql.database/v1alpha1; database: postgres_demo_db
+```
+
+The corresponding JSON fragment under `data.plan` is:
+
+```json
+{"intendedWork":{"status":"available","action":{"kind":"create","resourceId":"database","resourceType":"postgresql.database/v1alpha1","postgreSqlDatabase":{"databaseName":"postgres_demo_db"}}}}
+```
+
+A description read contacts no Provider, resolves no secrets and changes no catalog
+state. Intended work is independent from the current-state check: stale, expired
+and closed Plans may still describe their original action without becoming
+committable. Missing/corrupt revision input, unsupported shapes and inconsistent
+pinned inputs return bounded description statuses `revisionNotFound`, `inputCorrupt`,
+`unsupportedShape` or `pinnedInputMismatch`, with no action, raw payload or exception.
+The available Plan identity and current status remain visible. A CLI talking to an
+older server reports `unavailable` when no description is supplied; unknown wire
+outcomes fail closed. Review the intended database and pinned Provider, then use
+the explicit commit command below. The server repeats atomic commit validation.
+
 A Plan expires 24 hours after creation, with its expiry persisted at creation.
 `plan get` returns its immutable snapshot plus its current evaluated status,
 including closed or expired records (exit 0 when the record exists).

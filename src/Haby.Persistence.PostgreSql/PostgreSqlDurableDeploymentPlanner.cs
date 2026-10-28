@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
@@ -19,8 +18,6 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
     : IDurableDeploymentPlanner
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
-    private static readonly Regex SafeDatabase = new(@"\A[a-z][a-z0-9_]{0,62}\z",
-        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
     private readonly IProviderConfigurationCodec[] _codecs = codecs.ToArray();
 
     public async ValueTask<DurableChangeSetCreateResult> CreateChangeSetAsync(EnvironmentRecordId environment,
@@ -95,11 +92,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
-        if (spec.Resources.Count != 1 || spec.Components.Count != 0 || spec.Exports.Count != 0 ||
-            spec.Parameters.Count != 0) return new(DurablePlanStatus.UnsupportedShape);
+        if (!CheckpointDatabaseShape.IsSupported(spec)) return new(DurablePlanStatus.UnsupportedShape);
         var resource = spec.Resources.Single().Value;
-        if (!IsSupportedDatabaseResource(resource))
-            return new(DurablePlanStatus.UnsupportedShape);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
         var resolved = await aliases.ResolveAsync(environmentId, resource.ProviderRef, cancellationToken);
         if (resolved is null) return new(DurablePlanStatus.AliasNotResolved);
@@ -144,9 +138,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
     }
 
     internal static bool IsSupportedDatabaseResource(NormalizedResource resource) =>
-        resource.Type == PostgreSqlDatabaseContract.Id && resource.Properties.Members.Count == 1 &&
-        resource.Properties.Members.TryGetValue("name", out var value) &&
-        value is ConfigurationString name && SafeDatabase.IsMatch(name.Value);
+        CheckpointDatabaseShape.IsSupportedResource(resource);
 
     public async ValueTask<DeploymentChangeSet?> FindChangeSetAsync(DeploymentChangeSetId id,
         CancellationToken cancellationToken)
@@ -199,7 +191,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (plan is null) return DurablePlanCurrentStatus.PlanNotFound;
         if (clock.GetUtcNow() >= plan.ExpiresAt) return DurablePlanCurrentStatus.Expired;
         if (plan.ClosedAt is not null) return DurablePlanCurrentStatus.Closed;
-        var result = await CreateCurrentInputsAsync(plan.ChangeSetId, cancellationToken);
+        (DurablePlanStatus Status, DurablePlanningInputs? Inputs) result;
+        try { result = await CreateCurrentInputsAsync(plan.ChangeSetId, cancellationToken); }
+        catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
         if (result.Status == DurablePlanStatus.ChangeSetStale) return DurablePlanCurrentStatus.ChangeSetStale;
         if (result.Status != DurablePlanStatus.Planned || result.Inputs is null)
             return DurablePlanCurrentStatus.PlanInputUnavailable;

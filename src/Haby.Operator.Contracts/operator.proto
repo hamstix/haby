@@ -179,6 +179,31 @@ message DurablePlanSummary {
   string technical_actor_id = 13;
   optional string closed_at_utc = 14;
   optional string closed_by_technical_actor_id = 15;
+  PlanDescription intended_work = 16;
+}
+// Immutable intended work only: no Provider preflight, absence check or execution guarantee.
+enum PlanDescriptionStatus {
+  PLAN_DESCRIPTION_STATUS_UNSPECIFIED = 0;
+  PLAN_DESCRIPTION_STATUS_AVAILABLE = 1;
+  PLAN_DESCRIPTION_STATUS_REVISION_NOT_FOUND = 2;
+  PLAN_DESCRIPTION_STATUS_INPUT_CORRUPT = 3;
+  PLAN_DESCRIPTION_STATUS_UNSUPPORTED_SHAPE = 4;
+  PLAN_DESCRIPTION_STATUS_PINNED_INPUT_MISMATCH = 5;
+}
+enum IntendedActionKind {
+  INTENDED_ACTION_KIND_UNSPECIFIED = 0;
+  INTENDED_ACTION_KIND_CREATE = 1;
+}
+message PostgreSqlDatabaseActionDetail { string database_name = 1; }
+message IntendedPlanAction {
+  IntendedActionKind kind = 1;
+  string resource_id = 2;
+  string resource_type = 3;
+  oneof detail { PostgreSqlDatabaseActionDetail postgresql_database = 4; }
+}
+message PlanDescription {
+  PlanDescriptionStatus status = 1;
+  IntendedPlanAction action = 2;
 }
 message PlanningReply {
   PlanningStatus status = 1;

@@ -37,6 +37,17 @@ public sealed partial class CliLoopbackTests
             ProviderInstanceId = "provider-instance",
             ConfigurationRevision = 4,
             ImplementationId = "implementation",
+            IntendedWork = new PlanDescription
+            {
+                Status = PlanDescriptionStatus.Available,
+                Action = new IntendedPlanAction
+                {
+                    Kind = IntendedActionKind.Create,
+                    ResourceId = "database",
+                    ResourceType = "postgresql.database/v1alpha1",
+                    PostgresqlDatabase = new PostgreSqlDatabaseActionDetail { DatabaseName = "sample_db" }
+                }
+            },
             Fingerprint = "v1:exact",
             CreatedAtUtc = "2026-10-28T00:00:00Z",
             ExpiresAtUtc = "2026-10-29T00:00:00Z",
@@ -183,6 +194,12 @@ public sealed partial class CliLoopbackTests
                     void Verify(string text)
                     {
                         Assert.Contains(outcome, text);
+                        if (command.StartsWith("plan", StringComparison.Ordinal) && outcome != "planNotFound")
+                        {
+                            Assert.Contains("sample_db", text);
+                            Assert.Contains("postgresql.database/v1alpha1", text);
+                            if (format == "text") Assert.Contains("Intended action: Create; Resource: database", text);
+                        }
                         if (format != "json") return;
                         using var document = JsonDocument.Parse(text);
                         Assert.Equal(1, document.RootElement.GetProperty("formatVersion"u8).GetInt32());
