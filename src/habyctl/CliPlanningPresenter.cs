@@ -75,6 +75,7 @@ internal static class PlanningPresentation
             PlanDescriptionStatus.InputCorrupt => "inputCorrupt",
             PlanDescriptionStatus.UnsupportedShape => "unsupportedShape",
             PlanDescriptionStatus.PinnedInputMismatch => "pinnedInputMismatch",
+            PlanDescriptionStatus.ActionDescriberUnavailable => "actionDescriberUnavailable",
             _ => throw new InvalidDataException("Unknown server description outcome.")
         };
         if (description.Status != PlanDescriptionStatus.Available)

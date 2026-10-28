@@ -240,6 +240,14 @@ public sealed partial class OperatorHostIntegrationTests
                     Assert.Equal(outcome, openRead.Plan.IntendedWork.Status);
                     Assert.Equal(PlanningStatus.Expired, (await client.GetPlanAsync(expiredRequest)).Status);
                 }
+                // Explicit storage trust-boundary regression: a valid-content mutation cannot
+                // be detected from a revision reference or the existing Plan fingerprint.
+                await SetSnapshot(snapshot.Replace("sample_db", "other_db", StringComparison.Ordinal));
+                var trustedRead = await client.GetPlanAsync(new PlanRequest { PlanId = original.PlanId });
+                Assert.Equal(PlanningStatus.Closed, trustedRead.Status);
+                Assert.Equal(original.Fingerprint, trustedRead.Plan.Fingerprint);
+                Assert.Equal(DescriptionStatus.Available, trustedRead.Plan.IntendedWork.Status);
+                Assert.Equal("other_db", trustedRead.Plan.IntendedWork.Action.Target.Name);
                 await SetSnapshot(snapshot);
                 Assert.Equal(original, WithoutClosure((await client.GetPlanAsync(new PlanRequest { PlanId = original.PlanId })).Plan));
             }

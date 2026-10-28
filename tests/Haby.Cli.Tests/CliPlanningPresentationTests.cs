@@ -67,6 +67,7 @@ public sealed class CliPlanningPresentationTests
     [InlineData(PlanDescriptionStatus.InputCorrupt, "inputCorrupt")]
     [InlineData(PlanDescriptionStatus.UnsupportedShape, "unsupportedShape")]
     [InlineData(PlanDescriptionStatus.PinnedInputMismatch, "pinnedInputMismatch")]
+    [InlineData(PlanDescriptionStatus.ActionDescriberUnavailable, "actionDescriberUnavailable")]
     public void Description_unavailability_preserves_plan_identity_and_status(PlanDescriptionStatus status, string expected)
     {
         var reply = DescriptionReply(new PlanDescription { Status = status });

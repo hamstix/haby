@@ -75,6 +75,8 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
         // Execution resolves only the committed exact Provider revision and SecretVersion.
         builder.Services.AddPostgreSqlProviderConfigurationCodec();
+        builder.Services.AddSingleton<IPlanActionDescriber, PostgreSqlPlanActionDescriber>();
+        builder.Services.AddSingleton<DescribeDurablePlan>();
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
         builder.Services.AddPostgreSqlDurableDesiredStateCommitter();
         // Explicit pilot storage choice under ADR-006: database rows and backups contain recoverable secrets.

@@ -133,7 +133,7 @@ public sealed partial class ManifestOperatorService
     private async Task<DurablePlanSummary> PlanSummaryAsync(DurablePlan plan, CancellationToken cancellationToken)
     {
         var summary = Summary(plan);
-        var description = await new DescribeDurablePlan(revisions).ExecuteAsync(plan, cancellationToken);
+        var description = await descriptions.ExecuteAsync(plan, cancellationToken);
         summary.IntendedWork = new PlanDescription
         {
             Status = description.Status switch
@@ -143,6 +143,7 @@ public sealed partial class ManifestOperatorService
                 Application.PlanDescriptionStatus.InputCorrupt => Contracts.PlanDescriptionStatus.InputCorrupt,
                 Application.PlanDescriptionStatus.UnsupportedShape => Contracts.PlanDescriptionStatus.UnsupportedShape,
                 Application.PlanDescriptionStatus.PinnedInputMismatch => Contracts.PlanDescriptionStatus.PinnedInputMismatch,
+                Application.PlanDescriptionStatus.ActionDescriberUnavailable => Contracts.PlanDescriptionStatus.ActionDescriberUnavailable,
                 _ => throw new InvalidOperationException("Unknown description outcome.")
             }
         };
@@ -153,12 +154,7 @@ public sealed partial class ManifestOperatorService
                     : throw new InvalidOperationException("Unknown intended action."),
                 ResourceId = action.ResourceId.Value,
                 ResourceType = action.ResourceType.Value,
-                Target = action.Detail switch
-                {
-                    IntendedActionDetail.PostgreSqlDatabase database =>
-                        new IntendedActionTarget { Name = database.DatabaseName },
-                    _ => throw new InvalidOperationException("Unknown intended action detail.")
-                }
+                Target = new IntendedActionTarget { Name = action.Target.Name }
             };
         return summary;
     }
