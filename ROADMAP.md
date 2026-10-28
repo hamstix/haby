@@ -433,6 +433,9 @@ Accepted pilot boundaries:
   distributed execution leases remain outside both pilots.
 - Start with the internal alpha gRPC API and `habyctl` in ADR-004. Its contract
   may be rewritten or replaced in full; it is not the stable API promised by M4.
+- Develop `habyctl` as a Native AOT operator CLI under ADR-027, with an
+  explicit command tree, named contexts, and secret-safe output. This does not
+  make the alpha server AOT-ready or authorize a plaintext secret-reveal API.
 - In the first active pilot, provision only one explicitly named PostgreSQL
   database Resource. Do not create principals, generate credentials, deliver
   application configuration or deprovision the database.
@@ -675,6 +678,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-021](docs/adr/0021-application-manifest-validation-and-import-use-cases.md): Shared manifest validation and import use cases, typed outcomes, atomic revision creation and safe version-conflict reporting.
 - [ADR-022](docs/adr/0022-postgresql-database-checkpoint-execution.md): Narrow PostgreSQL database contract, post-commit execution, uncertain outcomes and real-database integration tests.
 - [ADR-025](docs/adr/0025-pilot-durable-postgresql-create-recovery.md): Durable single-database dispatch barrier and explicitly consented manual recovery after an uncertain outcome.
+- [ADR-027](docs/adr/0027-operator-cli-foundation.md): Native AOT operator CLI, explicit commands, local contexts, output formats and secret-disclosure boundary.
 
 ## Out of scope for the first milestones
 
