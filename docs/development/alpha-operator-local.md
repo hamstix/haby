@@ -10,6 +10,16 @@ Resource against hypothetical request metadata. It does not durably plan or
 commit a ChangeSet, execute a Provider, provision a database, generate a secret
 or deliver configuration.
 
+The CLI accepts `--help` at the root and at every command level without an
+endpoint. Command results go to standard output; syntax, local-file and
+transport errors go to standard error. Its alpha exit codes are `0` for a
+successful result, `1` for an expected registry rejection, `2` for invalid
+syntax, local input or endpoint configuration, and `3` for transport failure
+or cancellation. The current gRPC contract cannot classify an unset or
+unknown outcome as a typed registry rejection; the CLI reports it as a safe
+local error. `HABY_OPERATOR_URL` remains the endpoint source. Named contexts,
+configuration commands and JSON output are later slices.
+
 Use an isolated local PostgreSQL catalog database and a principal with the
 migration rights described in the [catalog guide](../../src/Haby.Persistence.PostgreSql/README.md).
 Only one host instance should run against it. Back up the catalog before a

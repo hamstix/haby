@@ -1,9 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="System.CommandLine" />
     <ProjectReference Include="..\Haby.Operator.Contracts\Haby.Operator.Contracts.csproj" />
   </ItemGroup>
 </Project>
