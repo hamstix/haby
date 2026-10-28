@@ -47,9 +47,22 @@ This follows the established `config view`, `config current-context`,
 `config use-context`, and `config get|set|rename|delete instance|context`
 command vocabulary. Do not copy unrelated downstream configuration concepts.
 
-Use JSON and source-generated `System.Text.Json` metadata for the local file.
+Use YAML as the operator-facing local configuration format so a file containing
+many instances and contexts remains practical to inspect and edit by hand.
+The file has an explicit format version and a restricted, predictable shape:
+one mapping document with known fields and scalar types. Reject duplicate
+mapping keys, unknown fields, aliases, merge keys, custom tags and multiple
+documents rather than allowing parser-dependent or surprising resolution.
+Parse into a typed configuration model without reflection-based object
+activation; select the YAML library only after a Native AOT publish-and-run
+spike proves the chosen parsing path. The source-generated `System.Text.Json`
+requirement still applies to JSON command output, not to parsing the YAML file.
+
 The configuration-file service owns path selection, bounded reading, validation,
-and atomic replacement. By default the file lives in the platform's per-user
+and atomic replacement. CLI writes must not silently discard unrelated
+operator comments or formatting: preserve them where supported, or make any
+normalization and backup/confirmation behavior explicit before enabling a
+mutating command. By default the file lives in the platform's per-user
 configuration directory under the executable's configurable identity
 (`habyctl` for the OSS distribution). `--config` overrides the file for one
 invocation; the application-identity-specific `HABYCTL_CONFIG` environment
