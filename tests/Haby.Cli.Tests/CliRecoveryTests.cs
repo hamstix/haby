@@ -7,6 +7,7 @@ namespace Haby.Cli.Tests;
 
 public sealed class CliRecoveryTests
 {
+    internal const string CanonicalAttempt = "01a1838d-981a-7913-9e18-b42480d65e11";
     [Theory]
     [InlineData(RecoveryStatus.Rejected, 1)]
     [InlineData(RecoveryStatus.TargetAbsent, 1)]
@@ -58,6 +59,7 @@ public sealed class CliRecoveryTests
     internal static RecoveryReply Reply(RecoveryStatus status)
     {
         var operation = CliOperationTests.Snapshot(OperationStatus.Found, OperationState.NeedsAttention).Operation;
+        operation.AttemptId = CanonicalAttempt;
         return new RecoveryReply
         {
             Status = status,
@@ -66,13 +68,13 @@ public sealed class CliRecoveryTests
                 Operation = operation,
                 TargetContract = "postgresql.database/v1alpha1",
                 TargetName = "example_db",
-                UncertainAttemptId = "attempt-id"
+                UncertainAttemptId = CanonicalAttempt
             },
             Receipt = new RecoveryReceipt
             {
                 Key = operation.Key.Clone(),
                 DecisionId = "decision-id",
-                AttemptId = "attempt-id",
+                AttemptId = CanonicalAttempt,
                 Reason = RecoveryReason.OperatorAcceptedExistingDatabase,
                 TechnicalActor = "host",
                 DecidedAtUtc = "2026-10-28T12:00:00Z"

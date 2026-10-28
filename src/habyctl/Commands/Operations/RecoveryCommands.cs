@@ -72,7 +72,9 @@ internal static class RecoveryCommands
                     if (preview.Status != RecoveryStatus.Found)
                         return context.PrintRecovery("operation recovery assign-existing", preview);
                     if (!key.Equals(preview.Preview?.Operation?.Key) || preview.Preview.Operation.EnvironmentRecordId != request.EnvironmentRecordId ||
-                        (preview.Preview.HasUncertainAttemptId ? preview.Preview.UncertainAttemptId : preview.Receipt?.AttemptId) != request.ExpectedAttemptId)
+                        !Guid.TryParseExact(request.ExpectedAttemptId, "D", out var expectedAttempt) ||
+                        !Guid.TryParseExact(preview.Preview.HasUncertainAttemptId ? preview.Preview.UncertainAttemptId : preview.Receipt?.AttemptId,
+                            "D", out var observedAttempt) || expectedAttempt != observedAttempt)
                         return context.PrintRecovery("operation recovery assign-existing", new RecoveryReply { Status = RecoveryStatus.Rejected });
                     return context.PrintRecovery("operation recovery assign-existing", await client.AssignExistingOperationAsync(request, ct));
                 }, token);

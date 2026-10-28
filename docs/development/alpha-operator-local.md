@@ -537,6 +537,9 @@ There is no inherited yes, prompt acceptance, default consent, Provider override
 or actor argument. Before submission the CLI re-inspects and writes the safe
 target/attempt/uncertainty summary to stderr. Stdout remains one JSON envelope.
 It never replaces supplied expected identities with newer preview identities.
+Deployment and Environment record IDs require canonical lowercase UUIDv7.
+Attempt IDs use D-format UUID syntax; hex case does not change their identity,
+and the CLI submits the caller's original spelling.
 Preview is not authorization: the server independently checks consent, exact
 Environment/attempt, eligible uncertainty, fresh existence on the pinned target
 and authoritative transaction guards. A competing state change fails closed.

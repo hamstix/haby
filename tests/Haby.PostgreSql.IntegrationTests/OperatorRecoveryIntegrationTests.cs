@@ -95,6 +95,8 @@ public sealed partial class OperatorHostIntegrationTests
         Add(r => r.ExpectedAttemptId = "", RecoveryStatus.InvalidRequest);
         Add(r => r.EnvironmentRecordId = EnvironmentRecordId.New().ToString(), RecoveryStatus.Rejected);
         Add(r => r.EnvironmentRecordId = "", RecoveryStatus.InvalidRequest);
+        Add(r => r.EnvironmentRecordId = r.EnvironmentRecordId.ToUpperInvariant(), RecoveryStatus.InvalidRequest);
+        Add(r => r.Key.DeploymentId = r.Key.DeploymentId.ToUpperInvariant(), RecoveryStatus.InvalidRequest);
         Add(r => r.Key.ResourceId = "other", RecoveryStatus.OperationNotFound);
         Add(r => r.Key.DeploymentId = ApplicationDeploymentId.New().ToString(), RecoveryStatus.OperationNotFound);
         Add(r => r.Key.Generation = 2, RecoveryStatus.UnsupportedRecoveryAction);
@@ -316,7 +318,7 @@ public sealed partial class OperatorHostIntegrationTests
                 var request = RecoveryAssignment(preview);
                 await Run(["inspect", key.DeploymentId, "1", "db", "--action", "create"], "json", 0, false);
                 var args = new[] { "assign-existing", key.DeploymentId, "1", "db", "--action", "create",
-                    "--environment-record-id", request.EnvironmentRecordId, "--expected-attempt-id", request.ExpectedAttemptId,
+                    "--environment-record-id", request.EnvironmentRecordId, "--expected-attempt-id", request.ExpectedAttemptId.ToUpperInvariant(),
                     "--reason", "operatorAcceptedExistingDatabase", "--note-file", note, "--acknowledge-assignment" };
                 if (restart == 0) await Run(args[..^1], "json", 2, false);
                 var result = await Run(args, "json", 0, true);
