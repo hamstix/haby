@@ -19,6 +19,13 @@ internal sealed class CliCommandContext(
     internal int Print(GetRevisionReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
     internal int Print(PreviewDatabaseReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
 
+    internal int PrintPlanning(string command, PlanningReply reply) =>
+        jsonOutput() ? jsonPresenter.PrintPlanning(command, reply) : presenter.PrintPlanning(command, reply);
+
+    internal Task<int> ExecutePlanningAsync(
+        Func<IRegistryClient, string, CancellationToken, Task<int>> action, CancellationToken cancellationToken) =>
+        ExecuteResolvedAsync(action, requireContext: true, cancellationToken);
+
     internal int MissingSubcommand()
     {
         error.WriteLine("A command is required. Use --help to see available commands.");
@@ -33,10 +40,15 @@ internal sealed class CliCommandContext(
         return Task.FromResult(CliApplication.UsageError);
     }
 
-    internal async Task<int> ExecuteAsync(Func<IRegistryClient, CancellationToken, Task<int>> action,
-        CancellationToken cancellationToken)
+    internal Task<int> ExecuteAsync(Func<IRegistryClient, CancellationToken, Task<int>> action,
+        CancellationToken cancellationToken) =>
+        ExecuteResolvedAsync((client, _, token) => action(client, token), requireContext: false, cancellationToken);
+
+    private async Task<int> ExecuteResolvedAsync(Func<IRegistryClient, string, CancellationToken, Task<int>> action,
+        bool requireContext, CancellationToken cancellationToken)
     {
         Uri address;
+        string environmentId = "";
         try
         {
             var selected = options();
@@ -49,8 +61,17 @@ internal sealed class CliCommandContext(
                     !config.Instances.TryGetValue(context.Instance, out var instance))
                     throw new InvalidDataException("Invalid CLI configuration.");
                 endpoint = instance.Endpoint;
+                environmentId = context.EnvironmentId;
             }
-            else endpoint = endpointSource.GetAddress();
+            else
+            {
+                if (requireContext)
+                {
+                    error.WriteLine("Durable planning requires a selected context with an Environment ID.");
+                    return CliApplication.UsageError;
+                }
+                endpoint = endpointSource.GetAddress();
+            }
             var selectedAddress = CliApplication.ParseEndpoint(endpoint);
             if (selectedAddress is null)
             {
@@ -74,7 +95,7 @@ internal sealed class CliCommandContext(
         {
             using var client = clientFactory.Create(address,
                 CliApplication.SkipTlsCertificateValidation(endpointSource.GetSkipTlsValidation()));
-            return await action(client, cancellationToken);
+            return await action(client, environmentId, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

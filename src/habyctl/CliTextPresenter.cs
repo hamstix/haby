@@ -2,7 +2,7 @@ using Haby.Operator.Contracts;
 
 namespace Haby.Cli;
 
-internal sealed class CliTextPresenter(TextWriter output)
+internal sealed partial class CliTextPresenter(TextWriter output)
 {
     private readonly TextWriter _output = output;
 

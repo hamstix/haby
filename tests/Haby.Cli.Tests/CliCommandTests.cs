@@ -50,6 +50,18 @@ public sealed class CliCommandTests
         public ImportReply? ImportResult { get; set; }
         public GetRevisionReply? GetResult { get; set; }
         public PreviewDatabaseReply? PreviewResult { get; set; }
+        public Task<PlanningReply> CreateChangeSetAsync(CreateChangeSetRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> GetChangeSetAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> CreatePlanAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> GetPlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> CheckPlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> ClosePlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
         public void Dispose() { }
 
         public Task<ValidateReply> ValidateAsync(EnvelopeRequest request, CancellationToken cancellationToken)

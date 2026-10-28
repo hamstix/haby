@@ -8,6 +8,12 @@ service ManifestOperator {
   rpc Import(EnvelopeRequest) returns (ImportReply);
   rpc GetRevision(GetRevisionRequest) returns (GetRevisionReply);
   rpc PreviewDatabase(PreviewDatabaseRequest) returns (PreviewDatabaseReply);
+  rpc CreateChangeSet(CreateChangeSetRequest) returns (PlanningReply);
+  rpc GetChangeSet(ChangeSetRequest) returns (PlanningReply);
+  rpc CreatePlan(ChangeSetRequest) returns (PlanningReply);
+  rpc GetPlan(PlanRequest) returns (PlanningReply);
+  rpc CheckPlan(PlanRequest) returns (PlanningReply);
+  rpc ClosePlan(PlanRequest) returns (PlanningReply);
 }
 
 message EnvelopeRequest { bytes original_envelope = 1; }
@@ -100,4 +106,73 @@ message PreviewDatabaseReply {
     PreviewAliasFailure capability_mismatch = 5;
     bool unsupported_shape = 6;
   }
+}
+
+// Durable planning only. No caller-supplied actor, Provider payload, or execution capability.
+enum PlanningStatus {
+  PLANNING_STATUS_UNSPECIFIED = 0;
+  PLANNING_STATUS_CREATED = 1;
+  PLANNING_STATUS_FOUND = 2;
+  PLANNING_STATUS_PLANNED = 3;
+  PLANNING_STATUS_CURRENT = 4;
+  PLANNING_STATUS_CLOSED = 5;
+  PLANNING_STATUS_ALREADY_CLOSED = 6;
+  PLANNING_STATUS_INVALID_REQUEST = 7;
+  PLANNING_STATUS_ENVIRONMENT_NOT_FOUND = 8;
+  PLANNING_STATUS_REVISION_NOT_FOUND = 9;
+  PLANNING_STATUS_REVISION_NOT_OWNED_BY_APPLICATION = 10;
+  PLANNING_STATUS_UNSUPPORTED_PRECONDITION = 11;
+  PLANNING_STATUS_CHANGE_SET_NOT_FOUND = 12;
+  PLANNING_STATUS_CHANGE_SET_STALE = 13;
+  PLANNING_STATUS_ALIAS_NOT_RESOLVED = 14;
+  PLANNING_STATUS_PROVIDER_REVISION_UNAVAILABLE = 15;
+  PLANNING_STATUS_PROVIDER_CAPABILITY_MISMATCH = 16;
+  PLANNING_STATUS_UNSUPPORTED_SHAPE = 17;
+  PLANNING_STATUS_PLAN_NOT_FOUND = 18;
+  PLANNING_STATUS_EXPIRED = 19;
+  PLANNING_STATUS_PLAN_STALE = 20;
+  PLANNING_STATUS_PLAN_INPUT_UNAVAILABLE = 21;
+}
+enum PlanningPrecondition {
+  PLANNING_PRECONDITION_UNSPECIFIED = 0;
+  PLANNING_PRECONDITION_EXPECTED_ABSENCE = 1;
+  PLANNING_PRECONDITION_EXPECTED_GENERATION = 2;
+}
+message CreateChangeSetRequest {
+  // Logical lowercase kebab-case EnvironmentId, unique in this registry, never a UUID.
+  string environment_id = 1;
+  RevisionReference reference = 2;
+  PlanningPrecondition precondition = 3;
+}
+message ChangeSetRequest { string change_set_id = 1; }
+message PlanRequest { string plan_id = 1; }
+message DurableChangeSetSummary {
+  string change_set_id = 1;
+  string environment_record_id = 2;
+  RevisionReference reference = 3;
+  PlanningPrecondition precondition = 4;
+  string created_at_utc = 5;
+  string technical_actor_id = 6;
+}
+message DurablePlanSummary {
+  string plan_id = 1;
+  string change_set_id = 2;
+  string environment_record_id = 3;
+  string environment_id = 4;
+  RevisionReference reference = 5;
+  string provider_alias = 6;
+  string provider_instance_id = 7;
+  int64 configuration_revision = 8;
+  string implementation_id = 9;
+  string fingerprint = 10;
+  string created_at_utc = 11;
+  string expires_at_utc = 12;
+  string technical_actor_id = 13;
+  optional string closed_at_utc = 14;
+  optional string closed_by_technical_actor_id = 15;
+}
+message PlanningReply {
+  PlanningStatus status = 1;
+  DurableChangeSetSummary change_set = 2;
+  DurablePlanSummary plan = 3;
 }

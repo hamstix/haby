@@ -54,6 +54,18 @@ public sealed class CliConfigurationTests
             throw new NotImplementedException();
         public Task<PreviewDatabaseReply> PreviewDatabaseAsync(PreviewDatabaseRequest request, CancellationToken cancellationToken) =>
             throw new NotImplementedException();
+        public Task<PlanningReply> CreateChangeSetAsync(CreateChangeSetRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> GetChangeSetAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> CreatePlanAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> GetPlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> CheckPlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<PlanningReply> ClosePlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
         public void Dispose() { }
     }
 

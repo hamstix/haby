@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Haby.Cli.Tests;
 
-public sealed class CliLoopbackTests
+public sealed partial class CliLoopbackTests
 {
     private sealed class TestRegistry : ManifestOperator.ManifestOperatorBase
     {

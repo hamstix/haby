@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using Haby.Application;
 using Haby.Manifest;
+using Haby.PostgreSql;
 using Haby.Persistence.PostgreSql;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
@@ -65,6 +66,10 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         builder.Services.AddSingleton<PreviewImportedDatabase>();
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
+        // Planning needs codecs and alias reads only; no preflight, secret resolver or executor.
+        builder.Services.AddPostgreSqlProviderConfigurationCodec();
+        builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
+        builder.Services.AddPostgreSqlDurableDeploymentPlanner();
 
         var app = builder.Build();
         app.MapGrpcService<ManifestOperatorService>();
