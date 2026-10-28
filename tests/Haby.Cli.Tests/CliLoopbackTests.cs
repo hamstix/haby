@@ -57,6 +57,7 @@ public sealed class CliLoopbackTests
     [Fact]
     public async Task Context_override_selects_second_disposable_loopback_host_and_aot_binary()
     {
+        var binary = AotBinary();
         static WebApplication Build<T>() where T : class
         {
             var builder = WebApplication.CreateBuilder();
@@ -109,7 +110,6 @@ public sealed class CliLoopbackTests
             Assert.Contains("Valid second-instance 1", output.ToString());
             Assert.Equal("", error.ToString());
 
-            var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
             if (binary is not null)
             {
                 using var process = new Process();
@@ -119,15 +119,33 @@ public sealed class CliLoopbackTests
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
                 };
-                foreach (var argument in new[] { "manifest", "validate", envelope, "--config", config, "--context", "second" })
+                foreach (var argument in new[] { "manifest", "validate", envelope, "--config", config })
                     process.StartInfo.ArgumentList.Add(argument);
-                process.StartInfo.Environment["HABY_OPERATOR_URL"] = firstAddress;
+                process.StartInfo.Environment["HABY_OPERATOR_URL"] = secondAddress;
                 Assert.True(process.Start());
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 await process.WaitForExitAsync(timeout.Token);
-                Assert.Equal(CliApplication.Success, process.ExitCode);
-                Assert.Contains("Valid second-instance 1", await process.StandardOutput.ReadToEndAsync(timeout.Token));
+                Assert.Equal(CliApplication.Rejected, process.ExitCode);
+                var text = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+                Assert.Contains("InvalidManifest", text);
+                Assert.DoesNotContain("sensitive-sentinel", text);
                 Assert.Equal("", await process.StandardError.ReadToEndAsync(timeout.Token));
+
+                using var overrideProcess = new Process();
+                overrideProcess.StartInfo = new ProcessStartInfo(binary)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                foreach (var argument in new[] { "manifest", "validate", envelope, "--config", config, "--context", "second" })
+                    overrideProcess.StartInfo.ArgumentList.Add(argument);
+                overrideProcess.StartInfo.Environment["HABY_OPERATOR_URL"] = firstAddress;
+                Assert.True(overrideProcess.Start());
+                await overrideProcess.WaitForExitAsync(timeout.Token);
+                Assert.Equal(CliApplication.Success, overrideProcess.ExitCode);
+                Assert.Contains("Valid second-instance 1", await overrideProcess.StandardOutput.ReadToEndAsync(timeout.Token));
+                Assert.Equal("", await overrideProcess.StandardError.ReadToEndAsync(timeout.Token));
             }
         }
         finally
@@ -141,6 +159,7 @@ public sealed class CliLoopbackTests
     [Fact]
     public async Task Generated_client_reaches_disposable_loopback_registry_and_aot_binary_when_supplied()
     {
+        var binary = AotBinary();
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0,
             listen => listen.Protocols = HttpProtocols.Http2));
@@ -163,10 +182,8 @@ public sealed class CliLoopbackTests
             Assert.Contains("InvalidManifest", output.ToString());
             Assert.Equal("", error.ToString());
 
-            var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
             if (binary is not null)
             {
-                Assert.True(File.Exists(binary), $"AOT binary is missing: {binary}");
                 using (var configProcess = new Process())
                 {
                     configProcess.StartInfo = new ProcessStartInfo(binary)
@@ -223,5 +240,15 @@ public sealed class CliLoopbackTests
     {
         public string? GetAddress() => address;
         public string? GetSkipTlsValidation() => null;
+    }
+
+    private static string? AotBinary()
+    {
+        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1")
+            Assert.False(string.IsNullOrWhiteSpace(binary), "HABY_AOT_CLI_PATH is required for the AOT smoke gate.");
+        if (binary is not null)
+            Assert.True(File.Exists(binary), $"AOT binary is missing: {binary}");
+        return binary;
     }
 }

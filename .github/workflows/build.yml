@@ -42,6 +42,48 @@ jobs:
       - name: Verify generated diff
         run: git diff --check --exit-code
 
+  native-aot:
+    name: Native AOT (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            executable: habyctl.exe
+          - os: ubuntu-latest
+            rid: linux-x64
+            executable: habyctl
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Install Linux Native AOT prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: Publish Native AOT executable (warnings as errors)
+        run: dotnet publish ./src/habyctl/habyctl.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true -o ./.artifacts/aot/${{ matrix.rid }}
+      - name: Execute published help and version
+        run: |
+          $cli = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
+          & $cli --help
+          if ($LASTEXITCODE -ne 0) { throw "Native AOT help failed: $LASTEXITCODE" }
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw "Native AOT version failed: $LASTEXITCODE" }
+      - name: Test published binary against disposable loopback hosts
+        run: |
+          $env:HABY_AOT_CLI_REQUIRED = '1'
+          $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
+          dotnet test ./tests/Haby.Cli.Tests/Haby.Cli.Tests.csproj -c Release --filter FullyQualifiedName~CliLoopbackTests -p:TreatWarningsAsErrors=true
+          if ($LASTEXITCODE -ne 0) { throw "Native AOT loopback tests failed: $LASTEXITCODE" }
+
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
