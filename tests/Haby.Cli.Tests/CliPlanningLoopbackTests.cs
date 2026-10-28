@@ -45,7 +45,7 @@ public sealed partial class CliLoopbackTests
                     Kind = IntendedActionKind.Create,
                     ResourceId = "database",
                     ResourceType = "postgresql.database/v1alpha1",
-                    PostgresqlDatabase = new PostgreSqlDatabaseActionDetail { DatabaseName = "sample_db" }
+                    Target = new IntendedActionTarget { Name = "sample_db" }
                 }
             },
             Fingerprint = "v1:exact",

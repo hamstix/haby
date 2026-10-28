@@ -271,7 +271,7 @@ public sealed partial class OperatorHostIntegrationTests
         Assert.Equal(ActionKind.Create, plan.IntendedWork.Action.Kind);
         Assert.Equal("db", plan.IntendedWork.Action.ResourceId);
         Assert.Equal("postgresql.database/v1alpha1", plan.IntendedWork.Action.ResourceType);
-        Assert.Equal("sample_db", plan.IntendedWork.Action.PostgresqlDatabase.DatabaseName);
+        Assert.Equal("sample_db", plan.IntendedWork.Action.Target.Name);
     }
 
     private static async Task NativePlanningSmoke(string endpoint, DurableChangeSetSummary change, string material, string providerInstance,
@@ -319,7 +319,7 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.Equal(original.ProviderInstanceId, historicalPlan.GetProperty("providerInstanceId"u8).GetString());
             Assert.Equal(1, historicalPlan.GetProperty("configurationRevision"u8).GetInt64());
             Assert.Equal("sample_db", historicalPlan.GetProperty("intendedWork"u8).GetProperty("action"u8)
-                .GetProperty("postgreSqlDatabase"u8).GetProperty("databaseName"u8).GetString());
+                .GetProperty("target"u8).GetProperty("name"u8).GetString());
             var expiredText = await Run(0, "plan", "get", expiredId);
             Assert.Contains("expired", expiredText);
             Assert.Contains("Intended action: Create; Resource: db", expiredText);
@@ -342,10 +342,10 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.Equal("create", action.GetProperty("kind"u8).GetString());
             Assert.Equal("db", action.GetProperty("resourceId"u8).GetString());
             Assert.Equal("postgresql.database/v1alpha1", action.GetProperty("resourceType"u8).GetString());
-            Assert.Equal("sample_db", action.GetProperty("postgreSqlDatabase"u8).GetProperty("databaseName"u8).GetString());
+            Assert.Equal("sample_db", action.GetProperty("target"u8).GetProperty("name"u8).GetString());
             var readText = await Run(0, "plan", "get", planId);
             Assert.Contains(planId, readText);
-            Assert.Contains("Intended action: Create; Resource: db; type: postgresql.database/v1alpha1; database: sample_db", readText);
+            Assert.Contains("Intended action: Create; Resource: db; type: postgresql.database/v1alpha1; target: sample_db", readText);
             Assert.Contains("no Provider preflight", readText);
             using var readJson = JsonDocument.Parse(await Run(0, "plan", "get", planId, "-o", "json"));
             Assert.Equal(intended.GetRawText(), readJson.RootElement.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("intendedWork"u8).GetRawText());

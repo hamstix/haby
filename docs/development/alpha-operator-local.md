@@ -358,7 +358,9 @@ rewrites the old Plan. A stale ChangeSet instead requires new intent.
 Plan identity, fingerprint, current status, Environment and exact pinned Provider
 instance/configuration revision/implementation. The current pilot describes only
 Create of one local `postgresql.database/v1alpha1` Resource, with an explicitly
-typed PostgreSQL database name. It derives these fields from the Plan's exact
+typed, Provider-neutral target name. The server maps the validated PostgreSQL
+database detail to this review target; the wire contract and CLI do not interpret
+Provider-specific payloads. It derives these fields from the Plan's exact
 immutable ManifestRevision, using the same supported-shape/name rules as planning.
 It never follows a changed alias to describe an old Plan. Restart preserves the
 same intended work. No new persisted snapshot or migration is involved.
@@ -373,13 +375,13 @@ Environment: pilot; record: <environment-record-id>
 Revision: <application-record-id> 1
 Provider: postgresql.primary -> <provider-instance-id> revision 1; implementation: haby.postgresql.database/v1alpha1
 Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.
-Intended action: Create; Resource: database; type: postgresql.database/v1alpha1; database: postgres_demo_db
+Intended action: Create; Resource: database; type: postgresql.database/v1alpha1; target: postgres_demo_db
 ```
 
 The corresponding JSON fragment under `data.plan` is:
 
 ```json
-{"intendedWork":{"status":"available","action":{"kind":"create","resourceId":"database","resourceType":"postgresql.database/v1alpha1","postgreSqlDatabase":{"databaseName":"postgres_demo_db"}}}}
+{"intendedWork":{"status":"available","action":{"kind":"create","resourceId":"database","resourceType":"postgresql.database/v1alpha1","target":{"name":"postgres_demo_db"}}}}
 ```
 
 A description read contacts no Provider, resolves no secrets and changes no catalog

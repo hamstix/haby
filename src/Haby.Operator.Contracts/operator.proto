@@ -194,12 +194,14 @@ enum IntendedActionKind {
   INTENDED_ACTION_KIND_UNSPECIFIED = 0;
   INTENDED_ACTION_KIND_CREATE = 1;
 }
-message PostgreSqlDatabaseActionDetail { string database_name = 1; }
+// A bounded, server-validated external object name for operator review.
+// Its Resource contract defines its meaning; it is never a Provider address or payload.
+message IntendedActionTarget { string name = 1; }
 message IntendedPlanAction {
   IntendedActionKind kind = 1;
   string resource_id = 2;
   string resource_type = 3;
-  oneof detail { PostgreSqlDatabaseActionDetail postgresql_database = 4; }
+  IntendedActionTarget target = 4;
 }
 message PlanDescription {
   PlanDescriptionStatus status = 1;

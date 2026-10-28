@@ -153,10 +153,10 @@ public sealed partial class ManifestOperatorService
                     : throw new InvalidOperationException("Unknown intended action."),
                 ResourceId = action.ResourceId.Value,
                 ResourceType = action.ResourceType.Value,
-                PostgresqlDatabase = action.Detail switch
+                Target = action.Detail switch
                 {
                     IntendedActionDetail.PostgreSqlDatabase database =>
-                        new Contracts.PostgreSqlDatabaseActionDetail { DatabaseName = database.DatabaseName },
+                        new IntendedActionTarget { Name = database.DatabaseName },
                     _ => throw new InvalidOperationException("Unknown intended action detail.")
                 }
             };

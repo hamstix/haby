@@ -10,8 +10,8 @@ internal sealed record CliPlan(string PlanId, string ChangeSetId, string Environ
     string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork);
 internal sealed record CliPlanDescription(string Status, CliIntendedAction? Action);
 internal sealed record CliIntendedAction(string Kind, string ResourceId, string ResourceType,
-    CliPostgreSqlDatabaseAction PostgreSqlDatabase);
-internal sealed record CliPostgreSqlDatabaseAction(string DatabaseName);
+    CliIntendedActionTarget Target);
+internal sealed record CliIntendedActionTarget(string Name);
 internal sealed record CliPlanningData(CliChangeSet? ChangeSet, CliPlan? Plan);
 
 internal static class PlanningPresentation
@@ -66,7 +66,7 @@ internal static class PlanningPresentation
 
     private static CliPlanDescription Description(PlanDescription? description)
     {
-        // An older server has no description. Unknown enum/oneof values must fail closed.
+        // An older server has no description. Unknown enum values must fail closed.
         if (description is null) return new("unavailable", null);
         var status = description.Status switch
         {
@@ -84,12 +84,12 @@ internal static class PlanningPresentation
         }
         var action = description.Action;
         if (action is null || action.Kind != IntendedActionKind.Create ||
-            action.DetailCase != IntendedPlanAction.DetailOneofCase.PostgresqlDatabase ||
-            string.IsNullOrEmpty(action.ResourceId) || action.ResourceType != "postgresql.database/v1alpha1" ||
-            string.IsNullOrEmpty(action.PostgresqlDatabase.DatabaseName))
+            action.Target is null ||
+            string.IsNullOrEmpty(action.ResourceId) || string.IsNullOrEmpty(action.ResourceType) ||
+            string.IsNullOrEmpty(action.Target.Name))
             throw new InvalidDataException("Unsupported server intended action.");
         return new(status, new("create", action.ResourceId, action.ResourceType,
-            new CliPostgreSqlDatabaseAction(action.PostgresqlDatabase.DatabaseName)));
+            new CliIntendedActionTarget(action.Target.Name)));
     }
 }
 
@@ -125,7 +125,7 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"Provider: {plan.ProviderAlias} -> {plan.ProviderInstanceId} revision {plan.ConfigurationRevision}; implementation: {plan.ImplementationId}");
             _output.WriteLine("Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.");
             if (plan.IntendedWork.Action is { } action)
-                _output.WriteLine($"Intended action: Create; Resource: {action.ResourceId}; type: {action.ResourceType}; database: {action.PostgreSqlDatabase.DatabaseName}");
+                _output.WriteLine($"Intended action: Create; Resource: {action.ResourceId}; type: {action.ResourceType}; target: {action.Target.Name}");
             else
                 _output.WriteLine($"Intended action unavailable: {plan.IntendedWork.Status}");
             _output.WriteLine($"Fingerprint: {plan.Fingerprint}");
