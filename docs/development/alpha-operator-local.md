@@ -122,11 +122,46 @@ tags, malformed encoding and invalid references. This slice has no config
 write commands. YamlDotNet 18.1.0 (MIT) provides the low-level YAML
 representation model; Haby maps it explicitly into typed records, without
 reflection-based object activation. The parser path was published and executed
-as a Windows Native AOT spike before it was selected. With
-`HABY_AOT_CLI_PATH` set to a published executable, the loopback tests also
-exercise that binary against two disposable hosts. The current CI runs those
-tests without the executable; an automated AOT gate is deferred to ADR-027's
-later delivery slice.
+as a Windows Native AOT spike before it was selected.
+
+## Native AOT publish and loopback smoke gate
+
+The CI gate publishes `src/habyctl` for `win-x64` on `windows-latest` and
+`linux-x64` on `ubuntu-latest` with the SDK selected by `global.json`.
+It treats publish warnings as errors, executes the resulting `habyctl` binary
+with `--help` and `--version`, then runs only `CliLoopbackTests` with
+`HABY_AOT_CLI_REQUIRED=1` and `HABY_AOT_CLI_PATH` pointing to that binary.
+Those tests launch the executable as a subprocess for context selection,
+text and JSON output, redaction, and gRPC calls to disposable loopback hosts.
+The test fails if the required path is missing or does not name a file.
+Neither the smoke gate nor these hosts need Docker, a persistent database,
+credentials, or a non-loopback API.
+
+Run the Windows gate from the repository root in PowerShell. Install the
+.NET SDK selected by `global.json` and the Visual Studio C++ build tools
+required by Native AOT first:
+
+```powershell
+dotnet publish .\src\habyctl\habyctl.csproj -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true -o .\.artifacts\aot\win-x64
+$env:HABY_AOT_CLI_PATH = (Resolve-Path .\.artifacts\aot\win-x64\habyctl.exe).Path
+$env:HABY_AOT_CLI_REQUIRED = '1'
+& $env:HABY_AOT_CLI_PATH --help
+& $env:HABY_AOT_CLI_PATH --version
+dotnet test .\tests\Haby.Cli.Tests\Haby.Cli.Tests.csproj -c Release --filter FullyQualifiedName~CliLoopbackTests -p:TreatWarningsAsErrors=true
+```
+
+Run the Linux gate from the repository root with the SDK selected by
+`global.json`, `clang`, and the zlib development package installed (on Ubuntu,
+`sudo apt-get install clang zlib1g-dev`):
+
+```bash
+dotnet publish ./src/habyctl/habyctl.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true -o ./.artifacts/aot/linux-x64
+export HABY_AOT_CLI_PATH="$(realpath ./.artifacts/aot/linux-x64/habyctl)"
+export HABY_AOT_CLI_REQUIRED=1
+"$HABY_AOT_CLI_PATH" --help
+"$HABY_AOT_CLI_PATH" --version
+dotnet test ./tests/Haby.Cli.Tests/Haby.Cli.Tests.csproj -c Release --filter FullyQualifiedName~CliLoopbackTests -p:TreatWarningsAsErrors=true
+```
 
 Use an isolated local PostgreSQL catalog database and a principal with the
 migration rights described in the [catalog guide](../../src/Haby.Persistence.PostgreSql/README.md).
