@@ -196,3 +196,12 @@ same immutable revision, warnings and hypothetical preview through a fresh
 host. The archive exists only inside the disposable container and is removed
 after the test. The operator procedure is in
 [the shadow-pilot rehearsal](shadow-pilot-rehearsal.md).
+
+The [active-pilot restore rehearsal](active-pilot-restore-rehearsal.md) extends
+this real dump/restore proof to Pending, Dispatching, NeedsAttention, confirmed
+success and manually assigned success. It compares complete read responses and
+private content digests through independent contexts, resolves pinned secrets
+internally, and verifies protected audit preservation. The fresh restored Host
+must perform zero Provider reads/dispatches, including on assignment retry.
+Its private container-only archive and utility-error redaction prevent protected
+data from reaching artifacts; cleanup preserves an original test failure.

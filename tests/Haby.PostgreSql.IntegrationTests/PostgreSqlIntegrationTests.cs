@@ -69,7 +69,7 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
         {
             var result = await _container.ExecAsync(command);
             if (result.ExitCode != 0)
-                throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed: {result.Stderr}");
+                throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed (exit {result.ExitCode}). Output withheld because catalog utilities may expose protected data.");
             return;
         }
 
@@ -82,8 +82,9 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
         var output = process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
         await output;
+        await error;
         if (process.ExitCode != 0)
-            throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed: {await error}");
+            throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed (exit {process.ExitCode}). Output withheld because catalog utilities may expose protected data.");
     }
 }
 
