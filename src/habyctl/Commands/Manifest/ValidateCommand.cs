@@ -15,7 +15,7 @@ internal static class ValidateCommand
             var bytes = await CliApplication.ReadEnvelopeAsync(parse.GetRequiredValue(file), token);
             var reply = await client.ValidateAsync(
                 new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(bytes) }, token);
-            return context.Presenter.Print(reply);
+            return context.Print(reply);
         }, cancellationToken));
         return command;
     }

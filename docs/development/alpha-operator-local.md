@@ -18,7 +18,55 @@ syntax, local input or endpoint configuration, and `3` for transport failure
 or cancellation. The current gRPC contract cannot classify an unset or
 unknown outcome as a typed registry rejection; the CLI reports it as a safe
 local error. The CLI can select a local registry through a named context.
-JSON output remains a later slice.
+The recursive `--output` / `-o` option accepts exactly `text` (the unchanged
+default) or `json`, before or after nested command tokens. An unsupported value
+is a usage error before configuration loading or RPC. Help and version remain
+human-readable and do not load configuration or connect, even when JSON output
+is requested.
+
+### Alpha JSON result envelope
+
+Every result from `manifest validate`, `manifest import`, `manifest revision get`,
+`manifest revision preview`, `config view` and `config current-context` emits one
+complete JSON object and one newline to stdout with these ordered fields:
+
+```json
+{"formatVersion":1,"command":"manifest validate","outcome":"valid","data":{"applicationId":"example.service","applicationVersion":"v1","diagnosticsTruncated":false},"diagnostics":[]}
+```
+
+`formatVersion` is `1`; `command` is the canonical space-separated command;
+`outcome` is its lower-camel-case typed result; `data` is the command-specific
+object or `null`; and `diagnostics` is always an array. Optional data fields are
+omitted when absent, except `currentContext`, which is `null` when unset.
+Diagnostic objects contain only `code`, `path`, `message`,
+`severity`, `relatedPaths` and optional `location` (`line`, `column`). Diagnostic
+parameters are never emitted. Truncation is reported through
+`data.diagnosticsTruncated` or, for a stored revision,
+`data.revision.historicalWarningsTruncated`. A revision has a typed `reference`
+with `applicationRecordId` and `revisionNumber`, plus revision metadata and
+`historicalWarnings`. Conflict data includes `applicationId`,
+`applicationVersion`, `existingRevision`, `changedPaths` and
+`changedPathsTruncated`. The `wouldCreate` preview data sets `hypothetical: true`
+and `canApply: false`; it is never a provisioning result. Every preview rejection
+also carries those markers.
+
+An expected rejection still emits the envelope to stdout and exits `1`:
+
+```json
+{"formatVersion":1,"command":"manifest revision get","outcome":"notFound","data":{"requestedReference":{"applicationRecordId":"missing","revisionNumber":1}},"diagnostics":[]}
+```
+
+The offline `config view -o json` result maps the validated configuration into
+sorted arrays of named instances and contexts, without source YAML or comments:
+
+```json
+{"formatVersion":1,"command":"config view","outcome":"ok","data":{"formatVersion":1,"currentContext":"local-a","instances":[{"name":"local-a","endpoint":"https://localhost:7443"}],"contexts":[{"name":"local-a","instance":"local-a","environmentId":"development-a"}]},"diagnostics":[]}
+```
+
+Syntax, local configuration, transport, cancellation and unknown-server-outcome
+failures keep stdout empty and use stderr with the existing exit codes `2` or
+`3`. Text output and exit codes are unchanged. The JSON envelope is an alpha
+operator format; it is not a stable M4 public API.
 
 ## Read-only local contexts
 

@@ -1,4 +1,5 @@
 using Grpc.Core;
+using Haby.Operator.Contracts;
 
 namespace Haby.Cli;
 
@@ -6,12 +7,17 @@ internal sealed class CliCommandContext(
     IEndpointSource endpointSource,
     IRegistryClientFactory clientFactory,
     CliTextPresenter presenter,
+    CliJsonPresenter jsonPresenter,
     TextWriter output,
     TextWriter error,
     CliConfigurationService configuration,
-    Func<(string? File, string? Context)> options)
+    Func<(string? File, string? Context)> options,
+    Func<bool> jsonOutput)
 {
-    internal CliTextPresenter Presenter => presenter;
+    internal int Print(ValidateReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
+    internal int Print(ImportReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
+    internal int Print(GetRevisionReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
+    internal int Print(PreviewDatabaseReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
 
     internal int MissingSubcommand()
     {
@@ -95,7 +101,13 @@ internal sealed class CliCommandContext(
                 throw new InvalidDataException("Invalid CLI configuration.");
             if (currentOnly)
             {
-                output.WriteLine(current ?? "(none)");
+                if (jsonOutput()) jsonPresenter.PrintCurrentContext(current);
+                else output.WriteLine(current ?? "(none)");
+                return CliApplication.Success;
+            }
+            if (jsonOutput())
+            {
+                jsonPresenter.PrintConfiguration(config, current);
                 return CliApplication.Success;
             }
             output.WriteLine("formatVersion: 1");

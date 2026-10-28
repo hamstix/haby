@@ -23,7 +23,7 @@ internal static class PreviewRevisionCommand
                 var request = await CliApplication.ReadPreviewContextAsync(
                     parse.GetRequiredValue(file), reference, token);
                 var reply = await client.PreviewDatabaseAsync(request, token);
-                return context.Presenter.Print(reply);
+                return context.Print(reply);
             }, cancellationToken));
         return command;
     }

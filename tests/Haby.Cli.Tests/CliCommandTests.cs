@@ -1,6 +1,7 @@
 using Grpc.Core;
 using Haby.Operator.Contracts;
 using System.CommandLine;
+using System.Text.Json;
 using Xunit;
 
 namespace Haby.Cli.Tests;
@@ -271,5 +272,66 @@ public sealed class CliCommandTests
             await Create(factory, output, error, "https://remote.example").RunAsync(["manifest", "revision", "get", "id", "1"]));
         Assert.Equal(0, factory.Created);
         Assert.Contains("loopback", error.ToString());
+    }
+
+    [Theory]
+    [InlineData("-o nope manifest revision get id 1")]
+    [InlineData("manifest -o nope revision get id 1")]
+    [InlineData("manifest revision get id 1 --output nope")]
+    public async Task Unsupported_output_fails_before_config_or_client(string command)
+    {
+        var factory = new FakeFactory();
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var cli = Create(factory, output, error, null);
+        Assert.Equal(2, await cli.RunAsync(command.Split(' ')));
+        Assert.Equal("", output.ToString());
+        Assert.NotEqual("", error.ToString());
+        Assert.Equal(0, factory.Created);
+    }
+
+    [Theory]
+    [InlineData("-o json manifest revision get record 1")]
+    [InlineData("manifest -o json revision get record 1")]
+    [InlineData("manifest revision get record 1 --output json")]
+    public async Task Json_option_is_recursive_and_emits_one_envelope(string command)
+    {
+        var factory = new FakeFactory();
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        Assert.Equal(1, await Create(factory, output, error).RunAsync(command.Split(' ')));
+        using var document = JsonDocument.Parse(output.ToString());
+        Assert.Equal("manifest revision get", document.RootElement.GetProperty("command").GetString());
+        Assert.Equal("notFound", document.RootElement.GetProperty("outcome").GetString());
+        Assert.Equal("", error.ToString());
+        Assert.Equal(1, factory.Created);
+    }
+
+    [Fact]
+    public async Task Json_transport_and_local_failures_keep_stdout_empty_and_redact_details()
+    {
+        var factory = new FakeFactory();
+        factory.Client.ThrowRpc = true;
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var cli = Create(factory, output, error);
+        Assert.Equal(3, await cli.RunAsync(["manifest", "revision", "get", "record", "1", "-o", "json"]));
+        Assert.Equal("", output.ToString());
+        Assert.DoesNotContain("secret-server-detail", error.ToString());
+        Assert.Equal(2, await cli.RunAsync(["manifest", "revision", "get", "record", "0", "-o", "json"]));
+        Assert.Equal("", output.ToString());
+    }
+
+    [Fact]
+    public async Task Version_stays_human_readable_with_json_option_and_missing_config()
+    {
+        var factory = new FakeFactory();
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        Assert.Equal(0, await Create(factory, output, error, null).RunAsync(
+            ["--version", "--config", "missing.yaml", "-o", "json"]));
+        Assert.Equal(0, factory.Created);
+        Assert.False(output.ToString().TrimStart().StartsWith('{'));
+        Assert.Equal("", error.ToString());
     }
 }
