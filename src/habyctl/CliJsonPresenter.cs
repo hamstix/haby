@@ -6,7 +6,8 @@ using Haby.Operator.Contracts;
 namespace Haby.Cli;
 
 // This is an alpha presentation contract. Only fields explicitly mapped here can reach stdout.
-internal sealed record CliEnvelope<T>(int FormatVersion, string Command, string Outcome, T? Data,
+internal sealed record CliEnvelope<T>(int FormatVersion, string Command, string Outcome,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] T? Data,
     CliDiagnostic[] Diagnostics) where T : class;
 internal sealed record CliDiagnostic(string Code, string Path, string Message, string Severity,
     string[] RelatedPaths, CliLocation? Location);

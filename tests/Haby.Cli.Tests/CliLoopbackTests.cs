@@ -22,7 +22,20 @@ public sealed class CliLoopbackTests
             Assert.Equal("{}", request.OriginalEnvelope.ToStringUtf8());
             return Task.FromResult(new ValidateReply
             {
-                InvalidManifest = new InvalidManifest { Report = new DiagnosticReport() }
+                InvalidManifest = new InvalidManifest
+                {
+                    Report = new DiagnosticReport
+                    {
+                        Diagnostics =
+                        {
+                            new Diagnostic
+                            {
+                                Code = "invalid", Path = "/spec", Message = "Invalid declaration",
+                                Severity = "Error", Parameters = { ["secretValue"] = "sensitive-sentinel" }
+                            }
+                        }
+                    }
+                }
             });
         }
     }
@@ -89,6 +102,7 @@ public sealed class CliLoopbackTests
                 new GrpcRegistryClientFactory(), output, error);
             Assert.Equal(CliApplication.Rejected, await cli.RunAsync(["manifest", "validate", envelope, "--config", config]));
             Assert.Contains("InvalidManifest", output.ToString());
+            Assert.DoesNotContain("sensitive-sentinel", output.ToString());
             output.GetStringBuilder().Clear();
             Assert.Equal(CliApplication.Success, await cli.RunAsync(["manifest", "validate", envelope,
                 "--config", config, "--context", "second"]));
@@ -193,6 +207,7 @@ public sealed class CliLoopbackTests
                 Assert.Equal(CliApplication.Rejected, process.ExitCode);
                 using var result = JsonDocument.Parse(await process.StandardOutput.ReadToEndAsync(timeout.Token));
                 Assert.Equal("invalidManifest", result.RootElement.GetProperty("outcome").GetString());
+                Assert.DoesNotContain("sensitive-sentinel", result.RootElement.GetRawText());
                 Assert.Equal("", await process.StandardError.ReadToEndAsync(timeout.Token));
             }
         }

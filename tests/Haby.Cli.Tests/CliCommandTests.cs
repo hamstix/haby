@@ -46,12 +46,17 @@ public sealed class CliCommandTests
         public bool WaitForCancellation { get; set; }
         public bool ReturnSuccess { get; set; }
         public bool ReturnUnsetOutcome { get; set; }
+        public ValidateReply? ValidateResult { get; set; }
+        public ImportReply? ImportResult { get; set; }
+        public GetRevisionReply? GetResult { get; set; }
+        public PreviewDatabaseReply? PreviewResult { get; set; }
         public void Dispose() { }
 
         public Task<ValidateReply> ValidateAsync(EnvelopeRequest request, CancellationToken cancellationToken)
         {
             Record("validate", cancellationToken);
             Assert.Equal("{}", request.OriginalEnvelope.ToStringUtf8());
+            if (ValidateResult is not null) return Task.FromResult(ValidateResult);
             if (ReturnUnsetOutcome) return Task.FromResult(new ValidateReply());
             return Task.FromResult(ReturnSuccess
                 ? new ValidateReply
@@ -66,6 +71,7 @@ public sealed class CliCommandTests
         {
             Record("import", cancellationToken);
             Assert.Equal("{}", request.OriginalEnvelope.ToStringUtf8());
+            if (ImportResult is not null) return Task.FromResult(ImportResult);
             return Task.FromResult(new ImportReply { InvalidRequest = new InvalidRequest { Report = new DiagnosticReport() } });
         }
 
@@ -75,6 +81,7 @@ public sealed class CliCommandTests
             GetRequest = request;
             if (WaitForCancellation) await Task.Delay(Timeout.Infinite, cancellationToken);
             if (ThrowRpc) throw new RpcException(new Status(StatusCode.Unavailable, "secret-server-detail"));
+            if (GetResult is not null) return GetResult;
             return new GetRevisionReply { NotFound = request.Reference.Clone() };
         }
 
@@ -82,6 +89,7 @@ public sealed class CliCommandTests
         {
             Record("preview", cancellationToken);
             PreviewRequest = request;
+            if (PreviewResult is not null) return Task.FromResult(PreviewResult);
             return Task.FromResult(new PreviewDatabaseReply { RevisionNotFound = true });
         }
 
@@ -241,6 +249,11 @@ public sealed class CliCommandTests
             Assert.Equal("", output.ToString());
             Assert.Contains("Operation failed", error.ToString());
             Assert.DoesNotContain(path, error.ToString());
+            error.GetStringBuilder().Clear();
+            Assert.Equal(CliApplication.UsageError,
+                await Create(factory, output, error).RunAsync(["manifest", "validate", path, "-o", "json"]));
+            Assert.Equal("", output.ToString());
+            Assert.Contains("Operation failed", error.ToString());
         }
         finally { File.Delete(path); }
     }
@@ -333,5 +346,90 @@ public sealed class CliCommandTests
         Assert.Equal(0, factory.Created);
         Assert.False(output.ToString().TrimStart().StartsWith('{'));
         Assert.Equal("", error.ToString());
+    }
+
+    [Fact]
+    public async Task Every_result_command_routes_success_and_rejection_through_json_mode()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "haby-json-routing-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await File.WriteAllTextAsync(path, "{}");
+            var factory = new FakeFactory();
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var cli = Create(factory, output, error);
+
+            async Task Verify(string[] args, int exit, string command, string outcome)
+            {
+                output.GetStringBuilder().Clear();
+                Assert.Equal(exit, await cli.RunAsync(args));
+                var json = output.ToString();
+                Assert.Equal(1, json.Count(character => character == '\n'));
+                using var document = JsonDocument.Parse(json);
+                Assert.Equal(command, document.RootElement.GetProperty("command").GetString());
+                Assert.Equal(outcome, document.RootElement.GetProperty("outcome").GetString());
+                Assert.Equal(5, document.RootElement.EnumerateObject().Count());
+                Assert.Equal("", error.ToString());
+            }
+
+            factory.Client.ValidateResult = new ValidateReply
+            {
+                Valid = new ValidManifest
+                { ApplicationId = "app", ApplicationVersion = "v1", Warnings = new DiagnosticReport() }
+            };
+            await Verify(["manifest", "validate", path, "-o", "json"], 0, "manifest validate", "valid");
+            factory.Client.ValidateResult = new ValidateReply
+            {
+                InvalidManifest = new InvalidManifest
+                { Report = new DiagnosticReport() }
+            };
+            await Verify(["manifest", "validate", path, "-o", "json"], 1, "manifest validate", "invalidManifest");
+
+            factory.Client.ImportResult = new ImportReply
+            {
+                Created = new ImportAccepted
+                { Revision = new RevisionSummary { Reference = new RevisionReference(), HistoricalWarnings = new DiagnosticReport() } }
+            };
+            await Verify(["manifest", "import", path, "-o", "json"], 0, "manifest import", "created");
+            factory.Client.ImportResult = new ImportReply
+            {
+                InvalidRequest = new InvalidRequest
+                { Report = new DiagnosticReport() }
+            };
+            await Verify(["manifest", "import", path, "-o", "json"], 1, "manifest import", "invalidRequest");
+
+            factory.Client.GetResult = new GetRevisionReply
+            {
+                Found = new RevisionSummary
+                { Reference = new RevisionReference(), HistoricalWarnings = new DiagnosticReport() }
+            };
+            await Verify(["manifest", "revision", "get", "record", "1", "-o", "json"],
+                0, "manifest revision get", "found");
+            factory.Client.GetResult = new GetRevisionReply
+            {
+                NotFound = new RevisionReference
+                { ApplicationRecordId = "record", RevisionNumber = 1 }
+            };
+            await Verify(["manifest", "revision", "get", "record", "1", "-o", "json"],
+                1, "manifest revision get", "notFound");
+
+            await File.WriteAllTextAsync(path,
+                """{"preview":true,"environmentId":"test","providers":[{"alias":"main","instanceId":"local","configurationRevision":1,"implementationId":"database"}]}""");
+            factory.Client.PreviewResult = new PreviewDatabaseReply
+            {
+                WouldCreate = new PreviewWouldCreate
+                { EnvironmentId = "test", ResourceId = "db", DatabaseName = "example" }
+            };
+            await Verify(["manifest", "revision", "preview", "record", "1", path, "-o", "json"],
+                0, "manifest revision preview", "wouldCreate");
+            factory.Client.PreviewResult = new PreviewDatabaseReply { RevisionNotFound = true };
+            await Verify(["manifest", "revision", "preview", "record", "1", path, "-o", "json"],
+                1, "manifest revision preview", "revisionNotFound");
+
+            await Verify(["config", "view", "-o", "json"], 0, "config view", "ok");
+            await Verify(["config", "current-context", "-o", "json"], 0, "config current-context", "ok");
+        }
+        finally { File.Delete(path); }
     }
 }

@@ -180,4 +180,15 @@ public sealed class CliJsonTests
         Assert.Equal(JsonValueKind.Object, current.GetProperty("data").ValueKind);
         Assert.Equal(JsonValueKind.Null, current.GetProperty("data").GetProperty("currentContext").ValueKind);
     }
+
+    [Fact]
+    public void Envelope_keeps_data_property_when_payload_is_null()
+    {
+        var json = JsonSerializer.Serialize(
+            new CliEnvelope<CliCurrentContextData>(1, "config current-context", "ok", null, []),
+            CliOutputJsonContext.Default.CliEnvelopeCliCurrentContextData);
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("data").ValueKind);
+        Assert.Equal(5, document.RootElement.EnumerateObject().Count());
+    }
 }
