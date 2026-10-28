@@ -11,8 +11,8 @@ namespace Haby.PostgreSql;
 /// The internal single-instance execution boundary for one exact durable Create. The unique-attempt
 /// <c>Dispatching</c> marker is committed durably before any SQL is sent; after the marker is
 /// committed nothing is retried automatically and no success is recorded that is not confirmed by
-/// both the Create response and an independent existence read. It is not exposed through the
-/// operator host and performs no manual assignment from <c>NeedsAttention</c>.
+/// both the Create response and an independent existence read. The operator host delegates here;
+/// this executor performs no manual assignment from <c>NeedsAttention</c>.
 /// </summary>
 public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOperationJournal journal,
     IManifestRevisionQuery manifests, IDurableCreateTarget target, IDurableCreateDispatchFaultHooks hooks,

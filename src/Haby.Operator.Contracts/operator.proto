@@ -18,6 +18,9 @@ service ManifestOperator {
   rpc CommitDesiredState(CommitDesiredStateRequest) returns (CommitReply);
   rpc GetCommit(ChangeSetRequest) returns (CommitReply);
   rpc GetGeneration(GenerationRequest) returns (CommitReply);
+  // Explicit execution only; GetOperation never dispatches or recovers.
+  rpc ExecuteOperation(OperationRequest) returns (OperationReply);
+  rpc GetOperation(OperationRequest) returns (OperationReply);
 }
 
 message EnvelopeRequest { bytes original_envelope = 1; }
@@ -232,4 +235,90 @@ message CommitReply {
   DurableCommitSummary commit = 2;
   DesiredGenerationSummary desired_generation = 3;
   optional int64 actual_generation = 4;
+}
+
+// Exact provider-neutral identity. No credentials, overrides, actor, or implicit latest generation.
+message OperationRequest {
+  string deployment_id = 1;
+  int64 generation = 2;
+  string resource_id = 3;
+  OperationAction action = 4;
+}
+enum OperationAction {
+  OPERATION_ACTION_UNSPECIFIED = 0;
+  OPERATION_ACTION_CREATE = 1;
+}
+enum OperationStatus {
+  OPERATION_STATUS_UNSPECIFIED = 0;
+  OPERATION_STATUS_FOUND = 1;
+  OPERATION_STATUS_SUCCEEDED = 2;
+  OPERATION_STATUS_FAILED = 3;
+  OPERATION_STATUS_RETRYABLE_FAILURE = 4;
+  OPERATION_STATUS_NEEDS_ATTENTION = 5;
+  OPERATION_STATUS_OPERATION_NOT_FOUND = 6;
+  OPERATION_STATUS_DISPATCH_UNCERTAIN = 7;
+  OPERATION_STATUS_INVALID_REQUEST = 8;
+  OPERATION_STATUS_UNSUPPORTED_ACTION = 9;
+  OPERATION_STATUS_UNSUPPORTED_SHAPE = 10;
+}
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_PENDING = 1;
+  OPERATION_STATE_PREPARING = 2;
+  OPERATION_STATE_DISPATCHING = 3;
+  OPERATION_STATE_SUCCEEDED = 4;
+  OPERATION_STATE_FAILED = 5;
+  OPERATION_STATE_NEEDS_ATTENTION = 6;
+}
+enum OperationReason {
+  OPERATION_REASON_UNSPECIFIED = 0;
+  OPERATION_REASON_PROVIDER_INPUT_UNAVAILABLE = 1;
+  OPERATION_REASON_SECRET_UNAVAILABLE = 2;
+  OPERATION_REASON_UNSUPPORTED_SHAPE = 3;
+  OPERATION_REASON_DATABASE_NAME_INVALID = 4;
+  OPERATION_REASON_CONNECTIVITY = 5;
+  OPERATION_REASON_CONFLICT = 6;
+  OPERATION_REASON_SERVER_REJECTED = 7;
+  OPERATION_REASON_UNCERTAIN_AFTER_DISPATCH = 8;
+}
+enum OperationAttemptOutcome {
+  OPERATION_ATTEMPT_OUTCOME_UNSPECIFIED = 0;
+  OPERATION_ATTEMPT_OUTCOME_SUCCEEDED = 1;
+  OPERATION_ATTEMPT_OUTCOME_CONFLICT = 2;
+  OPERATION_ATTEMPT_OUTCOME_SERVER_REJECTED = 3;
+  OPERATION_ATTEMPT_OUTCOME_UNCERTAIN = 4;
+  OPERATION_ATTEMPT_OUTCOME_CANCELED_BEFORE_DISPATCH = 5;
+  OPERATION_ATTEMPT_OUTCOME_ABANDONED_BEFORE_DISPATCH = 6;
+  OPERATION_ATTEMPT_OUTCOME_FAILED_BEFORE_DISPATCH = 7;
+}
+message DurableOperationSummary {
+  OperationRequest key = 1;
+  OperationState state = 2;
+  OperationReason reason = 3;
+  string environment_record_id = 4;
+  string application_record_id = 5;
+  RevisionReference reference = 6;
+  string provider_instance_id = 7;
+  int64 configuration_revision = 8;
+  string implementation_id = 9;
+  string created_at_utc = 10;
+  optional string updated_at_utc = 11;
+  optional string attempt_id = 12;
+  int64 attempt_number = 13;
+  optional string dispatched_at_utc = 14;
+  optional string finalized_at_utc = 15;
+}
+message OperationAttempt {
+  string attempt_id = 1;
+  int64 attempt_number = 2;
+  string started_at_utc = 3;
+  optional string dispatched_at_utc = 4;
+  optional string finished_at_utc = 5;
+  OperationAttemptOutcome outcome = 6;
+}
+message OperationReply {
+  OperationStatus status = 1;
+  DurableOperationSummary operation = 2;
+  // Read-only history populated by GetOperation; ExecuteOperation returns its execution snapshot.
+  repeated OperationAttempt attempts = 3;
 }

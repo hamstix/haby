@@ -42,6 +42,7 @@ internal sealed partial class CliApplication(
         root.Subcommands.Add(Commands.Planning.PlanningCommands.Plan(commands));
         root.Subcommands.Add(Commands.Planning.CommitCommands.Deployment(commands));
         root.Subcommands.Add(Commands.Config.ConfigCommands.Create(commands));
+        root.Subcommands.Add(Commands.Operations.OperationCommands.Create(commands));
         registerAdditionalCommands?.Invoke(root);
 
         parsed = root.Parse(args);

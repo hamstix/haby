@@ -39,6 +39,7 @@ internal sealed record CliCurrentContextData([property: JsonIgnore(Condition = J
 [JsonSerializable(typeof(CliEnvelope<CliPreviewData>))]
 [JsonSerializable(typeof(CliEnvelope<CliPlanningData>))]
 [JsonSerializable(typeof(CliEnvelope<CliCommitData>))]
+[JsonSerializable(typeof(CliEnvelope<CliOperationData>))]
 [JsonSerializable(typeof(CliEnvelope<CliConfigData>))]
 [JsonSerializable(typeof(CliEnvelope<CliCurrentContextData>))]
 internal partial class CliOutputJsonContext : JsonSerializerContext;

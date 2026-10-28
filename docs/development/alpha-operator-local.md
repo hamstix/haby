@@ -8,8 +8,9 @@ or remote exposure. Its protobuf contract may change before M4. It validates,
 imports, reads immutable manifest revisions and previews one supported database
 Resource against hypothetical request metadata. It also creates and reads durable
 ChangeSets and Plans, checks exact planning inputs, closes Plans and explicitly
-commits desired state with Pending work. Provider execution, database provisioning,
-secret generation and configuration delivery remain unavailable through this API.
+commits desired state with Pending work. Explicit operation execution can create that
+one database through the existing durable executor. Secret generation, recovery
+commands and configuration delivery remain unavailable through this API.
 
 The CLI accepts `--help` at the root and at every command level without an
 endpoint. Command results go to standard output; syntax, local-file and
@@ -30,7 +31,7 @@ is requested.
 Every result from `manifest validate`, `manifest import`, `manifest revision get`,
 `manifest revision preview`, `changeset create|get`, `plan create|get|check|close`,
 `changeset commit`, `changeset commit get`, `deployment generation get`,
-`config view` and `config current-context` emits one
+`operation execute|get`, `config view` and `config current-context` emits one
 complete JSON object and one newline to stdout with these ordered fields:
 
 ```json
@@ -311,8 +312,9 @@ above, plus an operator-prepared Environment and exact Provider configuration:
   credentials. These are internal composition APIs, not operator RPCs or CLI commands.
 - The imported Resource's alias must select a sealed, compatible exact revision through
   `IProviderAliasStore.ChangeAsync`. Normal alias switching performs mandatory read-only
-  Provider preflight. The planning Host registers only the alias reader and codec;
-  planning itself never performs that network preflight or resolves secret material.
+  Provider preflight. Planning uses only the alias reader and codec; it never
+  performs that network preflight or resolves secret material. Execution uses
+  separate registered dependencies only after an explicit operation request.
 - This slice adds no bootstrap API. A fresh empty catalog alone cannot produce a Plan.
   Have the maintainer prepare records through the existing trusted application/persistence
   APIs; do not insert catalog rows manually. The disposable rehearsal below provides
@@ -368,7 +370,8 @@ closure metadata. JSON uses the versioned envelope with `data.changeSet` or
 contains no Provider payload, SecretRef material, credential or driver error.
 Malformed canonical IDs return `invalidRequest`; missing Environment, revision,
 ChangeSet, Plan or alias and unsupported inputs remain typed results. An unknown
-server status is a safe local error. No execute/recovery command is exposed.
+server status is a safe local error. Execution is a separate explicit command below;
+no recovery command is exposed.
 
 ### Explicit desired-state acceptance
 
@@ -393,7 +396,7 @@ A successful commit atomically persists exactly one desired generation `1`, one
 immutable ChangeSetCommit and one Pending Create operation. It leaves
 AppliedGeneration absent and performs no Provider contact, secret-material read,
 execution attempt or dispatch. The target database has not been created.
-Execution remains unavailable through this API and CLI. Generation `2`, updates,
+Execution is a separate explicit step below. Generation `2`, updates,
 removal, bootstrap, recovery and background work remain outside this surface.
 No schema migration is needed for these adapters.
 
@@ -420,6 +423,81 @@ These are desired snapshots, not current operation or applied-state read models.
 Neither output format claims infrastructure is applied or reveals Provider payload,
 secret material or raw driver diagnostics. The actor is server-owned technical
 attribution, not authenticated human identity.
+
+### Explicit operation execution and read-only observation
+
+The Host explicitly composes the implemented PostgreSQL `Plaintext` SecretStore
+mode under [ADR-006](../adr/0006-secret-storage-and-encryption.md). Secret payloads
+are recoverable by readers of the corresponding database rows and backups.
+Restrict catalog access, protect backup copies and use this profile only when
+that exposure is accepted. `EnvelopeEncrypted` is not implemented by this Host.
+No secret creation/reveal, Provider bootstrap or alias-switch RPC is added here;
+trusted setup still uses the existing application APIs above. Execution resolves
+the accepted exact Provider revision and its exact SecretVersion, even after an
+alias switch. Unavailable pinned inputs cannot select a substitute.
+
+After successful desired-state commit, identify the exact local Resource from
+the accepted manifest (`db` in this example). Both commands require all four
+identity fields; neither guesses a Resource nor selects a latest generation:
+
+```powershell
+& $cli operation get $deploymentId 1 db --action create --config .\config.yaml -o json
+& $cli operation execute $deploymentId 1 db --action create --config .\config.yaml -o json
+& $cli operation get $deploymentId 1 db --action create --config .\config.yaml
+```
+
+A context selects the registry. Since these commands use a complete persisted
+identity, the transitional loopback `HABY_OPERATOR_URL` fallback also works when
+no context is selected. Context Environment metadata does not reassign the
+operation. Do not supply a password, connection string, Provider override or
+actor; there are no such command arguments or request fields.
+
+`ExecuteOperation` delegates to the singleton `IDurableCreateOperationExecutor`.
+Only a previously committed generation `1`, exact Resource and `Create` are
+supported. Malformed/missing identity returns `invalidRequest`, an unknown action
+returns `unsupportedAction`, a later generation returns `unsupportedShape`, and
+an absent operation returns `operationNotFound`. The adapter creates no journal
+rows or execution decisions. Import, planning, commit and Host startup never
+execute work. `GetOperation` calls the executor's existing read-only observation
+path; it never checks the Provider, dispatches, recovers or adopts. In particular,
+reading `Dispatching` leaves that marker untouched.
+
+Both formats expose safe identity, state, bounded reason, exact non-secret
+Provider references and timestamps. JSON uses source-generated DTOs under
+`data.operation` and `data.attempts`; protobuf unknown fields and raw Provider
+payloads are not serialized. The Host suppresses low-level EF Core/Npgsql diagnostics
+that could expose raw driver errors or credential-dependent payloads. Unexpected
+operation infrastructure failures return a value-free transport error, not a
+success or a rollback claim. Execute returns its execution snapshot; use get for
+the retained attempt history. Get succeeds (exit `0`) when a record exists even
+if its state requires attention. Execute succeeds only for `succeeded` (exit `0`);
+all typed execution rejections return exit `1`:
+
+| Execute outcome | Meaning and next step |
+| --- | --- |
+| `succeeded` | Confirmed CREATE and independent existence check were recorded with AppliedGeneration advancement. A repeated execute sends no second CREATE and preserves history. |
+| `failed` | Definitive failure, including `conflict` on an existing database. No adoption or AppliedGeneration advancement. |
+| `retryableFailure` | Exact dependency, secret or connectivity unavailable before dispatch. Inspect the bounded reason, restore the same pinned input and explicitly execute the same key again. |
+| `needsAttention` | Uncertain external effect; repeated execute cannot send CREATE or claim success. Separate manual recovery is required. |
+| `dispatchUncertain` | Dispatch-marker commit or terminal persistence could not be confirmed. Inspect the durable record; this response is no proof of non-execution. |
+
+Transport errors, deadlines and cancellation return exit `3`; they do not prove
+rollback and are never retried automatically by the CLI. Inspect with `operation
+get` after an interrupted request. A persisted `Dispatching` marker becomes
+`NeedsAttention` only on explicit execution, without sending SQL, even if a
+matching database exists. Neither its presence nor its absence authorizes a
+blind retry, adoption or success claim. Only confirmed success advances
+AppliedGeneration; desired-generation history is unchanged by execution.
+
+Manual assignment and audited retry remain internal recovery capabilities under
+[ADR-025](../adr/0025-pilot-durable-postgresql-create-recovery.md); this slice exposes
+no recovery RPC or CLI command. Leave uncertain operations in `NeedsAttention`
+until a separately reviewed, explicit recovery workflow is available. Do not edit
+journal rows or delete/recreate an operation to bypass the barrier. Full active-pilot
+operational readiness still requires that recovery surface and an operation/attempt/
+recovery-history backup/restore rehearsal. The shadow catalog restore rehearsal
+alone does not establish those guarantees. TLS/loopback isolation, one instance,
+no authentication and technical rather than human attribution remain unchanged.
 
 ### Disposable persistence and native executable rehearsal
 
@@ -453,3 +531,12 @@ TCP contact. The native sequence imports, creates intent and Plan, commits, then
 reads/retries through a fresh Host. Both Windows/Linux AOT loopback gates exercise
 all three commands in text and JSON; Linux PostgreSQL CI requires the full native
 persistence sequence. These tests use disposable catalogs, never personal databases.
+
+`OperatorHostIntegrationTests` also exercises real production Host composition with
+a disposable Provider: explicit generated-client and published native CLI execution,
+independent database absence/presence and AppliedGeneration checks, concurrent
+requests, restart and successful retry, conflict without adoption, unavailable
+pinned secret access, read-only Dispatching observation, and deterministic test-only
+crash/cancellation windows around the dispatch barrier. The native CLI smoke gates
+exercise operation outcomes and safe text/source-generated JSON on Windows and Linux.
+Fault hooks have no production configuration or RPC surface.

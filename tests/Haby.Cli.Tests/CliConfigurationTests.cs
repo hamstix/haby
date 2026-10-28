@@ -72,6 +72,10 @@ public sealed class CliConfigurationTests
             throw new NotImplementedException();
         public Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) =>
             throw new NotImplementedException();
+        public Task<OperationReply> ExecuteOperationAsync(OperationRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<OperationReply> GetOperationAsync(OperationRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
         public void Dispose() { }
     }
 
