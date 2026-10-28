@@ -332,8 +332,13 @@ public sealed partial class OperatorHostIntegrationTests
         var store = services.GetRequiredService<ISecretStore>();
         var environment = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
-        await store.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(target.Password!), default);
+        // Testcontainers may use a short default password also present in safe implementation IDs.
+        // Use a dedicated ephemeral Provider login and unique secret sentinel on every runtime.
+        var user = "exec_" + Guid.NewGuid().ToString("N");
+        var password = "haby-execution-secret-" + Guid.NewGuid().ToString("N");
+        await ExecutionSql(fixture.ConnectionString, $"CREATE ROLE \"{user}\" LOGIN CREATEDB PASSWORD '{password}'");
+        var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Username = user, Password = password };
+        await store.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(password), default);
         var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!,
             secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
