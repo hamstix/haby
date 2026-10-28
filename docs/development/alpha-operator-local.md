@@ -354,6 +354,64 @@ a stale Plan, call `plan create` again with the same ChangeSet ID. A changed ali
 makes the old Plan `planStale`; the new Plan pins the new exact revision. It never
 rewrites the old Plan. A stale ChangeSet instead requires new intent.
 
+`plan create` and `plan get` include server-owned `intendedWork` alongside the
+Plan identity, fingerprint, current status, Environment and exact pinned Provider
+instance/configuration revision/implementation. The current pilot describes only
+Create of one local `postgresql.database/v1alpha1` Resource, with an explicitly
+typed, Provider-neutral target name. The server maps the validated PostgreSQL
+database detail to this review target; the wire contract and CLI do not interpret
+Provider-specific payloads. Common description contracts and dispatch are also
+Provider-neutral: the composition root explicitly registers one pure action
+describer for the exact pinned implementation. PostgreSQL shape interpretation
+and its typed detail live in the PostgreSQL adapter. An absent or ambiguous exact
+describer returns `actionDescriberUnavailable`; no other implementation is
+substituted. It derives these fields from the Plan's exact
+immutable ManifestRevision, using the same supported-shape/name rules as planning.
+It never follows a changed alias to describe an old Plan. Restart over unchanged
+trusted revision content preserves the same intended work. No new persisted snapshot or migration is involved.
+
+Before committing, review the existing Plan (illustrative non-secret output for
+the `postgres_demo_db` example; actual IDs and timestamps are also printed):
+
+```text
+current
+Plan: <plan-id>; ChangeSet: <change-set-id>
+Environment: pilot; record: <environment-record-id>
+Revision: <application-record-id> 1
+Provider: postgresql.primary -> <provider-instance-id> revision 1; implementation: haby.postgresql.database/v1alpha1
+Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.
+Intended action: Create; Resource: database; type: postgresql.database/v1alpha1; target: postgres_demo_db
+```
+
+The corresponding JSON fragment under `data.plan` is:
+
+```json
+{"intendedWork":{"status":"available","action":{"kind":"create","resourceId":"database","resourceType":"postgresql.database/v1alpha1","target":{"name":"postgres_demo_db"}}}}
+```
+
+A description read contacts no Provider, resolves no secrets and changes no catalog
+state. Intended work is independent from the current-state check: stale, expired
+and closed Plans may still describe their original action without becoming
+committable. Missing revision input, decoding/identity/version failures,
+unsupported shapes and inconsistent pinned inputs return bounded description statuses `revisionNotFound`, `inputCorrupt`,
+`unsupportedShape` or `pinnedInputMismatch`, with no action, raw payload or exception.
+The available Plan identity and current status remain visible. A CLI talking to an
+older server reports `unavailable` when no description is supplied; unknown wire
+outcomes fail closed. Review the intended database and pinned Provider, then use
+the explicit commit command below. The server repeats atomic commit validation.
+
+The catalog's persisted immutable ManifestRevision is a **trusted input**. Neither
+the Plan fingerprint (which pins a revision reference) nor this read projection
+proves historical content authenticity. Structural checks detect decoding,
+identity, version and supported-shape failures; they do not detect every valid
+content mutation. For example, directly replacing `sample_db` with another valid
+name `other_db` in the trusted snapshot can produce an `available` description
+with `other_db` for the same Plan. This trust-boundary behavior is exercised in
+the real Host test, not claimed to be prevented. Protect catalog write access and
+restore trusted backups. A cross-cutting integrity policy for import, planning,
+commit and execution is a separate decision; this slice adds no checksum or
+migration and does not mark legacy revisions unavailable for lacking a checksum.
+
 A Plan expires 24 hours after creation, with its expiry persisted at creation.
 `plan get` returns its immutable snapshot plus its current evaluated status,
 including closed or expired records (exit 0 when the record exists).

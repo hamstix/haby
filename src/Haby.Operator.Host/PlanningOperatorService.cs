@@ -74,9 +74,9 @@ public sealed partial class ManifestOperatorService
                 DurablePlanStatus.UnsupportedShape => PlanningStatus.UnsupportedShape,
                 _ => throw new InvalidOperationException("Unknown Plan outcome.")
             },
-            Plan = result.Plan is null ? null : Summary(
+            Plan = result.Plan is null ? null : await PlanSummaryAsync(
                 await planner.FindPlanAsync(result.Plan.Id, context.CancellationToken)
-                    ?? throw new InvalidOperationException("Committed Plan was not found."))
+                    ?? throw new InvalidOperationException("Committed Plan was not found."), context.CancellationToken)
         };
     }
 
@@ -115,7 +115,7 @@ public sealed partial class ManifestOperatorService
                 _ => throw new InvalidOperationException("Unknown Plan status.")
             };
         var plan = await planner.FindPlanAsync(id, context.CancellationToken);
-        return new PlanningReply { Status = status, Plan = plan is null ? null : Summary(plan) };
+        return new PlanningReply { Status = status, Plan = plan is null ? null : await PlanSummaryAsync(plan, context.CancellationToken) };
     }
 
     private static PlanningReply Result(PlanningStatus status) => new() { Status = status };
@@ -129,6 +129,35 @@ public sealed partial class ManifestOperatorService
         CreatedAtUtc = Utc(value.CreatedAt),
         TechnicalActorId = value.ActorId
     };
+
+    private async Task<DurablePlanSummary> PlanSummaryAsync(DurablePlan plan, CancellationToken cancellationToken)
+    {
+        var summary = Summary(plan);
+        var description = await descriptions.ExecuteAsync(plan, cancellationToken);
+        summary.IntendedWork = new PlanDescription
+        {
+            Status = description.Status switch
+            {
+                Application.PlanDescriptionStatus.Available => Contracts.PlanDescriptionStatus.Available,
+                Application.PlanDescriptionStatus.RevisionNotFound => Contracts.PlanDescriptionStatus.RevisionNotFound,
+                Application.PlanDescriptionStatus.InputCorrupt => Contracts.PlanDescriptionStatus.InputCorrupt,
+                Application.PlanDescriptionStatus.UnsupportedShape => Contracts.PlanDescriptionStatus.UnsupportedShape,
+                Application.PlanDescriptionStatus.PinnedInputMismatch => Contracts.PlanDescriptionStatus.PinnedInputMismatch,
+                Application.PlanDescriptionStatus.ActionDescriberUnavailable => Contracts.PlanDescriptionStatus.ActionDescriberUnavailable,
+                _ => throw new InvalidOperationException("Unknown description outcome.")
+            }
+        };
+        if (description.Action is { } action)
+            summary.IntendedWork.Action = new Contracts.IntendedPlanAction
+            {
+                Kind = action.Kind == Application.IntendedActionKind.Create ? Contracts.IntendedActionKind.Create
+                    : throw new InvalidOperationException("Unknown intended action."),
+                ResourceId = action.ResourceId.Value,
+                ResourceType = action.ResourceType.Value,
+                Target = new IntendedActionTarget { Name = action.Target.Name }
+            };
+        return summary;
+    }
 
     private static DurablePlanSummary Summary(DurablePlan value)
     {

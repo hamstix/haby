@@ -133,6 +133,9 @@ public sealed partial class OperatorHostIntegrationTests
                     await new NpgsqlCommand("DELETE FROM provider_aliases", mutableSetup).ExecuteNonQueryAsync();
                 }
                 Assert.Equal(CommitStatus.PlanInputUnavailable, (await Commit(first, firstPlan)).Status);
+                var unavailableCheck = await client.GetPlanAsync(new PlanRequest { PlanId = firstPlan });
+                Assert.Equal(PlanningStatus.PlanInputUnavailable, unavailableCheck.Status);
+                AssertIntendedDatabase(unavailableCheck.Plan);
                 Assert.Equal(ProviderAliasChangeOutcome.Changed,
                     (await aliasStore.ChangeAsync(environment, alias, null, nextBinding, "fixture", default)).Outcome);
                 Assert.Equal(CommitStatus.PlanStale, (await Commit(first, firstPlan)).Status);
@@ -162,6 +165,9 @@ public sealed partial class OperatorHostIntegrationTests
                 var loser = original.ChangeSetId == first ? competing : first;
                 var loserPlan = original.ChangeSetId == first ? competingPlan : firstPlan;
                 Assert.Equal(CommitStatus.ChangeSetStale, (await Commit(loser, loserPlan)).Status);
+                var staleDescription = await client.GetPlanAsync(new PlanRequest { PlanId = loserPlan });
+                Assert.Equal(PlanningStatus.ChangeSetStale, staleDescription.Status);
+                AssertIntendedDatabase(staleDescription.Plan);
                 generation = (await client.GetGenerationAsync(new GenerationRequest { DeploymentId = original.DeploymentId, Generation = 1 })).DesiredGeneration;
                 Assert.Equal(original.PlanId, generation.PlanId);
                 Assert.Equal(2, generation.ConfigurationRevision);

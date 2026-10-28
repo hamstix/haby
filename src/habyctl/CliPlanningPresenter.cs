@@ -7,7 +7,11 @@ internal sealed record CliChangeSet(string ChangeSetId, string EnvironmentRecord
 internal sealed record CliPlan(string PlanId, string ChangeSetId, string EnvironmentRecordId, string EnvironmentId,
     CliReference Reference, string ProviderAlias, string ProviderInstanceId, long ConfigurationRevision,
     string ImplementationId, string Fingerprint, string CreatedAtUtc, string ExpiresAtUtc,
-    string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId);
+    string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork);
+internal sealed record CliPlanDescription(string Status, CliIntendedAction? Action);
+internal sealed record CliIntendedAction(string Kind, string ResourceId, string ResourceType,
+    CliIntendedActionTarget Target);
+internal sealed record CliIntendedActionTarget(string Name);
 internal sealed record CliPlanningData(CliChangeSet? ChangeSet, CliPlan? Plan);
 
 internal static class PlanningPresentation
@@ -58,7 +62,36 @@ internal static class PlanningPresentation
             plan.ProviderAlias, plan.ProviderInstanceId, plan.ConfigurationRevision, plan.ImplementationId,
             plan.Fingerprint, plan.CreatedAtUtc, plan.ExpiresAtUtc, plan.TechnicalActorId,
             plan.HasClosedAtUtc ? plan.ClosedAtUtc : null,
-            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null));
+            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork)));
+
+    private static CliPlanDescription Description(PlanDescription? description)
+    {
+        // An older server has no description. Unknown enum values must fail closed.
+        if (description is null) return new("unavailable", null);
+        var status = description.Status switch
+        {
+            PlanDescriptionStatus.Available => "available",
+            PlanDescriptionStatus.RevisionNotFound => "revisionNotFound",
+            PlanDescriptionStatus.InputCorrupt => "inputCorrupt",
+            PlanDescriptionStatus.UnsupportedShape => "unsupportedShape",
+            PlanDescriptionStatus.PinnedInputMismatch => "pinnedInputMismatch",
+            PlanDescriptionStatus.ActionDescriberUnavailable => "actionDescriberUnavailable",
+            _ => throw new InvalidDataException("Unknown server description outcome.")
+        };
+        if (description.Status != PlanDescriptionStatus.Available)
+        {
+            if (description.Action is not null) throw new InvalidDataException("Inconsistent server description.");
+            return new(status, null);
+        }
+        var action = description.Action;
+        if (action is null || action.Kind != IntendedActionKind.Create ||
+            action.Target is null ||
+            string.IsNullOrEmpty(action.ResourceId) || string.IsNullOrEmpty(action.ResourceType) ||
+            string.IsNullOrEmpty(action.Target.Name))
+            throw new InvalidDataException("Unsupported server intended action.");
+        return new(status, new("create", action.ResourceId, action.ResourceType,
+            new CliIntendedActionTarget(action.Target.Name)));
+    }
 }
 
 internal sealed partial class CliJsonPresenter
@@ -91,6 +124,11 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"Environment: {plan.EnvironmentId}; record: {plan.EnvironmentRecordId}");
             _output.WriteLine($"Revision: {plan.Reference.ApplicationRecordId} {plan.Reference.RevisionNumber}");
             _output.WriteLine($"Provider: {plan.ProviderAlias} -> {plan.ProviderInstanceId} revision {plan.ConfigurationRevision}; implementation: {plan.ImplementationId}");
+            _output.WriteLine("Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.");
+            if (plan.IntendedWork.Action is { } action)
+                _output.WriteLine($"Intended action: Create; Resource: {action.ResourceId}; type: {action.ResourceType}; target: {action.Target.Name}");
+            else
+                _output.WriteLine($"Intended action unavailable: {plan.IntendedWork.Status}");
             _output.WriteLine($"Fingerprint: {plan.Fingerprint}");
             _output.WriteLine($"Created UTC: {plan.CreatedAtUtc}; expires UTC: {plan.ExpiresAtUtc}; technical actor: {plan.TechnicalActorId}");
             if (plan.ClosedAtUtc is not null)
