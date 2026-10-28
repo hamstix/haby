@@ -23,6 +23,10 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
         AssignExistingPostgreSqlDatabase command, DateTimeOffset at, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        // Return exactly the timestamp PostgreSQL will retain, including in the first receipt.
+        // Its timestamptz precision is microseconds; a lost-response retry reads that stored value.
+        at = at.ToUniversalTime();
+        at = at.AddTicks(-(at.Ticks % TimeSpan.TicksPerMicrosecond));
         var key = command.Key;
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         var environment = Guid.Parse(command.Environment.ToString());

@@ -35,7 +35,8 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableCreateOperationJournal op
             shape.Input?.DatabaseName, operation.ProviderInstance, operation.ConfigurationRevision,
             operation.ImplementationId, uncertainAttempt, operation.State,
             operation.State == DurableCreateOperationState.NeedsAttention && uncertainAttempt is null
-                ? DurableCreateOperationReason.ProviderInputUnavailable : shape.Reason ?? operation.Reason);
+                ? DurableCreateOperationReason.ProviderInputUnavailable : shape.Reason ?? operation.Reason)
+        { Snapshot = operation };
     }
 
     public async ValueTask<PostgreSqlDatabaseAssignmentResult> AssignExistingDatabaseAsync(

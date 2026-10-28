@@ -21,6 +21,8 @@ service ManifestOperator {
   // Explicit execution only; GetOperation never dispatches or recovers.
   rpc ExecuteOperation(OperationRequest) returns (OperationReply);
   rpc GetOperation(OperationRequest) returns (OperationReply);
+  rpc InspectOperationRecovery(OperationRequest) returns (RecoveryReply);
+  rpc AssignExistingOperation(AssignExistingOperationRequest) returns (RecoveryReply);
 }
 
 message EnvelopeRequest { bytes original_envelope = 1; }
@@ -243,6 +245,52 @@ message OperationRequest {
   int64 generation = 2;
   string resource_id = 3;
   OperationAction action = 4;
+}
+
+// Recovery selects no Provider. The server uses the operation's immutable contract and implementation.
+enum RecoveryReason {
+  RECOVERY_REASON_UNSPECIFIED = 0;
+  RECOVERY_REASON_OPERATOR_ACCEPTED_EXISTING_DATABASE = 1;
+}
+enum RecoveryStatus {
+  RECOVERY_STATUS_UNSPECIFIED = 0;
+  RECOVERY_STATUS_FOUND = 1;
+  RECOVERY_STATUS_ASSIGNED = 2;
+  RECOVERY_STATUS_ALREADY_ASSIGNED = 3;
+  RECOVERY_STATUS_REJECTED = 4;
+  RECOVERY_STATUS_TARGET_ABSENT = 5;
+  RECOVERY_STATUS_TARGET_UNAVAILABLE = 6;
+  RECOVERY_STATUS_OPERATION_NOT_FOUND = 7;
+  RECOVERY_STATUS_INVALID_REQUEST = 8;
+  RECOVERY_STATUS_UNSUPPORTED_RECOVERY_ACTION = 9;
+}
+message AssignExistingOperationRequest {
+  OperationRequest key = 1;
+  string environment_record_id = 2;
+  string expected_attempt_id = 3;
+  bool acknowledged = 4;
+  RecoveryReason reason = 5;
+  // Protected audit input. Never returned by ordinary operator reads or diagnostics.
+  string note = 6;
+}
+message RecoveryReceipt {
+  string decision_id = 1;
+  OperationRequest key = 2;
+  string attempt_id = 3;
+  RecoveryReason reason = 4;
+  string technical_actor = 5;
+  string decided_at_utc = 6;
+}
+message RecoveryPreview {
+  DurableOperationSummary operation = 1;
+  string target_contract = 2;
+  optional string target_name = 3;
+  optional string uncertain_attempt_id = 4;
+}
+message RecoveryReply {
+  RecoveryStatus status = 1;
+  RecoveryPreview preview = 2;
+  RecoveryReceipt receipt = 3;
 }
 enum OperationAction {
   OPERATION_ACTION_UNSPECIFIED = 0;

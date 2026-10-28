@@ -82,6 +82,10 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlProviderConfigurationStore();
         builder.Services.AddPostgreSqlDurableCreateOperationJournal();
         builder.Services.AddPostgreSqlDurableCreateOperationExecution();
+        builder.Services.AddPostgreSqlDatabaseRecoveryJournal();
+        builder.Services.AddPostgreSqlDatabaseRecovery();
+        builder.Services.AddSingleton<PostgreSqlOperationRecoveryAdapter>();
+        builder.Services.AddSingleton<OperationRecoveryAdapter>();
 
         configureServices?.Invoke(builder.Services);
         var app = builder.Build();
