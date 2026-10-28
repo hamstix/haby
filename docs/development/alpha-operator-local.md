@@ -7,9 +7,9 @@ has no application authentication or authorization and is unsuitable for broad
 or remote exposure. Its protobuf contract may change before M4. It validates,
 imports, reads immutable manifest revisions and previews one supported database
 Resource against hypothetical request metadata. It also creates and reads durable
-ChangeSets and Plans, checks exact planning inputs and closes Plans. Desired-state
-commit, Provider execution, database provisioning, secret generation and configuration
-delivery remain unavailable through this API.
+ChangeSets and Plans, checks exact planning inputs, closes Plans and explicitly
+commits desired state with Pending work. Provider execution, database provisioning,
+secret generation and configuration delivery remain unavailable through this API.
 
 The CLI accepts `--help` at the root and at every command level without an
 endpoint. Command results go to standard output; syntax, local-file and
@@ -29,6 +29,7 @@ is requested.
 
 Every result from `manifest validate`, `manifest import`, `manifest revision get`,
 `manifest revision preview`, `changeset create|get`, `plan create|get|check|close`,
+`changeset commit`, `changeset commit get`, `deployment generation get`,
 `config view` and `config current-context` emits one
 complete JSON object and one newline to stdout with these ordered fields:
 
@@ -367,7 +368,58 @@ closure metadata. JSON uses the versioned envelope with `data.changeSet` or
 contains no Provider payload, SecretRef material, credential or driver error.
 Malformed canonical IDs return `invalidRequest`; missing Environment, revision,
 ChangeSet, Plan or alias and unsupported inputs remain typed results. An unknown
-server status is a safe local error. No apply/execute/recovery command is exposed.
+server status is a safe local error. No execute/recovery command is exposed.
+
+### Explicit desired-state acceptance
+
+With the same prepared Environment, sealed Provider configuration revision and alias,
+create a ChangeSet and a current Plan as above. Keep the Plan open if accepting it;
+`plan close` is an alternative to commit, not a prerequisite. Run:
+
+```powershell
+$accepted = & $cli changeset commit $changeId --plan $planId --config .\config.yaml -o json | ConvertFrom-Json
+& $cli changeset commit get $changeId --config .\config.yaml
+$deploymentId = $accepted.data.commit.deploymentId
+& $cli deployment generation get $deploymentId 1 --config .\config.yaml -o json
+```
+
+Check the exit code before consuming each response. Both ChangeSet and Plan IDs
+are required. The CLI never chooses a latest Plan or replans. The IDs address
+stored records in the selected registry; the context's Environment does not
+reassign or authorize access to those records. All three commands require a
+selected context, just like durable planning.
+
+A successful commit atomically persists exactly one desired generation `1`, one
+immutable ChangeSetCommit and one Pending Create operation. It leaves
+AppliedGeneration absent and performs no Provider contact, secret-material read,
+execution attempt or dispatch. The target database has not been created.
+Execution remains unavailable through this API and CLI. Generation `2`, updates,
+removal, bootstrap, recovery and background work remain outside this surface.
+No schema migration is needed for these adapters.
+
+If the response is lost, repeat the **same ChangeSet ID**, or read it with
+`changeset commit get`. Retry returns the original commit, including its original
+Plan ID, time and server technical actor, even if another Plan ID is supplied or
+inputs have since changed. It creates no second generation, commit or operation.
+IDs must still be canonical UUIDv7 values. Do not create a new ChangeSet to retry
+a committed one. Competing ExpectedAbsence ChangeSets for one deployment have one
+winner; the loser receives `changeSetStale`, with `actualGeneration` when known.
+
+Before a first acceptance, wrong-ChangeSet Plans, closed/expired Plans, unavailable
+inputs, stale inputs and unsupported pilot shapes/preconditions remain typed
+rejections. `changeSetStale` requires new intent; `planStale` permits a new Plan
+for still-valid intent. Rejections leave no partial desired state. Public creation
+already rejects unsupported shapes/preconditions before an executable Plan exists.
+`commitNotFound` and `generationNotFound` are typed read outcomes; malformed or
+missing IDs or a non-positive generation return `invalidRequest` at the API boundary.
+
+JSON uses `data.stateMeaning: "desiredStateOnly"`, `data.commit` or
+`data.desiredGeneration`. The generation contains its exact immutable revision,
+Environment, Provider identity/configuration revision and implementation references.
+These are desired snapshots, not current operation or applied-state read models.
+Neither output format claims infrastructure is applied or reveals Provider payload,
+secret material or raw driver diagnostics. The actor is server-owned technical
+attribution, not authenticated human identity.
 
 ### Disposable persistence and native executable rehearsal
 
@@ -383,11 +435,21 @@ integration project as described in [the PostgreSQL test guide](postgresql-integ
 `OperatorHostIntegrationTests.Durable_planning_survives_Host_restart_pins_alias_inputs_and_never_contacts_Provider`
 creates a disposable catalog, seeds accepted records through existing APIs, calls
 the generated client, disposes the Host and starts a fresh instance over that
-catalog, then executes all six new commands through the native binary. A TCP trap
+catalog, then executes all six planning commands through the native binary. A TCP trap
 proves planning never connects to the Provider; independent catalog reads assert
 no desired generations, commits, operations, attempts, recovery decisions or target
 database. Setup alone uses a deterministic preflight double for the offline fixture;
 the production Host and planner are unchanged. Normal operator setup still requires
 real preflight. Linux integration CI requires this native rehearsal; both Windows
-and Linux AOT gates additionally exercise every new command in text/JSON through
+and Linux AOT gates additionally exercise every planning command in text/JSON through
 disposable gRPC loopback test services.
+
+The commit rehearsal additionally races generated-client requests, retries with a
+second Plan and changed alias, and rereads identical commit/generation snapshots
+through a fresh TLS Host. Its Host catalog role is denied SELECT on secret_payloads;
+independent assertions require exactly one generation/commit/Pending operation,
+absent AppliedGeneration, zero attempts/dispatch and no target database or Provider
+TCP contact. The native sequence imports, creates intent and Plan, commits, then
+reads/retries through a fresh Host. Both Windows/Linux AOT loopback gates exercise
+all three commands in text and JSON; Linux PostgreSQL CI requires the full native
+persistence sequence. These tests use disposable catalogs, never personal databases.

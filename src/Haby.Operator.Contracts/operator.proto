@@ -14,6 +14,10 @@ service ManifestOperator {
   rpc GetPlan(PlanRequest) returns (PlanningReply);
   rpc CheckPlan(PlanRequest) returns (PlanningReply);
   rpc ClosePlan(PlanRequest) returns (PlanningReply);
+  // Accepts desired state and Pending work only; never executes a Provider.
+  rpc CommitDesiredState(CommitDesiredStateRequest) returns (CommitReply);
+  rpc GetCommit(ChangeSetRequest) returns (CommitReply);
+  rpc GetGeneration(GenerationRequest) returns (CommitReply);
 }
 
 message EnvelopeRequest { bytes original_envelope = 1; }
@@ -175,4 +179,57 @@ message PlanningReply {
   PlanningStatus status = 1;
   DurableChangeSetSummary change_set = 2;
   DurablePlanSummary plan = 3;
+}
+
+// No caller-supplied actor or implicit Plan selection.
+message CommitDesiredStateRequest { string change_set_id = 1; string plan_id = 2; }
+message GenerationRequest { string deployment_id = 1; int64 generation = 2; }
+enum CommitStatus {
+  COMMIT_STATUS_UNSPECIFIED = 0;
+  COMMIT_STATUS_COMMITTED = 1;
+  COMMIT_STATUS_FOUND = 2;
+  COMMIT_STATUS_INVALID_REQUEST = 3;
+  COMMIT_STATUS_CHANGE_SET_NOT_FOUND = 4;
+  COMMIT_STATUS_PLAN_NOT_FOUND = 5;
+  COMMIT_STATUS_PLAN_DOES_NOT_BELONG_TO_CHANGE_SET = 6;
+  COMMIT_STATUS_CLOSED = 7;
+  COMMIT_STATUS_EXPIRED = 8;
+  COMMIT_STATUS_CHANGE_SET_STALE = 9;
+  COMMIT_STATUS_PLAN_STALE = 10;
+  COMMIT_STATUS_PLAN_INPUT_UNAVAILABLE = 11;
+  COMMIT_STATUS_UNSUPPORTED_PRECONDITION = 12;
+  COMMIT_STATUS_UNSUPPORTED_SHAPE = 13;
+  COMMIT_STATUS_COMMIT_NOT_FOUND = 14;
+  COMMIT_STATUS_GENERATION_NOT_FOUND = 15;
+}
+message DurableCommitSummary {
+  string change_set_id = 1;
+  string plan_id = 2;
+  string deployment_id = 3;
+  int64 generation = 4;
+  string committed_at_utc = 5;
+  string technical_actor_id = 6;
+}
+// Immutable desired snapshot, never a claim about current applied/operation state.
+message DesiredGenerationSummary {
+  string deployment_id = 1;
+  int64 generation = 2;
+  string desired_presence = 3;
+  string change_set_id = 4;
+  string plan_id = 5;
+  string accepted_at_utc = 6;
+  string technical_actor_id = 7;
+  string environment_record_id = 8;
+  string environment_id = 9;
+  RevisionReference reference = 10;
+  string provider_alias = 11;
+  string provider_instance_id = 12;
+  int64 configuration_revision = 13;
+  string implementation_id = 14;
+}
+message CommitReply {
+  CommitStatus status = 1;
+  DurableCommitSummary commit = 2;
+  DesiredGenerationSummary desired_generation = 3;
+  optional int64 actual_generation = 4;
 }

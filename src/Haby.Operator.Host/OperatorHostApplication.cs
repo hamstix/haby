@@ -66,10 +66,10 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         builder.Services.AddSingleton<PreviewImportedDatabase>();
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
-        // Planning needs codecs and alias reads only; no preflight, secret resolver or executor.
+        // Planning and commit need codecs and alias reads; no preflight, secret resolver or executor.
         builder.Services.AddPostgreSqlProviderConfigurationCodec();
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
-        builder.Services.AddPostgreSqlDurableDeploymentPlanner();
+        builder.Services.AddPostgreSqlDurableDesiredStateCommitter();
 
         var app = builder.Build();
         app.MapGrpcService<ManifestOperatorService>();

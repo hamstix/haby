@@ -74,7 +74,7 @@ public sealed partial class OperatorHostIntegrationTests
             {
                 Assert.Null(host.Services.GetService<ISecretStore>());
                 Assert.Null(host.Services.GetService<IProviderRevisionPreflight>());
-                Assert.Null(host.Services.GetService<IDurableDesiredStateCommitter>());
+                Assert.NotNull(host.Services.GetService<IDurableDesiredStateCommitter>());
                 using var channel = Channel(host, certificate);
                 var client = new ManifestOperator.ManifestOperatorClient(channel);
                 var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(Envelope("durable-operator")) });

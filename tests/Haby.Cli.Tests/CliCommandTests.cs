@@ -62,6 +62,12 @@ public sealed class CliCommandTests
             throw new NotImplementedException();
         public Task<PlanningReply> ClosePlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
             throw new NotImplementedException();
+        public Task<CommitReply> CommitDesiredStateAsync(CommitDesiredStateRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
+        public Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) =>
+            throw new NotImplementedException();
         public void Dispose() { }
 
         public Task<ValidateReply> ValidateAsync(EnvelopeRequest request, CancellationToken cancellationToken)
