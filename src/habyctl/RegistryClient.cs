@@ -17,6 +17,9 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<CommitReply> CommitDesiredStateAsync(CommitDesiredStateRequest request, CancellationToken cancellationToken);
+    Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken);
+    Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> CreateChangeSetAsync(CreateChangeSetRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> GetChangeSetAsync(ChangeSetRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> CreatePlanAsync(ChangeSetRequest request, CancellationToken cancellationToken);
@@ -78,6 +81,15 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
 
     public async Task<PlanningReply> ClosePlanAsync(PlanRequest request, CancellationToken cancellationToken) =>
         await _client.ClosePlanAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<CommitReply> CommitDesiredStateAsync(CommitDesiredStateRequest request, CancellationToken cancellationToken) =>
+        await _client.CommitDesiredStateAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
+        await _client.GetCommitAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) =>
+        await _client.GetGenerationAsync(request, cancellationToken: cancellationToken);
 
     public void Dispose() => channel.Dispose();
 }

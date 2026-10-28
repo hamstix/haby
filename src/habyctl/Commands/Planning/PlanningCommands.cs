@@ -28,6 +28,7 @@ internal static class PlanningCommands
         group.Subcommands.Add(create);
         group.Subcommands.Add(ForChangeSet("get", "changeset get", context,
             (client, request, ct) => client.GetChangeSetAsync(request, ct)));
+        group.Subcommands.Add(CommitCommands.Commit(context));
         return group;
     }
 

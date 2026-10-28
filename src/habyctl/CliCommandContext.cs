@@ -22,6 +22,9 @@ internal sealed class CliCommandContext(
     internal int PrintPlanning(string command, PlanningReply reply) =>
         jsonOutput() ? jsonPresenter.PrintPlanning(command, reply) : presenter.PrintPlanning(command, reply);
 
+    internal int PrintCommit(string command, CommitReply reply) =>
+        jsonOutput() ? jsonPresenter.PrintCommit(command, reply) : presenter.PrintCommit(command, reply);
+
     internal Task<int> ExecutePlanningAsync(
         Func<IRegistryClient, string, CancellationToken, Task<int>> action, CancellationToken cancellationToken) =>
         ExecuteResolvedAsync(action, requireContext: true, cancellationToken);

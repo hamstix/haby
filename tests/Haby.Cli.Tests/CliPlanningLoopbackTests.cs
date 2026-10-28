@@ -42,6 +42,47 @@ public sealed partial class CliLoopbackTests
             ExpiresAtUtc = "2026-10-29T00:00:00Z",
             TechnicalActorId = "server-actor"
         };
+        private static DurableCommitSummary Commit => new()
+        {
+            ChangeSetId = ChangeId,
+            PlanId = PlanId,
+            DeploymentId = ChangeId,
+            Generation = 1,
+            CommittedAtUtc = "2026-10-28T00:00:00Z",
+            TechnicalActorId = "server-actor"
+        };
+        public override Task<CommitReply> CommitDesiredState(CommitDesiredStateRequest request, ServerCallContext context)
+        {
+            Assert.Equal(ChangeId, request.ChangeSetId);
+            Assert.Equal(PlanId, request.PlanId);
+            return Task.FromResult(new CommitReply { Status = CommitStatus.Committed, Commit = Commit });
+        }
+        public override Task<CommitReply> GetCommit(ChangeSetRequest request, ServerCallContext context)
+        {
+            Assert.Equal(ChangeId, request.ChangeSetId);
+            return Task.FromResult(new CommitReply { Status = CommitStatus.Found, Commit = Commit });
+        }
+        public override Task<CommitReply> GetGeneration(GenerationRequest request, ServerCallContext context)
+        {
+            Assert.Equal(ChangeId, request.DeploymentId);
+            Assert.Equal(1, request.Generation);
+            return Task.FromResult(new CommitReply
+            {
+                Status = CommitStatus.Found,
+                DesiredGeneration = new DesiredGenerationSummary
+                {
+                    DeploymentId = ChangeId,
+                    Generation = 1,
+                    DesiredPresence = "Present",
+                    ChangeSetId = ChangeId,
+                    PlanId = PlanId,
+                    Reference = Change.Reference,
+                    EnvironmentId = "pilot",
+                    ProviderInstanceId = Plan.ProviderInstanceId,
+                    ConfigurationRevision = 4
+                }
+            });
+        }
         public override Task<PlanningReply> CreateChangeSet(CreateChangeSetRequest request, ServerCallContext context)
         {
             Assert.Equal("pilot", request.EnvironmentId);
@@ -106,6 +147,9 @@ public sealed partial class CliLoopbackTests
             {
                 (["changeset", "create", "application", "3", "--expected-absence"], "changeset create", "created", 0),
                 (["changeset", "get", PlanningRegistry.ChangeId], "changeset get", "found", 0),
+                (["changeset", "commit", PlanningRegistry.ChangeId, "--plan", PlanningRegistry.PlanId], "changeset commit", "committed", 0),
+                (["changeset", "commit", "get", PlanningRegistry.ChangeId], "changeset commit get", "found", 0),
+                (["deployment", "generation", "get", PlanningRegistry.ChangeId, "1"], "deployment generation get", "found", 0),
                 (["plan", "create", PlanningRegistry.ChangeId], "plan create", "planned", 0),
                 (["plan", "get", PlanningRegistry.PlanId], "plan get", "current", 0),
                 (["plan", "check", PlanningRegistry.PlanId], "plan check", "planStale", 1),
