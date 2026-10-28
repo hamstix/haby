@@ -23,6 +23,11 @@ secret payload or key-encryption key to remain in PostgreSQL forever.
 
 ## Decision
 
+ADR-028 permits a future input-only Provider bootstrap credential block. It
+must extract material into SecretStore and retain only SecretRefs in accepted
+configuration. This does not permit secret-bearing persisted manifest history
+or ordinary read responses. Implement the SecretRef-only path first.
+
 ### Secret values are separate domain objects
 
 Haby represents confidential values through stable `Secret` and immutable

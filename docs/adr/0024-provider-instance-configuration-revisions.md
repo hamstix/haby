@@ -24,6 +24,11 @@ exception.
 
 ## Decision
 
+ADR-028 defines the operator bootstrap workflow and Provider JSON declarations.
+The first input path uses exact SecretRefs. A separately implemented future
+input-only credential block may extract material into SecretStore before
+accepting a revision; persisted configuration remains non-secret under this ADR.
+
 ### Environment-owned Provider instances
 
 A ProviderInstance belongs to exactly one Environment. It has a Haby-issued,

@@ -568,6 +568,13 @@ complete pilot to guide later CLI orchestration improvements. HA, UI, additional
 Providers, general rotation, deprovisioning and production delivery remain outside
 this goal. This pilot does not claim replacement of an existing registry.
 
+Operator bootstrap follows [ADR-028](docs/adr/0028-operator-bootstrap-and-provider-manifests.md):
+name-based Environment/Provider selection, JSON Provider declarations, safe
+request retries, SecretRef-first input and mandatory checked alias switching.
+Implement Environment/metadata, secret input and Provider revision/alias slices
+before a separate optional input-only credential-block slice. YAML remains
+exclusive to local CLI configuration.
+
 ADR-023 fixes the PostgreSQL manifest-catalog persistence and single-instance
 startup-migration policy. ADR-004 fixes the alpha API transport. Before exposing
 the shadow-pilot API, define and test its network isolation, transport
@@ -729,6 +736,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-022](docs/adr/0022-postgresql-database-checkpoint-execution.md): Narrow PostgreSQL database contract, post-commit execution, uncertain outcomes and real-database integration tests.
 - [ADR-025](docs/adr/0025-pilot-durable-postgresql-create-recovery.md): Durable single-database dispatch barrier and explicitly consented manual recovery after an uncertain outcome.
 - [ADR-027](docs/adr/0027-operator-cli-foundation.md): Native AOT operator CLI, explicit commands, local contexts, output formats and secret-disclosure boundary.
+- [ADR-028](docs/adr/0028-operator-bootstrap-and-provider-manifests.md): Named operator bootstrap, Provider JSON declarations, SecretRef-first credential input and local configuration policy.
 
 ## Out of scope for the first milestones
 

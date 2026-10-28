@@ -22,6 +22,12 @@ remain in force.
 
 ## Decision
 
+ADR-028 refines bootstrap command semantics, selects the intended per-user
+`.haby/config.yaml` location and permits a future plaintext operator token with
+mandatory redaction. Its explicit supersessions take precedence over the
+original path and future-token restrictions below. Current runtime behavior
+must remain documented until the relevant implementation slice changes it.
+
 ### Use System.CommandLine 2.x and an explicit command tree
 
 Use the stable `System.CommandLine` 2.x package. Build and register the command
