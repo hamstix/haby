@@ -136,13 +136,15 @@ public sealed class CliLoopbackTests
         var address = app.Services.GetRequiredService<IServer>().Features
             .Get<IServerAddressesFeature>()!.Addresses.Single();
         var path = Path.Combine(Path.GetTempPath(), "haby-cli-smoke-" + Guid.NewGuid().ToString("N"));
+        var config = path + ".yaml";
         try
         {
             await File.WriteAllTextAsync(path, "{}");
+            await File.WriteAllTextAsync(config, "formatVersion: 1\ninstances: {}\ncontexts: {}");
             using var output = new StringWriter();
             using var error = new StringWriter();
             var cli = new CliApplication(new FixedEndpoint(address), new GrpcRegistryClientFactory(), output, error);
-            Assert.Equal(CliApplication.Rejected, await cli.RunAsync(["manifest", "validate", path]));
+            Assert.Equal(CliApplication.Rejected, await cli.RunAsync(["manifest", "validate", path, "--config", config]));
             Assert.Contains("InvalidManifest", output.ToString());
             Assert.Equal("", error.ToString());
 
@@ -160,7 +162,10 @@ public sealed class CliLoopbackTests
                 process.StartInfo.ArgumentList.Add("manifest");
                 process.StartInfo.ArgumentList.Add("validate");
                 process.StartInfo.ArgumentList.Add(path);
+                process.StartInfo.ArgumentList.Add("--config");
+                process.StartInfo.ArgumentList.Add(config);
                 process.StartInfo.Environment["HABY_OPERATOR_URL"] = address;
+                process.StartInfo.Environment.Remove("HABYCTL_CONFIG");
                 Assert.True(process.Start());
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                 await process.WaitForExitAsync(timeout.Token);
@@ -172,6 +177,7 @@ public sealed class CliLoopbackTests
         finally
         {
             File.Delete(path);
+            File.Delete(config);
             await app.StopAsync();
         }
     }

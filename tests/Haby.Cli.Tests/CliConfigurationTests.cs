@@ -138,8 +138,15 @@ public sealed class CliConfigurationTests
             Assert.Equal(3, factory.Addresses.Count);
             Assert.Equal(2, await command.RunAsync(["manifest", "revision", "get", "record", "1", "--context", "absent"]));
             Assert.Equal(3, factory.Addresses.Count);
+            Assert.Contains("Invalid CLI configuration.", error.ToString());
             Assert.Equal(2, await command.RunAsync(["config", "view", "--config", Path.Combine(folder, "missing.yaml")]));
             Assert.DoesNotContain(folder, error.ToString());
+
+            var defaultFactory = new Factory();
+            var defaultCommand = new CliApplication(new Endpoint("http://localhost:7999"), defaultFactory,
+                output, error, configEnvironment: new Paths(null, defaultPath));
+            Assert.Equal(1, await defaultCommand.RunAsync(["manifest", "revision", "get", "record", "1"]));
+            Assert.Equal(7101, defaultFactory.Addresses.Single().Port);
         }
         finally { Directory.Delete(folder, true); }
     }

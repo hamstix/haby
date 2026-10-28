@@ -30,6 +30,7 @@ internal sealed class CliCommandContext(
     internal async Task<int> ExecuteAsync(Func<IRegistryClient, CancellationToken, Task<int>> action,
         CancellationToken cancellationToken)
     {
+        Uri address;
         try
         {
             var selected = options();
@@ -44,12 +45,27 @@ internal sealed class CliCommandContext(
                 endpoint = instance.Endpoint;
             }
             else endpoint = endpointSource.GetAddress();
-            var address = CliApplication.ParseEndpoint(endpoint);
-            if (address is null)
+            var selectedAddress = CliApplication.ParseEndpoint(endpoint);
+            if (selectedAddress is null)
             {
                 error.WriteLine("Select a loopback HTTP or HTTPS registry endpoint.");
                 return CliApplication.UsageError;
             }
+            address = selectedAddress;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            error.WriteLine("Operation canceled.");
+            return CliApplication.TransportError;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            error.WriteLine("Invalid CLI configuration.");
+            return CliApplication.UsageError;
+        }
+
+        try
+        {
             using var client = clientFactory.Create(address,
                 CliApplication.SkipTlsCertificateValidation(endpointSource.GetSkipTlsValidation()));
             return await action(client, cancellationToken);

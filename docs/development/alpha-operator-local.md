@@ -74,8 +74,11 @@ tags, malformed encoding and invalid references. This slice has no config
 write commands. YamlDotNet 18.1.0 (MIT) provides the low-level YAML
 representation model; Haby maps it explicitly into typed records, without
 reflection-based object activation. The parser path was published and executed
-as a Windows Native AOT spike before it was selected. The production CLI AOT
-binary is also exercised against two disposable loopback hosts in tests.
+as a Windows Native AOT spike before it was selected. With
+`HABY_AOT_CLI_PATH` set to a published executable, the loopback tests also
+exercise that binary against two disposable hosts. The current CI runs those
+tests without the executable; an automated AOT gate is deferred to ADR-027's
+later delivery slice.
 
 Use an isolated local PostgreSQL catalog database and a principal with the
 migration rights described in the [catalog guide](../../src/Haby.Persistence.PostgreSql/README.md).
