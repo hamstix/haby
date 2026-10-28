@@ -1,5 +1,6 @@
 using Grpc.Core;
 using Haby.Operator.Contracts;
+using System.CommandLine;
 using Xunit;
 
 namespace Haby.Cli.Tests;
@@ -81,6 +82,24 @@ public sealed class CliCommandTests
 
     private static CliApplication Create(FakeFactory factory, StringWriter output, StringWriter error,
         string? address = "http://localhost:7443") => new(new Endpoint(address), factory, output, error);
+
+    [Fact]
+    public async Task Build_time_registration_adds_command_without_registry_connection()
+    {
+        var factory = new FakeFactory();
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var cli = new CliApplication(new Endpoint(null), factory, output, error, root =>
+        {
+            var command = new Command("local-check", "Run a local check.");
+            command.SetAction(_ => { output.WriteLine("ready"); return 0; });
+            root.Subcommands.Add(command);
+        });
+
+        Assert.Equal(CliApplication.Success, await cli.RunAsync(["local-check"]));
+        Assert.Equal("ready" + Environment.NewLine, output.ToString());
+        Assert.Equal(0, factory.Created);
+    }
 
     [Theory]
     [InlineData("--help")]
