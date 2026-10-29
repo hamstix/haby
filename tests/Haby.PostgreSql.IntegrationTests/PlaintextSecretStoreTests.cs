@@ -223,8 +223,17 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
         await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         var store = services.GetRequiredService<ISecretStore>();
         var environment = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
-        await Assert.ThrowsAsync<DbUpdateException>(async () =>
-            await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default));
+        Assert.Equal(environment, await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default));
+        await using (var duplicateContext = new ManifestCatalogDbContext(
+            new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options))
+        {
+            var duplicateId = Guid.CreateVersion7();
+            var duplicateName = "pilot";
+            var error = await Assert.ThrowsAsync<PostgresException>(async () =>
+                await duplicateContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"INSERT INTO environments (id, environment_id) VALUES ({duplicateId}, {duplicateName})"));
+            Assert.Equal(PostgresErrorCodes.UniqueViolation, error.SqlState);
+        }
         var reference = new SecretRef(SecretId.New(), SecretVersionId.New());
         await store.CreateAsync(environment, reference, new byte[] { 83 }, default);
         await using var check = new NpgsqlConnection(connection);

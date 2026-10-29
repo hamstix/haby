@@ -118,6 +118,8 @@ public static class ManifestCatalogServiceCollectionExtensions
         services.AddSingleton<IManifestRevisionQuery>(provider => provider.GetRequiredService<PostgreSqlManifestImportStore>());
         services.AddSingleton<ManifestCatalogMigrationInitializer>();
         services.AddSingleton<IEnvironmentQuery, PostgreSqlEnvironmentQuery>();
+        services.AddSingleton<IEnvironmentCatalog, PostgreSqlEnvironmentCatalog>();
+        services.AddSingleton<EnvironmentAdministration>();
         return services;
     }
 }

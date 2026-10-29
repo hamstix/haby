@@ -17,6 +17,9 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<EnvironmentReply> CreateEnvironmentAsync(EnvironmentNameRequest request, CancellationToken cancellationToken);
+    Task<EnvironmentReply> GetEnvironmentAsync(EnvironmentNameRequest request, CancellationToken cancellationToken);
+    Task<ListEnvironmentsReply> ListEnvironmentsAsync(ListEnvironmentsRequest request, CancellationToken cancellationToken);
     Task<RecoveryReply> InspectOperationRecoveryAsync(OperationRequest request, CancellationToken cancellationToken);
     Task<RecoveryReply> AssignExistingOperationAsync(AssignExistingOperationRequest request, CancellationToken cancellationToken);
     Task<OperationReply> ExecuteOperationAsync(OperationRequest request, CancellationToken cancellationToken);
@@ -106,6 +109,13 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
 
     public async Task<OperationReply> GetOperationAsync(OperationRequest request, CancellationToken cancellationToken) =>
         await _client.GetOperationAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<EnvironmentReply> CreateEnvironmentAsync(EnvironmentNameRequest request, CancellationToken cancellationToken) =>
+        await _client.CreateEnvironmentAsync(request, cancellationToken: cancellationToken);
+    public async Task<EnvironmentReply> GetEnvironmentAsync(EnvironmentNameRequest request, CancellationToken cancellationToken) =>
+        await _client.GetEnvironmentAsync(request, cancellationToken: cancellationToken);
+    public async Task<ListEnvironmentsReply> ListEnvironmentsAsync(ListEnvironmentsRequest request, CancellationToken cancellationToken) =>
+        await _client.ListEnvironmentsAsync(request, cancellationToken: cancellationToken);
 
     public void Dispose() => channel.Dispose();
 }

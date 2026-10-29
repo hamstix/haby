@@ -14,6 +14,11 @@ internal sealed class CliCommandContext(
     Func<(string? File, string? Context)> options,
     Func<bool> jsonOutput)
 {
+    internal int PrintEnvironment(string command, EnvironmentReply reply) =>
+        jsonOutput() ? jsonPresenter.PrintEnvironment(command, reply) : presenter.PrintEnvironment(command, reply);
+    internal int PrintEnvironments(ListEnvironmentsReply reply) =>
+        jsonOutput() ? jsonPresenter.PrintEnvironments(reply) : presenter.PrintEnvironments(reply);
+
     internal int Print(ValidateReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
     internal int Print(ImportReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);
     internal int Print(GetRevisionReply reply) => jsonOutput() ? jsonPresenter.Print(reply) : presenter.Print(reply);

@@ -132,6 +132,62 @@ representation model; Haby maps it explicitly into typed records, without
 reflection-based object activation. The parser path was published and executed
 as a Windows Native AOT spike before it was selected.
 
+## Explicit Environment administration
+
+With the loopback Host running and `config.yaml` from the example above,
+create or rediscover an Environment through the registry API:
+
+```powershell
+dotnet run --project .\src\habyctl -- environment create pilot --config .\config.yaml --context local-a
+dotnet run --project .\src\habyctl -- environment create pilot --config .\config.yaml --context local-a
+dotnet run --project .\src\habyctl -- environment get pilot --config .\config.yaml --context local-a -o json
+dotnet run --project .\src\habyctl -- environment list --page-size 1 --config .\config.yaml --context local-a -o json
+```
+
+The first create returns `created` with `name` and a separate `recordId`
+(UUIDv7). The repeat returns `existing` with the same identity. Concurrent
+creates, a retry after a lost response, and a retry after Host restart return
+that same persisted identity. If `pilot` already exists, both creates return
+`existing`. A get returns `found` with the same metadata, or `notFound` (exit
+1) without creating anything. Invalid names return `invalidName` (exit 1):
+use a leading lowercase letter followed by lowercase letters/digits and
+single hyphen-separated segments, at most 64 ASCII characters. Names are
+validated server-side without trimming or case conversion.
+
+`environment create <name>` and `environment get <name>` always use the
+explicit name. The selected local context chooses the registry endpoint;
+its `environmentId` does not override the argument. Selecting a context,
+viewing configuration, get and list never create an Environment. Creation
+writes only Environment metadata: no secrets, Providers, deployments or
+operations. Later planning resolves the logical name server-side to this
+persisted identity; no direct CLI database access is involved.
+
+List returns one page in ascending ordinal name order. The default page size
+is 50; `--page-size` accepts 1..100 (wire value 0 selects the default).
+If more results exist, text prints `nextCursor: env1:<last-name>` and JSON
+includes `data.nextCursor`. Pass the returned token unchanged:
+
+```powershell
+# For example, if the previous page returned nextCursor "env1:pilot":
+dotnet run --project .\src\habyctl -- environment list --page-size 1 --cursor 'env1:pilot' --config .\config.yaml --context local-a -o json
+```
+
+Follow each returned cursor until `nextCursor` is absent (or no continuation
+line in text). An empty page is successful. Results are never silently
+truncated: each page that has more rows includes its continuation. Page size
+may change between calls. Cursors are versioned, bounded to 69 ASCII
+characters and validated using the same name rules. Malformed cursors return
+`invalidCursor`; out-of-range page sizes return `invalidPageSize` (exit 1).
+A valid continuation name need not currently exist. Pagination is a live
+traversal, not a snapshot: names created after the cursor can appear; names
+created before it require restarting the list. Rename and delete are deferred.
+
+The alpha RPCs are `CreateEnvironment`, `GetEnvironment` and
+`ListEnvironments`. Their typed statuses distinguish success, invalid name,
+not found, invalid cursor and invalid page size. Ordinary metadata contains
+only logical names and persisted identities. JSON retains the existing
+`formatVersion: 1` envelope and uses source-generated serialization metadata.
+
 ## Native AOT publish and loopback smoke gate
 
 The CI gate publishes `src/habyctl` for `win-x64` on `windows-latest` and

@@ -205,3 +205,23 @@ internally, and verifies protected audit preservation. The fresh restored Host
 must perform zero Provider reads/dispatches, including on assignment retry.
 Its private container-only archive and utility-error redaction prevent protected
 data from reaching artifacts; cleanup preserves an original test failure.
+
+## Environment administration (issue #87)
+
+The same disposable PostgreSQL suite exercises explicit create/get/list through
+production Host composition and the generated alpha gRPC client. A synchronized
+16-request race must produce exactly one Created outcome and one persisted
+UUIDv7 identity; retries through the compatibility SecretStore helper and a
+fresh Host must return that identity. Independent DbContexts verify persisted
+metadata and zero rows in secret, Provider, deployment, planning and operation
+tables. A direct duplicate insert still proves the database unique constraint.
+Ordinal pagination is checked with more than 100 distinct names, maximum-length
+names, sizes 1/2/50/100, exact boundaries, unknown continuation positions and
+typed invalid cursor/page-size outcomes. Arrange, act and assert contexts are
+separate; verification queries do not rely on tracked entities.
+
+When `HABY_AOT_CLI_REQUIRED=1`, the suite also launches the published CLI against
+the restarted Host for create retry, get/list, local context reads, text/JSON
+output and expected rejections. Selecting a context with an absent Environment
+must leave it absent. The existing Native AOT matrix also covers the new command
+tree and continuation output through disposable loopback generated services.
