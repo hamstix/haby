@@ -18,6 +18,32 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class OperatorHostIntegrationTests
 {
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("type")]
+    [InlineData("format")]
+    [InlineData("private")]
+    public void Current_declaration_adapter_requires_its_exact_registered_reload_codec(string mismatch)
+    {
+        var args = new[] { "--Haby:PostgreSql:ConnectionString=Host=127.0.0.1;Database=unused;Username=unused", "--Haby:Tls:Enabled=false", "--Haby:Port=0" };
+        Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.Build(args, services =>
+        {
+            services.RemoveAll<IProviderConfigurationCodec>();
+            if (mismatch != "missing") services.AddSingleton<IProviderConfigurationCodec>(provider =>
+                new MismatchedReloadCodec(provider.GetRequiredService<PostgreSqlProviderConfigurationCodec>(), mismatch));
+        }));
+    }
+
+    private sealed class MismatchedReloadCodec(IProviderConfigurationCodec inner, string mismatch) : IProviderConfigurationCodec
+    {
+        public Type ConfigurationType => mismatch == "type" ? typeof(string) : inner.ConfigurationType;
+        public string ProviderKindId => inner.ProviderKindId;
+        public string ShapeId => inner.ShapeId;
+        public int PayloadFormatVersion => mismatch == "format" ? inner.PayloadFormatVersion + 1 : inner.PayloadFormatVersion;
+        public PreparedProviderConfiguration Encode(object configuration) => inner.Encode(configuration);
+        public object Decode(string payloadJson) => inner.Decode(payloadJson);
+    }
+
     [Fact]
     public async Task Provider_generated_client_and_native_CLI_apply_and_read_safe_metadata_after_restart()
     {

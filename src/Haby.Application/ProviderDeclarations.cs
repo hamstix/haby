@@ -11,6 +11,7 @@ public sealed record ProviderAdapterKey(string ProviderKind, string Configuratio
 public interface IProviderDeclarationAdapter
 {
     ProviderAdapterKey Key { get; }
+    /// <summary>The exact singleton registered for persisted configuration reloads.</summary>
     IProviderConfigurationCodec Codec { get; }
     IReadOnlyList<string> RequiredSecretSlots { get; }
     IReadOnlyList<string> AllowedSecretSlots => RequiredSecretSlots;
@@ -24,9 +25,10 @@ public interface IProviderDeclarationAdapter
 public sealed class ProviderDeclarationRegistry
 {
     private readonly IProviderDeclarationAdapter[] _adapters;
-    public ProviderDeclarationRegistry(IEnumerable<IProviderDeclarationAdapter> adapters)
+    public ProviderDeclarationRegistry(IEnumerable<IProviderDeclarationAdapter> adapters, IEnumerable<IProviderConfigurationCodec> codecs)
     {
         _adapters = adapters.ToArray();
+        var reloadCodecs = codecs.ToArray();
         if (_adapters.GroupBy(x => x.Key).Any(g => g.Count() != 1) || _adapters.Any(x =>
                 !ValidId(x.Key.ProviderKind) || !ValidId(x.Key.ConfigurationContract) || !ValidId(x.Key.ImplementationId) ||
                 x.Codec.ProviderKindId != x.Key.ProviderKind || x.Codec.ShapeId != x.Key.ConfigurationContract ||
@@ -36,6 +38,13 @@ public sealed class ProviderDeclarationRegistry
                 x.RequiredSecretSlots.Distinct(StringComparer.Ordinal).Count() != x.RequiredSecretSlots.Count ||
                 x.RequiredSecretSlots.Any(s => !x.AllowedSecretSlots.Contains(s, StringComparer.Ordinal))))
             throw new InvalidOperationException("Provider declaration registration is invalid or ambiguous.");
+        // Intake and reload must use the same registered codec instance, not independently
+        // configured codecs that merely advertise matching envelope identifiers.
+        if (_adapters.Any(adapter => reloadCodecs.Count(codec => ReferenceEquals(codec, adapter.Codec) &&
+                codec.ProviderKindId == adapter.Key.ProviderKind && codec.ShapeId == adapter.Key.ConfigurationContract &&
+                codec.PayloadFormatVersion == adapter.Codec.PayloadFormatVersion &&
+                codec.ConfigurationType == adapter.Codec.ConfigurationType) != 1))
+            throw new InvalidOperationException("Provider declaration reload codec registration is missing or inconsistent.");
     }
     public IProviderDeclarationAdapter? Find(ProviderAdapterKey key) => _adapters.SingleOrDefault(x => x.Key == key);
     internal static bool ValidId(string? value) => !string.IsNullOrWhiteSpace(value) && value.Length <= 128;

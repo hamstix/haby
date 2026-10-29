@@ -63,7 +63,12 @@ must compare against its latest revision. Operator named revisions use declarati
 Only exact registered kind/contract/implementation combinations can be applied
 or decoded, and transitions require the new adapter's explicit compatibility
 support. Invalid/ambiguous current registrations fail Host construction. Missing
-historical support does not block startup or metadata reads. Unsupported input
+registration of an adapter's reload codec also fails: the adapter must use the
+same singleton codec registered for persistence reload, with matching kind,
+contract, payload format and configuration CLR type. Equivalent retries compare
+the resolved exact slot/SecretRef set against stored associations independently
+of the adapter's typed settings comparison; slot ordering is insignificant.
+Missing historical support does not block startup or metadata reads. Unsupported input
 and unavailable historical decoding have distinct typed outcomes; no handler,
 implementation or revision substitution is permitted.
 

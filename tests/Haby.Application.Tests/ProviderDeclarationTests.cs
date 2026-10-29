@@ -91,8 +91,8 @@ public sealed class ProviderDeclarationTests
         Assert.False(Accepted(Valid.Replace("\"port\":5432", "\"port\":5432,\"port\":5433", StringComparison.Ordinal)));
         Assert.False(Accepted(Valid.Replace("unreachable.invalid", "bad/host", StringComparison.Ordinal)));
         Assert.Null(ProviderDeclarationInput.Parse(new byte[ProviderDeclarationInput.MaxBytes + 1]));
-        Assert.Throws<InvalidOperationException>(() => new ProviderDeclarationRegistry([Adapter, Adapter]));
-        Assert.Null(new ProviderDeclarationRegistry([]).Find(Adapter.Key));
+        Assert.Throws<InvalidOperationException>(() => new ProviderDeclarationRegistry([Adapter, Adapter], [Adapter.Codec]));
+        Assert.Null(new ProviderDeclarationRegistry([], []).Find(Adapter.Key));
     }
 
     private static bool Accepted(string json)

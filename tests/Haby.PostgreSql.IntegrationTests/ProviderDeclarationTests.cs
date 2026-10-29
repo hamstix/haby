@@ -189,17 +189,17 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         var updated = json.Replace("\"revision\":1", "\"revision\":2", StringComparison.Ordinal).Replace("sample.impl/v1", "sample.impl/v2", StringComparison.Ordinal);
         await using (var original = Services(connection, sample: true)) Assert.Equal(ProviderOutcome.Created, (await Apply(original, json)).Outcome);
         await using (var incompatible = Services(connection, sample: true, configure: s =>
-            s.AddSingleton<IProviderDeclarationAdapter>(new SampleDeclarationAdapter("sample.impl/v2"))))
+            s.AddSingleton<IProviderDeclarationAdapter>(p => new SampleDeclarationAdapter(p.GetRequiredService<SampleConfigurationCodec>(), "sample.impl/v2"))))
             Assert.Equal(ProviderOutcome.UnsupportedConfiguration, (await Apply(incompatible, updated)).Outcome);
         await using (var missingPrevious = Services(connection, configure: s =>
-            s.AddSingleton<IProviderConfigurationCodec, SampleConfigurationCodec>()
-                .AddSingleton<IProviderDeclarationAdapter>(new SampleDeclarationAdapter("sample.impl/v2", compatible: true))))
+            s.AddSingleton<SampleConfigurationCodec>().AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<SampleConfigurationCodec>())
+                .AddSingleton<IProviderDeclarationAdapter>(p => new SampleDeclarationAdapter(p.GetRequiredService<SampleConfigurationCodec>(), "sample.impl/v2", compatible: true))))
         {
             Assert.Equal(ProviderOutcome.Found, (await missingPrevious.GetRequiredService<ProviderAdministration>().GetAsync("pilot", "sample", 1, default)).Outcome);
             Assert.Equal(ProviderOutcome.ConfigurationUnavailable, (await Apply(missingPrevious, updated)).Outcome);
         }
         await using (var compatible = Services(connection, sample: true, configure: s =>
-            s.AddSingleton<IProviderDeclarationAdapter>(new SampleDeclarationAdapter("sample.impl/v2", compatible: true))))
+            s.AddSingleton<IProviderDeclarationAdapter>(p => new SampleDeclarationAdapter(p.GetRequiredService<SampleConfigurationCodec>(), "sample.impl/v2", compatible: true))))
         {
             Assert.Equal(ProviderOutcome.RevisionContentConflict, (await Apply(compatible, updated.Replace("\"revision\":2", "\"revision\":1", StringComparison.Ordinal))).Outcome);
             Assert.Equal(ProviderOutcome.Created, (await Apply(compatible, updated)).Outcome);
@@ -386,6 +386,56 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         Declaration.Replace("\"revision\":1", "\"revision\":" + revision, StringComparison.Ordinal)
             .Replace("unreachable.invalid", host, StringComparison.Ordinal).Replace("\"postgres\"", "\"" + database + "\"", StringComparison.Ordinal)
             .Replace("pg-main", name, StringComparison.Ordinal);
+
+    [Fact]
+    public async Task Generic_equivalence_checks_exact_secret_sets_even_when_adapter_compares_only_settings()
+    {
+        var connection = await Database();
+        await using (var arrange = Services(connection))
+        {
+            using var material = new SecretMaterial([1, 2, 3]);
+            await arrange.GetRequiredService<SecretAdministration>().CreateAsync("pilot", "other-admin", Guid.NewGuid(), material, "actor", default);
+        }
+        await using (var arrange = Context(connection))
+        {
+            var secret = await arrange.Secrets.AsNoTracking().SingleAsync(x => x.Name == "admin");
+            // Metadata-only version fixture: apply must not require or read a material payload.
+            arrange.SecretVersions.Add(new SecretVersionRow
+            { Id = Guid.CreateVersion7(), SecretId = secret.Id, Number = 2, ProtectionFormat = "Plaintext", FormatVersion = 1 });
+            await arrange.SaveChangesAsync();
+        }
+        await using var services = Services(connection, configure: s => s
+            .AddSingleton<CredentialSampleCodec>()
+            .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<CredentialSampleCodec>())
+            .AddSingleton<IProviderDeclarationAdapter, CredentialSampleAdapter>());
+        var original = Input("admin", secondary: true);
+        Assert.Equal(ProviderOutcome.Created, (await Apply(services, original)).Outcome);
+        Assert.Equal(ProviderOutcome.ExistingEquivalent, (await Apply(services, Input("admin", secondary: true, reverse: true))).Outcome);
+        Assert.Equal(ProviderOutcome.RevisionContentConflict, (await Apply(services, Input("other-admin", secondary: true))).Outcome);
+        Assert.Equal(ProviderOutcome.RevisionContentConflict, (await Apply(services,
+            Input("admin", secondary: true).Replace("\"version\":1", "\"version\":2", StringComparison.Ordinal))).Outcome);
+        Assert.Equal(ProviderOutcome.RevisionContentConflict, (await Apply(services, Input("admin", secondary: false))).Outcome);
+        var withoutSecondary = Input("admin", secondary: false).Replace("\"name\":\"credential-sample\"", "\"name\":\"credential-other\"", StringComparison.Ordinal);
+        Assert.Equal(ProviderOutcome.Created, (await Apply(services, withoutSecondary)).Outcome);
+        Assert.Equal(ProviderOutcome.RevisionContentConflict, (await Apply(services,
+            original.Replace("\"name\":\"credential-sample\"", "\"name\":\"credential-other\"", StringComparison.Ordinal))).Outcome);
+        await using var check = Context(connection);
+        Assert.Equal(2, await check.ProviderConfigurationRevisions.CountAsync());
+        Assert.Equal(3, await check.ProviderRevisionSecretRefs.CountAsync());
+        Assert.True(await check.ProviderConfigurationRevisions.AllAsync(r => r.ConfirmationActor == null));
+
+        static string Input(string credential, bool secondary, bool reverse = false)
+        {
+            var primary = "\"credential\":{\"secretName\":\"" + credential + "\",\"version\":1}";
+            var extra = "\"secondary\":{\"secretName\":\"admin\",\"version\":1}";
+            var refs = secondary ? (reverse ? extra + "," + primary : primary + "," + extra) : primary;
+            return """
+                {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"credential-sample","environment":"pilot"},
+                "spec":{"revision":1,"providerKind":"credential-sample/v1","configurationContract":"credential-sample.configuration/v1",
+                "implementationId":"credential-sample.impl/v1","properties":{"Target":"sample","ImplementationId":"sample.impl/v1"},"secretRefs":{REFS}}}
+                """.Replace("REFS", refs, StringComparison.Ordinal);
+        }
+    }
     private static ValueTask<ProviderResult> Apply(ServiceProvider services, string? json = null, bool confirm = false, long? previous = null) =>
         services.GetRequiredService<ProviderAdministration>().ApplyAsync(Encoding.UTF8.GetBytes(json ?? Declaration), null, confirm, previous, "actor", default);
 
@@ -414,7 +464,9 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
             .AddPostgreSqlProviderConfigurationStore().AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
             .AddPostgreSqlProviderConfigurationCodec().AddSingleton(TimeProvider.System)
             .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>().AddPostgreSqlDurableDesiredStateCommitter();
-        if (sample) services.AddSingleton<IProviderConfigurationCodec, SampleConfigurationCodec>().AddSingleton<IProviderDeclarationAdapter, SampleDeclarationAdapter>();
+        if (sample) services.AddSingleton<SampleConfigurationCodec>()
+                .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<SampleConfigurationCodec>())
+                .AddSingleton<IProviderDeclarationAdapter, SampleDeclarationAdapter>();
         if (intercept is not null) services.AddDbContextFactory<ManifestCatalogDbContext>(o => o.UseNpgsql(connection).AddInterceptors(intercept));
         configure?.Invoke(services);
         return services.BuildServiceProvider();
@@ -441,10 +493,52 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
     }
 }
 
-internal sealed class SampleDeclarationAdapter(string implementation = "sample.impl/v1", bool compatible = false) : IProviderDeclarationAdapter
+internal sealed record CredentialSampleConfiguration(string Target, string SecretId, string SecretVersionId,
+    string? SecondarySecretId, string? SecondarySecretVersionId);
+
+internal sealed class CredentialSampleCodec : ProviderConfigurationCodec<CredentialSampleConfiguration>
+{
+    public override string ProviderKindId => "credential-sample/v1";
+    public override string ShapeId => "credential-sample.configuration/v1";
+    public override int PayloadFormatVersion => 1;
+    public override PreparedProviderConfiguration Encode(CredentialSampleConfiguration value)
+    {
+        var refs = new List<ProviderConfigurationSecretReference>
+        { new("credential", new(SecretId.Parse(value.SecretId), SecretVersionId.Parse(value.SecretVersionId))) };
+        if (value.SecondarySecretId is not null) refs.Add(new("secondary", new(SecretId.Parse(value.SecondarySecretId), SecretVersionId.Parse(value.SecondarySecretVersionId!))));
+        return new(ProviderKindId, new(1, value.Target), "credential-sample.impl/v1", ShapeId, 1,
+            JsonSerializer.Serialize(value, CredentialSampleJsonContext.Default.CredentialSampleConfiguration), refs);
+    }
+    public override CredentialSampleConfiguration DecodeTyped(string payloadJson) =>
+        JsonSerializer.Deserialize(payloadJson, CredentialSampleJsonContext.Default.CredentialSampleConfiguration)!;
+}
+
+internal sealed class CredentialSampleAdapter(CredentialSampleCodec codec) : IProviderDeclarationAdapter
+{
+    public ProviderAdapterKey Key { get; } = new("credential-sample/v1", "credential-sample.configuration/v1", "credential-sample.impl/v1");
+    public IProviderConfigurationCodec Codec => codec;
+    public IReadOnlyList<string> RequiredSecretSlots => ["credential"];
+    public IReadOnlyList<string> AllowedSecretSlots => ["credential", "secondary"];
+    public object ParseProperties(JsonElement properties) => properties.Deserialize(SampleConfigurationJsonContext.Default.SampleConfiguration)!;
+    public object Bind(object properties, IReadOnlyDictionary<string, SecretRef> secrets)
+    {
+        secrets.TryGetValue("secondary", out var extra);
+        return new CredentialSampleConfiguration(((SampleConfiguration)properties).Target, secrets["credential"].SecretId.ToString(),
+            secrets["credential"].SecretVersionId.ToString(), extra?.SecretId.ToString(), extra?.SecretVersionId.ToString());
+    }
+    public bool CanReplace(ProviderAdapterKey previous) => previous == Key;
+    // Deliberately settings-only: the generic retry boundary must enforce credential identity.
+    public bool Equivalent(object previous, object candidate) => SameEndpoint(previous, candidate);
+    public bool SameEndpoint(object previous, object candidate) => ((CredentialSampleConfiguration)previous).Target == ((CredentialSampleConfiguration)candidate).Target;
+}
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(CredentialSampleConfiguration))]
+internal partial class CredentialSampleJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
+
+internal sealed class SampleDeclarationAdapter(SampleConfigurationCodec codec, string implementation = "sample.impl/v1", bool compatible = false) : IProviderDeclarationAdapter
 {
     public ProviderAdapterKey Key { get; } = new("sample/v1", "sample.configuration/v1", implementation);
-    public IProviderConfigurationCodec Codec { get; } = new SampleConfigurationCodec();
+    public IProviderConfigurationCodec Codec => codec;
     public IReadOnlyList<string> RequiredSecretSlots => [];
     public object ParseProperties(JsonElement properties) => properties.Deserialize(SampleConfigurationJsonContext.Default.SampleConfiguration)
         ?? throw new ArgumentException("Invalid sample.");

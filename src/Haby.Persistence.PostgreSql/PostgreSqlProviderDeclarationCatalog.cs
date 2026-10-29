@@ -54,8 +54,16 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
                 {
                     var decoded = await DecodeAsync(context, instance, existing, cancellationToken);
                     if (decoded is null) return new(ProviderOutcome.ConfigurationUnavailable);
+                    var storedReferences = await context.ProviderRevisionSecretRefs.AsNoTracking().Where(x =>
+                        x.ProviderInstanceId == instance.Id && x.RevisionNumber == spec.Revision)
+                        .Select(x => new { x.Slot, x.SecretId, x.SecretVersionId }).ToArrayAsync(cancellationToken);
+                    // Exact reference identity is a generic retry invariant, independent of
+                    // whether the typed adapter's settings comparison includes credentials.
+                    var sameReferences = storedReferences.Length == references.Count && storedReferences.All(x =>
+                        references.TryGetValue(x.Slot, out var exact) && x.SecretId == Guid.Parse(exact.SecretId.ToString()) &&
+                        x.SecretVersionId == Guid.Parse(exact.SecretVersionId.ToString()));
                     var equivalent = existing.ImplementationId == prepared.ImplementationId &&
-                        existing.ConfigurationShapeId == prepared.ShapeId && adapter.Equivalent(decoded, candidate);
+                        existing.ConfigurationShapeId == prepared.ShapeId && sameReferences && adapter.Equivalent(decoded, candidate);
                     return equivalent ? new(ProviderOutcome.ExistingEquivalent, await MetadataAsync(context, instance, existing, cancellationToken)) :
                         new(ProviderOutcome.RevisionContentConflict);
                 }
