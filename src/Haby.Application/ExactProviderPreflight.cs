@@ -17,14 +17,15 @@ public interface IProviderPreflightRevisionReader
 public interface IProviderPreflightHandler
 {
     IReadOnlyList<ProviderAdapterKey> Keys { get; }
-    IProviderConfigurationCodec Codec { get; }
+    /// <summary>Explicit compatible readers. Each decodes a known persisted format into a type this handler accepts.</summary>
+    IReadOnlyList<IProviderConfigurationCodec> Readers { get; }
     ValueTask<ProviderPreflightResult> CheckAsync(EnvironmentRecordId environment, object configuration, CancellationToken cancellationToken);
 }
 
-public abstract class ProviderPreflightHandler<TConfiguration>(ProviderConfigurationCodec<TConfiguration> codec)
+public abstract class ProviderPreflightHandler<TConfiguration>(params ProviderConfigurationCodec<TConfiguration>[] readers)
     : IProviderPreflightHandler where TConfiguration : class
 {
-    public IProviderConfigurationCodec Codec => codec;
+    public IReadOnlyList<IProviderConfigurationCodec> Readers { get; } = Array.AsReadOnly<IProviderConfigurationCodec>(readers.ToArray());
     public abstract IReadOnlyList<ProviderAdapterKey> Keys { get; }
     public abstract ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment,
         TConfiguration configuration, CancellationToken cancellationToken);
@@ -43,17 +44,21 @@ public sealed class ProviderPreflightRegistry
         var readers = codecs.ToArray();
         foreach (var handler in handlers)
         {
-            if (handler.Keys.Count is < 1 or > 64 || readers.Count(c => ReferenceEquals(c, handler.Codec)) != 1)
+            if (handler.Keys.Count is < 1 or > 64 || handler.Readers.Count is < 1 or > 64 ||
+                handler.Readers.Distinct(ReferenceEqualityComparer.Instance).Count() != handler.Readers.Count ||
+                handler.Readers.Any(reader => readers.Count(c => ReferenceEquals(c, reader)) != 1 ||
+                    reader.PayloadFormatVersion <= 0 || !handler.Keys.Any(key =>
+                        key.ProviderKind == reader.ProviderKindId && key.ConfigurationContract == reader.ShapeId)))
                 throw new InvalidOperationException("Provider preflight registration is invalid.");
             foreach (var key in handler.Keys)
                 if (!ProviderDeclarationRegistry.ValidId(key.ImplementationId) ||
                     !ProviderDeclarationRegistry.ValidId(key.ProviderKind) || !ProviderDeclarationRegistry.ValidId(key.ConfigurationContract) ||
-                    key.ProviderKind != handler.Codec.ProviderKindId || key.ConfigurationContract != handler.Codec.ShapeId ||
-                    handler.Codec.PayloadFormatVersion <= 0 || !_handlers.TryAdd(key, handler))
+                    !handler.Readers.Any(reader => key.ProviderKind == reader.ProviderKindId && key.ConfigurationContract == reader.ShapeId) ||
+                    !_handlers.TryAdd(key, handler))
                     throw new InvalidOperationException("Provider preflight registration is invalid or ambiguous.");
         }
         foreach (var declaration in declarations)
-            if (!_handlers.TryGetValue(declaration.Key, out var handler) || !ReferenceEquals(handler.Codec, declaration.Codec))
+            if (!_handlers.TryGetValue(declaration.Key, out var handler) || !handler.Readers.Any(reader => ReferenceEquals(reader, declaration.Codec)))
                 throw new InvalidOperationException("Provider declaration and preflight registrations are inconsistent.");
     }
     public IProviderPreflightHandler? Find(ProviderAdapterKey key) => _handlers.GetValueOrDefault(key);
@@ -77,7 +82,7 @@ public sealed class ExactProviderRevisionPreflight(IProviderPreflightRevisionRea
             if (handler is null) return new(ProviderPreflightOutcome.HandlerUnavailable);
             var revision = await reader.ReadAsync(environment, target, deadline.Token);
             if (revision is null) return new(ProviderPreflightOutcome.RevisionUnavailable);
-            if (revision.Key != key || !ReferenceEquals(handler.Codec, revision.Codec)) return new(ProviderPreflightOutcome.ConfigurationUnavailable);
+            if (revision.Key != key || !handler.Readers.Any(reader => ReferenceEquals(reader, revision.Codec))) return new(ProviderPreflightOutcome.ConfigurationUnavailable);
             var result = await handler.CheckAsync(environment, revision.Configuration, deadline.Token);
             cancellationToken.ThrowIfCancellationRequested();
             return deadline.IsCancellationRequested ? new(ProviderPreflightOutcome.DeadlineExceeded) : result;

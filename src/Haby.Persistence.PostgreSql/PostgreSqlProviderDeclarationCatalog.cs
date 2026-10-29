@@ -7,8 +7,9 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>EF-owned declaration transaction. No secret material or external Provider access.</summary>
 public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    ProviderDeclarationRegistry registry) : IProviderDeclarationCatalog
+    ProviderDeclarationRegistry registry, IEnumerable<IProviderConfigurationCodec> codecs) : IProviderDeclarationCatalog
 {
+    private readonly IProviderConfigurationCodec[] _codecs = codecs.ToArray();
     public async ValueTask<ProviderResult> ApplyAsync(EnvironmentRecordId environment, ProviderDeclaration declaration,
         object properties, IProviderDeclarationAdapter adapter, bool confirmIdentity, long? expectedPreviousRevision,
         string actor, CancellationToken cancellationToken)
@@ -145,10 +146,13 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
         ProviderConfigurationRevisionRow row, CancellationToken cancellationToken)
     {
         var adapter = registry.Find(new(instance.ProviderKindId, row.ConfigurationShapeId, row.ImplementationId));
-        if (adapter is null || !row.IsSealed || adapter.Codec.PayloadFormatVersion != row.PayloadFormatVersion) return null;
-        var decoded = adapter.Codec.Decode(row.PayloadJson);
-        var prepared = adapter.Codec.Encode(decoded);
-        PostgreSqlProviderConfigurationStore.ValidatePrepared(adapter.Codec, prepared);
+        if (adapter is null || !row.IsSealed) return null;
+        var reader = _codecs.SingleOrDefault(codec => codec.ProviderKindId == instance.ProviderKindId &&
+            codec.ShapeId == row.ConfigurationShapeId && codec.PayloadFormatVersion == row.PayloadFormatVersion);
+        if (reader is null) return null;
+        var decoded = reader.Decode(row.PayloadJson);
+        var prepared = reader.Encode(decoded);
+        PostgreSqlProviderConfigurationStore.ValidatePrepared(reader, prepared);
         var refs = await context.ProviderRevisionSecretRefs.AsNoTracking().Where(x => x.ProviderInstanceId == instance.Id &&
             x.RevisionNumber == row.RevisionNumber).ToArrayAsync(cancellationToken);
         return prepared.PayloadJson == row.PayloadJson && prepared.ImplementationId == row.ImplementationId &&

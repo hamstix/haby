@@ -35,7 +35,19 @@ Audit and binding commit together, and one alias per instance remains enforced.
 No new storage workflow procedures, triggers, payload formats or migrations.
 
 Current handlers explicitly list exact kind/contract/implementation combinations
-and use the same codec singleton as declaration acceptance and persisted reload.
+and their accepted typed readers. Handler identity is independent of payload
+format/version. A handler can accept several contracts and persisted formats;
+only its explicitly listed, registered reader singletons can supply decoded inputs.
+The generic typed handler accepts codecs for its configuration CLR type; a handler
+bridging different typed DTO versions must explicitly handle those known types.
+Current declaration writers must still be the exact registered reload codec and
+appear in the selected handler's reader list. `IsCompatibilityReader` marks a codec
+as historical read/re-encode only: it cannot accept declarations or prepare new
+revisions. This permits several format readers for one CLR type while keeping one
+unambiguous writer. The persisted kind/contract/format triple remains unique.
+Declaration retry and baseline checks also select the exact persisted reader,
+never the current writer for historical payload bytes. Missing or unaccepted
+readers fail closed. Historical payloads and associations are never rewritten.
 Overlaps and inconsistent current registrations fail startup. Missing historical
 support permits startup and metadata reads; checks fail closed without fallback.
 Preflight is point-in-time evidence, not a guarantee of future provisioning

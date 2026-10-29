@@ -32,7 +32,7 @@ public sealed class ProviderDeclarationRegistry
         if (_adapters.GroupBy(x => x.Key).Any(g => g.Count() != 1) || _adapters.Any(x =>
                 !ValidId(x.Key.ProviderKind) || !ValidId(x.Key.ConfigurationContract) || !ValidId(x.Key.ImplementationId) ||
                 x.Codec.ProviderKindId != x.Key.ProviderKind || x.Codec.ShapeId != x.Key.ConfigurationContract ||
-                x.Codec.PayloadFormatVersion <= 0 ||
+                x.Codec.PayloadFormatVersion <= 0 || x.Codec.IsCompatibilityReader ||
                 x.AllowedSecretSlots.Count > 64 || x.AllowedSecretSlots.Any(s => !ValidId(s)) ||
                 x.AllowedSecretSlots.Distinct(StringComparer.Ordinal).Count() != x.AllowedSecretSlots.Count ||
                 x.RequiredSecretSlots.Distinct(StringComparer.Ordinal).Count() != x.RequiredSecretSlots.Count ||

@@ -17,7 +17,7 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
     {
         _contexts = contexts;
         _codecs = codecs.ToArray();
-        if (_codecs.GroupBy(codec => codec.ConfigurationType).Any(group => group.Count() != 1) ||
+        if (_codecs.Where(codec => !codec.IsCompatibilityReader).GroupBy(codec => codec.ConfigurationType).Any(group => group.Count() != 1) ||
             _codecs.GroupBy(codec => (codec.ProviderKindId, codec.ShapeId, codec.PayloadFormatVersion))
                 .Any(group => group.Count() != 1))
             throw new InvalidOperationException("Provider configuration codec registration is ambiguous.");
@@ -204,7 +204,7 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
 
     private PreparedProviderConfiguration Prepare<TConfiguration>(TConfiguration configuration) where TConfiguration : class
     {
-        var codec = _codecs.SingleOrDefault(item => item.ConfigurationType == typeof(TConfiguration))
+        var codec = _codecs.SingleOrDefault(item => !item.IsCompatibilityReader && item.ConfigurationType == typeof(TConfiguration))
             ?? throw new InvalidOperationException("Provider configuration shape is unavailable.");
         var prepared = codec.Encode(configuration);
         ValidatePrepared(codec, prepared);

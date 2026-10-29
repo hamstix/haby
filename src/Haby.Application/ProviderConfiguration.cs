@@ -29,8 +29,9 @@ public sealed record PreparedProviderConfiguration(string ProviderKindId, Provid
 /// <summary>Build-time registered typed codec. Payloads never contain secret material.</summary>
 /// <remarks>
 /// A persisted kind, shape and format triple is a frozen byte contract: exact reads re-encode and compare
-/// the JSON text. The current registry permits one codec per configuration CLR type. Changing its serialized
-/// bytes requires an explicit compatibility reader or migration before historical revisions can be used.
+/// the JSON text. The registry permits one writer per configuration CLR type and explicit read-only
+/// compatibility codecs for historical formats. Changing serialized bytes requires an explicit compatibility
+/// reader or migration before historical revisions can be used.
 /// </remarks>
 public interface IProviderConfigurationCodec
 {
@@ -38,6 +39,8 @@ public interface IProviderConfigurationCodec
     string ProviderKindId { get; }
     string ShapeId { get; }
     int PayloadFormatVersion { get; }
+    /// <summary>Decode and re-encode frozen history only; cannot accept declarations or prepare new revisions.</summary>
+    bool IsCompatibilityReader => false;
     PreparedProviderConfiguration Encode(object configuration);
     object Decode(string payloadJson);
 }
@@ -50,6 +53,7 @@ public abstract class ProviderConfigurationCodec<TConfiguration> : IProviderConf
     public abstract string ProviderKindId { get; }
     public abstract string ShapeId { get; }
     public abstract int PayloadFormatVersion { get; }
+    public virtual bool IsCompatibilityReader => false;
     public abstract PreparedProviderConfiguration Encode(TConfiguration configuration);
     public abstract TConfiguration DecodeTyped(string payloadJson);
 

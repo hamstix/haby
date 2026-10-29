@@ -45,12 +45,45 @@ public sealed class ExactProviderPreflightTests
         cancelled.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await broken.CheckAsync(environment, binding, cancelled.Token));
     }
+    [Theory]
+    [InlineData("queue.settings/v1")]
+    [InlineData("queue.settings/v2")]
+    public async Task Typed_handler_accepts_only_its_explicit_registered_format_and_contract_readers(string historicalContract)
+    {
+        var current = new Codec(2);
+        var historical = new Codec(1, historicalContract);
+        var handler = new CompatibleHandler(current, historical);
+        var registry = new ProviderPreflightRegistry([handler], [current, historical], []);
+        var reader = new Reader(new(new("queue/v1", historicalContract, "impl-a"), historical, new Settings(42)));
+        var environment = EnvironmentRecordId.New();
+        var binding = new ProviderAliasBinding(ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1));
+        Assert.Equal(ProviderPreflightOutcome.Ready, (await new ExactProviderRevisionPreflight(reader, registry).CheckAsync(environment, binding, default)).Outcome);
+        Assert.Equal(1, handler.Calls);
+        // Merely registering a decoder never makes it an accepted input to another handler.
+        var restricted = new CompatibleHandler(current);
+        var restrictedRegistry = new ProviderPreflightRegistry([restricted], [current, historical], []);
+        var result = await new ExactProviderRevisionPreflight(reader, restrictedRegistry).CheckAsync(environment, binding, default);
+        Assert.Equal(historicalContract == current.ShapeId ? ProviderPreflightOutcome.ConfigurationUnavailable : ProviderPreflightOutcome.HandlerUnavailable, result.Outcome);
+        Assert.Equal(0, restricted.Calls);
+    }
+    private sealed class CompatibleHandler(params Codec[] readers) : ProviderPreflightHandler<Settings>(readers)
+    {
+        public int Calls;
+        public override IReadOnlyList<ProviderAdapterKey> Keys => Readers.Select(reader =>
+            new ProviderAdapterKey(reader.ProviderKindId, reader.ShapeId, "impl-a")).Distinct().ToArray();
+        public override ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment, Settings configuration, CancellationToken token)
+        {
+            Assert.Equal(42, configuration.QueueLimit);
+            Calls++;
+            return ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.Ready));
+        }
+    }
     private sealed record Settings(int QueueLimit);
-    private sealed class Codec : ProviderConfigurationCodec<Settings>
+    private sealed class Codec(int format = 1, string contract = "queue.settings/v1") : ProviderConfigurationCodec<Settings>
     {
         public override string ProviderKindId => "queue/v1";
-        public override string ShapeId => "queue.settings/v1";
-        public override int PayloadFormatVersion => 1;
+        public override string ShapeId => contract;
+        public override int PayloadFormatVersion => format;
         public override PreparedProviderConfiguration Encode(Settings value) => throw new NotSupportedException();
         public override Settings DecodeTyped(string json) => throw new NotSupportedException();
     }
