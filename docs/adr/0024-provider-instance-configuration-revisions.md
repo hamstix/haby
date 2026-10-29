@@ -25,7 +25,8 @@ exception.
 ## Decision
 
 ADR-028 defines the operator bootstrap workflow and Provider JSON declarations.
-The first input path uses exact SecretRefs. A separately implemented future
+The first input path resolves named explicit-version references to exact
+SecretRefs under ADR-029/030. A separately implemented future
 input-only credential block may extract material into SecretStore before
 accepting a revision; persisted configuration remains non-secret under this ADR.
 
@@ -43,27 +44,25 @@ An alias is unique within its Environment. More than one alias for an instance
 is deferred until a concrete use case justifies it. Alias reassignment between
 instances is explicit and audited; it never rewrites historical resolutions.
 
-The identity of the external target must not be silently changed by a new
-configuration revision. The generic instance persists an opaque, non-secret,
-versioned target identity produced by its Provider contract; it does not
-interpret Provider-specific address fields. A revision may belong to that
-instance only when the registered Provider-specific validator proves that its
-declared target matches the instance's persisted target identity. Unknown
-target-identity versions or an unprovable match fail closed. The Provider kind,
-target identity and `ImplementationId` are distinct: the same external target
-may use another compatible implementation in a later revision.
+A ProviderInstance identifies a logical external instance recognized by the
+operator. Its endpoint is mutable configuration-revision data, not proof of
+physical target identity. Moving PostgreSQL or restoring it behind a new
+address may preserve the logical instance; an independent external instance
+requires a new Provider. Provider kind and ImplementationId remain distinct.
 
-For the first PostgreSQL pilot, the PostgreSQL adapter derives the declared
-target identity from the configured host name or IP address and port. Changing
-either requires a new ProviderInstance; changing credentials,
-maintenance-database settings or a compatible adapter creates a new
-configuration revision of the same instance. An operator must explicitly
-select the new instance through an alias switch. This is a PostgreSQL pilot
-policy, not a pair of universal `ProviderInstance` columns or a rule for other
-Provider kinds. It protects against an unnoticed configuration edit; it does
-not prove that DNS or the server behind an unchanged endpoint still identifies
-the same PostgreSQL cluster. A successful connection test alone does not
-establish target identity.
+[ADR-030](0030-provider-declarations-and-logical-identity.md) supersedes the
+original rule that a host/port change requires a new instance. The typed
+adapter detects endpoint changes against the highest accepted revision. Such
+a change requires explicit, audited confirmation that the logical identity
+is retained, conditional on that previous revision remaining current. Network
+preflight cannot prove physical cluster identity. Alias switching remains
+explicit; accepted Plans and generations keep their pinned revisions.
+
+Existing versioned target-identity values derived from endpoints are historical
+compatibility data, not a permanent equality condition for future revisions.
+Implementation changes must preserve old payloads and exact references through
+explicit compatibility handling; do not rewrite historical revisions or merged
+migrations to implement this policy.
 
 ### Immutable configuration revisions
 
@@ -97,7 +96,7 @@ Haby must not silently substitute another implementation.
 
 The persisted ProviderInstance and ProviderConfigurationRevision envelopes are
 Provider-neutral. The instance records its identity, Environment, opaque
-versioned Provider kind and declared target identity. The revision records its
+versioned Provider kind and logical identity metadata. The revision records its
 instance and revision number, exact `ImplementationId`, exact versioned
 configuration-shape ID and immutable serialized payload. Neither generic
 table, generic domain type nor generic application contract has columns or
@@ -107,8 +106,8 @@ slot. Adding another Provider kind must not require adding such columns or
 altering the generic Provider tables.
 
 The shape's owner registers a typed codec and validator at build time. The
-PostgreSQL adapter owns the first PostgreSQL configuration DTO, target-identity
-derivation, schema and semantic validation, and SecretRef extraction. The core
+PostgreSQL adapter owns the first PostgreSQL configuration DTO, endpoint-change
+detection, schema and semantic validation, and SecretRef extraction. The core
 persists and selects the exact shape ID and payload without interpreting
 Provider-specific members. A typed boundary must validate and serialize the
 payload before storage and decode it when the pinned revision is used; a
@@ -251,7 +250,8 @@ mode and an explicit operational decision about its threat and backup boundary.
 Focused tests must cover uniqueness, immutability, wrong-Environment and
 missing-SecretRef rejection, failed validation leaving the alias untouched,
 concurrent alias switches, stale Plans, adapter unavailability and retention
-of pinned revisions. Also cover target-identity mismatch, unavailable shape
+of pinned revisions. Also cover unconfirmed endpoint changes, stale identity
+confirmation, old pinned reads after confirmed transfer, unavailable shape
 codecs, payload/SecretRef-association mismatch and the addition of a second
 Provider shape without a generic-table migration. Real-PostgreSQL tests must
 prove transaction and restart behavior with separate `DbContext` instances
@@ -264,7 +264,8 @@ active-revision pointer. Revision preparation cannot disturb the selected
 configuration. The price is that each switch requires a server-side preflight
 and a durable, auditable alias compare-and-swap.
 
-The PostgreSQL-specific endpoint target rule, Provider-neutral persistence,
+The ADR-030 logical-identity and explicit endpoint-confirmation rule replaces
+the original fixed-endpoint policy. Provider-neutral persistence,
 typed versioned PostgreSQL configuration, finite Plan expiry with explicit
 closure, and optional `Plaintext` mode for the isolated pilot are accepted
 here. Implementation still must choose and document a concrete Plan duration

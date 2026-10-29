@@ -375,6 +375,7 @@ Objective: provide a useful product-neutral distribution.
 - [ ] Optional Consul publisher only if it can remain product-neutral.
 - [ ] Add external `ISecretStore` and `IKeyEncryptionProvider` adapters only when deployment requirements justify them, with OpenBao/Vault KV and Transit as initial candidates.
 - [ ] Keep dynamic leased credentials behind a separate capability if a supported provider requires them.
+- [ ] Optionally add input-only Provider credential blocks after separately specifying atomic secret/revision acceptance and retry semantics; named secret creation followed by reference-only Provider apply remains sufficient for bootstrap and the usable pilot.
 - [ ] Integration-test containers for supported external systems.
 - [ ] Plugin compatibility and upgrade documentation.
 
@@ -576,8 +577,12 @@ administrative secrets, explicit operator version numbers, immutable internal
 SecretRef resolution and atomic durable creation receipts. Rotation and secret
 disclosure remain separate work.
 Implement Environment/metadata, secret input and Provider revision/alias slices
-before a separate optional input-only credential-block slice. YAML remains
-exclusive to local CLI configuration.
+under [ADR-030](docs/adr/0030-provider-declarations-and-logical-identity.md).
+ProviderInstance retains logical identity across explicitly confirmed endpoint
+changes; exact historical revisions remain pinned. Deliver declarations and
+revisions before exact preflight/alias administration. Optional input-only
+credential blocks are deferred to M6, outside this pilot. YAML remains exclusive
+to local CLI configuration.
 
 ADR-023 fixes the PostgreSQL manifest-catalog persistence and single-instance
 startup-migration policy. ADR-004 fixes the alpha API transport. Before exposing
@@ -742,6 +747,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-027](docs/adr/0027-operator-cli-foundation.md): Native AOT operator CLI, explicit commands, local contexts, output formats and secret-disclosure boundary.
 - [ADR-028](docs/adr/0028-operator-bootstrap-and-provider-manifests.md): Named operator bootstrap, Provider JSON declarations, SecretRef-first credential input and local configuration policy.
 - [ADR-029](docs/adr/0029-named-administrative-secret-bootstrap.md): Named administrative secrets, explicit versions and durable creation receipts.
+- [ADR-030](docs/adr/0030-provider-declarations-and-logical-identity.md): Provider JSON declarations, confirmed logical-identity continuity and exact typed preflight dispatch.
 
 ## Out of scope for the first milestones
 

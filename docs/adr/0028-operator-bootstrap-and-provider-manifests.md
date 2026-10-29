@@ -119,13 +119,13 @@ The first Provider manifest accepts secret references without inline material.
 An operator reference uses a Secret name and explicit version number; the
 server resolves it to an exact internal SecretRef when accepting the Provider
 revision and persists that resolution immutably under ADR-029. An implicit
-`latest` is forbidden. The exact Provider input schema remains to be agreed.
+`latest` is forbidden. ADR-030 defines the accepted Provider input shape.
 Interactive secret creation uses hidden input; automation can explicitly use
 `--stdin`. Do not accept secret literals in command-line arguments or print
 secret values.
 
-A later slice may add a separate input-only credential block alongside the
-non-secret Provider configuration. It is not a generic Provider property or
+A later M6 backlog item may add a separate input-only credential block alongside
+the non-secret Provider configuration. It is not a generic Provider property or
 part of the stored immutable payload. Each declared credential input maps to
 a registered Provider-defined secret slot. Supplying inline material and a
 SecretRef for the same slot is invalid.
@@ -158,12 +158,14 @@ credential; local contexts must not become storage for Provider passwords.
 
 First expose Environment and metadata selection, then scoped secret creation,
 then Provider declarations/revisions and revision checks/alias switching.
-Implement the input-only credential block in a separate later slice after the
-SecretRef workflow is verified. Local configuration writes retain ADR-027's
-comment/formatting and atomic replacement requirements.
+The input-only credential block is deferred to the optional M6 backlog and is
+not required for bootstrap or the usable alpha pilot. Separate secret creation
+and reference-only Provider application are sufficient. Local configuration
+writes retain ADR-027's comment/formatting and atomic replacement requirements.
 
 Before each slice, finalize the relevant DTO/schema, name constraints,
 idempotency outcomes and tests. This decision accepts architecture and workflow,
-not a complete executable Provider manifest schema. It does not introduce a
-bootstrap wizard, stable public API, remote exposure, secret reveal, automatic
+not a complete executable Provider manifest schema; ADR-030 now specifies its
+accepted declaration contract. It does not introduce a bootstrap wizard,
+stable public API, remote exposure, secret reveal, automatic
 execution or a general plugin framework.
