@@ -10,7 +10,7 @@ public sealed partial class ManifestOperatorService(ManifestContractCatalog cata
     IManifestRevisionQuery revisions, PreviewImportedDatabase preview,
     IDurableDeploymentPlanner planner, DescribeDurablePlan descriptions, IEnvironmentQuery environments, IDurableDesiredStateCommitter committer,
     IDurableCreateOperationExecutor executor, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
-    ProviderAdministration providerAdministration) : ManifestOperator.ManifestOperatorBase
+    ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess) : ManifestOperator.ManifestOperatorBase
 {
     public override Task<ValidateReply> Validate(EnvelopeRequest request, ServerCallContext context)
     {

@@ -136,6 +136,7 @@ public sealed partial class OperatorHostIntegrationTests
         {
             services.RemoveAll<IProviderDeclarationAdapter>();
             services.RemoveAll<IProviderConfigurationCodec>();
+            services.RemoveAll<IProviderPreflightHandler>();
         }))
         {
             await host.StartAsync();

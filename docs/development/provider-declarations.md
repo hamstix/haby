@@ -98,4 +98,4 @@ habyctl provider apply --file provider.json --confirm-logical-identity --expecte
 
 The file's Environment is mandatory. Explicit `--environment` must match it;
 context supplies only registry selection for apply. Apply never connects,
-preflights, changes aliases or provisions. Preflight/alias commands belong to #96.
+preflights, changes aliases or provisions. Use [exact checks and checked alias commands](provider-check-alias.md) as separate steps.

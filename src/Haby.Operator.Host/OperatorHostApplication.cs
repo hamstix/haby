@@ -89,11 +89,19 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<PostgreSqlOperationRecoveryAdapter>();
         builder.Services.AddSingleton<OperationRecoveryAdapter>();
 
+        builder.Services.AddSingleton<PostgreSqlProviderRevisionPreflight>();
+        builder.Services.AddSingleton<IProviderPreflightHandler, PostgreSqlPreflightHandler>();
+        builder.Services.AddSingleton<ProviderPreflightRegistry>();
+        builder.Services.AddSingleton<IProviderRevisionPreflight, ExactProviderRevisionPreflight>();
+        builder.Services.AddPostgreSqlProviderAliasStore();
+        builder.Services.AddSingleton<ProviderAccessAdministration>();
+        builder.Services.AddSingleton<IProviderIdentityQuery, PostgreSqlProviderIdentityQuery>();
         configureServices?.Invoke(builder.Services);
         var app = builder.Build();
         // Validate only current-build registrations, never require handlers for every stored revision.
         _ = app.Services.GetRequiredService<ProviderDeclarationRegistry>();
         _ = app.Services.GetRequiredService<IProviderConfigurationStore>();
+        _ = app.Services.GetRequiredService<ProviderPreflightRegistry>();
         app.MapGrpcService<ManifestOperatorService>();
         app.MapGrpcReflectionService();
 

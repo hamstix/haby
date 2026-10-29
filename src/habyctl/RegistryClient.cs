@@ -17,6 +17,10 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken);
+    Task<ProviderAccessReply> GetProviderAliasAsync(GetProviderAliasRequest request, CancellationToken cancellationToken);
+    Task<ProviderAccessReply> SetProviderAliasAsync(SetProviderAliasRequest request, CancellationToken cancellationToken);
+
     Task<ProviderReply> ApplyProviderAsync(ApplyProviderRequest request, CancellationToken cancellationToken);
     Task<ProviderReply> GetProviderAsync(GetProviderRequest request, CancellationToken cancellationToken);
     Task<ListProvidersReply> ListProvidersAsync(ListProvidersRequest request, CancellationToken cancellationToken);
@@ -137,4 +141,10 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
     public async Task<ListProvidersReply> ListProvidersAsync(ListProvidersRequest request, CancellationToken cancellationToken) =>
         await _client.ListProvidersAsync(request, cancellationToken: cancellationToken);
     public void Dispose() => channel.Dispose();
+    public async Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken) =>
+        await _client.CheckProviderAsync(request, cancellationToken: cancellationToken);
+    public async Task<ProviderAccessReply> GetProviderAliasAsync(GetProviderAliasRequest request, CancellationToken cancellationToken) =>
+        await _client.GetProviderAliasAsync(request, cancellationToken: cancellationToken);
+    public async Task<ProviderAccessReply> SetProviderAliasAsync(SetProviderAliasRequest request, CancellationToken cancellationToken) =>
+        await _client.SetProviderAliasAsync(request, cancellationToken: cancellationToken);
 }

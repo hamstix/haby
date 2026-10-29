@@ -33,6 +33,19 @@ public sealed class PostgreSqlProviderRevisionPreflight(IProviderConfigurationSt
         if (deadline.IsCancellationRequested) return new(ProviderPreflightOutcome.DeadlineExceeded);
         if (configuration is null) return new(ProviderPreflightOutcome.RevisionUnavailable);
 
+        try { return await CheckConfigurationAsync(environment, configuration, deadline.Token); }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException(cancellationToken); }
+        catch (Exception) when (deadline.IsCancellationRequested)
+        { return new(ProviderPreflightOutcome.DeadlineExceeded); }
+    }
+
+    public async ValueTask<ProviderPreflightResult> CheckConfigurationAsync(EnvironmentRecordId environment,
+        PostgreSqlProviderConfiguration configuration, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(10));
         SecretMaterial? material;
         try { material = await secrets.ResolveAsync(environment, configuration.AdministratorPassword, deadline.Token); }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
@@ -94,7 +107,18 @@ public static class PostgreSqlProviderRevisionPreflightServiceCollectionExtensio
 {
     public static IServiceCollection AddPostgreSqlProviderRevisionPreflight(this IServiceCollection services)
     {
-        services.AddSingleton<IProviderRevisionPreflight, PostgreSqlProviderRevisionPreflight>();
+        services.AddSingleton<PostgreSqlProviderRevisionPreflight>();
+        services.AddSingleton<IProviderRevisionPreflight>(p => p.GetRequiredService<PostgreSqlProviderRevisionPreflight>());
         return services;
     }
+}
+
+public sealed class PostgreSqlPreflightHandler(PostgreSqlProviderConfigurationCodec codec,
+    PostgreSqlProviderRevisionPreflight preflight) : ProviderPreflightHandler<PostgreSqlProviderConfiguration>(codec)
+{
+    public override IReadOnlyList<ProviderAdapterKey> Keys { get; } =
+        [new(PostgreSqlProviderConfigurationCodec.Kind, PostgreSqlProviderConfigurationCodec.Shape, PostgreSqlDatabaseProvisioner.ImplementationId)];
+    public override ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment,
+        PostgreSqlProviderConfiguration configuration, CancellationToken cancellationToken) =>
+        preflight.CheckConfigurationAsync(environment, configuration, cancellationToken);
 }

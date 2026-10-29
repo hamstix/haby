@@ -42,6 +42,36 @@ internal static class ProviderCommands
                 { Environment = env, Name = parse.GetRequiredValue(revisionName), Revision = parse.GetValue(number) }, ct)), token));
         revisions.Subcommands.Add(revisionGet);
         group.Subcommands.Add(revisions);
+        var checkName = new Argument<string>("name");
+        var checkRevision = new Option<long>("--revision") { Required = true };
+        var check = new Command("check", "Check one exact saved revision without external mutations.") { checkName, checkRevision };
+        check.SetAction((parse, token) => context.ExecuteSecretAsync(parse.GetValue(environment), async (client, env, ct) =>
+            context.PrintProviderAccess("provider check", await client.CheckProviderAsync(new CheckProviderRequest
+            { Environment = env, Name = parse.GetRequiredValue(checkName), Revision = parse.GetValue(checkRevision) }, ct)), token));
+        group.Subcommands.Add(check);
+        var aliases = new Command("alias", "Inspect or conditionally change an exact Provider alias.");
+        aliases.SetAction(_ => context.MissingSubcommand());
+        var getAlias = new Argument<string>("alias");
+        var aliasGet = new Command("get", "Get an exact alias binding.") { getAlias };
+        aliasGet.SetAction((parse, token) => context.ExecuteSecretAsync(parse.GetValue(environment), async (client, env, ct) =>
+            context.PrintProviderAccess("provider alias get", await client.GetProviderAliasAsync(new GetProviderAliasRequest
+            { Environment = env, Alias = parse.GetRequiredValue(getAlias) }, ct)), token));
+        aliases.Subcommands.Add(aliasGet);
+        var setAlias = new Argument<string>("alias");
+        var provider = new Option<string?>("--provider");
+        var instance = new Option<string?>("--provider-instance-id");
+        var targetRevision = new Option<long>("--revision") { Required = true };
+        var absent = new Option<bool>("--expect-absent");
+        var oldProvider = new Option<string?>("--expected-provider");
+        var oldInstance = new Option<string?>("--expected-instance-id");
+        var oldRevision = new Option<long?>("--expected-revision");
+        var aliasSet = new Command("set", "Repeat preflight and atomically compare and set a binding.")
+            { setAlias, provider, instance, targetRevision, absent, oldProvider, oldInstance, oldRevision };
+        aliasSet.SetAction((parse, token) => context.SetProviderAliasAsync(parse.GetValue(environment), parse.GetRequiredValue(setAlias),
+            parse.GetValue(provider), parse.GetValue(instance), parse.GetValue(targetRevision), parse.GetValue(absent),
+            parse.GetValue(oldProvider), parse.GetValue(oldInstance), parse.GetValue(oldRevision), token));
+        aliases.Subcommands.Add(aliasSet);
+        group.Subcommands.Add(aliases);
         return group;
     }
 }

@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Provider-neutral, Environment-scoped append-only configuration storage.</summary>
-public sealed class PostgreSqlProviderConfigurationStore : IProviderConfigurationStore
+public sealed class PostgreSqlProviderConfigurationStore : IProviderConfigurationStore, IProviderPreflightRevisionReader
 {
     private readonly IDbContextFactory<ManifestCatalogDbContext> _contexts;
     private readonly IProviderConfigurationCodec[] _codecs;
@@ -17,7 +17,7 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
     {
         _contexts = contexts;
         _codecs = codecs.ToArray();
-        if (_codecs.GroupBy(codec => codec.ConfigurationType).Any(group => group.Count() != 1) ||
+        if (_codecs.Where(codec => !codec.IsCompatibilityReader).GroupBy(codec => codec.ConfigurationType).Any(group => group.Count() != 1) ||
             _codecs.GroupBy(codec => (codec.ProviderKindId, codec.ShapeId, codec.PayloadFormatVersion))
                 .Any(group => group.Count() != 1))
             throw new InvalidOperationException("Provider configuration codec registration is ambiguous.");
@@ -132,6 +132,31 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
         EnvironmentRecordId environment, ProviderInstanceId instanceId,
         ProviderConfigurationRevisionNumber revision, CancellationToken cancellationToken) where TConfiguration : class
     {
+        var loaded = await ReadAsync(environment, new(instanceId, revision), cancellationToken);
+        if (loaded is null) return null;
+        if (loaded.Configuration is not TConfiguration typed) throw new InvalidDataException("Provider configuration type is unavailable.");
+        return new(instanceId, revision, environment, typed);
+    }
+
+    public async ValueTask<ProviderAdapterKey?> FindKeyAsync(EnvironmentRecordId environment, ProviderAliasBinding target,
+        CancellationToken cancellationToken)
+    {
+        var environmentId = Guid.Parse(environment.ToString());
+        var instanceId = Guid.Parse(target.InstanceId.ToString());
+        await using var context = await _contexts.CreateDbContextAsync(cancellationToken);
+        return await (from revision in context.ProviderConfigurationRevisions.AsNoTracking()
+                      join instance in context.ProviderInstances.AsNoTracking() on revision.ProviderInstanceId equals instance.Id
+                      where instance.EnvironmentRecordId == environmentId && revision.EnvironmentRecordId == environmentId &&
+                          instance.Id == instanceId && revision.RevisionNumber == target.RevisionNumber.Value && revision.IsSealed
+                      select new ProviderAdapterKey(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    public async ValueTask<LoadedProviderRevision?> ReadAsync(EnvironmentRecordId environment, ProviderAliasBinding target,
+        CancellationToken cancellationToken)
+    {
+        var instanceId = target.InstanceId;
+        var revision = target.RevisionNumber;
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(instanceId);
         ArgumentNullException.ThrowIfNull(revision);
@@ -149,7 +174,7 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
         var codec = _codecs.SingleOrDefault(item => item.ProviderKindId == row.Instance.ProviderKindId &&
             item.ShapeId == row.Revision.ConfigurationShapeId &&
             item.PayloadFormatVersion == row.Revision.PayloadFormatVersion);
-        if (codec is null || codec.ConfigurationType != typeof(TConfiguration))
+        if (codec is null)
             throw new InvalidDataException("Provider configuration shape is unavailable.");
         var associated = await context.ProviderRevisionSecretRefs.AsNoTracking()
             .Where(item => item.ProviderInstanceId == id && item.RevisionNumber == revision.Value)
@@ -170,8 +195,8 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
                     item.Slot == reference.Slot && item.SecretId == Guid.Parse(reference.Reference.SecretId.ToString()) &&
                     item.SecretVersionId == Guid.Parse(reference.Reference.SecretVersionId.ToString()))))
                 throw new InvalidDataException("Stored Provider configuration is inconsistent.");
-            return new ProviderConfigurationRevision<TConfiguration>(instanceId, revision, environment,
-                (TConfiguration)decoded);
+            return new LoadedProviderRevision(new(row.Instance.ProviderKindId, row.Revision.ConfigurationShapeId,
+                row.Revision.ImplementationId), codec, decoded);
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException or InvalidDataException or FormatException or JsonException)
         { throw new InvalidDataException("Stored Provider configuration is invalid."); }
@@ -179,7 +204,7 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
 
     private PreparedProviderConfiguration Prepare<TConfiguration>(TConfiguration configuration) where TConfiguration : class
     {
-        var codec = _codecs.SingleOrDefault(item => item.ConfigurationType == typeof(TConfiguration))
+        var codec = _codecs.SingleOrDefault(item => !item.IsCompatibilityReader && item.ConfigurationType == typeof(TConfiguration))
             ?? throw new InvalidOperationException("Provider configuration shape is unavailable.");
         var prepared = codec.Encode(configuration);
         ValidatePrepared(codec, prepared);
@@ -214,7 +239,9 @@ public static class ProviderConfigurationStoreServiceCollectionExtensions
 {
     public static IServiceCollection AddPostgreSqlProviderConfigurationStore(this IServiceCollection services)
     {
-        services.AddSingleton<IProviderConfigurationStore, PostgreSqlProviderConfigurationStore>();
+        services.AddSingleton<PostgreSqlProviderConfigurationStore>();
+        services.AddSingleton<IProviderConfigurationStore>(p => p.GetRequiredService<PostgreSqlProviderConfigurationStore>());
+        services.AddSingleton<IProviderPreflightRevisionReader>(p => p.GetRequiredService<PostgreSqlProviderConfigurationStore>());
         return services;
     }
 }

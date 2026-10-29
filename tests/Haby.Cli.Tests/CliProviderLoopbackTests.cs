@@ -37,6 +37,33 @@ public sealed partial class CliLoopbackTests
             Assert.Equal("pilot", request.Environment);
             return Task.FromResult(new ListProvidersReply { Status = ProviderStatus.Listed, Items = { Metadata() } });
         }
+        public override Task<ProviderAccessReply> CheckProvider(CheckProviderRequest request, ServerCallContext context)
+        {
+            Assert.Equal("pilot", request.Environment);
+            Assert.Equal(1, request.Revision);
+            return Task.FromResult(request.Name switch
+            {
+                "bad-status" => new ProviderAccessReply { Status = ProviderAccessStatus.Found },
+                "bad-preflight" => new ProviderAccessReply { Status = ProviderAccessStatus.Ready },
+                "offline" => new ProviderAccessReply { Status = ProviderAccessStatus.PreflightFailed, Preflight = ProviderPreflightStatus.ServerUnavailable },
+                _ => new ProviderAccessReply { Status = ProviderAccessStatus.Ready, Preflight = ProviderPreflightStatus.Ready }
+            });
+        }
+        public override Task<ProviderAccessReply> GetProviderAlias(GetProviderAliasRequest request, ServerCallContext context)
+        {
+            Assert.Equal("pilot", request.Environment);
+            return Task.FromResult(new ProviderAccessReply { Status = ProviderAccessStatus.Found, Binding = Binding() });
+        }
+        public override Task<ProviderAccessReply> SetProviderAlias(SetProviderAliasRequest request, ServerCallContext context)
+        {
+            Assert.Equal("pilot", request.Environment);
+            Assert.NotNull(request.Target);
+            Assert.Equal(1, request.Target.Revision);
+            Assert.NotEqual(SetProviderAliasRequest.ExpectationOneofCase.None, request.ExpectationCase);
+            return Task.FromResult(new ProviderAccessReply { Status = ProviderAccessStatus.Changed, Binding = Binding() });
+        }
+        private static ProviderAliasMetadata Binding() => new()
+        { Alias = "postgresql.primary", InstanceId = "019d03cf-a000-7000-8000-000000000002", Revision = 1 };
         private static ProviderMetadata Metadata() => new()
         {
             EnvironmentRecordId = "019d03cf-a000-7000-8000-000000000001",
@@ -73,6 +100,16 @@ public sealed partial class CliLoopbackTests
                 (["provider", "get", "pg-main", "--environment", "pilot"], 0),
                 (["provider", "revision", "get", "pg-main", "--revision", "1", "--environment", "pilot"], 0),
                 (["provider", "list", "--environment", "pilot"], 0),
+                (["provider", "check", "pg-main", "--revision", "1", "--environment", "pilot"], 0),
+                (["provider", "check", "offline", "--revision", "1", "--environment", "pilot"], 1),
+                (["provider", "check", "bad-status", "--revision", "1", "--environment", "pilot"], CliApplication.UsageError),
+                (["provider", "check", "bad-preflight", "--revision", "1", "--environment", "pilot"], CliApplication.UsageError),
+                (["provider", "alias", "get", "postgresql.primary", "--environment", "pilot"], 0),
+                (["provider", "alias", "set", "postgresql.primary", "--provider", "pg-main", "--revision", "1", "--expect-absent", "--environment", "pilot"], 0),
+                (["provider", "alias", "set", "postgresql.primary", "--provider", "pg-main", "--revision", "1", "--expected-provider", "pg-main", "--expected-revision", "1", "--environment", "pilot"], 0),
+                (["provider", "alias", "set", "postgresql.primary", "--provider-instance-id", "019d03cf-a000-7000-8000-000000000002", "--revision", "1", "--expected-instance-id", "019d03cf-a000-7000-8000-000000000002", "--expected-revision", "1", "--environment", "pilot"], 0),
+                (["provider", "alias", "set", "postgresql.primary", "--provider", "pg-main", "--revision", "1", "--environment", "pilot"], CliApplication.UsageError),
+                (["provider", "alias", "set", "postgresql.primary", "--provider", "pg-main", "--revision", "1", "--expect-absent", "--expected-provider", "pg-main", "--expected-revision", "1", "--environment", "pilot"], CliApplication.UsageError),
                 (["provider", "get", "missing", "--environment", "pilot"], 1),
                 (["provider", "get", "bad-status", "--environment", "pilot"], CliApplication.UsageError),
                 (["provider", "get", "bad-id", "--environment", "pilot"], CliApplication.UsageError)

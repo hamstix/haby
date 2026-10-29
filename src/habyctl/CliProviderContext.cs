@@ -27,4 +27,31 @@ internal sealed partial class CliCommandContext
             return PrintProvider("provider apply", await client.ApplyProviderAsync(request, ct));
         }, token);
     }
+    internal int PrintProviderAccess(string command, ProviderAccessReply reply) =>
+        jsonOutput() ? jsonPresenter.PrintProviderAccess(command, reply) : presenter.PrintProviderAccess(command, reply);
+
+    internal Task<int> SetProviderAliasAsync(string? environment, string alias, string? provider, string? instance, long revision,
+        bool absent, string? previousProvider, string? previousInstance, long? previousRevision, CancellationToken token)
+    {
+        if ((provider is null) == (instance is null) || revision <= 0 ||
+            (absent ? previousProvider is not null || previousInstance is not null || previousRevision is not null :
+                (previousProvider is null) == (previousInstance is null) || previousRevision is null or <= 0))
+        {
+            error.WriteLine("Select one Provider and exactly one expectation: --expect-absent or --expected-provider/--expected-instance-id with --expected-revision.");
+            return Task.FromResult(CliApplication.UsageError);
+        }
+        return ExecuteSecretAsync(environment, async (client, env, ct) =>
+        {
+            var target = new ProviderSelector { Revision = revision };
+            if (provider is not null) target.Name = provider; else target.InstanceId = instance!;
+            var request = new SetProviderAliasRequest { Environment = env, Alias = alias, Target = target };
+            if (absent) request.ExpectedAbsent = true;
+            else
+            {
+                request.Expected = new ProviderSelector { Revision = previousRevision!.Value };
+                if (previousProvider is not null) request.Expected.Name = previousProvider; else request.Expected.InstanceId = previousInstance!;
+            }
+            return PrintProviderAccess("provider alias set", await client.SetProviderAliasAsync(request, ct));
+        }, token);
+    }
 }
