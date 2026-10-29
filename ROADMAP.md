@@ -562,6 +562,14 @@ the existing unauthenticated operator API is not automatically a delivery API.
 Kubernetes authentication and a general operator authorization framework are
 not prerequisites for this isolated pilot.
 
+[ADR-031](docs/adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md)
+defines the #90 refactor moving database-specific execution inputs and ports
+into the PostgreSQL adapter without changing behavior or existing stored/wire
+reasons. The legacy DatabaseNameInvalid reason is temporary compatibility debt.
+Issue #91 must define a Provider-neutral reason model and explicit historical
+mapping; implement it before admitting role/grant or other new effect kinds,
+together with dependency and aggregate generation-completion rules.
+
 Deliver this goal in narrow vertical slices. Finish operation/recovery restore
 rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize
 credential provisioning, configuration rendering and API retrieval. Use the
@@ -748,6 +756,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-028](docs/adr/0028-operator-bootstrap-and-provider-manifests.md): Named operator bootstrap, Provider JSON declarations, SecretRef-first credential input and local configuration policy.
 - [ADR-029](docs/adr/0029-named-administrative-secret-bootstrap.md): Named administrative secrets, explicit versions and durable creation receipts.
 - [ADR-030](docs/adr/0030-provider-declarations-and-logical-identity.md): Provider JSON declarations, confirmed logical-identity continuity and exact typed preflight dispatch.
+- [ADR-031](docs/adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md): PostgreSQL-specific execution inputs/ports and mandatory replacement of legacy specialized reasons through compatible generic contracts.
 
 ## Out of scope for the first milestones
 

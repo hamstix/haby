@@ -6,6 +6,11 @@
 
 ## Context
 
+[ADR-031](0031-postgresql-execution-boundaries-and-reason-compatibility.md)
+defines the accepted behavior-preserving relocation of database-specific
+inputs/ports and the temporary compatibility treatment of durable reason codes.
+It does not alter the execution or recovery policy below.
+
 ADR-016 separates accepting a desired generation from executing external effects.
 ADR-022 proves one PostgreSQL `CREATE DATABASE` through an in-memory checkpoint,
 but its status does not survive a restart. The active pilot needs a durable
