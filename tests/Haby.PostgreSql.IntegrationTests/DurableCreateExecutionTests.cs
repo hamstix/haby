@@ -26,6 +26,50 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         [], [], []);
 
     [Fact]
+    public async Task Legacy_database_name_reason_survives_persistence_restart_and_recovery_inspection()
+    {
+        var prepared = await PrepareExecutionAsync("haby_legacy_reason");
+        await using (var arrange = Services(prepared.Connection, prepared.Time))
+        {
+            var journal = arrange.GetRequiredService<IDurableCreateOperationJournal>();
+            var begun = Assert.IsType<DurableCreateBeginAttemptResult.Started>(
+                await journal.TryBeginAttemptAsync(prepared.Key, prepared.Time.GetUtcNow(), default));
+            Assert.True(await journal.TryFinalizeFailureAsync(prepared.Key, begun.AttemptId,
+                DurableCreateOperationState.Failed, DurableCreateOperationReason.DatabaseNameInvalid,
+                prepared.Time.GetUtcNow(), default));
+        }
+        // Inspect the actual stored spelling independently of enum serialization and tracked state.
+        await using (var verification = Services(prepared.Connection, prepared.Time))
+        await using (var context = await verification.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()
+            .CreateDbContextAsync())
+        {
+            var row = await context.DurableCreateOperations.AsNoTracking().SingleAsync();
+            Assert.Equal("DatabaseNameInvalid", row.ReasonCode);
+            Assert.Equal("Failed", row.State);
+            Assert.Null((await context.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        }
+        await using (var restarted = Services(prepared.Connection, prepared.Time))
+        {
+            var executor = restarted.GetRequiredService<IDurableCreateOperationExecutor>();
+            var historical = await executor.ObserveAsync(prepared.Key, default);
+            Assert.Equal(DurableCreateOperationReason.DatabaseNameInvalid, historical!.Operation.Reason);
+            Assert.Equal(DurableCreateAttemptOutcome.FailedBeforeDispatch, Assert.Single(historical.Attempts).Outcome);
+            var preview = await restarted.GetRequiredService<IPostgreSqlDatabaseRecovery>()
+                .InspectAsync(prepared.Key, default);
+            Assert.Equal(DurableCreateOperationReason.DatabaseNameInvalid, preview!.Reason);
+            Assert.Equal(DurableCreateOperationState.Failed, preview.State);
+            Assert.Null(preview.UncertainAttemptId);
+            var retry = await executor.ExecuteAsync(prepared.Key, default);
+            Assert.Equal(DurableCreateExecutionOutcome.Failed, retry.Outcome);
+            Assert.Equal(historical.Operation, retry.Operation);
+        }
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM durable_create_operation_attempts WHERE dispatched_at IS NOT NULL"));
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection,
+            "SELECT count(*) FROM postgresql_database_recovery_decisions"));
+    }
+
+    [Fact]
     public async Task Explicit_assignment_of_independently_created_database_is_atomic_and_idempotent()
     {
         var prepared = await PrepareExecutionAsync("haby_recover_ok");

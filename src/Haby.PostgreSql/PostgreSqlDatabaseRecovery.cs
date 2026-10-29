@@ -8,7 +8,7 @@ namespace Haby.PostgreSql;
 /// <summary>Manual assignment of one uncertain PostgreSQL Create; no SQL Create is reachable here.</summary>
 public sealed class PostgreSqlDatabaseRecovery(IDurableCreateOperationJournal operations,
     IPostgreSqlDatabaseRecoveryJournal decisions, IManifestRevisionQuery manifests,
-    IDurableCreateTarget target, TimeProvider clock) : IPostgreSqlDatabaseRecovery
+    IPostgreSqlDatabaseCreateTarget target, TimeProvider clock) : IPostgreSqlDatabaseRecovery
 {
     private static readonly Regex CredentialPattern = new(
         @"(?i)(password|passwd|pwd|secret|token|api[_-]?key|connection[_-]?string)\s*[:=]|postgres(?:ql)?://|-----BEGIN |(?:host|username|user id)\s*=.+;",
@@ -69,13 +69,13 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableCreateOperationJournal op
 
         var shape = await resolver.ResolveAsync(command.Key, operation, cancellationToken);
         if (shape.Input is null) return new(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable, null);
-        DurableCreateAbsenceOutcome absence;
+        PostgreSqlDatabaseAbsenceOutcome absence;
         try { absence = await target.CheckDatabaseAbsentAsync(shape.Input, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { return new(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable, null); }
-        if (absence == DurableCreateAbsenceOutcome.Absent)
+        if (absence == PostgreSqlDatabaseAbsenceOutcome.Absent)
             return new(PostgreSqlDatabaseAssignmentOutcome.DatabaseAbsent, null);
-        if (absence != DurableCreateAbsenceOutcome.Present)
+        if (absence != PostgreSqlDatabaseAbsenceOutcome.Present)
             return new(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable, null);
 
         return await decisions.TryAssignAsync(command, clock.GetUtcNow(), cancellationToken);
@@ -106,7 +106,7 @@ public static class PostgreSqlDatabaseRecoveryServiceCollectionExtensions
 {
     public static IServiceCollection AddPostgreSqlDatabaseRecovery(this IServiceCollection services)
     {
-        services.AddPostgreSqlDurableCreateTarget();
+        services.AddPostgreSqlDatabaseCreateTarget();
         services.TryAddSingleton<IPostgreSqlDatabaseRecovery, PostgreSqlDatabaseRecovery>();
         return services;
     }

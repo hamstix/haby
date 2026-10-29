@@ -88,7 +88,7 @@ public sealed class DurableCreateExecutorTests
     [Fact]
     public async Task A_preexisting_database_conflicts_before_dispatch_and_is_never_adopted()
     {
-        var (executor, journal, target, _) = Harness(new Fixture { Absence = DurableCreateAbsenceOutcome.Present });
+        var (executor, journal, target, _) = Harness(new Fixture { Absence = PostgreSqlDatabaseAbsenceOutcome.Present });
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
@@ -133,6 +133,37 @@ public sealed class DurableCreateExecutorTests
         Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
         Assert.Equal(DurableCreateOperationReason.DatabaseNameInvalid, result.Operation!.Reason);
         Assert.Empty(target.Inputs);
+    }
+
+    [Fact]
+    public async Task Adapter_local_name_validation_maps_to_the_legacy_reason_without_dispatch()
+    {
+        var (executor, journal, _, _) = Harness(new Fixture
+        { Absence = PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid });
+
+        var result = await executor.ExecuteAsync(HarnessKey(), default);
+
+        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
+        Assert.Equal(DurableCreateOperationReason.DatabaseNameInvalid, result.Operation!.Reason);
+        Assert.Equal(DurableCreateAttemptOutcome.FailedBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
+        Assert.False(journal.AppliedGenerationAdvanced);
+        Assert.DoesNotContain("marker", journal.Log);
+        Assert.DoesNotContain("create", journal.Log);
+    }
+
+    [Fact]
+    public void Database_target_contracts_belong_only_to_the_PostgreSql_adapter()
+    {
+        var adapter = typeof(PostgreSqlDatabaseCreateTarget).Assembly;
+        Assert.Equal(adapter, typeof(PostgreSqlDatabaseCreateInput).Assembly);
+        Assert.Equal(adapter, typeof(IPostgreSqlDatabaseCreateTarget).Assembly);
+        Assert.Equal(adapter, typeof(PostgreSqlDatabaseAbsenceOutcome).Assembly);
+        Assert.Equal(adapter, typeof(PostgreSqlDatabaseCreateDispatchOutcome).Assembly);
+        var application = typeof(IDurableCreateOperationExecutor).Assembly;
+        Assert.DoesNotContain(application.GetReferencedAssemblies(), reference => reference.Name == "Haby.PostgreSql");
+        Assert.DoesNotContain(application.GetExportedTypes(), type => type.Name is
+            "DurableCreateTargetInput" or "IDurableCreateTarget" or "DurableCreateAbsenceOutcome" or
+            "DurableCreateDispatchOutcome");
     }
 
     [Fact]
@@ -209,7 +240,7 @@ public sealed class DurableCreateExecutorTests
     public async Task An_uncertain_dispatch_requires_attention_and_is_not_retried_in_process()
     {
         var (executor, journal, _, _) = Harness(new Fixture
-        { Dispatch = DurableCreateDispatchOutcome.Uncertain });
+        { Dispatch = PostgreSqlDatabaseCreateDispatchOutcome.Uncertain });
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
@@ -223,7 +254,7 @@ public sealed class DurableCreateExecutorTests
     public async Task A_duplicate_answer_after_dispatch_fails_as_conflict_without_adoption()
     {
         var (executor, journal, _, _) = Harness(new Fixture
-        { Dispatch = DurableCreateDispatchOutcome.Conflict });
+        { Dispatch = PostgreSqlDatabaseCreateDispatchOutcome.Conflict });
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
@@ -236,7 +267,7 @@ public sealed class DurableCreateExecutorTests
     public async Task A_created_answer_without_confirmation_is_not_a_success()
     {
         var (executor, journal, _, _) = Harness(new Fixture
-        { Confirm = DurableCreateAbsenceOutcome.Absent });
+        { Confirm = PostgreSqlDatabaseAbsenceOutcome.Absent });
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
@@ -280,7 +311,7 @@ public sealed class DurableCreateExecutorTests
     [Fact]
     public async Task Manual_recovery_requires_consent_and_never_dispatches_create()
     {
-        var (_, journal, target, _) = Harness(new Fixture { Absence = DurableCreateAbsenceOutcome.Present });
+        var (_, journal, target, _) = Harness(new Fixture { Absence = PostgreSqlDatabaseAbsenceOutcome.Present });
         var attemptId = Guid.CreateVersion7();
         journal.SeedUncertain(attemptId);
         var decisions = new FakeRecoveryDecisions();
@@ -399,12 +430,13 @@ public sealed class DurableCreateExecutorTests
     public async Task The_target_sees_exactly_the_inputs_pinned_by_the_generation()
     {
         var instance = ProviderInstanceId.New();
-        var (executor, _, target, _) = Harness(new Fixture { ProviderInstance = instance });
+        var (executor, journal, target, _) = Harness(new Fixture { ProviderInstance = instance });
 
         await executor.ExecuteAsync(HarnessKey(), default);
 
         Assert.All(target.Inputs, input =>
         {
+            Assert.Equal(journal.Operation.Environment, input.Environment);
             Assert.Equal(instance, input.ProviderInstance);
             Assert.Equal(7L, input.ConfigurationRevision.Value);
             Assert.Equal("haby.postgresql.database/v1alpha1", input.ImplementationId);
@@ -422,8 +454,8 @@ public sealed class DurableCreateExecutorTests
             descriptor.ImplementationType == typeof(PostgreSqlDurableCreateOperationExecutor));
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IDurableCreateDispatchFaultHooks) &&
             descriptor.ImplementationType == typeof(NullDurableCreateDispatchFaultHooks));
-        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IDurableCreateTarget) &&
-            descriptor.ImplementationType == typeof(PostgreSqlDurableCreateTarget));
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IPostgreSqlDatabaseCreateTarget) &&
+            descriptor.ImplementationType == typeof(PostgreSqlDatabaseCreateTarget));
     }
 
     private const string OneResource =
@@ -497,9 +529,9 @@ public sealed class DurableCreateExecutorTests
         public bool CorruptManifest { get; init; }
         public bool ThrowOnMarkerCommit { get; init; }
         public bool ThrowOnRecordSuccess { get; init; }
-        public DurableCreateAbsenceOutcome Absence { get; init; } = DurableCreateAbsenceOutcome.Absent;
-        public DurableCreateAbsenceOutcome Confirm { get; init; } = DurableCreateAbsenceOutcome.Present;
-        public DurableCreateDispatchOutcome Dispatch { get; init; } = DurableCreateDispatchOutcome.Created;
+        public PostgreSqlDatabaseAbsenceOutcome Absence { get; init; } = PostgreSqlDatabaseAbsenceOutcome.Absent;
+        public PostgreSqlDatabaseAbsenceOutcome Confirm { get; init; } = PostgreSqlDatabaseAbsenceOutcome.Present;
+        public PostgreSqlDatabaseCreateDispatchOutcome Dispatch { get; init; } = PostgreSqlDatabaseCreateDispatchOutcome.Created;
         public bool CancelDuringCheck { get; init; }
         public Func<CancellationToken, ValueTask>? BeforeMarker { get; init; }
         public Func<CancellationToken, ValueTask>? AfterMarker { get; init; }
@@ -696,16 +728,16 @@ public sealed class DurableCreateExecutorTests
         }
     }
 
-    private sealed class FakeTarget(List<string> log) : IDurableCreateTarget
+    private sealed class FakeTarget(List<string> log) : IPostgreSqlDatabaseCreateTarget
     {
-        public List<DurableCreateTargetInput> Inputs { get; } = [];
-        public DurableCreateAbsenceOutcome Absence { get; init; } = DurableCreateAbsenceOutcome.Absent;
-        public DurableCreateAbsenceOutcome Confirm { get; init; } = DurableCreateAbsenceOutcome.Present;
-        public DurableCreateDispatchOutcome Dispatch { get; init; } = DurableCreateDispatchOutcome.Created;
+        public List<PostgreSqlDatabaseCreateInput> Inputs { get; } = [];
+        public PostgreSqlDatabaseAbsenceOutcome Absence { get; init; } = PostgreSqlDatabaseAbsenceOutcome.Absent;
+        public PostgreSqlDatabaseAbsenceOutcome Confirm { get; init; } = PostgreSqlDatabaseAbsenceOutcome.Present;
+        public PostgreSqlDatabaseCreateDispatchOutcome Dispatch { get; init; } = PostgreSqlDatabaseCreateDispatchOutcome.Created;
         public Action? CancelOnCheck { get; init; }
         private bool Dispatched;
 
-        public ValueTask<DurableCreateAbsenceOutcome> CheckDatabaseAbsentAsync(DurableCreateTargetInput input,
+        public ValueTask<PostgreSqlDatabaseAbsenceOutcome> CheckDatabaseAbsentAsync(PostgreSqlDatabaseCreateInput input,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -717,16 +749,16 @@ public sealed class DurableCreateExecutorTests
             }
 
             log.Add(Dispatched ? "confirm" : "check");
-            return new ValueTask<DurableCreateAbsenceOutcome>(Dispatched ? Confirm : Absence);
+            return new ValueTask<PostgreSqlDatabaseAbsenceOutcome>(Dispatched ? Confirm : Absence);
         }
 
-        public ValueTask<DurableCreateDispatchOutcome> DispatchCreateAsync(DurableCreateTargetInput input,
+        public ValueTask<PostgreSqlDatabaseCreateDispatchOutcome> DispatchCreateAsync(PostgreSqlDatabaseCreateInput input,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             log.Add("create");
             Dispatched = true;
-            return new ValueTask<DurableCreateDispatchOutcome>(Dispatch);
+            return new ValueTask<PostgreSqlDatabaseCreateDispatchOutcome>(Dispatch);
         }
     }
 

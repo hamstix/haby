@@ -40,8 +40,12 @@ public sealed partial class CliLoopbackTests
         public override Task<OperationReply> GetOperation(OperationRequest request, ServerCallContext context)
         {
             Assert.Equal("deployment", request.DeploymentId); Assert.Equal(1, request.Generation);
-            Assert.Equal("db", request.ResourceId); Assert.Equal(OperationAction.Create, request.Action);
-            return Task.FromResult(CliOperationTests.Snapshot(OperationStatus.Found, OperationState.Dispatching));
+            Assert.Contains(request.ResourceId, new[] { "db", "legacy" });
+            Assert.Equal(OperationAction.Create, request.Action);
+            var reply = CliOperationTests.Snapshot(OperationStatus.Found,
+                request.ResourceId == "legacy" ? OperationState.Failed : OperationState.Dispatching);
+            if (request.ResourceId == "legacy") reply.Operation.Reason = (OperationReason)4;
+            return Task.FromResult(reply);
         }
     }
 
@@ -61,7 +65,7 @@ public sealed partial class CliLoopbackTests
         {
             var cases = new (string Verb, string Resource, string Outcome, int Exit)[]
             {
-                ("get", "db", "found", 0), ("execute", "success", "succeeded", 0),
+                ("get", "db", "found", 0), ("get", "legacy", "found", 0), ("execute", "success", "succeeded", 0),
                 ("execute", "conflict", "failed", 1), ("execute", "retry", "retryableFailure", 1),
                 ("execute", "attention", "needsAttention", 1), ("execute", "uncertain", "dispatchUncertain", 1),
                 ("execute", "missing", "operationNotFound", 1), ("execute", "transport", "", 3)
@@ -92,10 +96,14 @@ public sealed partial class CliLoopbackTests
                         Assert.DoesNotContain("secret-transport-sentinel", text + errors);
                         if (exit == 3) { Assert.Equal("", text); Assert.NotEqual("", errors); return; }
                         Assert.Equal("", errors); Assert.Contains(outcome, text);
+                        if (resource == "legacy") Assert.Contains("databaseNameInvalid", text);
                         if (format != "json") return;
                         using var json = JsonDocument.Parse(text);
                         Assert.Equal("operation " + verb, json.RootElement.GetProperty("command"u8).GetString());
                         Assert.Equal(outcome, json.RootElement.GetProperty("outcome"u8).GetString());
+                        if (resource == "legacy")
+                            Assert.Equal("databaseNameInvalid", json.RootElement.GetProperty("data")
+                                .GetProperty("operation").GetProperty("reason").GetString());
                     }
                 }
             using var canceledOutput = new StringWriter(); using var canceledError = new StringWriter();

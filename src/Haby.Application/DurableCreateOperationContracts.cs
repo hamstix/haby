@@ -32,13 +32,17 @@ public enum DurableCreateOperationReason
     SecretUnavailable,
     /// <summary>The accepted revision is not the one supported database shape for this operation.</summary>
     UnsupportedShape,
-    /// <summary>The target database identifier is invalid at the Provider trust boundary.</summary>
+    /// <summary>
+    /// Legacy PostgreSQL database-name validation reason retained for stored history and wire compatibility.
+    /// Temporary debt under ADR-031: issue #91 must define a Provider-neutral successor and explicit
+    /// legacy mapping, implemented before role/grant or any other new effect kind is admitted.
+    /// </summary>
     DatabaseNameInvalid,
     /// <summary>The pinned target could not be reached or admitted the connection before dispatch.</summary>
     Connectivity,
-    /// <summary>The database existed before this attempt, or PostgreSQL definitively rejected with a duplicate.</summary>
+    /// <summary>The target state conflicts with the requested operation, before dispatch or in a definitive response.</summary>
     Conflict,
-    /// <summary>PostgreSQL definitively answered the dispatched command with a rejection.</summary>
+    /// <summary>The target server definitively rejected the dispatched operation.</summary>
     ServerRejected,
     /// <summary>The post-dispatch outcome is uncertain; only manual recovery may resolve it.</summary>
     UncertainAfterDispatch
@@ -146,41 +150,6 @@ public interface IDurableCreateOperationJournal
 public interface IDurableCreateOperationQuery
 {
     ValueTask<DurableCreateOperation?> FindAsync(DurableCreateOperationKey key,
-        CancellationToken cancellationToken);
-}
-
-/// <summary>The exact, already-resolved inputs for one external Create against the pinned target.</summary>
-public sealed record DurableCreateTargetInput(EnvironmentRecordId Environment, ProviderInstanceId ProviderInstance,
-    ProviderConfigurationRevisionNumber ConfigurationRevision, string ImplementationId, string DatabaseName)
-{
-    public override string ToString() => nameof(DurableCreateTargetInput);
-}
-
-/// <summary>The bounded result of the read-only database-absence read.</summary>
-public enum DurableCreateAbsenceOutcome
-{
-    Absent,
-    Present,
-    ProviderInputUnavailable,
-    SecretUnavailable,
-    Connectivity,
-    /// <summary>Defensive revalidation: the identifier failed at the Provider trust boundary.</summary>
-    DatabaseNameInvalid
-}
-
-/// <summary>The bounded result of the dispatched Create command after the marker was committed.</summary>
-public enum DurableCreateDispatchOutcome { Created, Conflict, ServerRejected, Uncertain }
-
-/// <summary>
-/// The external effect boundary for exactly one Create. Absence reads and the command are separate
-/// operations so the journal barrier can be committed between them. Implementations never read the
-/// current alias and never leak driver or configuration text.
-/// </summary>
-public interface IDurableCreateTarget
-{
-    ValueTask<DurableCreateAbsenceOutcome> CheckDatabaseAbsentAsync(DurableCreateTargetInput input,
-        CancellationToken cancellationToken);
-    ValueTask<DurableCreateDispatchOutcome> DispatchCreateAsync(DurableCreateTargetInput input,
         CancellationToken cancellationToken);
 }
 

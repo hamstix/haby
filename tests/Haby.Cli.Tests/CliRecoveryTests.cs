@@ -33,6 +33,21 @@ public sealed class CliRecoveryTests
         Assert.DoesNotContain("protected-note-sentinel", text.ToString() + json);
     }
 
+    [Fact]
+    public void Historical_database_name_reason_remains_renderable_in_recovery_inspection()
+    {
+        var reply = Reply(RecoveryStatus.Found);
+        reply.Preview.Operation.State = OperationState.Failed;
+        reply.Preview.Operation.Reason = (OperationReason)4;
+        using var json = new StringWriter(); using var text = new StringWriter();
+        Assert.Equal(0, new CliJsonPresenter(json).PrintRecovery("operation recovery inspect", reply));
+        Assert.Equal(0, new CliTextPresenter(text).PrintRecovery("operation recovery inspect", reply));
+        using var document = JsonDocument.Parse(json.ToString());
+        Assert.Equal("databaseNameInvalid", document.RootElement.GetProperty("data")
+            .GetProperty("preview").GetProperty("operation").GetProperty("reason").GetString());
+        Assert.Contains("reason: databaseNameInvalid", text.ToString());
+    }
+
     [Theory]
     [InlineData("status")]
     [InlineData("preview")]

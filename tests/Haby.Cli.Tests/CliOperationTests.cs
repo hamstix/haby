@@ -54,6 +54,24 @@ public sealed class CliOperationTests
             Assert.Contains("do not blindly retry", text.ToString());
     }
 
+    [Fact]
+    public void Historical_database_name_reason_preserves_wire_number_and_exact_json_spelling()
+    {
+        Assert.Equal(4, (int)OperationReason.DatabaseNameInvalid);
+        // Decode the literal historical field value, independently of the generated enum name.
+        var historical = DurableOperationSummary.Parser.ParseFrom(new byte[] { 24, 4 });
+        Assert.Equal(OperationReason.DatabaseNameInvalid, historical.Reason);
+        var reply = Snapshot(OperationStatus.Found, OperationState.Failed);
+        reply.Operation.Reason = historical.Reason;
+        using var json = new StringWriter(); using var text = new StringWriter();
+        Assert.Equal(0, new CliJsonPresenter(json).PrintOperation("operation get", reply));
+        Assert.Equal(0, new CliTextPresenter(text).PrintOperation("operation get", reply));
+        using var document = JsonDocument.Parse(json.ToString());
+        Assert.Equal("databaseNameInvalid", document.RootElement.GetProperty("data")
+            .GetProperty("operation").GetProperty("reason").GetString());
+        Assert.Contains("databaseNameInvalid", text.ToString());
+    }
+
     [Theory]
     [InlineData("status")]
     [InlineData("snapshot")]
