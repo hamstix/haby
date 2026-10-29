@@ -120,7 +120,9 @@ public static class PostgreSqlProviderConfigurationCodecServiceCollectionExtensi
 {
     public static IServiceCollection AddPostgreSqlProviderConfigurationCodec(this IServiceCollection services)
     {
-        services.AddSingleton<IProviderConfigurationCodec, PostgreSqlProviderConfigurationCodec>();
+        services.AddSingleton<PostgreSqlProviderConfigurationCodec>();
+        services.AddSingleton<IProviderConfigurationCodec>(provider => provider.GetRequiredService<PostgreSqlProviderConfigurationCodec>());
+        services.AddSingleton<IProviderDeclarationAdapter, PostgreSqlProviderDeclarationAdapter>();
         return services;
     }
 }

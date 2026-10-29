@@ -811,6 +811,19 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(128)")
                         .HasColumnName("configuration_shape_id");
 
+                    b.Property<string>("ConfirmationActor")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("confirmation_actor");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("confirmed_at");
+
+                    b.Property<long?>("ConfirmedPreviousRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("confirmed_previous_revision");
+
                     b.Property<Guid>("EnvironmentRecordId")
                         .HasColumnType("uuid")
                         .HasColumnName("environment_record_id");
@@ -852,6 +865,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("environment_record_id");
 
+                    b.Property<string>("Name")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("name");
+
                     b.Property<string>("ProviderKindId")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -870,7 +888,8 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EnvironmentRecordId");
+                    b.HasIndex("EnvironmentRecordId", "Name")
+                        .IsUnique();
 
                     b.ToTable("provider_instances", (string)null);
                 });

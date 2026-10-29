@@ -291,7 +291,7 @@ internal sealed class SampleConfigurationCodec : ProviderConfigurationCodec<Samp
     public override int PayloadFormatVersion => 1;
     public override PreparedProviderConfiguration Encode(SampleConfiguration value)
     {
-        if (string.IsNullOrWhiteSpace(value.Target) || value.ImplementationId != "sample.impl/v1")
+        if (string.IsNullOrWhiteSpace(value.Target) || value.ImplementationId is not ("sample.impl/v1" or "sample.impl/v2"))
             throw new InvalidOperationException("Sample configuration is invalid.");
         var json = JsonSerializer.Serialize(value, SampleConfigurationJsonContext.Default.SampleConfiguration);
         return new PreparedProviderConfiguration(ProviderKindId, new ProviderTargetIdentity(1, value.Target),

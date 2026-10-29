@@ -5,6 +5,7 @@ using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
@@ -903,16 +904,15 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
         var database = prefix + "_" + Guid.NewGuid().ToString("N");
         var connection = await NewDatabaseAsync(prefix);
         var time = new AdjustableTimeProvider();
-        await using (var services = Services(connection, time))
+        if (migrateToPrevious)
         {
-            if (migrateToPrevious)
-            {
-                await using var context = await services
-                    .GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()
-                    .CreateDbContextAsync();
-                await context.Database.MigrateAsync("20261027101647_AddDurableCreateDispatchBarrier");
-            }
-            else
+            await using var migrations = Services(connection, time);
+            await using var context = await migrations.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+            await context.Database.MigrateAsync("20261027101647_AddDurableCreateDispatchBarrier");
+        }
+        await using (var services = Services(connection, time, historicalProviderSchema: migrateToPrevious))
+        {
+            if (!migrateToPrevious)
                 await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
             var secrets = services.GetRequiredService<ISecretStore>();
             var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
@@ -1000,7 +1000,7 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
     }
 
     private static ServiceProvider Services(string connection, TimeProvider clock, bool registerCodec = true,
-        IDurableCreateDispatchFaultHooks? hooks = null, bool failManifestReadOnce = false)
+        IDurableCreateDispatchFaultHooks? hooks = null, bool failManifestReadOnce = false, bool historicalProviderSchema = false)
     {
         var services = new ServiceCollection()
             .AddSingleton(clock)
@@ -1020,7 +1020,23 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
             .AddPostgreSqlDatabaseRecoveryJournal()
             .AddPostgreSqlDatabaseRecovery();
         if (hooks is not null) services.AddSingleton(hooks);
+        if (historicalProviderSchema)
+            services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.UseNpgsql(connection)
+                .ReplaceService<IModelCustomizer, HistoricalProviderModelCustomizer>());
         return services.BuildServiceProvider();
+    }
+
+    // The upgrade rehearsal arranges against the historical Provider schema. Keep the current
+    // production model unchanged, and do not select/insert columns that did not exist then.
+    private sealed class HistoricalProviderModelCustomizer(ModelCustomizerDependencies dependencies) : ModelCustomizer(dependencies)
+    {
+        public override void Customize(ModelBuilder modelBuilder, DbContext context)
+        {
+            base.Customize(modelBuilder, context);
+            modelBuilder.Entity<ProviderInstanceRow>().Ignore(x => x.Name);
+            modelBuilder.Entity<ProviderConfigurationRevisionRow>().Ignore(x => x.ConfirmedPreviousRevision)
+                .Ignore(x => x.ConfirmationActor).Ignore(x => x.ConfirmedAt);
+        }
     }
 
     private sealed class FailOnceManifestRevisionQuery(IManifestRevisionQuery inner) : IManifestRevisionQuery

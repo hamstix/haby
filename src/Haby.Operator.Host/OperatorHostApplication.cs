@@ -91,6 +91,9 @@ public static class OperatorHostApplication
 
         configureServices?.Invoke(builder.Services);
         var app = builder.Build();
+        // Validate only current-build registrations, never require handlers for every stored revision.
+        _ = app.Services.GetRequiredService<ProviderDeclarationRegistry>();
+        _ = app.Services.GetRequiredService<IProviderConfigurationStore>();
         app.MapGrpcService<ManifestOperatorService>();
         app.MapGrpcReflectionService();
 

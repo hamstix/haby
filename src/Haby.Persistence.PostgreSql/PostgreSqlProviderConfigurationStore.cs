@@ -62,13 +62,23 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
         var id = Guid.Parse(instanceId.ToString());
         await using var context = await _contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var instance = await context.ProviderInstances.AsNoTracking()
+        // Serialize the baseline with declaration apply and other legacy writers. EF has no row-lock API.
+        var instance = await context.ProviderInstances.FromSqlInterpolated($"SELECT * FROM provider_instances WHERE id = {id} FOR UPDATE").AsNoTracking()
             .SingleOrDefaultAsync(row => row.Id == id, cancellationToken);
         if (instance is null || instance.EnvironmentRecordId != environmentId)
             throw new InvalidOperationException("Provider instance is unavailable in this Environment.");
-        if (instance.ProviderKindId != prepared.ProviderKindId ||
-            instance.TargetFormatVersion != prepared.TargetIdentity.FormatVersion ||
-            instance.TargetIdentity != prepared.TargetIdentity.Value)
+        var latest = await context.ProviderConfigurationRevisions.AsNoTracking().Where(row => row.ProviderInstanceId == id)
+            .OrderByDescending(row => row.RevisionNumber).FirstOrDefaultAsync(cancellationToken);
+        var baselineTarget = new ProviderTargetIdentity(instance.TargetFormatVersion, instance.TargetIdentity);
+        if (latest is not null)
+        {
+            var reader = _codecs.SingleOrDefault(codec => codec.ProviderKindId == instance.ProviderKindId &&
+                codec.ShapeId == latest.ConfigurationShapeId && codec.PayloadFormatVersion == latest.PayloadFormatVersion)
+                ?? throw new InvalidOperationException("Provider configuration shape is unavailable.");
+            baselineTarget = reader.Encode(reader.Decode(latest.PayloadJson)).TargetIdentity;
+        }
+        // This compatibility API carries no operator consent. Endpoint transfers use declaration apply.
+        if (instance.ProviderKindId != prepared.ProviderKindId || baselineTarget != prepared.TargetIdentity)
             throw new InvalidOperationException("Provider target differs from the instance.");
         var maximum = await context.ProviderConfigurationRevisions.AsNoTracking()
             .Where(row => row.ProviderInstanceId == id).MaxAsync(row => (long?)row.RevisionNumber, cancellationToken);
@@ -151,8 +161,6 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
             var prepared = codec.Encode(decoded);
             ValidatePrepared(codec, prepared);
             if (prepared.ProviderKindId != row.Instance.ProviderKindId ||
-                prepared.TargetIdentity.FormatVersion != row.Instance.TargetFormatVersion ||
-                prepared.TargetIdentity.Value != row.Instance.TargetIdentity ||
                 prepared.ImplementationId != row.Revision.ImplementationId ||
                 prepared.ShapeId != row.Revision.ConfigurationShapeId ||
                 prepared.PayloadFormatVersion != row.Revision.PayloadFormatVersion ||
@@ -178,7 +186,7 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
         return prepared;
     }
 
-    private static void ValidatePrepared(IProviderConfigurationCodec codec, PreparedProviderConfiguration prepared)
+    internal static void ValidatePrepared(IProviderConfigurationCodec codec, PreparedProviderConfiguration prepared)
     {
         if (prepared.ProviderKindId != codec.ProviderKindId || prepared.ShapeId != codec.ShapeId ||
             prepared.PayloadFormatVersion != codec.PayloadFormatVersion ||

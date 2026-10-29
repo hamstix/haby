@@ -122,6 +122,9 @@ public static class ManifestCatalogServiceCollectionExtensions
         services.AddSingleton<EnvironmentAdministration>();
         services.AddSingleton<IAdministrativeSecretCatalog, PostgreSqlAdministrativeSecretCatalog>();
         services.AddSingleton<SecretAdministration>();
+        services.AddSingleton<ProviderDeclarationRegistry>();
+        services.AddSingleton<IProviderDeclarationCatalog, PostgreSqlProviderDeclarationCatalog>();
+        services.AddSingleton<ProviderAdministration>();
         return services;
     }
 }
