@@ -571,6 +571,10 @@ this goal. This pilot does not claim replacement of an existing registry.
 Operator bootstrap follows [ADR-028](docs/adr/0028-operator-bootstrap-and-provider-manifests.md):
 name-based Environment/Provider selection, JSON Provider declarations, safe
 request retries, SecretRef-first input and mandatory checked alias switching.
+[ADR-029](docs/adr/0029-named-administrative-secret-bootstrap.md) defines named
+administrative secrets, explicit operator version numbers, immutable internal
+SecretRef resolution and atomic durable creation receipts. Rotation and secret
+disclosure remain separate work.
 Implement Environment/metadata, secret input and Provider revision/alias slices
 before a separate optional input-only credential-block slice. YAML remains
 exclusive to local CLI configuration.
@@ -737,6 +741,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-025](docs/adr/0025-pilot-durable-postgresql-create-recovery.md): Durable single-database dispatch barrier and explicitly consented manual recovery after an uncertain outcome.
 - [ADR-027](docs/adr/0027-operator-cli-foundation.md): Native AOT operator CLI, explicit commands, local contexts, output formats and secret-disclosure boundary.
 - [ADR-028](docs/adr/0028-operator-bootstrap-and-provider-manifests.md): Named operator bootstrap, Provider JSON declarations, SecretRef-first credential input and local configuration policy.
+- [ADR-029](docs/adr/0029-named-administrative-secret-bootstrap.md): Named administrative secrets, explicit versions and durable creation receipts.
 
 ## Out of scope for the first milestones
 
