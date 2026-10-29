@@ -137,6 +137,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
             entity.Property(row => row.ProviderKindId).HasColumnName("provider_kind_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(64);
+            entity.HasIndex(row => new { row.EnvironmentRecordId, row.Name }).IsUnique();
             entity.Property(row => row.TargetFormatVersion).HasColumnName("target_format_version");
             entity.Property(row => row.TargetIdentity).HasColumnName("target_identity").HasMaxLength(512).IsRequired();
             entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
@@ -154,6 +156,9 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.PayloadFormatVersion).HasColumnName("payload_format_version");
             entity.Property(row => row.PayloadJson).HasColumnName("payload_json").HasColumnType("text").IsRequired();
             entity.Property(row => row.IsSealed).HasColumnName("is_sealed");
+            entity.Property(row => row.ConfirmedPreviousRevision).HasColumnName("confirmed_previous_revision");
+            entity.Property(row => row.ConfirmationActor).HasColumnName("confirmation_actor").HasMaxLength(256);
+            entity.Property(row => row.ConfirmedAt).HasColumnName("confirmed_at");
             entity.HasOne<ProviderInstanceRow>().WithMany()
                 .HasForeignKey(row => new { row.ProviderInstanceId, row.EnvironmentRecordId })
                 .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId })
@@ -637,6 +642,7 @@ internal sealed class ProviderInstanceRow
 {
     public Guid Id { get; set; }
     public Guid EnvironmentRecordId { get; set; }
+    public string? Name { get; set; }
     public required string ProviderKindId { get; set; }
     public int TargetFormatVersion { get; set; }
     public required string TargetIdentity { get; set; }
@@ -652,6 +658,9 @@ internal sealed class ProviderConfigurationRevisionRow
     public int PayloadFormatVersion { get; set; }
     public required string PayloadJson { get; set; }
     public bool IsSealed { get; set; }
+    public long? ConfirmedPreviousRevision { get; set; }
+    public string? ConfirmationActor { get; set; }
+    public DateTimeOffset? ConfirmedAt { get; set; }
 }
 
 internal sealed class ProviderRevisionSecretRefRow

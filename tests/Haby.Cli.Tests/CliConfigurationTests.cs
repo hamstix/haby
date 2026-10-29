@@ -46,6 +46,9 @@ public sealed class CliConfigurationTests
 
     private sealed class Client : IRegistryClient
     {
+        public Task<ProviderReply> ApplyProviderAsync(ApplyProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ProviderReply> GetProviderAsync(GetProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ListProvidersReply> ListProvidersAsync(ListProvidersRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<SecretReply> CreateSecretAsync(CreateSecretRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<SecretReply> GetSecretAsync(GetSecretRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ListSecretsReply> ListSecretsAsync(ListSecretsRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();

@@ -4,6 +4,9 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc ApplyProvider(ApplyProviderRequest) returns (ProviderReply);
+  rpc GetProvider(GetProviderRequest) returns (ProviderReply);
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersReply);
   rpc CreateSecret(CreateSecretRequest) returns (SecretReply);
   rpc GetSecret(GetSecretRequest) returns (SecretReply);
   rpc ListSecrets(ListSecretsRequest) returns (ListSecretsReply);
@@ -30,6 +33,48 @@ service ManifestOperator {
   rpc InspectOperationRecovery(OperationRequest) returns (RecoveryReply);
   rpc AssignExistingOperation(AssignExistingOperationRequest) returns (RecoveryReply);
 }
+
+message ApplyProviderRequest {
+  bytes declaration = 1;
+  optional string environment = 2;
+  bool confirm_logical_identity = 3;
+  optional int64 expected_previous_revision = 4;
+}
+message GetProviderRequest { string environment = 1; string name = 2; optional int64 revision = 3; }
+message ListProvidersRequest { string environment = 1; int32 page_size = 2; string cursor = 3; }
+enum ProviderStatus {
+  PROVIDER_STATUS_UNSPECIFIED = 0;
+  PROVIDER_STATUS_CREATED = 1;
+  PROVIDER_STATUS_EXISTING_EQUIVALENT = 2;
+  PROVIDER_STATUS_INVALID_REQUEST = 3;
+  PROVIDER_STATUS_ENVIRONMENT_MISMATCH = 4;
+  PROVIDER_STATUS_ENVIRONMENT_NOT_FOUND = 5;
+  PROVIDER_STATUS_UNSUPPORTED_CONFIGURATION = 6;
+  PROVIDER_STATUS_CONFIGURATION_UNAVAILABLE = 7;
+  PROVIDER_STATUS_SECRET_REFERENCE_UNAVAILABLE = 8;
+  PROVIDER_STATUS_REVISION_CONTENT_CONFLICT = 9;
+  PROVIDER_STATUS_REVISION_NOT_INCREASING = 10;
+  PROVIDER_STATUS_IDENTITY_CONFIRMATION_REQUIRED = 11;
+  PROVIDER_STATUS_STALE_BASELINE = 12;
+  PROVIDER_STATUS_PROVIDER_KIND_CONFLICT = 13;
+  PROVIDER_STATUS_STORAGE_UNAVAILABLE = 14;
+  PROVIDER_STATUS_FOUND = 15;
+  PROVIDER_STATUS_NOT_FOUND = 16;
+  PROVIDER_STATUS_LISTED = 17;
+  PROVIDER_STATUS_INVALID_CURSOR = 18;
+  PROVIDER_STATUS_INVALID_PAGE_SIZE = 19;
+}
+message ProviderSecretReference { string slot = 1; string secret_id = 2; string secret_version_id = 3; }
+message ProviderRevisionMetadata {
+  int64 revision = 1; string configuration_contract = 2; string implementation_id = 3;
+  repeated ProviderSecretReference secret_references = 4;
+}
+message ProviderMetadata {
+  string environment_record_id = 1; string instance_id = 2; optional string name = 3;
+  string provider_kind = 4; ProviderRevisionMetadata revision = 5;
+}
+message ProviderReply { ProviderStatus status = 1; ProviderMetadata provider = 2; optional int64 previous_revision = 3; }
+message ListProvidersReply { ProviderStatus status = 1; repeated ProviderMetadata items = 2; string next_cursor = 3; }
 
 message EnvelopeRequest { bytes original_envelope = 1; }
 message SourceLocation { int32 line = 1; int32 column = 2; }

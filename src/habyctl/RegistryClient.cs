@@ -17,6 +17,9 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ProviderReply> ApplyProviderAsync(ApplyProviderRequest request, CancellationToken cancellationToken);
+    Task<ProviderReply> GetProviderAsync(GetProviderRequest request, CancellationToken cancellationToken);
+    Task<ListProvidersReply> ListProvidersAsync(ListProvidersRequest request, CancellationToken cancellationToken);
     Task<SecretReply> CreateSecretAsync(CreateSecretRequest request, CancellationToken cancellationToken);
     Task<SecretReply> GetSecretAsync(GetSecretRequest request, CancellationToken cancellationToken);
     Task<ListSecretsReply> ListSecretsAsync(ListSecretsRequest request, CancellationToken cancellationToken);
@@ -127,5 +130,11 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
     public async Task<ListSecretsReply> ListSecretsAsync(ListSecretsRequest request, CancellationToken cancellationToken) =>
         await _client.ListSecretsAsync(request, cancellationToken: cancellationToken);
 
+    public async Task<ProviderReply> ApplyProviderAsync(ApplyProviderRequest request, CancellationToken cancellationToken) =>
+        await _client.ApplyProviderAsync(request, cancellationToken: cancellationToken);
+    public async Task<ProviderReply> GetProviderAsync(GetProviderRequest request, CancellationToken cancellationToken) =>
+        await _client.GetProviderAsync(request, cancellationToken: cancellationToken);
+    public async Task<ListProvidersReply> ListProvidersAsync(ListProvidersRequest request, CancellationToken cancellationToken) =>
+        await _client.ListProvidersAsync(request, cancellationToken: cancellationToken);
     public void Dispose() => channel.Dispose();
 }

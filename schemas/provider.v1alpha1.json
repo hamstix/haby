@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haby.dev/schemas/provider-v1alpha1.schema.json",
+  "title": "Haby Provider declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "haby.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "Provider"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "environment"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "environment": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "providerKind",
+        "configurationContract",
+        "implementationId",
+        "properties",
+        "secretRefs"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        },
+        "providerKind": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": ".*\\S.*"
+        },
+        "configurationContract": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": ".*\\S.*"
+        },
+        "implementationId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": ".*\\S.*"
+        },
+        "properties": {
+          "type": "object"
+        },
+        "secretRefs": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": ".*\\S.*"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "secretName",
+              "version"
+            ],
+            "properties": {
+              "secretName": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "configurationContract": {
+                "const": "haby.postgresql.connection/v1"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "properties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "host",
+                  "port",
+                  "maintenanceDatabase",
+                  "administratorUserName"
+                ],
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "pattern": ".*\\S.*"
+                  },
+                  "port": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "maintenanceDatabase": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": ".*\\S.*"
+                  },
+                  "administratorUserName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": ".*\\S.*"
+                  }
+                }
+              },
+              "secretRefs": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "administrator-password"
+                ],
+                "properties": {
+                  "administrator-password": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "secretName",
+                      "version"
+                    ],
+                    "properties": {
+                      "secretName": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -264,8 +264,6 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
                 prepared.ShapeId == revision.ConfigurationShapeId &&
                 prepared.PayloadFormatVersion == revision.PayloadFormatVersion &&
                 prepared.ImplementationId == revision.ImplementationId &&
-                prepared.TargetIdentity.FormatVersion == instance.TargetFormatVersion &&
-                prepared.TargetIdentity.Value == instance.TargetIdentity &&
                 prepared.PayloadJson == revision.PayloadJson &&
                 prepared.SecretReferences.Count == references.Count &&
                 prepared.SecretReferences.All(reference => references.Any(item => item.Slot == reference.Slot &&

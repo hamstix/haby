@@ -547,9 +547,11 @@ are recoverable by readers of the corresponding database rows and backups.
 Restrict catalog access, protect backup copies and use this profile only when
 that exposure is accepted. `EnvelopeEncrypted` is not implemented by this Host.
 Secret creation and safe metadata discovery are documented in
-[named administrative secrets](named-administrative-secrets.md). No reveal,
-Provider bootstrap or alias-switch RPC is added here;
-trusted setup still uses the existing application APIs above. Execution resolves
+[named administrative secrets](named-administrative-secrets.md). Named Provider
+declarations and immutable revisions are available through
+[provider apply/get/list and revision get](provider-declarations.md).
+Secret reveal and operator alias switching remain unavailable; alias setup
+still uses the trusted application APIs above. Execution resolves
 the accepted exact Provider revision and its exact SecretVersion, even after an
 alias switch. Unavailable pinned inputs cannot select a substitute.
 
