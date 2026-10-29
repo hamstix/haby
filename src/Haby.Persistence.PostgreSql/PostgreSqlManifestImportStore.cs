@@ -120,6 +120,8 @@ public static class ManifestCatalogServiceCollectionExtensions
         services.AddSingleton<IEnvironmentQuery, PostgreSqlEnvironmentQuery>();
         services.AddSingleton<IEnvironmentCatalog, PostgreSqlEnvironmentCatalog>();
         services.AddSingleton<EnvironmentAdministration>();
+        services.AddSingleton<IAdministrativeSecretCatalog, PostgreSqlAdministrativeSecretCatalog>();
+        services.AddSingleton<SecretAdministration>();
         return services;
     }
 }

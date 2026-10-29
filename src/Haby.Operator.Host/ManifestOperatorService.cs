@@ -9,7 +9,7 @@ namespace Haby.Operator.Host;
 public sealed partial class ManifestOperatorService(ManifestContractCatalog catalog, ImportApplicationManifest importer,
     IManifestRevisionQuery revisions, PreviewImportedDatabase preview,
     IDurableDeploymentPlanner planner, DescribeDurablePlan descriptions, IEnvironmentQuery environments, IDurableDesiredStateCommitter committer,
-    IDurableCreateOperationExecutor executor, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration) : ManifestOperator.ManifestOperatorBase
+    IDurableCreateOperationExecutor executor, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration) : ManifestOperator.ManifestOperatorBase
 {
     public override Task<ValidateReply> Validate(EnvelopeRequest request, ServerCallContext context)
     {

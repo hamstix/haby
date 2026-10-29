@@ -10,6 +10,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<EnvironmentRow> Environments => Set<EnvironmentRow>();
     internal DbSet<SecretRow> Secrets => Set<SecretRow>();
     internal DbSet<SecretVersionRow> SecretVersions => Set<SecretVersionRow>();
+    internal DbSet<SecretCreationReceiptRow> SecretCreationReceipts => Set<SecretCreationReceiptRow>();
     internal DbSet<SecretPayloadRow> SecretPayloads => Set<SecretPayloadRow>();
     internal DbSet<ProviderInstanceRow> ProviderInstances => Set<ProviderInstanceRow>();
     internal DbSet<ProviderConfigurationRevisionRow> ProviderConfigurationRevisions => Set<ProviderConfigurationRevisionRow>();
@@ -67,7 +68,10 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
         });
         modelBuilder.Entity<SecretRow>(entity =>
         {
-            entity.ToTable("secrets");
+            entity.ToTable("secrets", table => table.HasCheckConstraint("CK_secrets_name", "name IS NULL OR name ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'"));
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(64);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(row => new { row.EnvironmentRecordId, row.Name }).IsUnique();
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
@@ -88,7 +92,10 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
         });
         modelBuilder.Entity<SecretVersionRow>(entity =>
         {
-            entity.ToTable("secret_versions");
+            entity.ToTable("secret_versions", table => table.HasCheckConstraint("CK_secret_versions_number", "number IS NULL OR number > 0"));
+            entity.Property(row => row.Number).HasColumnName("number");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(row => new { row.SecretId, row.Number }).IsUnique();
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.SecretId).HasColumnName("secret_id");
@@ -96,6 +103,23 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.FormatVersion).HasColumnName("format_version");
             entity.HasOne<SecretRow>().WithMany().HasForeignKey(row => row.SecretId).OnDelete(DeleteBehavior.Restrict);
             entity.HasAlternateKey(row => new { row.SecretId, row.Id });
+        });
+        modelBuilder.Entity<SecretCreationReceiptRow>(entity =>
+        {
+            entity.ToTable("secret_creation_receipts");
+            entity.HasKey(row => new { row.EnvironmentRecordId, row.Operation, row.RequestId });
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.Operation).HasColumnName("operation").HasMaxLength(64);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(64).IsRequired();
+            entity.Property(row => row.SecretId).HasColumnName("secret_id");
+            entity.Property(row => row.VersionId).HasColumnName("version_id");
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(256).IsRequired();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasOne<SecretRow>().WithMany().HasForeignKey(row => new { row.SecretId, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SecretVersionRow>().WithMany().HasForeignKey(row => new { row.SecretId, row.VersionId })
+                .HasPrincipalKey(row => new { row.SecretId, row.Id }).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SecretPayloadRow>(entity =>
         {
@@ -580,6 +604,8 @@ internal sealed class EnvironmentRow
 
 internal sealed class SecretRow
 {
+    public string? Name { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
     public Guid Id { get; set; }
     public Guid EnvironmentRecordId { get; set; }
     public required string Owner { get; set; }
@@ -593,6 +619,8 @@ internal sealed class SecretRow
 
 internal sealed class SecretVersionRow
 {
+    public int? Number { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
     public Guid Id { get; set; }
     public Guid SecretId { get; set; }
     public required string ProtectionFormat { get; set; }
@@ -677,4 +705,16 @@ internal sealed class ManifestRevisionRow
     public required string HistoricalWarnings { get; set; }
     public required string ActorId { get; set; }
     public DateTimeOffset ImportedAt { get; set; }
+}
+
+internal sealed class SecretCreationReceiptRow
+{
+    public Guid EnvironmentRecordId { get; set; }
+    public required string Operation { get; set; }
+    public Guid RequestId { get; set; }
+    public required string Name { get; set; }
+    public Guid SecretId { get; set; }
+    public Guid VersionId { get; set; }
+    public required string Actor { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
