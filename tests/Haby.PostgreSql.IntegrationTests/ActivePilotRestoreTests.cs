@@ -129,7 +129,7 @@ public sealed partial class OperatorHostIntegrationTests
             using var logs = new ExecutionLogs();
             fresh = OperatorHostApplication.Build(Arguments(hostConnection, scenario.CertificatePath), services =>
             {
-                services.AddSingleton<IDurableCreateTarget>(trap);
+                services.AddSingleton<IPostgreSqlDatabaseCreateTarget>(trap);
                 services.AddLogging(builder => builder.AddProvider(logs));
             });
             {
@@ -334,13 +334,13 @@ public sealed partial class OperatorHostIntegrationTests
         return result;
     }
 
-    private sealed class RestoreProviderTrap : IDurableCreateTarget
+    private sealed class RestoreProviderTrap : IPostgreSqlDatabaseCreateTarget
     {
         private int calls;
         public int Calls => Volatile.Read(ref calls);
-        public ValueTask<DurableCreateAbsenceOutcome> CheckDatabaseAbsentAsync(DurableCreateTargetInput input, CancellationToken cancellationToken)
+        public ValueTask<PostgreSqlDatabaseAbsenceOutcome> CheckDatabaseAbsentAsync(PostgreSqlDatabaseCreateInput input, CancellationToken cancellationToken)
         { Interlocked.Increment(ref calls); throw new InvalidOperationException("Restored Host contacted a Provider read boundary."); }
-        public ValueTask<DurableCreateDispatchOutcome> DispatchCreateAsync(DurableCreateTargetInput input, CancellationToken cancellationToken)
+        public ValueTask<PostgreSqlDatabaseCreateDispatchOutcome> DispatchCreateAsync(PostgreSqlDatabaseCreateInput input, CancellationToken cancellationToken)
         { Interlocked.Increment(ref calls); throw new InvalidOperationException("Restored Host contacted a Provider dispatch boundary."); }
     }
 }

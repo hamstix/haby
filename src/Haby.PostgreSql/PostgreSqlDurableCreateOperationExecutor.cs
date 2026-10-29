@@ -15,7 +15,7 @@ namespace Haby.PostgreSql;
 /// this executor performs no manual assignment from <c>NeedsAttention</c>.
 /// </summary>
 public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOperationJournal journal,
-    IManifestRevisionQuery manifests, IDurableCreateTarget target, IDurableCreateDispatchFaultHooks hooks,
+    IManifestRevisionQuery manifests, IPostgreSqlDatabaseCreateTarget target, IDurableCreateDispatchFaultHooks hooks,
     TimeProvider clock) : IDurableCreateOperationExecutor
 {
     private readonly PostgreSqlDurableCreateInputResolver resolver = new(manifests);
@@ -81,7 +81,7 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
 
         // Before the barrier, temporary dependency failures close only this attempt. Immutable
         // input defects and a confirmed preexisting database are definitive terminal failures.
-        DurableCreateTargetInput input;
+        PostgreSqlDatabaseCreateInput input;
         try
         {
             var shape = await resolver.ResolveAsync(key, operation, cancellationToken);
@@ -90,9 +90,9 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
                     cancellationToken);
             input = shape.Input!;
             var absence = await target.CheckDatabaseAbsentAsync(input, cancellationToken);
-            if (absence != DurableCreateAbsenceOutcome.Absent)
+            if (absence != PostgreSqlDatabaseAbsenceOutcome.Absent)
                 return await FailBeforeDispatchAsync(key, attemptId, MapAbsenceFailure(absence),
-                    absence is DurableCreateAbsenceOutcome.Present or DurableCreateAbsenceOutcome.DatabaseNameInvalid,
+                    absence is PostgreSqlDatabaseAbsenceOutcome.Present or PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid,
                     cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -140,7 +140,7 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
             return await FinalizeUncertainAsync(key, attemptId, cancellationToken);
         }
 
-        DurableCreateDispatchOutcome dispatch;
+        PostgreSqlDatabaseCreateDispatchOutcome dispatch;
         try
         {
             dispatch = await target.DispatchCreateAsync(input, cancellationToken);
@@ -152,10 +152,10 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
 
         switch (dispatch)
         {
-            case DurableCreateDispatchOutcome.Created:
+            case PostgreSqlDatabaseCreateDispatchOutcome.Created:
                 {
                     // Succeeded requires the confirmed Create response and an independent existence read.
-                    DurableCreateAbsenceOutcome confirmed;
+                    PostgreSqlDatabaseAbsenceOutcome confirmed;
                     try
                     {
                         confirmed = await target.CheckDatabaseAbsentAsync(input, cancellationToken);
@@ -165,7 +165,7 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
                         return await FinalizeUncertainAsync(key, attemptId, cancellationToken);
                     }
 
-                    if (confirmed != DurableCreateAbsenceOutcome.Present)
+                    if (confirmed != PostgreSqlDatabaseAbsenceOutcome.Present)
                         return await FinalizeUncertainAsync(key, attemptId, cancellationToken);
 
                     // The crash window after external success but before terminal persistence must leave
@@ -192,7 +192,7 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
                             await journal.FindAsync(key, CancellationToken.None) ?? operation)
                         : await UncertainResultAsync(key, cancellationToken);
                 }
-            case DurableCreateDispatchOutcome.Conflict:
+            case PostgreSqlDatabaseCreateDispatchOutcome.Conflict:
                 {
                     // A duplicate answer after dispatch is a definitive conflict; an existing database is
                     // never adopted. The post-marker outcome is recorded regardless of the caller token.
@@ -200,7 +200,7 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
                         DurableCreateOperationReason.Conflict, clock.GetUtcNow(), CancellationToken.None);
                     return await RereadResultAsync(key, cancellationToken);
                 }
-            case DurableCreateDispatchOutcome.ServerRejected:
+            case PostgreSqlDatabaseCreateDispatchOutcome.ServerRejected:
                 {
                     await journal.TryFinalizeFailureAsync(key, attemptId, DurableCreateOperationState.Failed,
                         DurableCreateOperationReason.ServerRejected, clock.GetUtcNow(), CancellationToken.None);
@@ -272,13 +272,13 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
             : MapObserved(operation);
     }
 
-    private static DurableCreateOperationReason MapAbsenceFailure(DurableCreateAbsenceOutcome absence) =>
+    private static DurableCreateOperationReason MapAbsenceFailure(PostgreSqlDatabaseAbsenceOutcome absence) =>
         absence switch
         {
-            DurableCreateAbsenceOutcome.Present => DurableCreateOperationReason.Conflict,
-            DurableCreateAbsenceOutcome.DatabaseNameInvalid => DurableCreateOperationReason.DatabaseNameInvalid,
-            DurableCreateAbsenceOutcome.Connectivity => DurableCreateOperationReason.Connectivity,
-            DurableCreateAbsenceOutcome.SecretUnavailable => DurableCreateOperationReason.SecretUnavailable,
+            PostgreSqlDatabaseAbsenceOutcome.Present => DurableCreateOperationReason.Conflict,
+            PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid => DurableCreateOperationReason.DatabaseNameInvalid,
+            PostgreSqlDatabaseAbsenceOutcome.Connectivity => DurableCreateOperationReason.Connectivity,
+            PostgreSqlDatabaseAbsenceOutcome.SecretUnavailable => DurableCreateOperationReason.SecretUnavailable,
             _ => DurableCreateOperationReason.ProviderInputUnavailable
         };
 
@@ -303,7 +303,7 @@ public static class PostgreSqlDurableCreateOperationExecutorServiceCollectionExt
     public static IServiceCollection AddPostgreSqlDurableCreateOperationExecution(this IServiceCollection services)
     {
         services.TryAddSingleton<IDurableCreateDispatchFaultHooks, NullDurableCreateDispatchFaultHooks>();
-        services.AddPostgreSqlDurableCreateTarget();
+        services.AddPostgreSqlDatabaseCreateTarget();
         services.TryAddSingleton<IDurableCreateOperationExecutor, PostgreSqlDurableCreateOperationExecutor>();
         return services;
     }

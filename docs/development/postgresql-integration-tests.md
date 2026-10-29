@@ -225,3 +225,34 @@ the restarted Host for create retry, get/list, local context reads, text/JSON
 output and expected rejections. Selecting a context with an absent Environment
 must leave it absent. The existing Native AOT matrix also covers the new command
 tree and continuation output through disposable loopback generated services.
+
+## PostgreSQL execution boundary (issue #90)
+
+`Haby.Application` owns durable operation keys/states, journal/query contracts,
+the public executor and safe execution results. `Haby.PostgreSql` owns
+`PostgreSqlDatabaseCreateInput`, `IPostgreSqlDatabaseCreateTarget`,
+`PostgreSqlDatabaseAbsenceOutcome` and `PostgreSqlDatabaseCreateDispatchOutcome`.
+The input retains the exact Environment, Provider instance, configuration revision,
+implementation and database name. The adapter resolves the exact configuration's
+SecretRef; execution and recovery never follow the current Provider alias.
+The existing singleton executor commits the durable dispatch marker between the
+absence read and SQL dispatch. ADR-025 recovery remains explicitly specialized.
+No persistence schema or wire contract changes are needed for this source move.
+
+Within this adapter, an existing database or a definitive duplicate response maps
+to Conflict; a definitive PostgreSQL rejection maps to ServerRejected. Those
+shared reasons remain general conflict/rejection categories. The adapter-local
+DatabaseNameInvalid outcome maps to the unchanged durable DatabaseNameInvalid
+reason. This shared specialized reason is temporary compatibility debt under
+[ADR-031](../adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md):
+issue #91 must define a Provider-neutral successor and explicit legacy mapping,
+implemented before role/grant or any other new effect kind is admitted.
+
+The boundary tests check adapter ownership and the absence of an Application
+reference to the concrete adapter. The disposable PostgreSQL suite checks the
+literal persisted `DatabaseNameInvalid`, fresh-context history and recovery reads,
+and terminal retry without dispatch. CLI tests distinguish protobuf value `4`
+and JSON `databaseNameInvalid` in historical operation/recovery presentation;
+the published Native AOT loopback test also renders the historical operation.
+The existing dispatch, cancellation, uncertainty, pinned-input, recovery, restart
+and dump/restore suites continue to exercise the same execution behavior.

@@ -10,7 +10,7 @@ internal sealed class PostgreSqlDurableCreateInputResolver(IManifestRevisionQuer
     private static readonly Regex SafeDatabase = new(@"\A[a-z][a-z0-9_]{0,62}\z",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
-    public async ValueTask<(DurableCreateTargetInput? Input, DurableCreateOperationReason? Reason, bool Definitive)>
+    public async ValueTask<(PostgreSqlDatabaseCreateInput? Input, DurableCreateOperationReason? Reason, bool Definitive)>
         ResolveAsync(DurableCreateOperationKey key, DurableCreateOperation operation,
             CancellationToken cancellationToken)
     {
@@ -40,7 +40,7 @@ internal sealed class PostgreSqlDurableCreateInputResolver(IManifestRevisionQuer
             return (null, DurableCreateOperationReason.UnsupportedShape, true);
         if (!SafeDatabase.IsMatch(name.Value))
             return (null, DurableCreateOperationReason.DatabaseNameInvalid, true);
-        return (new DurableCreateTargetInput(operation.Environment, operation.ProviderInstance,
+        return (new PostgreSqlDatabaseCreateInput(operation.Environment, operation.ProviderInstance,
             operation.ConfigurationRevision, operation.ImplementationId, name.Value), null, false);
     }
 }

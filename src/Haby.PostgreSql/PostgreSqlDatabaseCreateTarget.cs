@@ -15,38 +15,38 @@ namespace Haby.PostgreSql;
 /// — and never follows the current alias. Secret material is held only for one dedicated,
 /// non-pooled connection and is cleared before returning.
 /// </summary>
-public sealed class PostgreSqlDurableCreateTarget(IProviderConfigurationStore revisions, ISecretStore secrets,
-    ICheckpointProviderCapability capability, IDurableCreateDispatchFaultHooks hooks) : IDurableCreateTarget
+public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore revisions, ISecretStore secrets,
+    ICheckpointProviderCapability capability, IDurableCreateDispatchFaultHooks hooks) : IPostgreSqlDatabaseCreateTarget
 {
-    public async ValueTask<DurableCreateAbsenceOutcome> CheckDatabaseAbsentAsync(DurableCreateTargetInput input,
+    public async ValueTask<PostgreSqlDatabaseAbsenceOutcome> CheckDatabaseAbsentAsync(PostgreSqlDatabaseCreateInput input,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         var resolution = await ResolveAsync(input, cancellationToken);
         try
         {
-            if (resolution.Outcome is not DurableCreateAbsenceOutcome.Absent) return resolution.Outcome;
+            if (resolution.Outcome is not PostgreSqlDatabaseAbsenceOutcome.Absent) return resolution.Outcome;
             return await PostgreSqlDatabaseGateway.CheckAbsentAsync(resolution.Builder!, input.DatabaseName,
                 cancellationToken) switch
             {
-                DatabaseAbsenceOutcome.Absent => DurableCreateAbsenceOutcome.Absent,
-                DatabaseAbsenceOutcome.Present => DurableCreateAbsenceOutcome.Present,
-                _ => DurableCreateAbsenceOutcome.Connectivity
+                DatabaseAbsenceOutcome.Absent => PostgreSqlDatabaseAbsenceOutcome.Absent,
+                DatabaseAbsenceOutcome.Present => PostgreSqlDatabaseAbsenceOutcome.Present,
+                _ => PostgreSqlDatabaseAbsenceOutcome.Connectivity
             };
         }
         finally { Clear(resolution.Builder); }
     }
 
-    public async ValueTask<DurableCreateDispatchOutcome> DispatchCreateAsync(DurableCreateTargetInput input,
+    public async ValueTask<PostgreSqlDatabaseCreateDispatchOutcome> DispatchCreateAsync(PostgreSqlDatabaseCreateInput input,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         var resolution = await ResolveAsync(input, cancellationToken);
-        if (resolution.Outcome is not DurableCreateAbsenceOutcome.Absent)
+        if (resolution.Outcome is not PostgreSqlDatabaseAbsenceOutcome.Absent)
         {
             // The barrier was already committed. Anything that cannot re-establish the exact pinned
             // target now is an outcome the journal must treat as uncertain, never as "not dispatched".
-            return DurableCreateDispatchOutcome.Uncertain;
+            return PostgreSqlDatabaseCreateDispatchOutcome.Uncertain;
         }
 
         try
@@ -54,29 +54,29 @@ public sealed class PostgreSqlDurableCreateTarget(IProviderConfigurationStore re
             return await PostgreSqlDatabaseGateway.CreateDatabaseAsync(resolution.Builder!, input.DatabaseName,
                     () => hooks.DuringCreateCommandAsync(cancellationToken), cancellationToken) switch
             {
-                DatabaseCreateOutcome.Created => DurableCreateDispatchOutcome.Created,
-                DatabaseCreateOutcome.Conflict => DurableCreateDispatchOutcome.Conflict,
-                DatabaseCreateOutcome.ServerRejected => DurableCreateDispatchOutcome.ServerRejected,
-                _ => DurableCreateDispatchOutcome.Uncertain
+                DatabaseCreateOutcome.Created => PostgreSqlDatabaseCreateDispatchOutcome.Created,
+                DatabaseCreateOutcome.Conflict => PostgreSqlDatabaseCreateDispatchOutcome.Conflict,
+                DatabaseCreateOutcome.ServerRejected => PostgreSqlDatabaseCreateDispatchOutcome.ServerRejected,
+                _ => PostgreSqlDatabaseCreateDispatchOutcome.Uncertain
             };
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
             // Past the dispatch marker an unexpected failure can never be claimed as "not sent".
-            return DurableCreateDispatchOutcome.Uncertain;
+            return PostgreSqlDatabaseCreateDispatchOutcome.Uncertain;
         }
         finally { Clear(resolution.Builder); }
     }
 
-    private async ValueTask<Resolved> ResolveAsync(DurableCreateTargetInput input,
+    private async ValueTask<Resolved> ResolveAsync(PostgreSqlDatabaseCreateInput input,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(input.DatabaseName))
-            return new Resolved(DurableCreateAbsenceOutcome.DatabaseNameInvalid, null);
+            return new Resolved(PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid, null);
         if (!capability.Supports(new ProviderResolution(input.ProviderInstance.ToString(),
                 input.ConfigurationRevision.Value, input.ImplementationId), PostgreSqlDatabaseContract.Id))
-            return new Resolved(DurableCreateAbsenceOutcome.ProviderInputUnavailable, null);
+            return new Resolved(PostgreSqlDatabaseAbsenceOutcome.ProviderInputUnavailable, null);
 
         PostgreSqlProviderConfiguration? configuration;
         try
@@ -86,10 +86,10 @@ public sealed class PostgreSqlDurableCreateTarget(IProviderConfigurationStore re
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         { throw new OperationCanceledException(cancellationToken); }
-        catch (Exception) { return new Resolved(DurableCreateAbsenceOutcome.ProviderInputUnavailable, null); }
+        catch (Exception) { return new Resolved(PostgreSqlDatabaseAbsenceOutcome.ProviderInputUnavailable, null); }
         if (configuration is null ||
             !string.Equals(configuration.ImplementationId, input.ImplementationId, StringComparison.Ordinal))
-            return new Resolved(DurableCreateAbsenceOutcome.ProviderInputUnavailable, null);
+            return new Resolved(PostgreSqlDatabaseAbsenceOutcome.ProviderInputUnavailable, null);
 
         SecretMaterial? material;
         try
@@ -99,9 +99,9 @@ public sealed class PostgreSqlDurableCreateTarget(IProviderConfigurationStore re
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         { throw new OperationCanceledException(cancellationToken); }
-        catch (Exception) { return new Resolved(DurableCreateAbsenceOutcome.SecretUnavailable, null); }
+        catch (Exception) { return new Resolved(PostgreSqlDatabaseAbsenceOutcome.SecretUnavailable, null); }
         using var ownedMaterial = material;
-        if (material is null) return new Resolved(DurableCreateAbsenceOutcome.SecretUnavailable, null);
+        if (material is null) return new Resolved(PostgreSqlDatabaseAbsenceOutcome.SecretUnavailable, null);
 
         byte[]? bytes = null;
         try
@@ -119,11 +119,11 @@ public sealed class PostgreSqlDurableCreateTarget(IProviderConfigurationStore re
                 // Npgsql requires a managed string; clearing byte buffers and disabling pooling limits its lifetime.
                 Password = Encoding.UTF8.GetString(bytes)
             };
-            return new Resolved(DurableCreateAbsenceOutcome.Absent, builder);
+            return new Resolved(PostgreSqlDatabaseAbsenceOutcome.Absent, builder);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            return new Resolved(DurableCreateAbsenceOutcome.ProviderInputUnavailable, null);
+            return new Resolved(PostgreSqlDatabaseAbsenceOutcome.ProviderInputUnavailable, null);
         }
         finally { if (bytes is not null) Array.Clear(bytes); }
     }
@@ -133,15 +133,15 @@ public sealed class PostgreSqlDurableCreateTarget(IProviderConfigurationStore re
         if (builder is not null) builder.Password = null;
     }
 
-    private readonly record struct Resolved(DurableCreateAbsenceOutcome Outcome,
+    private readonly record struct Resolved(PostgreSqlDatabaseAbsenceOutcome Outcome,
         NpgsqlConnectionStringBuilder? Builder);
 }
 
-public static class PostgreSqlDurableCreateTargetServiceCollectionExtensions
+public static class PostgreSqlDatabaseCreateTargetServiceCollectionExtensions
 {
-    public static IServiceCollection AddPostgreSqlDurableCreateTarget(this IServiceCollection services)
+    public static IServiceCollection AddPostgreSqlDatabaseCreateTarget(this IServiceCollection services)
     {
-        services.TryAddSingleton<IDurableCreateTarget, PostgreSqlDurableCreateTarget>();
+        services.TryAddSingleton<IPostgreSqlDatabaseCreateTarget, PostgreSqlDatabaseCreateTarget>();
         return services;
     }
 }
