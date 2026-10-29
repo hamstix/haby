@@ -95,7 +95,7 @@ public sealed partial class OperatorHostIntegrationTests
             await using (var host = await StartExecutionLoggedHost(restricted, certificatePath, logs))
             {
                 Assert.NotNull(host.Services.GetService<ISecretStore>());
-                Assert.Null(host.Services.GetService<IProviderRevisionPreflight>());
+                Assert.IsType<ExactProviderRevisionPreflight>(host.Services.GetRequiredService<IProviderRevisionPreflight>());
                 Assert.NotNull(host.Services.GetService<IDurableDesiredStateCommitter>());
                 using var channel = Channel(host, certificate);
                 var client = new ManifestOperator.ManifestOperatorClient(channel);

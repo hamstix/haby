@@ -745,3 +745,57 @@ loopback gates exercise recovery commands, consent, bounded UTF-8 input, safe
 text/JSON and transport failures. The
 [active-pilot restore checkpoint](active-pilot-restore-rehearsal.md) additionally
 proves recovery-history preservation without Provider access or replay.
+
+## Exact Provider checks and checked alias administration
+
+After creating the Environment, prepare its exact administrative secret and
+apply a reference-only declaration (see [Provider declarations](provider-declarations.md)):
+
+```text
+habyctl secret create pg-admin --environment pilot
+habyctl provider apply --file provider.json
+habyctl provider check pg-main --revision 1 --environment pilot
+habyctl provider alias set postgresql.primary --provider pg-main --revision 1 --expect-absent --environment pilot
+habyctl provider alias get postgresql.primary --environment pilot
+```
+
+Secret creation prompts without echo; retain the displayed request identity for
+uncertain retries. For exact redirected input, explicitly use `--stdin`. The
+Provider declaration must name that Secret and its explicit version. Apply is
+offline validation and persistence; it does not test a connection or select an alias.
+
+To select revision 2 conditionally:
+
+```text
+habyctl provider check pg-main --revision 2 --environment pilot
+habyctl provider alias set postgresql.primary --provider pg-main --revision 2 --expected-provider pg-main --expected-revision 1 --environment pilot
+```
+
+Every set requires exactly one expectation: absence, or exact prior Provider and
+revision. The server resolves all names in the requested Environment. Existing
+unnamed instances use `--provider-instance-id` or `--expected-instance-id`
+instead of the corresponding name flag, always with an explicit revision.
+There is no force/latest selection. One alias per Provider instance is enforced.
+Set repeats preflight even after a successful check. Network checks run outside
+the short alias transaction; exact availability, CAS and successful-change audit
+commit together. Unchanged requires expectation and proposal to match the current
+binding. An obsolete expectation returns staleExpectation without another audit.
+
+Preflight checks exact saved configuration and SecretRefs, connectivity,
+authentication and read-only privilege evidence. It creates no probe databases,
+users or other objects. It is point-in-time evidence, not a guarantee of future
+provisioning success. A successful check is never stored as lasting validation.
+Checks and alias changes preserve historical Plans, generations and revisions;
+execution still uses its original exact inputs, including pre-transfer endpoints.
+
+Text and `--output json` use the same outcomes and exit codes: success 0,
+expected rejection 1, usage/configuration or invalid server response 2,
+transport/cancellation 3. Safe preflight categories include revisionUnavailable,
+handlerUnavailable, configurationUnavailable, secretUnavailable,
+authenticationFailed, insufficientPrivilege, serverUnavailable and deadlineExceeded.
+No driver diagnostics, connection strings, full configuration or material are returned.
+After uncertain alias commit, get the current binding before constructing the next
+expectation; cancellation or a lost response cannot promise rollback after commit.
+
+See [PR design notes](provider-check-alias.md) for exact CLI/wire syntax and
+current-build registration and historical compatibility rules.

@@ -78,7 +78,7 @@ public sealed partial class OperatorHostIntegrationTests
             await using (var host = await StartAsync(restricted, certificatePath))
             {
                 Assert.NotNull(host.Services.GetService<ISecretStore>());
-                Assert.Null(host.Services.GetService<IProviderRevisionPreflight>());
+                Assert.IsType<ExactProviderRevisionPreflight>(host.Services.GetRequiredService<IProviderRevisionPreflight>());
                 Assert.Same(host.Services.GetRequiredService<IDurableCreateOperationExecutor>(),
                     host.Services.GetRequiredService<IDurableCreateOperationExecutor>());
                 using var channel = Channel(host, certificate);

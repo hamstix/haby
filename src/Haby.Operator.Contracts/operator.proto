@@ -4,6 +4,10 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc CheckProvider (CheckProviderRequest) returns (ProviderAccessReply);
+  rpc GetProviderAlias (GetProviderAliasRequest) returns (ProviderAccessReply);
+  rpc SetProviderAlias (SetProviderAliasRequest) returns (ProviderAccessReply);
+
   rpc ApplyProvider(ApplyProviderRequest) returns (ProviderReply);
   rpc GetProvider(GetProviderRequest) returns (ProviderReply);
   rpc ListProviders(ListProvidersRequest) returns (ListProvidersReply);
@@ -499,3 +503,53 @@ message SecretMetadata {
 }
 message SecretReply { SecretStatus status = 1; SecretMetadata secret = 2; optional string request_id = 3; }
 message ListSecretsReply { SecretStatus status = 1; repeated SecretMetadata items = 2; string next_cursor = 3; }
+
+message ProviderSelector {
+  oneof selection { string name = 1; string instance_id = 2; }
+  int64 revision = 3;
+}
+message CheckProviderRequest { string environment = 1; string name = 2; int64 revision = 3; }
+message GetProviderAliasRequest { string environment = 1; string alias = 2; }
+message SetProviderAliasRequest {
+  string environment = 1;
+  string alias = 2;
+  ProviderSelector target = 3;
+  oneof expectation { bool expected_absent = 4; ProviderSelector expected = 5; }
+}
+enum ProviderAccessStatus {
+  PROVIDER_ACCESS_STATUS_UNSPECIFIED = 0;
+  PROVIDER_ACCESS_STATUS_READY = 1;
+  PROVIDER_ACCESS_STATUS_FOUND = 2;
+  PROVIDER_ACCESS_STATUS_NOT_FOUND = 3;
+  PROVIDER_ACCESS_STATUS_CHANGED = 4;
+  PROVIDER_ACCESS_STATUS_UNCHANGED = 5;
+  PROVIDER_ACCESS_STATUS_INVALID_REQUEST = 6;
+  PROVIDER_ACCESS_STATUS_ENVIRONMENT_NOT_FOUND = 7;
+  PROVIDER_ACCESS_STATUS_TARGET_UNAVAILABLE = 8;
+  PROVIDER_ACCESS_STATUS_PREFLIGHT_FAILED = 9;
+  PROVIDER_ACCESS_STATUS_STALE_EXPECTATION = 10;
+  PROVIDER_ACCESS_STATUS_INSTANCE_ALREADY_BOUND = 11;
+  PROVIDER_ACCESS_STATUS_STORAGE_UNAVAILABLE = 12;
+}
+enum ProviderPreflightStatus {
+  PROVIDER_PREFLIGHT_STATUS_UNSPECIFIED = 0;
+  PROVIDER_PREFLIGHT_STATUS_READY = 1;
+  PROVIDER_PREFLIGHT_STATUS_REVISION_UNAVAILABLE = 2;
+  PROVIDER_PREFLIGHT_STATUS_SECRET_UNAVAILABLE = 3;
+  PROVIDER_PREFLIGHT_STATUS_AUTHENTICATION_FAILED = 4;
+  PROVIDER_PREFLIGHT_STATUS_SERVER_UNAVAILABLE = 5;
+  PROVIDER_PREFLIGHT_STATUS_INSUFFICIENT_PRIVILEGE = 6;
+  PROVIDER_PREFLIGHT_STATUS_CONFIGURATION_UNAVAILABLE = 7;
+  PROVIDER_PREFLIGHT_STATUS_DEADLINE_EXCEEDED = 8;
+  PROVIDER_PREFLIGHT_STATUS_HANDLER_UNAVAILABLE = 9;
+}
+message ProviderAliasMetadata {
+  string alias = 1;
+  string instance_id = 2;
+  int64 revision = 3;
+}
+message ProviderAccessReply {
+  ProviderAccessStatus status = 1;
+  optional ProviderPreflightStatus preflight = 2;
+  ProviderAliasMetadata binding = 3;
+}

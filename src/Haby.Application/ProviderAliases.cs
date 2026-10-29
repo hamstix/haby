@@ -19,7 +19,8 @@ public enum ProviderPreflightOutcome
     ServerUnavailable,
     InsufficientPrivilege,
     ConfigurationUnavailable,
-    DeadlineExceeded
+    DeadlineExceeded,
+    HandlerUnavailable
 }
 
 /// <summary>Bounded, value-free point-in-time evidence. No driver detail crosses this boundary.</summary>

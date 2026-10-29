@@ -38,6 +38,9 @@ public sealed class CliCommandTests
 
     private sealed class FakeClient : IRegistryClient
     {
+        public Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ProviderAccessReply> GetProviderAliasAsync(GetProviderAliasRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ProviderAccessReply> SetProviderAliasAsync(SetProviderAliasRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProviderReply> ApplyProviderAsync(ApplyProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProviderReply> GetProviderAsync(GetProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ListProvidersReply> ListProvidersAsync(ListProvidersRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
