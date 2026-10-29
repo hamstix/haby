@@ -46,6 +46,9 @@ public sealed class CliConfigurationTests
 
     private sealed class Client : IRegistryClient
     {
+        public Task<SecretReply> CreateSecretAsync(CreateSecretRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<SecretReply> GetSecretAsync(GetSecretRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ListSecretsReply> ListSecretsAsync(ListSecretsRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<GetRevisionReply> GetRevisionAsync(GetRevisionRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new GetRevisionReply { NotFound = request.Reference.Clone() });
         public Task<ValidateReply> ValidateAsync(EnvelopeRequest request, CancellationToken cancellationToken) =>

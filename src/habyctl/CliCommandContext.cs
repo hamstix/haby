@@ -3,7 +3,7 @@ using Haby.Operator.Contracts;
 
 namespace Haby.Cli;
 
-internal sealed class CliCommandContext(
+internal sealed partial class CliCommandContext(
     IEndpointSource endpointSource,
     IRegistryClientFactory clientFactory,
     CliTextPresenter presenter,
@@ -12,7 +12,7 @@ internal sealed class CliCommandContext(
     TextWriter error,
     CliConfigurationService configuration,
     Func<(string? File, string? Context)> options,
-    Func<bool> jsonOutput)
+    Func<bool> jsonOutput, ISecretTerminal secretTerminal)
 {
     internal int PrintEnvironment(string command, EnvironmentReply reply) =>
         jsonOutput() ? jsonPresenter.PrintEnvironment(command, reply) : presenter.PrintEnvironment(command, reply);

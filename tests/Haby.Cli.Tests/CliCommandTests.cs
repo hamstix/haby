@@ -38,6 +38,9 @@ public sealed class CliCommandTests
 
     private sealed class FakeClient : IRegistryClient
     {
+        public Task<SecretReply> CreateSecretAsync(CreateSecretRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<SecretReply> GetSecretAsync(GetSecretRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ListSecretsReply> ListSecretsAsync(ListSecretsRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public string? Called { get; private set; }
         public CancellationToken ReceivedToken { get; private set; }
         public GetRevisionRequest? GetRequest { get; private set; }

@@ -546,7 +546,9 @@ mode under [ADR-006](../adr/0006-secret-storage-and-encryption.md). Secret paylo
 are recoverable by readers of the corresponding database rows and backups.
 Restrict catalog access, protect backup copies and use this profile only when
 that exposure is accepted. `EnvelopeEncrypted` is not implemented by this Host.
-No secret creation/reveal, Provider bootstrap or alias-switch RPC is added here;
+Secret creation and safe metadata discovery are documented in
+[named administrative secrets](named-administrative-secrets.md). No reveal,
+Provider bootstrap or alias-switch RPC is added here;
 trusted setup still uses the existing application APIs above. Execution resolves
 the accepted exact Provider revision and its exact SecretVersion, even after an
 alias switch. Unavailable pinned inputs cannot select a substitute.

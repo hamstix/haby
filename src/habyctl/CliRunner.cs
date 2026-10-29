@@ -9,7 +9,7 @@ internal sealed partial class CliApplication(
     TextWriter output,
     TextWriter error,
     Action<RootCommand>? registerAdditionalCommands = null,
-    IConfigEnvironment? configEnvironment = null)
+    IConfigEnvironment? configEnvironment = null, ISecretTerminal? secretTerminal = null)
 {
     internal const int Success = 0;
     internal const int Rejected = 1;
@@ -36,8 +36,9 @@ internal sealed partial class CliApplication(
         var commands = new CliCommandContext(endpointSource, clientFactory, new CliTextPresenter(output),
             new CliJsonPresenter(output), output, error, configuration,
             () => (parsed!.GetValue(configFile), parsed.GetValue(contextName)),
-            () => parsed!.GetValue(outputFormat) == "json");
+            () => parsed!.GetValue(outputFormat) == "json", secretTerminal ?? new SecretTerminal());
         root.Subcommands.Add(ManifestCommands.Create(commands));
+        root.Subcommands.Add(Commands.Secrets.SecretCommands.Create(commands));
         root.Subcommands.Add(Commands.Environments.EnvironmentCommands.Create(commands));
         root.Subcommands.Add(Commands.Planning.PlanningCommands.ChangeSet(commands));
         root.Subcommands.Add(Commands.Planning.PlanningCommands.Plan(commands));

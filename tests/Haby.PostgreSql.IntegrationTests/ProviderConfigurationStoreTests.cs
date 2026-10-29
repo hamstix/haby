@@ -30,7 +30,7 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
             var secrets = services.GetRequiredService<ISecretStore>();
             environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
             secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(environment, secret, new byte[] { 123, 45, 67 }, default);
+            await LegacySecretFixture.CreateAsync(factory, environment, secret, new byte[] { 123, 45, 67 });
             await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
             var store = services.GetRequiredService<IProviderConfigurationStore>();
             instance = await store.CreateInstanceAsync(environment, Configuration(secret), default);

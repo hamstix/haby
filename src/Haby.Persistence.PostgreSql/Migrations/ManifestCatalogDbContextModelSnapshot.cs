@@ -913,6 +913,54 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("provider_revision_secret_refs", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.SecretCreationReceiptRow", b =>
+                {
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("Operation")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("operation");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("SecretId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_id");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("version_id");
+
+                    b.HasKey("EnvironmentRecordId", "Operation", "RequestId");
+
+                    b.HasIndex("SecretId", "EnvironmentRecordId");
+
+                    b.HasIndex("SecretId", "VersionId");
+
+                    b.ToTable("secret_creation_receipts", (string)null);
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.SecretPayloadRow", b =>
                 {
                     b.Property<Guid>("SecretVersionId")
@@ -941,6 +989,10 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("content_type");
 
+                    b.Property<DateTimeOffset?>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
                     b.Property<Guid?>("CurrentVersionId")
                         .HasColumnType("uuid")
                         .HasColumnName("current_version_id");
@@ -948,6 +1000,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.Property<Guid>("EnvironmentRecordId")
                         .HasColumnType("uuid")
                         .HasColumnName("environment_record_id");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("name");
 
                     b.Property<string>("Owner")
                         .IsRequired()
@@ -981,11 +1038,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EnvironmentRecordId");
+                    b.HasIndex("EnvironmentRecordId", "Name")
+                        .IsUnique();
 
                     b.HasIndex("Id", "CurrentVersionId");
 
-                    b.ToTable("secrets", (string)null);
+                    b.ToTable("secrets", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_secrets_name", "name IS NULL OR name ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'");
+                        });
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.SecretVersionRow", b =>
@@ -995,9 +1056,17 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<DateTimeOffset?>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
                     b.Property<int>("FormatVersion")
                         .HasColumnType("integer")
                         .HasColumnName("format_version");
+
+                    b.Property<int?>("Number")
+                        .HasColumnType("integer")
+                        .HasColumnName("number");
 
                     b.Property<string>("ProtectionFormat")
                         .IsRequired()
@@ -1011,7 +1080,13 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("secret_versions", (string)null);
+                    b.HasIndex("SecretId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("secret_versions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_secret_versions_number", "number IS NULL OR number > 0");
+                        });
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ApplicationDeploymentRow", b =>
@@ -1239,6 +1314,23 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .WithMany()
                         .HasForeignKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
                         .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.SecretCreationReceiptRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.SecretRow", null)
+                        .WithMany()
+                        .HasForeignKey("SecretId", "EnvironmentRecordId")
+                        .HasPrincipalKey("Id", "EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.SecretVersionRow", null)
+                        .WithMany()
+                        .HasForeignKey("SecretId", "VersionId")
+                        .HasPrincipalKey("SecretId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

@@ -105,10 +105,18 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(reference);
         cancellationToken.ThrowIfCancellationRequested();
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        return await ResolveAsync(context, environment, reference, cancellationToken);
+    }
+
+    // Administrative acceptance already owns a transaction and its connection. Reuse it for the
+    // exact-version read so retries also work with a one-connection pool and retain one boundary.
+    internal async ValueTask<SecretMaterial?> ResolveAsync(ManifestCatalogDbContext context,
+        EnvironmentRecordId environment, SecretRef reference, CancellationToken cancellationToken)
+    {
         var environmentId = Guid.Parse(environment.ToString());
         var secretId = Guid.Parse(reference.SecretId.ToString());
         var versionId = Guid.Parse(reference.SecretVersionId.ToString());
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var row = await (from payload in context.SecretPayloads.AsNoTracking()
                          join version in context.SecretVersions.AsNoTracking() on payload.SecretVersionId equals version.Id
                          join secret in context.Secrets.AsNoTracking() on version.SecretId equals secret.Id

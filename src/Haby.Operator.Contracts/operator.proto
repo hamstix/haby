@@ -4,6 +4,9 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc CreateSecret(CreateSecretRequest) returns (SecretReply);
+  rpc GetSecret(GetSecretRequest) returns (SecretReply);
+  rpc ListSecrets(ListSecretsRequest) returns (ListSecretsReply);
   rpc CreateEnvironment(EnvironmentNameRequest) returns (EnvironmentReply);
   rpc GetEnvironment(EnvironmentNameRequest) returns (EnvironmentReply);
   rpc ListEnvironments(ListEnvironmentsRequest) returns (ListEnvironmentsReply);
@@ -425,3 +428,29 @@ message ListEnvironmentsReply {
   // Empty means no more rows. Live keyset traversal in ordinal name order.
   string next_cursor = 3;
 }
+
+// Write-only input. Never log, snapshot or format this message as JSON.
+message CreateSecretRequest { string environment = 1; string name = 2; string request_id = 3; bytes material = 4; }
+message GetSecretRequest { string environment = 1; string name = 2; string secret_id = 3; }
+message ListSecretsRequest { string environment = 1; int32 page_size = 2; string cursor = 3; }
+enum SecretStatus {
+  SECRET_STATUS_UNSPECIFIED = 0;
+  SECRET_STATUS_CREATED = 1;
+  SECRET_STATUS_EXISTING_EQUIVALENT = 2;
+  SECRET_STATUS_INVALID_REQUEST = 3;
+  SECRET_STATUS_ENVIRONMENT_NOT_FOUND = 4;
+  SECRET_STATUS_REQUEST_CONTENT_CONFLICT = 5;
+  SECRET_STATUS_SECRET_STORAGE_UNAVAILABLE = 6;
+  SECRET_STATUS_FOUND = 7;
+  SECRET_STATUS_NOT_FOUND = 8;
+  SECRET_STATUS_LISTED = 9;
+  SECRET_STATUS_INVALID_CURSOR = 10;
+  SECRET_STATUS_INVALID_PAGE_SIZE = 11;
+}
+message SecretVersionMetadata { string version_id = 1; optional int32 number = 2; optional string created_at_utc = 3; }
+message SecretMetadata {
+  string environment_record_id = 1; string secret_id = 2; optional string name = 3;
+  string purpose = 4; optional string created_at_utc = 5; repeated SecretVersionMetadata versions = 6;
+}
+message SecretReply { SecretStatus status = 1; SecretMetadata secret = 2; optional string request_id = 3; }
+message ListSecretsReply { SecretStatus status = 1; repeated SecretMetadata items = 2; string next_cursor = 3; }

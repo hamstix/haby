@@ -926,7 +926,11 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
                 await role.ExecuteNonQueryAsync();
             }
             var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(password), default);
+            if (migrateToPrevious)
+                await LegacySecretFixture.CreateAsync(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+                    environment, secret, Encoding.UTF8.GetBytes(password));
+            else
+                await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(password), default);
             var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
             { Username = user, Password = password };
             var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
