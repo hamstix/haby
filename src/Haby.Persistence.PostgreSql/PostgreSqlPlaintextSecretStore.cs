@@ -11,17 +11,8 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
     public async ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(id);
-        cancellationToken.ThrowIfCancellationRequested();
-        var recordId = EnvironmentRecordId.New();
-        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
-        context.Environments.Add(new EnvironmentRow
-        {
-            Id = Guid.Parse(recordId.ToString()),
-            EnvironmentId = id.Value
-        });
-        await context.SaveChangesAsync(cancellationToken);
-        return recordId;
+        var result = await new PostgreSqlEnvironmentCatalog(contexts).CreateOrGetAsync(id, cancellationToken);
+        return result.Environment.RecordId;
     }
 
     public async ValueTask CreateAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,

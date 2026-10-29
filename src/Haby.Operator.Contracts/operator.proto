@@ -4,6 +4,9 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc CreateEnvironment(EnvironmentNameRequest) returns (EnvironmentReply);
+  rpc GetEnvironment(EnvironmentNameRequest) returns (EnvironmentReply);
+  rpc ListEnvironments(ListEnvironmentsRequest) returns (ListEnvironmentsReply);
   rpc Validate(EnvelopeRequest) returns (ValidateReply);
   rpc Import(EnvelopeRequest) returns (ImportReply);
   rpc GetRevision(GetRevisionRequest) returns (GetRevisionReply);
@@ -397,4 +400,28 @@ message OperationReply {
   DurableOperationSummary operation = 2;
   // Read-only history populated by GetOperation; ExecuteOperation returns its execution snapshot.
   repeated OperationAttempt attempts = 3;
+}
+
+// Secret-free registry metadata. Names never replace durable persisted identities.
+message EnvironmentNameRequest { string name = 1; }
+message EnvironmentMetadata { string record_id = 1; string name = 2; }
+enum EnvironmentStatus {
+  ENVIRONMENT_STATUS_UNSPECIFIED = 0;
+  ENVIRONMENT_STATUS_CREATED = 1;
+  ENVIRONMENT_STATUS_EXISTING = 2;
+  ENVIRONMENT_STATUS_FOUND = 3;
+  ENVIRONMENT_STATUS_NOT_FOUND = 4;
+  ENVIRONMENT_STATUS_INVALID_NAME = 5;
+  ENVIRONMENT_STATUS_LISTED = 6;
+  ENVIRONMENT_STATUS_INVALID_CURSOR = 7;
+  ENVIRONMENT_STATUS_INVALID_PAGE_SIZE = 8;
+}
+message EnvironmentReply { EnvironmentStatus status = 1; EnvironmentMetadata environment = 2; }
+// Zero means default 50; otherwise 1..100. Empty cursor starts traversal.
+message ListEnvironmentsRequest { int32 page_size = 1; string cursor = 2; }
+message ListEnvironmentsReply {
+  EnvironmentStatus status = 1;
+  repeated EnvironmentMetadata items = 2;
+  // Empty means no more rows. Live keyset traversal in ordinal name order.
+  string next_cursor = 3;
 }

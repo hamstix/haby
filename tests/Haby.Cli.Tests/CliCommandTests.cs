@@ -74,6 +74,10 @@ public sealed class CliCommandTests
             throw new NotImplementedException();
         public Task<RecoveryReply> InspectOperationRecoveryAsync(OperationRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<RecoveryReply> AssignExistingOperationAsync(AssignExistingOperationRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<EnvironmentReply> CreateEnvironmentAsync(EnvironmentNameRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<EnvironmentReply> GetEnvironmentAsync(EnvironmentNameRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ListEnvironmentsReply> ListEnvironmentsAsync(ListEnvironmentsRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public void Dispose() { }
 
         public Task<ValidateReply> ValidateAsync(EnvelopeRequest request, CancellationToken cancellationToken)

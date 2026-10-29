@@ -36,6 +36,7 @@ public sealed class SecretMaterial : IDisposable
 /// <summary>Internal storage boundary. The caller supplies a trusted Environment identity.</summary>
 public interface ISecretStore
 {
+    /// <summary>Compatibility helper: create-or-get metadata only. Prefer EnvironmentAdministration for explicit administration.</summary>
     ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id, CancellationToken cancellationToken);
     ValueTask CreateAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,
         CancellationToken cancellationToken);
