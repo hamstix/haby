@@ -19,27 +19,27 @@ internal sealed class PostgreSqlDurableCreateInputResolver(IManifestRevisionQuer
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (InvalidDataException)
         {
-            return (null, DurableCreateOperationReason.ProviderInputUnavailable, true);
+            return (null, DurableCreateOperationReason.InputUnavailable, true);
         }
         catch (Exception)
         {
-            return (null, DurableCreateOperationReason.ProviderInputUnavailable, false);
+            return (null, DurableCreateOperationReason.InputUnavailable, false);
         }
         if (revision is null)
-            return (null, DurableCreateOperationReason.ProviderInputUnavailable, false);
+            return (null, DurableCreateOperationReason.InputUnavailable, false);
         var spec = revision.Declaration.Spec;
         if (spec.Resources.Count != 1 || spec.Components.Count != 0 || spec.Exports.Count != 0 ||
             spec.Parameters.Count != 0)
-            return (null, DurableCreateOperationReason.UnsupportedShape, true);
+            return (null, DurableCreateOperationReason.InputInvalid, true);
         var entry = spec.Resources.Single();
-        if (entry.Key != key.ResourceId) return (null, DurableCreateOperationReason.UnsupportedShape, true);
+        if (entry.Key != key.ResourceId) return (null, DurableCreateOperationReason.InputInvalid, true);
         var resource = entry.Value;
         if (resource.Type != PostgreSqlDatabaseContract.Id || resource.Properties.Members.Count != 1 ||
             !resource.Properties.Members.TryGetValue("name", out var value) ||
             value is not ConfigurationString name)
-            return (null, DurableCreateOperationReason.UnsupportedShape, true);
+            return (null, DurableCreateOperationReason.InputInvalid, true);
         if (!SafeDatabase.IsMatch(name.Value))
-            return (null, DurableCreateOperationReason.DatabaseNameInvalid, true);
+            return (null, DurableCreateOperationReason.InputInvalid, true);
         return (new PostgreSqlDatabaseCreateInput(operation.Environment, operation.ProviderInstance,
             operation.ConfigurationRevision, operation.ImplementationId, name.Value), null, false);
     }

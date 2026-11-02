@@ -99,6 +99,28 @@ risks. Do not turn style preferences into blockers or green CI into proof.
 Finish with an explicit merge-readiness verdict and unperformed checks.
 ```
 
+## Compatibility and migration behavior
+
+New attempts use InputInvalid for action-input validation and InputUnavailable
+for broad exact pinned-input failures. Each path retains its previous definitive
+or transient classification. Reason alone never authorizes retry, and the
+single-database dispatch and recovery policy is unchanged. HandlerUnavailable
+has end-to-end representation support; emission awaits exact typed dispatch.
+
+The additive AddProviderNeutralOperationReasons migration expands the reason
+constraint without rewriting rows. Historical CLR ordinals, stored strings,
+protobuf values 0-8 and CLI JSON spellings remain unchanged. New CLR members
+append at 8-10; their protobuf values are 9-11. Recovery inspection preserves
+retained legacy reasons, including when current pinned input is unavailable.
+
+Deploy the schema expansion before a new binary writes new reasons. This is a
+forward-only binary compatibility boundary once new values exist: old readers
+may reject the new stored/wire codes. Mixed-version operation and rolling binary
+downgrade are not supported. A schema downgrade restores the validating legacy
+constraint inside EF's migration transaction; any new-code row makes it fail
+without deleting/relabeling history or changing the current schema. Do not work
+around this refusal by changing retained reasons.
+
 ## Completion and next step
 
 The issue is complete when the scoped PR is merged after accepted evidence and

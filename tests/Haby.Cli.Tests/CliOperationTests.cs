@@ -54,22 +54,33 @@ public sealed class CliOperationTests
             Assert.Contains("do not blindly retry", text.ToString());
     }
 
-    [Fact]
-    public void Historical_database_name_reason_preserves_wire_number_and_exact_json_spelling()
+    [Theory]
+    [InlineData(1, "providerInputUnavailable")]
+    [InlineData(2, "secretUnavailable")]
+    [InlineData(3, "unsupportedShape")]
+    [InlineData(4, "databaseNameInvalid")]
+    [InlineData(5, "connectivity")]
+    [InlineData(6, "conflict")]
+    [InlineData(7, "serverRejected")]
+    [InlineData(8, "uncertainAfterDispatch")]
+    [InlineData(9, "inputInvalid")]
+    [InlineData(10, "inputUnavailable")]
+    [InlineData(11, "handlerUnavailable")]
+    public void Reasons_preserve_wire_numbers_and_exact_json_spelling(int number, string spelling)
     {
-        Assert.Equal(4, (int)OperationReason.DatabaseNameInvalid);
+        Assert.Equal(spelling, char.ToLowerInvariant(((OperationReason)number).ToString()[0]) + ((OperationReason)number).ToString()[1..]);
         // Decode the literal historical field value, independently of the generated enum name.
-        var historical = DurableOperationSummary.Parser.ParseFrom(new byte[] { 24, 4 });
-        Assert.Equal(OperationReason.DatabaseNameInvalid, historical.Reason);
+        var historical = DurableOperationSummary.Parser.ParseFrom(new byte[] { 24, (byte)number });
+        Assert.Equal((OperationReason)number, historical.Reason);
         var reply = Snapshot(OperationStatus.Found, OperationState.Failed);
         reply.Operation.Reason = historical.Reason;
         using var json = new StringWriter(); using var text = new StringWriter();
         Assert.Equal(0, new CliJsonPresenter(json).PrintOperation("operation get", reply));
         Assert.Equal(0, new CliTextPresenter(text).PrintOperation("operation get", reply));
         using var document = JsonDocument.Parse(json.ToString());
-        Assert.Equal("databaseNameInvalid", document.RootElement.GetProperty("data")
+        Assert.Equal(spelling, document.RootElement.GetProperty("data")
             .GetProperty("operation").GetProperty("reason").GetString());
-        Assert.Contains("databaseNameInvalid", text.ToString());
+        Assert.Contains(spelling, text.ToString());
     }
 
     [Theory]

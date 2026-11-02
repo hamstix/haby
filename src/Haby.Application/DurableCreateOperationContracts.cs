@@ -26,16 +26,15 @@ public enum DurableCreateOperationState
 /// <summary>A bounded, value-free reason code. It never carries driver text, configuration or secret material.</summary>
 public enum DurableCreateOperationReason
 {
-    /// <summary>The pinned generation input, codec, implementation or Provider revision could not be resolved exactly.</summary>
+    /// <summary>Legacy pinned-input reason retained for history and safe pre-dispatch resume; new attempts use InputUnavailable.</summary>
     ProviderInputUnavailable,
     /// <summary>The exact pinned SecretRef could not be resolved.</summary>
     SecretUnavailable,
-    /// <summary>The accepted revision is not the one supported database shape for this operation.</summary>
+    /// <summary>Legacy shape rejection retained for history; new attempts use InputInvalid.</summary>
     UnsupportedShape,
     /// <summary>
     /// Legacy PostgreSQL database-name validation reason retained for stored history and wire compatibility.
-    /// Temporary debt under ADR-031: issue #91 must define a Provider-neutral successor and explicit
-    /// legacy mapping, implemented before role/grant or any other new effect kind is admitted.
+    /// New attempts use InputInvalid under ADR-032.
     /// </summary>
     DatabaseNameInvalid,
     /// <summary>The pinned target could not be reached or admitted the connection before dispatch.</summary>
@@ -45,7 +44,13 @@ public enum DurableCreateOperationReason
     /// <summary>The target server definitively rejected the dispatched operation.</summary>
     ServerRejected,
     /// <summary>The post-dispatch outcome is uncertain; only manual recovery may resolve it.</summary>
-    UncertainAfterDispatch
+    UncertainAfterDispatch,
+    /// <summary>Resolved operation inputs fail the action's execution contract.</summary>
+    InputInvalid,
+    /// <summary>Required pinned input cannot be read, decoded or resolved exactly.</summary>
+    InputUnavailable,
+    /// <summary>The exact required handler or its supported contract is positively known to be unavailable.</summary>
+    HandlerUnavailable
 }
 
 /// <summary>A bounded, value-free outcome retained on one separately attributable attempt row.</summary>

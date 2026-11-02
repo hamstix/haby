@@ -40,11 +40,12 @@ public sealed partial class CliLoopbackTests
         public override Task<OperationReply> GetOperation(OperationRequest request, ServerCallContext context)
         {
             Assert.Equal("deployment", request.DeploymentId); Assert.Equal(1, request.Generation);
-            Assert.Contains(request.ResourceId, new[] { "db", "legacy" });
+            Assert.True(request.ResourceId == "db" || request.ResourceId.StartsWith("reason-", StringComparison.Ordinal));
             Assert.Equal(OperationAction.Create, request.Action);
             var reply = CliOperationTests.Snapshot(OperationStatus.Found,
-                request.ResourceId == "legacy" ? OperationState.Failed : OperationState.Dispatching);
-            if (request.ResourceId == "legacy") reply.Operation.Reason = (OperationReason)4;
+                request.ResourceId == "db" ? OperationState.Dispatching : OperationState.Failed);
+            if (request.ResourceId.StartsWith("reason-", StringComparison.Ordinal))
+                reply.Operation.Reason = (OperationReason)int.Parse(request.ResourceId[7..], System.Globalization.CultureInfo.InvariantCulture);
             return Task.FromResult(reply);
         }
     }
@@ -65,11 +66,12 @@ public sealed partial class CliLoopbackTests
         {
             var cases = new (string Verb, string Resource, string Outcome, int Exit)[]
             {
-                ("get", "db", "found", 0), ("get", "legacy", "found", 0), ("execute", "success", "succeeded", 0),
+                ("get", "db", "found", 0), ("execute", "success", "succeeded", 0),
                 ("execute", "conflict", "failed", 1), ("execute", "retry", "retryableFailure", 1),
                 ("execute", "attention", "needsAttention", 1), ("execute", "uncertain", "dispatchUncertain", 1),
                 ("execute", "missing", "operationNotFound", 1), ("execute", "transport", "", 3)
             };
+            cases = [.. cases, .. Enumerable.Range(0, 12).Select(n => ("get", "reason-" + n, "found", 0))];
             foreach (var (verb, resource, outcome, exit) in cases)
                 foreach (var format in new[] { "text", "json" })
                 {
@@ -96,14 +98,22 @@ public sealed partial class CliLoopbackTests
                         Assert.DoesNotContain("secret-transport-sentinel", text + errors);
                         if (exit == 3) { Assert.Equal("", text); Assert.NotEqual("", errors); return; }
                         Assert.Equal("", errors); Assert.Contains(outcome, text);
-                        if (resource == "legacy") Assert.Contains("databaseNameInvalid", text);
+                        string?[] spellings = [null, "providerInputUnavailable", "secretUnavailable", "unsupportedShape",
+                            "databaseNameInvalid", "connectivity", "conflict", "serverRejected", "uncertainAfterDispatch",
+                            "inputInvalid", "inputUnavailable", "handlerUnavailable"];
+                        var reason = resource.StartsWith("reason-", StringComparison.Ordinal)
+                            ? spellings[int.Parse(resource[7..], System.Globalization.CultureInfo.InvariantCulture)] : null;
+                        if (reason is not null) Assert.Contains(reason, text);
                         if (format != "json") return;
                         using var json = JsonDocument.Parse(text);
                         Assert.Equal("operation " + verb, json.RootElement.GetProperty("command"u8).GetString());
                         Assert.Equal(outcome, json.RootElement.GetProperty("outcome"u8).GetString());
-                        if (resource == "legacy")
-                            Assert.Equal("databaseNameInvalid", json.RootElement.GetProperty("data")
-                                .GetProperty("operation").GetProperty("reason").GetString());
+                        if (resource.StartsWith("reason-", StringComparison.Ordinal))
+                        {
+                            var operation = json.RootElement.GetProperty("data").GetProperty("operation");
+                            if (reason is null) Assert.False(operation.TryGetProperty("reason", out _));
+                            else Assert.Equal(reason, operation.GetProperty("reason").GetString());
+                        }
                     }
                 }
             using var canceledOutput = new StringWriter(); using var canceledError = new StringWriter();
