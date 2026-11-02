@@ -10,11 +10,11 @@ using Npgsql;
 
 namespace Haby.Persistence.PostgreSql;
 
-/// <summary>Durable, side-effect-free one-database planning. It never accepts desired state.</summary>
+/// <summary>Durable, side-effect-free single-action planning. It never accepts desired state.</summary>
 public sealed class PostgreSqlDurableDeploymentPlanner(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IManifestRevisionQuery revisions,
     IProviderAliasResolver aliases, IEnumerable<IProviderConfigurationCodec> codecs,
-    ICheckpointProviderCapability capability, TimeProvider clock)
+    DurableActionAdmission admission, TimeProvider clock)
     : IDurableDeploymentPlanner
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
@@ -92,24 +92,22 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
-        if (!CheckpointDatabaseShape.IsSupported(spec)) return new(DurablePlanStatus.UnsupportedShape);
+        if (!DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
         var resource = spec.Resources.Single().Value;
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
         var resolved = await aliases.ResolveAsync(environmentId, resource.ProviderRef, cancellationToken);
         if (resolved is null) return new(DurablePlanStatus.AliasNotResolved);
-        if (!capability.Supports(new ProviderResolution(resolved.Binding.InstanceId.ToString(),
-            resolved.Binding.RevisionNumber.Value, resolved.ImplementationId), resource.Type))
-            return new(DurablePlanStatus.ProviderCapabilityMismatch);
         var revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
             item.ProviderInstanceId == Guid.Parse(resolved.Binding.InstanceId.ToString()) &&
             item.RevisionNumber == resolved.Binding.RevisionNumber.Value &&
             item.EnvironmentRecordId == row.EnvironmentRecordId && item.IsSealed, cancellationToken);
-        if (revisionRow is null || revisionRow.ImplementationId != resolved.ImplementationId ||
-            !await CodecAvailableAsync(context, revisionRow, cancellationToken))
+        if (revisionRow is null || revisionRow.ImplementationId != resolved.ImplementationId)
             return new(DurablePlanStatus.ProviderRevisionUnavailable);
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId),
             reference, resource.ProviderRef, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber,
             resolved.ImplementationId);
+        var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
+        if (admitted != DurablePlanStatus.Planned) return new(admitted);
         var id = DeploymentPlanId.New();
         var createdAt = clock.GetUtcNow();
         var planRow = new DurablePlanRow
@@ -136,9 +134,6 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         await transaction.CommitAsync(CancellationToken.None);
         return new(DurablePlanStatus.Planned, ToPlan(planRow, null, null));
     }
-
-    internal static bool IsSupportedDatabaseResource(NormalizedResource resource) =>
-        CheckpointDatabaseShape.IsSupportedResource(resource);
 
     public async ValueTask<DeploymentChangeSet?> FindChangeSetAsync(DeploymentChangeSetId id,
         CancellationToken cancellationToken)
@@ -218,7 +213,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ManifestRevisionNumber.Create(row.RevisionNumber));
         var manifest = await revisions.FindAsync(revision, cancellationToken);
         if (manifest is null) return (DurablePlanStatus.RevisionNotFound, null);
-        if (manifest.Declaration.Spec.Resources.Count != 1)
+        if (!DurableActionAdmission.SupportsPilotShape(manifest.Declaration.Spec))
             return (DurablePlanStatus.UnsupportedShape, null);
         var alias = manifest.Declaration.Spec.Resources.Single().Value.ProviderRef;
         var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(item =>
@@ -227,19 +222,43 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
         var resolution = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
         if (resolution is null) return (DurablePlanStatus.AliasNotResolved, null);
-        if (!capability.Supports(new ProviderResolution(resolution.Binding.InstanceId.ToString(),
-            resolution.Binding.RevisionNumber.Value, resolution.ImplementationId), PostgreSqlDatabaseContract.Id))
-            return (DurablePlanStatus.ProviderCapabilityMismatch, null);
         var providerRevision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
             item.ProviderInstanceId == Guid.Parse(resolution.Binding.InstanceId.ToString()) &&
             item.RevisionNumber == resolution.Binding.RevisionNumber.Value &&
             item.EnvironmentRecordId == row.EnvironmentRecordId && item.IsSealed, cancellationToken);
-        if (providerRevision is null || providerRevision.ImplementationId != resolution.ImplementationId ||
-            !await CodecAvailableAsync(context, providerRevision, cancellationToken))
+        if (providerRevision is null || providerRevision.ImplementationId != resolution.ImplementationId)
             return (DurablePlanStatus.ProviderRevisionUnavailable, null);
-        return (DurablePlanStatus.Planned, new DurablePlanningInputs(environmentId,
+        var inputs = new DurablePlanningInputs(environmentId,
             EnvironmentId.Create(environment.EnvironmentId), revision, alias, resolution.Binding.InstanceId,
-            resolution.Binding.RevisionNumber, resolution.ImplementationId));
+            resolution.Binding.RevisionNumber, resolution.ImplementationId);
+        var admitted = await AdmitAsync(context, manifest.Declaration.Spec, providerRevision, inputs, cancellationToken);
+        return (admitted, admitted == DurablePlanStatus.Planned ? inputs : null);
+    }
+
+    // The caller owns the context and transaction. Commit passes its already-loaded exact
+    // revision, retaining its row/advisory locks through all admission and persistence.
+    internal async Task<DurablePlanStatus> AdmitAsync(ManifestCatalogDbContext context,
+        NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs,
+        CancellationToken cancellationToken)
+    {
+        if (!revision.IsSealed || revision.EnvironmentRecordId != Guid.Parse(inputs.Environment.ToString()) ||
+            revision.ProviderInstanceId != Guid.Parse(inputs.ProviderInstance.ToString()) ||
+            revision.RevisionNumber != inputs.ConfigurationRevision.Value || revision.ImplementationId != inputs.ImplementationId)
+            return DurablePlanStatus.ProviderRevisionUnavailable;
+        var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(row =>
+            row.Id == revision.ProviderInstanceId && row.EnvironmentRecordId == revision.EnvironmentRecordId,
+            cancellationToken);
+        if (instance is null) return DurablePlanStatus.ProviderRevisionUnavailable;
+        DurablePlanStatus result;
+        try
+        {
+            result = admission.Admit(spec,
+                new ProviderAdapterKey(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs);
+        }
+        catch (ArgumentException) { return DurablePlanStatus.ProviderRevisionUnavailable; }
+        if (result != DurablePlanStatus.Planned) return result;
+        return await CodecAvailableAsync(context, revision, cancellationToken)
+            ? DurablePlanStatus.Planned : DurablePlanStatus.ProviderRevisionUnavailable;
     }
 
     internal async Task<bool> CodecAvailableAsync(ManifestCatalogDbContext context,
@@ -329,6 +348,8 @@ public static class DurableDeploymentPlannerServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDurableDeploymentPlanner(this IServiceCollection services)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton<DurableActionRegistry>();
+        services.TryAddSingleton<DurableActionAdmission>();
         services.TryAddSingleton<PostgreSqlDurableDeploymentPlanner>();
         services.TryAddSingleton<IDurableDeploymentPlanner>(provider =>
             provider.GetRequiredService<PostgreSqlDurableDeploymentPlanner>());

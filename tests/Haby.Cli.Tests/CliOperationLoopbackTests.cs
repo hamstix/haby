@@ -29,6 +29,7 @@ public sealed partial class CliLoopbackTests
                 throw new RpcException(new Status(StatusCode.Unavailable, "secret-transport-sentinel"));
             return request.ResourceId switch
             {
+                "no-handler" => CliOperationTests.Snapshot(OperationStatus.HandlerUnavailable, OperationState.Pending),
                 "success" => CliOperationTests.Snapshot(OperationStatus.Succeeded, OperationState.Succeeded),
                 "conflict" => CliOperationTests.Snapshot(OperationStatus.Failed, OperationState.Failed),
                 "retry" => CliOperationTests.Snapshot(OperationStatus.RetryableFailure, OperationState.Preparing),
@@ -66,7 +67,7 @@ public sealed partial class CliLoopbackTests
         {
             var cases = new (string Verb, string Resource, string Outcome, int Exit)[]
             {
-                ("get", "db", "found", 0), ("execute", "success", "succeeded", 0),
+                ("get", "db", "found", 0), ("execute", "no-handler", "handlerUnavailable", 2), ("execute", "success", "succeeded", 0),
                 ("execute", "conflict", "failed", 1), ("execute", "retry", "retryableFailure", 1),
                 ("execute", "attention", "needsAttention", 1), ("execute", "uncertain", "dispatchUncertain", 1),
                 ("execute", "missing", "operationNotFound", 1), ("execute", "transport", "", 3)

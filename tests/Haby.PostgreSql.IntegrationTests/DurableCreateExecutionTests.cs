@@ -1175,6 +1175,7 @@ public sealed class DurableCreateExecutionTests(PostgreSqlFixture fixture) : ICl
             services.AddSingleton<IManifestRevisionQuery>(provider => new FailOnceManifestRevisionQuery(
                 provider.GetRequiredService<PostgreSqlManifestImportStore>()));
         services.AddPostgreSqlProviderRevisionPreflight()
+            .AddPostgreSqlDatabaseCreateAction()
             .AddPostgreSqlDurableDesiredStateCommitter()
             .AddPostgreSqlDurableCreateOperationJournal()
             .AddPostgreSqlDurableCreateOperationExecution()

@@ -187,6 +187,8 @@ public sealed partial class OperatorHostIntegrationTests
                 .AddSingleton<TimeProvider, PastClock>().AddPostgreSqlProviderConfigurationCodec()
                 .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>()
                 .AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
+                .AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
+                .AddPostgreSqlDurableCreateOperationJournal().AddPostgreSqlDurableCreateOperationExecution()
                 .AddPostgreSqlDurableDeploymentPlanner().BuildServiceProvider();
             var expired = (await past.GetRequiredService<IDurableDeploymentPlanner>().CreatePlanAsync(
                 DeploymentChangeSetId.Parse(change.ChangeSetId), "fixture", default)).Plan!;
@@ -236,7 +238,8 @@ public sealed partial class OperatorHostIntegrationTests
                     Assert.Null(unavailable.Plan.IntendedWork.Action);
                     Assert.DoesNotContain("secret-sentinel", unavailable.ToString());
                     var openRead = await client.GetPlanAsync(new PlanRequest { PlanId = replacement.PlanId });
-                    Assert.Equal(outcome == DescriptionStatus.InputCorrupt ? PlanningStatus.PlanInputUnavailable : PlanningStatus.Current, openRead.Status);
+                    // Check now runs the same adapter-owned admission as Plan and Commit.
+                    Assert.Equal(PlanningStatus.PlanInputUnavailable, openRead.Status);
                     Assert.Equal(outcome, openRead.Plan.IntendedWork.Status);
                     Assert.Equal(PlanningStatus.Expired, (await client.GetPlanAsync(expiredRequest)).Status);
                 }

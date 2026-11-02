@@ -168,7 +168,9 @@ public enum DurableCreateExecutionOutcome
     NeedsAttention,
     OperationNotFound,
     /// <summary>The dispatch marker commit result was uncertain; no SQL was sent and the state remains recoverable.</summary>
-    DispatchUncertain
+    DispatchUncertain,
+    /// <summary>The exact handler is unavailable; persisted state and attempts are unchanged.</summary>
+    HandlerUnavailable
 }
 
 public sealed record DurableCreateExecutionResult(DurableCreateExecutionOutcome Outcome,

@@ -463,7 +463,10 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         var services = new ServiceCollection().AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore().AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
             .AddPostgreSqlProviderConfigurationCodec().AddSingleton(TimeProvider.System)
-            .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>().AddPostgreSqlDurableDesiredStateCommitter();
+            .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>().AddPostgreSqlDatabaseCreateAction()
+            .AddPostgreSqlDurableCreateOperationJournal()
+            .AddPostgreSqlDurableCreateOperationExecution()
+            .AddPostgreSqlDurableDesiredStateCommitter();
         if (sample) services.AddSingleton<SampleConfigurationCodec>()
                 .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<SampleConfigurationCodec>())
                 .AddSingleton<IProviderDeclarationAdapter, SampleDeclarationAdapter>();

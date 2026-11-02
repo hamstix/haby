@@ -7,6 +7,7 @@ using Haby.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Xunit;
 
@@ -21,6 +22,35 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         [], [], []);
     private static readonly byte[] Envelope = Encoding.UTF8.GetBytes(
         """{"applicationVersion":"v1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"operator-example"},"spec":{"resources":{"db":{"type":"postgresql.database/v1alpha1","providerRef":"postgresql.primary","properties":{"name":"sample_db"}}}}}}""");
+
+    [Fact]
+    public async Task Invalid_database_name_is_rejected_by_plan_check_and_commit_without_acceptance()
+    {
+        var setup = await PrepareCommitAsync();
+        await using var services = Services(setup.Connection, setup.Time);
+        var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
+        var change = (await planner.CreateChangeSetAsync(setup.Environment, setup.Revision.ApplicationRecordId,
+            setup.Revision, new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).ChangeSet!;
+        var plan = (await planner.CreatePlanAsync(change.Id, "tester", default)).Plan!;
+        // Valid privileged catalog edits are inside ADR-023's trust boundary. Keep the
+        // normalized shape valid while replacing the adapter-specific database name.
+        await using (var database = new NpgsqlConnection(setup.Connection))
+        {
+            await database.OpenAsync();
+            await new NpgsqlCommand("SET session_replication_role = replica", database).ExecuteNonQueryAsync();
+            await new NpgsqlCommand("UPDATE manifest_revisions SET snapshot = replace(snapshot, 'sample_db', 'invalid-name')", database)
+                .ExecuteNonQueryAsync();
+        }
+        Assert.Equal(DurablePlanStatus.UnsupportedShape,
+            (await planner.CreatePlanAsync(change.Id, "tester", default)).Status);
+        Assert.Equal(DurablePlanCurrentStatus.PlanInputUnavailable, await planner.CheckPlanAsync(plan.Id, default));
+        Assert.IsType<DurableCommitResult.UnsupportedShape>(await services.GetRequiredService<IDurableDesiredStateCommitter>()
+            .CommitAsync(change.Id, plan.Id, "tester", default));
+        await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()
+            .CreateDbContextAsync();
+        Assert.Empty(await verify.DeploymentGenerations.AsNoTracking().ToListAsync());
+        Assert.Empty(await verify.DurableCreateOperations.AsNoTracking().ToListAsync());
+    }
 
     [Fact]
     public async Task Commit_is_atomic_restartable_and_returns_original_plan_on_retry()
@@ -617,8 +647,12 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         if (supportsCapability) services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         else services.AddSingleton<ICheckpointProviderCapability, RejectCapability>();
         if (registerCodec) services.AddPostgreSqlProviderConfigurationCodec();
-        return services.AddPostgreSqlProviderRevisionPreflight()
-            .AddPostgreSqlDurableDesiredStateCommitter().BuildServiceProvider();
+        services.AddPostgreSqlProviderRevisionPreflight()
+            .AddPostgreSqlDurableCreateOperationJournal()
+            .AddPostgreSqlDurableCreateOperationExecution()
+            .AddPostgreSqlDurableDesiredStateCommitter();
+        if (!supportsCapability) services.RemoveAll<IDurableActionAdmissionHandler>().RemoveAll<IDurableActionHandler>();
+        return services.BuildServiceProvider();
     }
 
     private sealed class AdjustableTimeProvider : TimeProvider

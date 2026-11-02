@@ -102,6 +102,7 @@ public static class OperatorHostApplication
         _ = app.Services.GetRequiredService<ProviderDeclarationRegistry>();
         _ = app.Services.GetRequiredService<IProviderConfigurationStore>();
         _ = app.Services.GetRequiredService<ProviderPreflightRegistry>();
+        _ = app.Services.GetRequiredService<DurableActionRegistry>();
         app.MapGrpcService<ManifestOperatorService>();
         app.MapGrpcReflectionService();
 

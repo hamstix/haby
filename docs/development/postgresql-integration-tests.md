@@ -246,8 +246,15 @@ shared reasons remain general conflict/rejection categories. Under
 new adapter-local DatabaseNameInvalid and unsupported-shape failures map to
 InputInvalid; broad pinned-input failures map to InputUnavailable. Definitive
 versus transient classification, cancellation and dispatch ordering are unchanged.
-HandlerUnavailable is readable and renderable but is not emitted by generic
-resolver failures; exact handler admission remains a later slice.
+HandlerUnavailable is a bounded request refusal from exact action dispatch, not a
+persisted reason inferred from resolver failures. Missing Pending/Preparing support
+leaves the journal and attempts unchanged. Terminal histories remain readable and
+Dispatching still becomes NeedsAttention without Provider calls. The historical
+ResourceId + Create representation maps explicitly to the adapter-owned
+`postgresql.database.create/v1alpha1` contract. Plan, Check and atomic Commit share
+exact admission and adapter-owned validation; production still registers only the
+database action. See the [implementation design](102-exact-action-admission.md) for
+keys, ownership and the typed test-only queue boundary.
 
 The boundary tests check adapter ownership and the absence of an Application
 reference to the concrete adapter. The disposable PostgreSQL suite checks
