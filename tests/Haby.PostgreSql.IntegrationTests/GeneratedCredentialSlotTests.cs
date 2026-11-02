@@ -198,20 +198,99 @@ public sealed class GeneratedCredentialSlotTests(PostgreSqlFixture fixture) : IC
     }
 
     [Fact]
-    public async Task Database_constraints_reject_cross_environment_owner_and_slot_reassignment()
+    public async Task Declarative_constraints_reject_cross_environment_resource_and_current_version_reassignment()
     {
         var (connection, slot) = await ArrangeAsync();
         await using (var services = Services(connection))
             await Ensure(services.GetRequiredService<IGeneratedCredentialSlots>(), slot);
         await using var check = Context(connection);
         var original = await check.GeneratedCredentialSlots.AsNoTracking().SingleAsync();
-        var error = await Assert.ThrowsAsync<PostgresException>(() => check.Database.ExecuteSqlInterpolatedAsync(
-            $"INSERT INTO generated_credential_slots (environment_record_id, application_record_id, resource_local_id, slot_id, generation_profile, secret_id, version_id) VALUES ({Guid.CreateVersion7()}, {original.ApplicationRecordId}, {original.ResourceLocalId}, {original.SlotId}, {original.GenerationProfile}, {original.SecretId}, {original.VersionId})"));
-        Assert.Equal(PostgresErrorCodes.RaiseException, error.SqlState);
-        await Assert.ThrowsAsync<PostgresException>(() => check.Database.ExecuteSqlRawAsync("UPDATE generated_credential_slots SET resource_local_id = 'different'"));
-        await Assert.ThrowsAsync<PostgresException>(() => check.Database.ExecuteSqlRawAsync("DELETE FROM generated_credential_creation_audits"));
-        await Assert.ThrowsAsync<PostgresException>(() => check.Database.ExecuteSqlRawAsync("UPDATE secrets SET purpose = 'ProviderAdministrator'"));
+        foreach (var sql in new[] { "UPDATE generated_credential_slots SET environment_record_id = gen_random_uuid()",
+                     "UPDATE generated_credential_slots SET resource_local_id = 'different'",
+                     "UPDATE secrets SET resource_local_id = 'different'", "UPDATE secrets SET current_version_id = NULL" })
+        {
+            var error = await Assert.ThrowsAsync<PostgresException>(() => check.Database.ExecuteSqlRawAsync(sql));
+            Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, error.SqlState);
+        }
+        var invalidPurpose = await Assert.ThrowsAsync<PostgresException>(() => check.Database.ExecuteSqlRawAsync("UPDATE secrets SET purpose = 'ProviderAdministrator'"));
+        Assert.Equal(PostgresErrorCodes.CheckViolation, invalidPurpose.SqlState);
         Assert.False(check.Database.HasPendingModelChanges());
+    }
+
+    [Fact]
+    public async Task EF_rejects_tracked_detached_and_deleted_generated_metadata_without_changing_the_winner()
+    {
+        var (connection, slot) = await ArrangeAsync();
+        await using var services = Services(connection);
+        var accepted = await Ensure(services.GetRequiredService<IGeneratedCredentialSlots>(), slot);
+        var bytes = await Bytes(services, slot, accepted.Reference!);
+        foreach (var change in new[] { "purpose", "version", "delete", "detached" })
+        {
+            await using var act = Context(connection);
+            var row = await act.Secrets.AsNoTracking().SingleAsync();
+            if (change == "detached")
+            {
+                row.Owner = "Environment";
+                row.Purpose = "ProviderAdministrator";
+                row.ApplicationRecordId = null;
+                row.ResourceLocalId = null;
+                act.Update(row);
+            }
+            else
+            {
+                act.Attach(row);
+                if (change == "purpose") row.Purpose = "ProviderAdministrator";
+                else if (change == "version") row.CurrentVersionId = Guid.CreateVersion7();
+                else act.Remove(row);
+            }
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => act.SaveChangesAsync());
+            Assert.Equal("Generated credential metadata is immutable.", error.Message);
+        }
+        Assert.Equal(accepted.Reference, (await Ensure(services.GetRequiredService<IGeneratedCredentialSlots>(), slot)).Reference);
+        Assert.True(Enumerable.SequenceEqual(bytes, await Bytes(services, slot, accepted.Reference!)), "Exact generated material must remain unchanged.");
+        await Counts(connection, 1);
+    }
+
+    [Fact]
+    public async Task Restricted_SQL_writer_can_create_and_read_but_cannot_mutate_generated_history()
+    {
+        var (connection, slot) = await ArrangeAsync();
+        var role = "haby_slot_writer_" + Guid.NewGuid().ToString("N");
+        await using (var arrange = Context(connection))
+        {
+            // Test-owned NOLOGIN role; no password literal or external Provider role is created.
+            // Role identifiers cannot be parameters; the quoted name is a fixed prefix plus a generated UUID.
+            await arrange.Database.OpenConnectionAsync();
+            await using var grants = new NpgsqlCommand($"""
+                CREATE ROLE "{role}" NOLOGIN;
+                GRANT USAGE ON SCHEMA public TO "{role}";
+                GRANT SELECT ON environments, applications TO "{role}";
+                GRANT SELECT, INSERT ON secrets, secret_versions, secret_payloads,
+                    generated_credential_slots, generated_credential_creation_audits TO "{role}";
+                GRANT UPDATE (current_version_id) ON secrets TO "{role}";
+                """, (NpgsqlConnection)arrange.Database.GetDbConnection());
+            await grants.ExecuteNonQueryAsync();
+        }
+        var service = new PostgreSqlGeneratedCredentialSlots(new Factory(connection, new AssumeWriter(role)));
+        var accepted = await Ensure(service, slot);
+        Assert.Equal(GeneratedCredentialOutcome.Created, accepted.Outcome);
+        Assert.Equal(new(GeneratedCredentialOutcome.Existing, accepted.Reference), await Ensure(service, slot));
+        await using (var act = new Factory(connection, new AssumeWriter(role)).CreateDbContext())
+        {
+            foreach (var sql in new[] { "UPDATE generated_credential_slots SET generation_profile = 'changed'",
+                         "DELETE FROM generated_credential_slots", "UPDATE generated_credential_creation_audits SET technical_actor = 'changed'",
+                         "DELETE FROM generated_credential_creation_audits", "UPDATE secrets SET resource_local_id = 'changed'",
+                         "TRUNCATE generated_credential_slots, generated_credential_creation_audits" })
+            {
+                var error = await Assert.ThrowsAsync<PostgresException>(() => act.Database.ExecuteSqlRawAsync(sql));
+                Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
+            }
+            // The allowed current-version column still cannot move away from the accepted association.
+            var pin = await Assert.ThrowsAsync<PostgresException>(() => act.Database.ExecuteSqlRawAsync("UPDATE secrets SET current_version_id = NULL"));
+            Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, pin.SqlState);
+        }
+        await Counts(connection, 1);
+        Assert.Equal(new(GeneratedCredentialOutcome.Existing, accepted.Reference), await Ensure(service, slot));
     }
 
     [Theory]
@@ -397,6 +476,18 @@ public sealed class GeneratedCredentialSlotTests(PostgreSqlFixture fixture) : IC
                 await _ready.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
             }
             return result;
+        }
+    }
+
+    private sealed class AssumeWriter(string role) : DbConnectionInterceptor
+    {
+        // PostgreSQL session role selection is a test-only capability; the identifier is generated above.
+        public override async Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SET ROLE \"{role}\"";
+            await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 

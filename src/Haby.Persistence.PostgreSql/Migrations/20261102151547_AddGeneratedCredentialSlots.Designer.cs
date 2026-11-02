@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Haby.Persistence.PostgreSql.Migrations
 {
     [DbContext(typeof(ManifestCatalogDbContext))]
-    [Migration("20261102133356_AddGeneratedCredentialSlots")]
+    [Migration("20261102151547_AddGeneratedCredentialSlots")]
     partial class AddGeneratedCredentialSlots
     {
         /// <inheritdoc />

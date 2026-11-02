@@ -59,9 +59,44 @@ association still refuses without generating a replacement.
 The immutable creation audit records trusted technical attribution and UTC time.
 Its unique SecretId foreign key joins the immutable slot's safe owner, slot,
 profile and exact SecretRef identities without copying material. Existing calls
-do not add another audit. Database constraints enforce uniqueness, exact
-Environment/version references and owner association; guards prohibit mutation
-of accepted slot/audit and generated-secret metadata.
+do not add another audit. Declarative database constraints enforce uniqueness
+and the exact Secret/Environment/Application/Resource/current-version tuple.
+The tuple's nullable columns preserve administrative Secrets; its non-null slot
+foreign key cannot point at an administrative Secret or change the accepted
+owner/version. This additional constraint is explicit migration DDL because an
+EF principal alternate key would make administrative owner columns non-nullable.
+
+Under ADR-026, this slice installs no functions or triggers. EF SaveChanges
+(synchronous and asynchronous) rejects slot/audit updates/deletes, generated
+metadata changes and invalid acceptance associations. The first null-to-version
+pin is allowed only for an existing immutable initial version; subsequent pins
+are refused. Detached writes are checked against persisted Secret classification.
+The acceptance transaction and database uniqueness still arbitrate concurrent
+candidates. Existing merged secret-version/payload triggers remain unchanged.
+
+Direct SQL requires a restricted catalog writer, separate from the migration
+owner: grant SELECT/INSERT on generated slot/audit tables, never UPDATE, DELETE
+or TRUNCATE. Secret metadata needs SELECT/INSERT and only column-level
+UPDATE(current_version_id); the composite FK prevents even that permitted column
+from moving away from an accepted generated slot. Do not grant broader table
+UPDATE through PUBLIC, inherited roles or ownership. For this internal service,
+an administrator can grant an existing non-owner `catalog_writer` role:
+
+```sql
+GRANT USAGE ON SCHEMA public TO catalog_writer;
+GRANT SELECT ON environments, applications TO catalog_writer;
+GRANT SELECT, INSERT ON secrets, secret_versions, secret_payloads,
+    generated_credential_slots, generated_credential_creation_audits TO catalog_writer;
+GRANT UPDATE (current_version_id) ON secrets TO catalog_writer;
+```
+
+These are the secret service's minimum grants, not a complete Host role setup.
+Schema initialization remains migration-owner work; no runtime role, grant or
+external Provider effect is provisioned automatically. Database owners and
+superusers remain privileged administrators capable of direct corruption;
+EF checks do not protect SQL issued with those privileges. Disposable tests
+prove real service create/retry with the restricted writer and SQL mutation
+refusal, alongside fail-closed handling of deliberately corrupted owner data.
 
 Cancellation is honored before commit begins. Commit and ambiguity reread use
 an uncancelled token after that boundary. A lost response or service restart
@@ -82,6 +117,8 @@ mapping; no new RPC, CLI command or confidential endpoint is added.
 
 This schema revision requires an explicitly initialized fresh catalog under
 [ADR-033](../adr/0033-development-compatibility-and-catalog-resets.md).
+The unmerged migration has a new identity so catalogs from earlier PR revisions
+are also rejected rather than silently retaining their removed triggers.
 Startup rejects an earlier migration set and never resets persistent data.
 The migration refuses to reinterpret populated earlier secret metadata. There
 is no old-alpha reader, metadata backfill or populated downgrade path. A catalog

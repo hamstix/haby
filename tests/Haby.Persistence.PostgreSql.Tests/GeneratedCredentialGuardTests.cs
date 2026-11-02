@@ -1,12 +1,59 @@
 using Haby.Application;
 using Haby.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace Haby.Persistence.PostgreSql.Tests;
 
 public sealed class GeneratedCredentialGuardTests
 {
+    [Fact]
+    public void Generated_slot_migration_adds_no_functions_or_triggers()
+    {
+        using var context = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
+        var sql = context.GetService<IMigrator>().GenerateScript("20261102101539_PersistOperationGraph", context.Database.GetMigrations().Single(id => id.EndsWith("_AddGeneratedCredentialSlots", StringComparison.Ordinal)));
+        Assert.DoesNotContain("CREATE TRIGGER", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CREATE FUNCTION", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Slot_and_audit_mutation_is_rejected_by_EF_before_storage(bool audit, bool delete)
+    {
+        await using var context = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
+        var secret = Guid.CreateVersion7();
+        if (audit)
+        {
+            var row = new GeneratedCredentialCreationAuditRow { SecretId = secret, TechnicalActor = "original", CreatedAt = DateTimeOffset.UtcNow };
+            context.Attach(row);
+            if (delete) context.Remove(row); else row.TechnicalActor = "changed";
+        }
+        else
+        {
+            var row = new GeneratedCredentialSlotRow
+            {
+                EnvironmentRecordId = Guid.CreateVersion7(),
+                ApplicationRecordId = Guid.CreateVersion7(),
+                ResourceLocalId = "queue-user",
+                SlotId = "application-password",
+                GenerationProfile = "random-password/v1",
+                SecretId = secret,
+                VersionId = Guid.CreateVersion7()
+            };
+            context.Attach(row);
+            if (delete) context.Remove(row); else row.GenerationProfile = "changed";
+        }
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
+        Assert.Equal("Generated credential history is immutable.", error.Message);
+        var synchronous = Assert.Throws<InvalidOperationException>(() => context.SaveChanges());
+        Assert.Equal(error.Message, synchronous.Message);
+    }
+
     [Fact]
     public async Task Invalid_slot_owner_and_cancellation_are_rejected_without_storage()
     {

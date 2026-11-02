@@ -126,32 +126,14 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 ALTER TABLE generated_credential_slots ADD CONSTRAINT ck_generated_slot_shape CHECK (
                   slot_id = 'application-password' AND generation_profile = 'random-password/v1'
                   AND resource_local_id ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$');
-                CREATE FUNCTION guard_generated_slot_insert() RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN
-                  IF NOT EXISTS (SELECT 1 FROM secrets s JOIN secret_versions v ON v.secret_id = s.id
-                    WHERE s.id = NEW.secret_id AND s.environment_record_id = NEW.environment_record_id
-                      AND s.application_record_id = NEW.application_record_id AND s.resource_local_id = NEW.resource_local_id
-                      AND s.owner = 'Resource' AND s.purpose = 'ApplicationLogin'
-                      AND s.current_version_id = NEW.version_id AND v.id = NEW.version_id AND v.number = 1) THEN
-                    RAISE EXCEPTION 'Generated credential association is inconsistent';
-                  END IF;
-                  RETURN NEW;
-                END $$;
-                CREATE TRIGGER generated_credential_slots_validate BEFORE INSERT ON generated_credential_slots
-                  FOR EACH ROW EXECUTE FUNCTION guard_generated_slot_insert();
-                CREATE TRIGGER generated_credential_slots_immutable BEFORE UPDATE OR DELETE ON generated_credential_slots
-                  FOR EACH ROW EXECUTE FUNCTION reject_secret_version_mutation();
-                CREATE TRIGGER generated_credential_creation_audits_immutable BEFORE UPDATE OR DELETE ON generated_credential_creation_audits
-                  FOR EACH ROW EXECUTE FUNCTION reject_secret_version_mutation();
-                CREATE FUNCTION guard_generated_secret_update() RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN
-                  IF EXISTS (SELECT 1 FROM generated_credential_slots WHERE secret_id = OLD.id) THEN
-                    RAISE EXCEPTION 'Generated credential metadata is immutable';
-                  END IF;
-                  RETURN NEW;
-                END $$;
-                CREATE TRIGGER generated_secret_immutable BEFORE UPDATE ON secrets
-                  FOR EACH ROW EXECUTE FUNCTION guard_generated_secret_update();
+                -- The nullable owner/version columns remain nullable for administrative Secrets.
+                -- A non-null slot tuple can only reference the exact Resource owner and pinned version.
+                ALTER TABLE secrets ADD CONSTRAINT ak_generated_secret_owner_version UNIQUE
+                  (id, environment_record_id, application_record_id, resource_local_id, current_version_id);
+                ALTER TABLE generated_credential_slots ADD CONSTRAINT fk_generated_slot_owner_version
+                  FOREIGN KEY (secret_id, environment_record_id, application_record_id, resource_local_id, version_id)
+                  REFERENCES secrets (id, environment_record_id, application_record_id, resource_local_id, current_version_id)
+                  ON UPDATE RESTRICT ON DELETE RESTRICT;
                 """);
         }
 
@@ -165,10 +147,8 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     RAISE EXCEPTION 'A fresh catalog is required; generated material cannot be downgraded.';
                   END IF;
                 END $$;
-                DROP TRIGGER generated_secret_immutable ON secrets;
-                DROP FUNCTION guard_generated_secret_update();
-                DROP TRIGGER generated_credential_slots_validate ON generated_credential_slots;
-                DROP FUNCTION guard_generated_slot_insert();
+                ALTER TABLE generated_credential_slots DROP CONSTRAINT fk_generated_slot_owner_version;
+                ALTER TABLE secrets DROP CONSTRAINT ak_generated_secret_owner_version;
                 ALTER TABLE secrets DROP CONSTRAINT ck_secrets_typed_shape;
                 ALTER TABLE secrets ADD CONSTRAINT ck_secrets_pilot_shape CHECK
                   (owner = 'Environment' AND purpose = 'ProviderAdministrator' AND sensitivity = 'Credential'

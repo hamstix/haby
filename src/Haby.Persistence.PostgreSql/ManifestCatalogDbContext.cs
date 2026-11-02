@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Durable catalog schema, independent of manifest and domain objects.</summary>
-public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbContext> options) : DbContext(options)
+public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbContext> options) : DbContext(options)
 {
     internal DbSet<ApplicationRow> Applications => Set<ApplicationRow>();
     internal DbSet<ManifestRevisionRow> Revisions => Set<ManifestRevisionRow>();
@@ -124,6 +124,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<SecretRow>().WithMany().HasForeignKey(row => new { row.SecretId, row.EnvironmentRecordId })
                 .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId }).OnDelete(DeleteBehavior.Restrict);
+            // The migration also adds a composite FK to the nullable Secret owner/current-version tuple.
+            // An EF principal alternate key would make those administrative-secret columns non-nullable.
             entity.HasOne<SecretVersionRow>().WithMany().HasForeignKey(row => new { row.SecretId, row.VersionId })
                 .HasPrincipalKey(row => new { row.SecretId, row.Id }).OnDelete(DeleteBehavior.Restrict);
         });
