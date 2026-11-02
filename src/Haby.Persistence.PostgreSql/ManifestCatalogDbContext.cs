@@ -12,6 +12,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
     internal DbSet<SecretVersionRow> SecretVersions => Set<SecretVersionRow>();
     internal DbSet<SecretCreationReceiptRow> SecretCreationReceipts => Set<SecretCreationReceiptRow>();
     internal DbSet<SecretPayloadRow> SecretPayloads => Set<SecretPayloadRow>();
+    internal DbSet<OperationOutputRow> OperationOutputs => Set<OperationOutputRow>();
     internal DbSet<GeneratedCredentialSlotRow> GeneratedCredentialSlots => Set<GeneratedCredentialSlotRow>();
     internal DbSet<GeneratedCredentialCreationAuditRow> GeneratedCredentialCreationAudits => Set<GeneratedCredentialCreationAuditRow>();
     internal DbSet<ProviderInstanceRow> ProviderInstances => Set<ProviderInstanceRow>();
@@ -415,6 +416,22 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
                 .HasForeignKey(row => new { row.DeploymentId, row.Generation })
                 .OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<OperationOutputRow>(entity =>
+        {
+            entity.ToTable("operation_outputs", table =>
+            {
+                table.HasCheckConstraint("CK_operation_outputs_contract", "length(output_contract) > 0 AND length(output_key) > 0");
+            });
+            entity.HasKey(r => new { r.DeploymentId, r.Generation, r.OperationId, r.Contract, r.Key });
+            entity.Property(r => r.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(r => r.Generation).HasColumnName("generation");
+            entity.Property(r => r.OperationId).HasColumnName("operation_id").HasMaxLength(128);
+            entity.Property(r => r.Contract).HasColumnName("output_contract").HasMaxLength(128);
+            entity.Property(r => r.Key).HasColumnName("output_key").HasMaxLength(128);
+            entity.Property(r => r.Payload).HasColumnName("payload").IsRequired();
+            entity.HasOne<DurableOperationRow>().WithMany()
+                .HasForeignKey(r => new { r.DeploymentId, r.Generation, r.OperationId }).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<DurableOperationAttemptRow>(entity =>
         {
             entity.ToTable("durable_create_operation_attempts", table =>
@@ -773,4 +790,14 @@ internal sealed class SecretCreationReceiptRow
     public Guid VersionId { get; set; }
     public required string Actor { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+internal sealed class OperationOutputRow
+{
+    public Guid DeploymentId { get; set; }
+    public long Generation { get; set; }
+    public required string OperationId { get; set; }
+    public required string Contract { get; set; }
+    public required string Key { get; set; }
+    public required string Payload { get; set; }
 }

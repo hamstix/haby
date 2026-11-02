@@ -114,7 +114,7 @@ public sealed class PostgreSqlGeneratedCredentialSlots(IDbContextFactory<Manifes
     private static bool StorageFailure(Exception error) =>
         error is DbUpdateException or NpgsqlException or InvalidOperationException or IOException or TimeoutException;
 
-    private static async Task<GeneratedCredentialResult?> ReadAsync(ManifestCatalogDbContext context,
+    internal static async Task<GeneratedCredentialResult?> ReadAsync(ManifestCatalogDbContext context,
         GeneratedCredentialSlot slot, string profile, CancellationToken cancellationToken)
     {
         var env = Guid.Parse(slot.Owner.EnvironmentRecordId.ToString());

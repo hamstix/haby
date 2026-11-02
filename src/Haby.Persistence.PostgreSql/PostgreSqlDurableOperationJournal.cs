@@ -116,6 +116,9 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         Guid attemptId, DateTimeOffset at, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
+        var local = await FindAsync(key, cancellationToken);
+        if (local is not null && GeneratedCredentialContracts.IsProducer(local.Node))
+            return new DurableMarkerResult.Rejected(local);
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
@@ -259,6 +262,9 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         DateTimeOffset at, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
+        var local = await FindAsync(key, cancellationToken);
+        if (local is not null && GeneratedCredentialContracts.IsProducer(local.Node))
+            return false;
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);

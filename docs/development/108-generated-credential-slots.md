@@ -74,9 +74,13 @@ are refused. Detached writes are checked against persisted Secret classification
 The acceptance transaction and database uniqueness still arbitrate concurrent
 candidates. Existing merged secret-version/payload triggers remain unchanged.
 
-Direct SQL requires a restricted catalog writer, separate from the migration
-owner: grant SELECT/INSERT on generated slot/audit tables, never UPDATE, DELETE
-or TRUNCATE. Secret metadata needs SELECT/INSERT and only column-level
+Optional direct-SQL defense in depth can use a restricted catalog writer,
+separate from the migration owner: grant SELECT/INSERT on generated slot/audit
+tables, never UPDATE, DELETE or TRUNCATE. This is not a mandatory deployment or
+runtime role-separation requirement. The supported internal write paths enforce
+their invariants through C#/EF transactions, concurrency predicates and declarative
+constraints; privileged direct SQL maintenance is outside that guarantee.
+Secret metadata needs SELECT/INSERT and only column-level
 UPDATE(current_version_id); the composite FK prevents even that permitted column
 from moving away from an accepted generated slot. Do not grant broader table
 UPDATE through PUBLIC, inherited roles or ownership. For this internal service,

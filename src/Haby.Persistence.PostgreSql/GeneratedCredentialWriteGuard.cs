@@ -20,6 +20,8 @@ public sealed partial class ManifestCatalogDbContext
     private async Task ValidateGeneratedWritesAsync(bool asynchronous, CancellationToken cancellationToken)
     {
         ChangeTracker.DetectChanges();
+        if (ChangeTracker.Entries<OperationOutputRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Operation output history is immutable.");
         if (ChangeTracker.Entries<GeneratedCredentialSlotRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted) ||
             ChangeTracker.Entries<GeneratedCredentialCreationAuditRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Generated credential history is immutable.");

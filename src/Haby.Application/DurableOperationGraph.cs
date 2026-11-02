@@ -24,7 +24,10 @@ public sealed record OperationId
 public sealed record DurableActionPayload(string Format, string Json);
 public sealed record DurableOperationNode(OperationId Id, ManifestLocalId ResourceId,
     DurableActionExecutionKey Action, DurableActionInputReferences References,
-    DurableActionPayload Input, IReadOnlyList<OperationId> Dependencies);
+    DurableActionPayload Input, IReadOnlyList<OperationId> Dependencies)
+{
+    public IReadOnlyList<OperationOutputRef> OutputReferences { get; init; } = [];
+}
 
 /// <summary>Validated, defensively copied and canonically ordered immutable graph.</summary>
 public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
@@ -33,7 +36,11 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
     public DurableOperationGraph(IEnumerable<DurableOperationNode> nodes)
     {
         var ordered = nodes.OrderBy(n => n.Id.Value, StringComparer.Ordinal).Select(n => n with
-        { Dependencies = Array.AsReadOnly(n.Dependencies.OrderBy(d => d.Value, StringComparer.Ordinal).ToArray()) }).ToArray();
+        {
+            Dependencies = Array.AsReadOnly(n.Dependencies.OrderBy(d => d.Value, StringComparer.Ordinal).ToArray()),
+            OutputReferences = Array.AsReadOnly(n.OutputReferences.OrderBy(r => r.ProducerOperationId.Value, StringComparer.Ordinal)
+              .ThenBy(r => r.OutputContract, StringComparer.Ordinal).ThenBy(r => r.OutputKey, StringComparer.Ordinal).ToArray())
+        }).ToArray();
         if (ordered.Length is 0 or > 256 || ordered.Select(n => n.Id).Distinct().Count() != ordered.Length)
             throw new InvalidDataException("Invalid graph identity set.");
         var ids = ordered.Select(n => n.Id).ToHashSet();
@@ -55,6 +62,7 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
             foreach (var node in ready) { visited.Add(node.Id); remaining.Remove(node); }
         }
         Nodes = Array.AsReadOnly(ordered);
+        GeneratedCredentialContracts.ValidateGraph(this);
     }
 
     public bool Equals(DurableOperationGraph? other) => other is not null &&
@@ -65,30 +73,36 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
     public void ValidateReferences(DurablePlanningInputs inputs)
     {
         foreach (var node in Nodes)
+        {
+            if (GeneratedCredentialContracts.IsProducer(node) &&
+                GeneratedCredentialInputCodec.Decode(node.Input)?.Owner != new ManagedResourceKey(inputs.Environment, inputs.Revision.ApplicationRecordId, node.ResourceId))
+                throw new InvalidDataException("Inconsistent generated credential owner.");
             if (node.References != new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance,
                     inputs.ConfigurationRevision, inputs.ImplementationId) ||
                 node.Action.Admission.ImplementationId.Value != inputs.ImplementationId)
                 throw new InvalidDataException("Inconsistent graph references.");
+        }
     }
 }
 
 /// <summary>One current, explicitly versioned graph format. No legacy readers.</summary>
 public static class DurableOperationGraphCodec
 {
-    public static string Encode(DurableOperationGraph graph) => JsonSerializer.Serialize(new GraphDocument(1,
+    public static string Encode(DurableOperationGraph graph) => JsonSerializer.Serialize(new GraphDocument(2,
         graph.Nodes.Select(n => new NodeDocument(n.Id.Value, n.ResourceId.Value,
             n.Action.Admission.ResourceContract.Value, n.Action.Admission.ProviderKind.Value,
             n.Action.Admission.ConfigurationContract.Value, n.Action.Admission.ImplementationId.Value,
             n.Action.ActionContract.Value, n.References.Environment.ToString(), n.References.ProviderInstance.ToString(),
             n.References.ConfigurationRevision.Value, n.Input.Format, n.Input.Json,
-            n.Dependencies.Select(d => d.Value).ToArray())).ToArray()), GraphJsonContext.Default.GraphDocument);
+            n.Dependencies.Select(d => d.Value).ToArray(), n.OutputReferences.Select(r =>
+                new OutputRefDocument(r.ProducerOperationId.Value, r.OutputContract, r.OutputKey)).ToArray())).ToArray()), GraphJsonContext.Default.GraphDocument);
 
     public static DurableOperationGraph Decode(string json)
     {
         try
         {
             var document = JsonSerializer.Deserialize(json, GraphJsonContext.Default.GraphDocument);
-            if (document is null || document.Version != 1 || document.Nodes is null)
+            if (document is null || document.Version != 2 || document.Nodes is null)
                 throw new InvalidDataException("Unsupported operation graph format.");
             return new(document.Nodes.Select(n => new DurableOperationNode(OperationId.Create(n.Id),
                 ManifestLocalId.Create(n.Resource), new(new(ResourceTypeId.Create(n.ResourceContract),
@@ -96,9 +110,10 @@ public static class DurableOperationGraphCodec
                     ProviderImplementationId.Create(n.Implementation)), OperationContractId.Create(n.Action)),
                 new(EnvironmentRecordId.Parse(n.Environment), ProviderInstanceId.Parse(n.Provider),
                     ProviderConfigurationRevisionNumber.Create(n.Revision), n.Implementation),
-                new(n.Format, n.Input), n.Dependencies.Select(OperationId.Create).ToArray())));
+                new(n.Format, n.Input), n.Dependencies.Select(OperationId.Create).ToArray())
+            { OutputReferences = n.Outputs.Select(r => new OperationOutputRef(OperationId.Create(r.Producer), r.Contract, r.Key)).ToArray() }));
         }
-        catch (Exception e) when (e is JsonException or ArgumentException or NullReferenceException)
+        catch (Exception e) when (e is JsonException or ArgumentException or NullReferenceException or FormatException)
         { throw new InvalidDataException("Invalid operation graph."); }
     }
 
@@ -116,7 +131,8 @@ public static class DurableOperationGraphCodec
 internal sealed record GraphDocument(int Version, NodeDocument[] Nodes);
 internal sealed record NodeDocument(string Id, string Resource, string ResourceContract, string Kind,
     string Configuration, string Implementation, string Action, string Environment, string Provider,
-    long Revision, string Format, string Input, string[] Dependencies);
+    long Revision, string Format, string Input, string[] Dependencies, OutputRefDocument[] Outputs);
+internal sealed record OutputRefDocument(string Producer, string Contract, string Key);
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(GraphDocument))]
 internal partial class GraphJsonContext : JsonSerializerContext;
