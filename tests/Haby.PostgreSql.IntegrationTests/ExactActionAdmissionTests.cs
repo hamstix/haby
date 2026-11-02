@@ -119,6 +119,13 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
             .AddSingleton<ExactDurableOperationExecutor>()
             .AddSingleton<IDurableOperationExecutor>(p => p.GetRequiredService<ExactDurableOperationExecutor>())
             .AddSingleton<DurableGenerationRunner>();
+        if (boundary.Generated)
+        {
+            services.AddSingleton<IGeneratedCredentialOperations, PostgreSqlGeneratedCredentialOperations>();
+            services.AddSingleton<IDurableActionHandler>(p => new GeneratedCredentialAction(Key.Admission,
+                p.GetRequiredService<IDurableOperationJournal>(), p.GetRequiredService<IGeneratedCredentialSlots>(),
+                p.GetRequiredService<IGeneratedCredentialOperations>(), p.GetRequiredService<TimeProvider>()));
+        }
         if (codec) services.AddSingleton<IProviderConfigurationCodec, SampleConfigurationCodec>();
         if (installed) services.AddSingleton<QueueAction>()
             .AddSingleton<IDurableActionAdmissionHandler>(p => p.GetRequiredService<QueueAction>())
@@ -141,6 +148,7 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
     private sealed class QueueBoundary
     {
         public bool Graph;
+        public bool Generated;
         public string PlannedName = "jobs";
         public string Format = "sample.queue-create/v1";
         public string? Mode;
@@ -153,11 +161,24 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
         public void Create(QueueCreateInput input) { Input = input; Interlocked.Increment(ref Calls); }
     }
     private sealed class QueueAction(IDurableOperationJournal journal, IProviderConfigurationStore configurations,
-        QueueBoundary boundary) : DurableActionHandler<QueueCreateInput>
+        QueueBoundary boundary, IServiceProvider services) : DurableActionHandler<QueueCreateInput>
     {
         public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
         {
             var single = PrepareNode(OperationId.Create(resourceId.Value + "-create"), resourceId, resource, inputs);
+            if (boundary.Generated)
+            {
+                var producer = single with
+                {
+                    Id = OperationId.Create("10-material"),
+                    Action = new(Key.Admission, OperationContractId.Create(GeneratedCredentialContracts.Action)),
+                    Input = GeneratedCredentialInputCodec.Encode(new(new(inputs.Environment, inputs.Revision.ApplicationRecordId, resourceId),
+                        GeneratedCredentialSlot.ApplicationPassword, GeneratedCredentialSlot.RandomPasswordV1))
+                };
+                var selector = GeneratedCredentialContracts.PasswordFrom(producer.Id);
+                var consumer = single with { Id = OperationId.Create("20-dependent"), Dependencies = [producer.Id], OutputReferences = [selector] };
+                return [consumer, producer];
+            }
             if (!boundary.Graph) return [single];
             DurableOperationNode Step(string id, int units, params string[] dependencies) => single with
             {
@@ -179,6 +200,9 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
             QueueCreateInput? input, CancellationToken cancellationToken)
         {
             Assert.NotNull(input);
+            if (boundary.Generated)
+                Assert.NotNull(await services.GetRequiredService<IGeneratedCredentialOperations>().ConsumeAsync(operation.Key,
+                    Assert.Single(operation.Node.OutputReferences), cancellationToken));
             var configuration = await configurations.FindRevisionAsync<SampleConfiguration>(operation.Environment,
                 operation.ProviderInstance, operation.ConfigurationRevision, cancellationToken);
             Assert.Equal("queue-broker", configuration!.Configuration.Target);

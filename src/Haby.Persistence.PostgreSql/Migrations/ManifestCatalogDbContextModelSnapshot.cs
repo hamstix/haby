@@ -670,6 +670,44 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("manifest_revisions", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.OperationOutputRow", b =>
+                {
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("OperationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("operation_id");
+
+                    b.Property<string>("Contract")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("output_contract");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("output_key");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload");
+
+                    b.HasKey("DeploymentId", "Generation", "OperationId", "Contract", "Key");
+
+                    b.ToTable("operation_outputs", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_operation_outputs_contract", "length(output_contract) > 0 AND length(output_key) > 0");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.PostgreSqlDatabaseRecoveryDecisionRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1346,6 +1384,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
                         .WithMany()
                         .HasForeignKey("ApplicationRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.OperationOutputRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableOperationRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation", "OperationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
