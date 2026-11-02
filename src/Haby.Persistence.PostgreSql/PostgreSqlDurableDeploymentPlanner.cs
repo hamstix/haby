@@ -187,7 +187,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(id);
-        var plan = await FindPlanAsync(id, cancellationToken);
+        DurablePlan? plan;
+        try { plan = await FindPlanAsync(id, cancellationToken); }
+        catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
         if (plan is null) return DurablePlanCurrentStatus.PlanNotFound;
         if (clock.GetUtcNow() >= plan.ExpiresAt) return DurablePlanCurrentStatus.Expired;
         if (plan.ClosedAt is not null) return DurablePlanCurrentStatus.Closed;

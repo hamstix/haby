@@ -95,6 +95,11 @@ public sealed partial class ManifestOperatorService
         DeploymentPlanId id;
         try { id = DeploymentPlanId.Parse(request.PlanId); }
         catch (ArgumentException) { return Result(PlanningStatus.InvalidRequest); }
+        // Refuse unreadable saved state before checking it. A typed unavailable result
+        // must not be followed by another decode of the same unsupported Plan.
+        DurablePlan? plan;
+        try { plan = await planner.FindPlanAsync(id, context.CancellationToken); }
+        catch (InvalidDataException) { return Result(PlanningStatus.PlanInputUnavailable); }
         var status = close
             ? (await planner.ClosePlanAsync(id, OperatorHostApplication.TechnicalActorId, context.CancellationToken)) switch
             {
@@ -114,7 +119,12 @@ public sealed partial class ManifestOperatorService
                 DurablePlanCurrentStatus.PlanInputUnavailable => PlanningStatus.PlanInputUnavailable,
                 _ => throw new InvalidOperationException("Unknown Plan status.")
             };
-        var plan = await planner.FindPlanAsync(id, context.CancellationToken);
+        if (close)
+        {
+            // Closure is a separate record: return its committed timestamp and actor.
+            try { plan = await planner.FindPlanAsync(id, context.CancellationToken); }
+            catch (InvalidDataException) { return Result(PlanningStatus.PlanInputUnavailable); }
+        }
         return new PlanningReply { Status = status, Plan = plan is null ? null : await PlanSummaryAsync(plan, context.CancellationToken) };
     }
 

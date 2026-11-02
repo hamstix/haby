@@ -54,3 +54,17 @@ barriers, partial/final success, transactional rollback, specialized recovery wi
 siblings and immutable receipts. Use separate arrange/act/assert DbContexts and
 real disposable PostgreSQL, including pg_dump/pg_restore of partial state. Run
 focused, full solution, PostgreSQL, formatting, diff and published Native AOT gates.
+
+## Review corrections
+
+The current OperationRequest uses field 5 for OperationId and reserves the removed
+identity slots 3/4 and names. Requests without an explicit current OperationId are
+rejected before execution/recovery. This prevents cross-interpretation of identity
+bytes; it provides no old operation facade, payload reader or cross-build support
+promise. ADR-033 and the fresh-catalog requirement still apply.
+
+Unsupported/corrupt stored Plan snapshot or graph formats yield PlanInputUnavailable
+through Check and Host Get/Check, with no Plan projection when decoding fails.
+The Host does not decode an unreadable Plan again to build the reply. Readable
+Plans whose pinned support is unavailable retain their safe metadata. These reads
+never change stored state or contact Providers.

@@ -7,6 +7,25 @@ namespace Haby.Cli.Tests;
 
 public sealed class CliOperationTests
 {
+    [Fact]
+    public void Operation_identity_uses_a_distinct_wire_field_and_rejects_removed_identity_fields()
+    {
+        var current = new OperationRequest { DeploymentId = "deployment", Generation = 1, OperationId = "db-create" };
+        Assert.Equal(5, OperationRequest.Descriptor.FindFieldByName("operation_id").FieldNumber);
+        Assert.Null(OperationRequest.Descriptor.FindFieldByNumber(3));
+        Assert.Null(OperationRequest.Descriptor.FindFieldByNumber(4));
+        Assert.Equal(current, OperationRequest.Parser.ParseFrom(current.ToByteArray()));
+        using var bytes = new MemoryStream();
+        using (var wire = new CodedOutputStream(bytes, leaveOpen: true))
+        {
+            new OperationRequest { DeploymentId = current.DeploymentId, Generation = current.Generation }.WriteTo(wire);
+            wire.WriteTag(3, WireFormat.WireType.LengthDelimited); wire.WriteString(current.OperationId);
+            wire.WriteTag(4, WireFormat.WireType.Varint); wire.WriteEnum(1);
+        }
+        var unsupported = OperationRequest.Parser.ParseFrom(bytes.ToArray());
+        Assert.Equal("", unsupported.OperationId);
+    }
+
     [Theory]
     [InlineData(OperationStatus.InvalidRequest, "invalidRequest")]
     [InlineData(OperationStatus.UnsupportedAction, "unsupportedAction")]

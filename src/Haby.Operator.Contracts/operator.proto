@@ -334,7 +334,10 @@ message CommitReply {
 message OperationRequest {
   string deployment_id = 1;
   int64 generation = 2;
-  string operation_id = 3;
+  // Unsupported former identities must not be interpreted as a current operation.
+  reserved 3, 4;
+  reserved "resource_id", "action";
+  string operation_id = 5;
 }
 
 // Recovery selects no Provider. The server uses the operation's immutable contract and implementation.
