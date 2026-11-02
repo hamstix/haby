@@ -157,7 +157,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             r.Contract == GeneratedCredentialContracts.OutputContract && r.Key == GeneratedCredentialContracts.Password, token);
     }
 
-    private static async Task<(DurableOperationNode Node, DeploymentGenerationRow Generation)?> AcceptedAsync(
+    internal static async Task<(DurableOperationNode Node, DeploymentGenerationRow Generation)?> AcceptedAsync(
         ManifestCatalogDbContext context, DurableOperationKey key, CancellationToken token)
     {
         var id = Guid.Parse(key.DeploymentId.ToString());

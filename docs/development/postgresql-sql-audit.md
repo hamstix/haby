@@ -21,6 +21,8 @@ production workflow and is outside the refactoring inventory.
 | Site | Purpose | ADR-026 classification | Action |
 | --- | --- | --- | --- |
 | `PostgreSqlDatabaseGateway` | Inspect `pg_database`; issue quoted `CREATE DATABASE` | PostgreSQL catalog and DDL capability | Retain; keep the values parameterized and identifiers quoted |
+| `PostgreSqlDatabaseCreateTarget` (#114) | Independent confirmed CREATE name/OID evidence | PostgreSQL catalog capability | Parameterized, non-template evidence; no adoption |
+| `PostgreSqlDatabaseRestrictTarget` (#114) | Exact database/owner/ACL checks; transactional PUBLIC revocation; independent verification | PostgreSQL ACL/catalog capability | Parameterized values, quoted database identifier, transaction-local administrative search_path; no stored workflow |
 | `PostgreSqlProviderRevisionPreflight` | Check PostgreSQL connection and server privileges | Provider-specific capability probe | Retain |
 | `PostgreSqlManifestImportStore` | Lock the Application row during immutable import | Explicit row-lock mode | Retain until an equivalent concurrency mechanism is proved |
 | `PostgreSqlPlaintextSecretStore` | Lock a Secret before adding a version | Explicit row-lock mode | Retain until an equivalent concurrency mechanism is proved |

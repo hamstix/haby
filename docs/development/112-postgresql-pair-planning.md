@@ -1,5 +1,9 @@
 # PostgreSQL pair planning
 
+Subsequent [issue #114](114-postgresql-restrict.md) adds confirmed database output
+and opt-in PUBLIC restriction, with a new fresh-catalog baseline. The full pair
+remains unavailable in production. The scope below records this earlier slice.
+
 Issue #112 implements the planning/admission half of ADR-034 step 2 on PR #111.
 It introduces no new external effect, output publication or credential generation.
 

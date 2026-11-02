@@ -216,3 +216,12 @@ entire graph, payloads, partial state, attempts and recovery decisions; restored
 startup and inspection send no effects. See the
 [implementation and evidence design](../../docs/development/104-durable-operation-graph.md)
 and [operator commands](../../docs/development/alpha-operator-local.md).
+
+## Confirmed database evidence baseline (issue #114)
+
+The empty RequireConfirmedDatabaseEvidence migration marks a fresh-catalog-only
+baseline: ordinary confirmed database Create now requires atomic name/OID output.
+Earlier success histories are not backfilled from name lookups. Startup refuses
+earlier migration sets; never reset persistent data automatically. Explicit
+standalone manual assignment remains successful without database output and
+cannot authorize restrict. See [the slice contract](../../docs/development/114-postgresql-restrict.md).

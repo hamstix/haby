@@ -601,6 +601,10 @@ delivery remain deferred; uncertainty must still stop execution safely.
 PostgreSQL pair metadata and test-composed five-node planning. Production retains
 standalone database admission; missing mandatory executors block the whole graph
 before any partial effect.
+[Issue #114](docs/development/114-postgresql-restrict.md) publishes confirmed
+database name/OID evidence and adds opt-in transactional PUBLIC restriction.
+The full pair remains gated; uncertain restrict has no recovery or redispatch.
+The new evidence baseline requires a fresh catalog under ADR-033.
 
 Deliver this goal in narrow vertical slices. Finish operation/recovery restore
 rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize

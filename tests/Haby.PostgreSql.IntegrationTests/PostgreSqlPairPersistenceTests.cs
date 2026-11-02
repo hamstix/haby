@@ -19,7 +19,7 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
     {
         public override DateTimeOffset GetUtcNow() => new(2026, 11, 2, 16, 0, 0, TimeSpan.Zero);
     }
-    private static ServiceProvider Services(string connection, bool pair = true)
+    private static ServiceProvider Services(string connection, bool pair = true, bool restrict = false)
     {
         var services = new ServiceCollection().AddSingleton<TimeProvider>(new Clock())
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore()
@@ -28,6 +28,7 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
             .AddPostgreSqlProviderConfigurationCodec().AddPostgreSqlProviderRevisionPreflight()
             .AddPostgreSqlDurableDesiredStateCommitter().AddPostgreSqlDurableOperationJournal()
             .AddPostgreSqlDurableOperationExecution();
+        if (restrict) services.AddPostgreSqlDatabaseRestrict();
         if (pair)
         {
             services.RemoveAll<IDurableActionAdmissionHandler>();
@@ -195,6 +196,24 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
             Assert.Empty(await verify.DeploymentGenerations.AsNoTracking().ToArrayAsync());
             Assert.Empty(await verify.ChangeSetCommits.AsNoTracking().ToArrayAsync());
             Assert.Empty(await verify.DurableOperations.AsNoTracking().ToArrayAsync());
+        }
+        await AssertNoEffects(setup.Connection, setup.Policy);
+    }
+
+    [Fact]
+    public async Task Opt_in_restrict_does_not_allow_partial_five_node_pair_execution()
+    {
+        var setup = await Prepare();
+        DurableChangeSetCommit commit;
+        await using (var accept = Services(setup.Connection))
+            commit = Assert.IsType<DurableCommitResult.Committed>(await accept.GetRequiredService<IDurableDesiredStateCommitter>()
+                .CommitAsync(setup.Change.Id, setup.Plan.Id, "tester", default)).Commit;
+        await using (var act = Services(setup.Connection, restrict: true))
+        {
+            var key = new DurableOperationKey(commit.DeploymentId, commit.Generation, OperationId.Create("db-create"));
+            Assert.Equal(DurableExecutionOutcome.HandlerUnavailable, (await act.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(key, default)).Outcome);
+            Assert.Equal(DurableExecutionOutcome.HandlerUnavailable, (await act.GetRequiredService<PostgreSqlDurableOperationExecutor>().ExecuteAsync(key, default)).Outcome);
+            Assert.Equal(DurableExecutionOutcome.HandlerUnavailable, (await act.GetRequiredService<DurableGenerationRunner>().RunAsync(commit.DeploymentId, commit.Generation, default)).StopOutcome);
         }
         await AssertNoEffects(setup.Connection, setup.Policy);
     }

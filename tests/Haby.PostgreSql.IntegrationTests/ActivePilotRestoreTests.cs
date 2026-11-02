@@ -337,6 +337,8 @@ public sealed partial class OperatorHostIntegrationTests
     {
         private int calls;
         public int Calls => Volatile.Read(ref calls);
+        public ValueTask<PostgreSqlDatabaseOutput?> ReadDatabaseEvidenceAsync(PostgreSqlDatabaseCreateInput input, CancellationToken cancellationToken)
+        { throw new InvalidOperationException("Unexpected evidence read."); }
         public ValueTask<PostgreSqlDatabaseAbsenceOutcome> CheckDatabaseAbsentAsync(PostgreSqlDatabaseCreateInput input, CancellationToken cancellationToken)
         { Interlocked.Increment(ref calls); throw new InvalidOperationException("Restored Host contacted a Provider read boundary."); }
         public ValueTask<PostgreSqlDatabaseCreateDispatchOutcome> DispatchCreateAsync(PostgreSqlDatabaseCreateInput input, CancellationToken cancellationToken)

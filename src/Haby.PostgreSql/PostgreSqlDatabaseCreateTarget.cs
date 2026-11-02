@@ -11,8 +11,8 @@ namespace Haby.PostgreSql;
 
 /// <summary>
 /// The external effect boundary for one durable Create. Every call re-resolves exactly the inputs
-/// pinned by the accepted generation — Provider instance, configuration revision and implementation
-/// — and never follows the current alias. Secret material is held only for one dedicated,
+/// pinned by the accepted generation: Provider instance, configuration revision and implementation
+/// and never follows the current alias. Secret material is held only for one dedicated,
 /// non-pooled connection and is cleared before returning.
 /// </summary>
 public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore revisions, ISecretStore secrets,
@@ -68,7 +68,24 @@ public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore r
         finally { Clear(resolution.Builder); }
     }
 
-    private async ValueTask<Resolved> ResolveAsync(PostgreSqlDatabaseCreateInput input,
+    public async ValueTask<PostgreSqlDatabaseOutput?> ReadDatabaseEvidenceAsync(PostgreSqlDatabaseCreateInput input,
+        CancellationToken cancellationToken)
+    {
+        var resolution = await ResolveAsync(input, cancellationToken);
+        try
+        {
+            if (resolution.Outcome != PostgreSqlDatabaseAbsenceOutcome.Absent) return null;
+            await using var connection = new NpgsqlConnection(resolution.Builder!.ConnectionString);
+            await connection.OpenAsync(cancellationToken);
+            // PostgreSQL catalog/OID inspection is an adapter capability, not name-based adoption.
+            await using var command = new NpgsqlCommand("SELECT oid FROM pg_catalog.pg_database WHERE datname = $1 AND NOT datistemplate", connection);
+            command.Parameters.AddWithValue(input.DatabaseName);
+            return await command.ExecuteScalarAsync(cancellationToken) is uint oid && oid != 0 ? new(input.DatabaseName, oid) : null;
+        }
+        finally { Clear(resolution.Builder); }
+    }
+
+    internal async ValueTask<Resolved> ResolveAsync(PostgreSqlDatabaseCreateInput input,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -133,7 +150,7 @@ public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore r
         if (builder is not null) builder.Password = null;
     }
 
-    private readonly record struct Resolved(PostgreSqlDatabaseAbsenceOutcome Outcome,
+    internal readonly record struct Resolved(PostgreSqlDatabaseAbsenceOutcome Outcome,
         NpgsqlConnectionStringBuilder? Builder);
 }
 
@@ -141,6 +158,7 @@ public static class PostgreSqlDatabaseCreateTargetServiceCollectionExtensions
 {
     public static IServiceCollection AddPostgreSqlDatabaseCreateTarget(this IServiceCollection services)
     {
+        services.TryAddSingleton<PostgreSqlDatabaseCreateTarget>();
         services.TryAddSingleton<IPostgreSqlDatabaseCreateTarget, PostgreSqlDatabaseCreateTarget>();
         return services;
     }

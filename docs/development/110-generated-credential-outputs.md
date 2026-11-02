@@ -1,5 +1,9 @@
 # Generated credential outputs and local operation completion
 
+Subsequent [issue #114](114-postgresql-restrict.md) adds confirmed database output
+and opt-in PUBLIC restriction, with a new fresh-catalog baseline. The full pair
+remains unavailable in production. The scope below records this earlier slice.
+
 Issue #110 implements the output/local-execution part of
 [ADR-034](../adr/0034-application-credentials-and-postgresql-role-policy.md).
 It builds on [stable generated slots](108-generated-credential-slots.md).
