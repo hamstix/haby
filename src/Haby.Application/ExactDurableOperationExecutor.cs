@@ -63,6 +63,12 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
         if (operation.Node.Dependencies.Any(dependency => !progress.Nodes.Any(n =>
             n.Operation.Key.OperationId == dependency && n.Operation.State == DurableOperationState.Succeeded)))
             return new(DurableExecutionOutcome.Blocked, operation);
+        // Admission metadata is not execution capability. Refuse the whole required graph
+        // before any effect if even one mandatory exact handler is absent or cannot decode it.
+        if (progress.Nodes.Any(n => registry.Find(n.Operation.Node.Action) is null))
+            return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+        if (progress.Nodes.Any(n => registry.Find(n.Operation.Node.Action)!.Supports(n.Operation.Node) != true))
+            return new(DurableExecutionOutcome.InputUnavailable, operation);
         var handler = registry.Find(operation.Node.Action);
         if (handler is null) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
         if (!handler.Supports(operation.Node)) return new(DurableExecutionOutcome.InputUnavailable, operation);

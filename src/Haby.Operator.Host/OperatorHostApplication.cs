@@ -67,7 +67,7 @@ public static class OperatorHostApplication
         }));
         builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = MaxReceiveBytes);
         builder.Services.AddGrpcReflection();
-        builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition], [], [], []));
+        builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [], [], []));
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ImportApplicationManifest>();
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();

@@ -31,10 +31,11 @@ public static class GeneratedCredentialContracts
             foreach (var selector in node.OutputReferences)
             {
                 var producer = graph.Nodes.SingleOrDefault(n => n.Id == selector.ProducerOperationId);
-                if (producer is null || !IsProducer(producer) || selector.OutputContract != OutputContract ||
-                    selector.OutputKey != Password || !node.Dependencies.Contains(producer.Id) ||
-                    producer.ResourceId != node.ResourceId || producer.References != node.References ||
-                    producer.Action.Admission != node.Action.Admission)
+                if (producer is null || !node.Dependencies.Contains(producer.Id) || producer.References != node.References ||
+                    string.IsNullOrEmpty(selector.OutputContract) || string.IsNullOrEmpty(selector.OutputKey) ||
+                    ((IsProducer(producer) || selector.OutputContract == OutputContract) &&
+                     (!IsProducer(producer) || selector.OutputContract != OutputContract || selector.OutputKey != Password ||
+                      producer.ResourceId != node.ResourceId || producer.Action.Admission != node.Action.Admission)))
                     throw new InvalidDataException("Invalid operation output selector.");
             }
         }

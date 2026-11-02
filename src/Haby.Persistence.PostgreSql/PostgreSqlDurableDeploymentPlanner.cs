@@ -93,9 +93,10 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
         if (!DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
-        var resource = spec.Resources.Single().Value;
+        var alias = DurableActionAdmission.SingleAlias(spec);
+        if (alias is null) return new(DurablePlanStatus.UnsupportedShape);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
-        var resolved = await aliases.ResolveAsync(environmentId, resource.ProviderRef, cancellationToken);
+        var resolved = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
         if (resolved is null) return new(DurablePlanStatus.AliasNotResolved);
         var revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
             item.ProviderInstanceId == Guid.Parse(resolved.Binding.InstanceId.ToString()) &&
@@ -104,14 +105,13 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (revisionRow is null || revisionRow.ImplementationId != resolved.ImplementationId)
             return new(DurablePlanStatus.ProviderRevisionUnavailable);
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId),
-            reference, resource.ProviderRef, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber,
+            reference, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber,
             resolved.ImplementationId);
         var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
         if (admitted != DurablePlanStatus.Planned) return new(admitted);
         DurableOperationGraph graph;
         try { graph = await PlanGraphAsync(context, spec, revisionRow, inputs, cancellationToken); }
         catch (InvalidDataException) { return new(DurablePlanStatus.UnsupportedShape); }
-        if (!admission.Supports(graph)) return new(DurablePlanStatus.ProviderCapabilityMismatch);
         var id = DeploymentPlanId.New();
         var createdAt = clock.GetUtcNow();
         var planRow = new DurablePlanRow
@@ -201,7 +201,18 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             return DurablePlanCurrentStatus.PlanInputUnavailable;
         if (result.Inputs != plan.Inputs || DurableOperationGraphCodec.Fingerprint(result.Inputs, plan.Graph) != plan.Fingerprint)
             return DurablePlanCurrentStatus.PlanStale;
-        return admission.Supports(plan.Graph) ? DurablePlanCurrentStatus.Current : DurablePlanCurrentStatus.PlanInputUnavailable;
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        var revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(r =>
+            r.ProviderInstanceId == Guid.Parse(plan.Inputs.ProviderInstance.ToString()) && r.RevisionNumber == plan.Inputs.ConfigurationRevision.Value,
+            cancellationToken);
+        var manifest = await revisions.FindAsync(plan.Inputs.Revision, cancellationToken);
+        try
+        {
+            return revisionRow is not null && manifest is not null &&
+                await ValidateGraphAsync(context, manifest.Declaration.Spec, revisionRow, plan.Inputs, plan.Graph, cancellationToken)
+                ? DurablePlanCurrentStatus.Current : DurablePlanCurrentStatus.PlanInputUnavailable;
+        }
+        catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
     }
 
     private async ValueTask<(DurablePlanStatus Status, DurablePlanningInputs? Inputs)> CreateCurrentInputsAsync(
@@ -222,7 +233,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (manifest is null) return (DurablePlanStatus.RevisionNotFound, null);
         if (!DurableActionAdmission.SupportsPilotShape(manifest.Declaration.Spec))
             return (DurablePlanStatus.UnsupportedShape, null);
-        var alias = manifest.Declaration.Spec.Resources.Single().Value.ProviderRef;
+        var alias = DurableActionAdmission.SingleAlias(manifest.Declaration.Spec);
+        if (alias is null) return (DurablePlanStatus.UnsupportedShape, null);
         var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return (DurablePlanStatus.ChangeSetStale, null);
@@ -259,13 +271,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         DurablePlanStatus result;
         try
         {
-            result = admission.Admit(spec,
-                new ProviderAdapterKey(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs);
+            var provider = new ProviderAdapterKey(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId);
+            if (!admission.HasPlanningSupport(spec, provider)) return DurablePlanStatus.ProviderCapabilityMismatch;
+            if (!await CodecAvailableAsync(context, revision, cancellationToken)) return DurablePlanStatus.ProviderRevisionUnavailable;
+            result = admission.Admit(spec, provider, inputs, PreparedConfiguration(instance.ProviderKindId, revision));
         }
-        catch (ArgumentException) { return DurablePlanStatus.ProviderRevisionUnavailable; }
-        if (result != DurablePlanStatus.Planned) return result;
-        return await CodecAvailableAsync(context, revision, cancellationToken)
-            ? DurablePlanStatus.Planned : DurablePlanStatus.ProviderRevisionUnavailable;
+        catch (Exception e) when (e is ArgumentException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException)
+        { return DurablePlanStatus.ProviderRevisionUnavailable; }
+        return result;
     }
 
     internal async Task<bool> CodecAvailableAsync(ManifestCatalogDbContext context,
@@ -326,13 +339,29 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         { Graph = graph };
     }
 
-    internal bool Supports(DurableOperationGraph graph) => admission.Supports(graph);
+    private PreparedProviderConfiguration PreparedConfiguration(string kind, ProviderConfigurationRevisionRow revision)
+    {
+        var matches = _codecs.Where(c => c.ProviderKindId == kind && c.ShapeId == revision.ConfigurationShapeId &&
+            c.PayloadFormatVersion == revision.PayloadFormatVersion).Take(2).ToArray();
+        if (matches.Length != 1) throw new InvalidDataException("Provider codec unavailable.");
+        return matches[0].Encode(matches[0].Decode(revision.PayloadJson));
+    }
+
+    internal async Task<bool> ValidateGraphAsync(ManifestCatalogDbContext context, NormalizedManifestSpec spec,
+        ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs, DurableOperationGraph graph, CancellationToken token)
+    {
+        var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(r => r.Id == revision.ProviderInstanceId, token);
+        return instance is not null && admission.ValidateGraph(spec,
+            new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs,
+            PreparedConfiguration(instance.ProviderKindId, revision), graph);
+    }
     internal async Task<DurableOperationGraph> PlanGraphAsync(ManifestCatalogDbContext context,
         NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs,
         CancellationToken cancellationToken)
     {
         var instance = await context.ProviderInstances.AsNoTracking().SingleAsync(row => row.Id == revision.ProviderInstanceId, cancellationToken);
-        return admission.Plan(spec, new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs);
+        return admission.Plan(spec, new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs,
+            PreparedConfiguration(instance.ProviderKindId, revision));
     }
 
     internal static void ValidateActor(string actorId)

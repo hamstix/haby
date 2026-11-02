@@ -597,6 +597,10 @@ generated slots first, without external Provider effects. PostgreSQL-specific
 pair admission and ownership remain adapter policies; RabbitMQ credentials must
 not require a database. New role/access recovery and confidential Configuration
 delivery remain deferred; uncertainty must still stop execution safely.
+[Issue #112 planning](docs/development/112-postgresql-pair-planning.md) adds strict
+PostgreSQL pair metadata and test-composed five-node planning. Production retains
+standalone database admission; missing mandatory executors block the whole graph
+before any partial effect.
 
 Deliver this goal in narrow vertical slices. Finish operation/recovery restore
 rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize

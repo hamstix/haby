@@ -27,6 +27,18 @@ public interface IDurableActionAdmissionHandler
 
 }
 
+/// <summary>Optional pure composition seam. The exact Resource registration owns its nodes and relationships.
+/// Configuration is the validated pinned envelope, never a current alias lookup or credential material.</summary>
+public interface IDurableResourcePlanComposer
+{
+    bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
+        PreparedProviderConfiguration configuration);
+    IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration);
+    bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
+        PreparedProviderConfiguration configuration, DurableOperationGraph graph);
+}
+
 public interface IDurableActionHandler
 {
     DurableActionExecutionKey Key { get; }
@@ -108,29 +120,72 @@ public sealed class DurableActionRegistry
 /// <summary>The same pure admission rule is used by durable Plan, Check and atomic Commit.</summary>
 public sealed class DurableActionAdmission(DurableActionRegistry registry)
 {
-    public static bool SupportsPilotShape(NormalizedManifestSpec spec) => spec.Resources.Count == 1 &&
-        spec.Components.Count == 0 && spec.Exports.Count == 0 && spec.Parameters.Count == 0;
+    public static bool SupportsPilotShape(NormalizedManifestSpec spec) => spec.Resources.Count is > 0 and <= 256 &&
+        spec.Exports.Count == 0 && spec.Parameters.Count == 0;
 
-    public DurablePlanStatus Admit(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs)
+    // This pilot pins one Provider. A distinct alias is refused, never collapsed to a first match.
+    public static ProviderAlias? SingleAlias(NormalizedManifestSpec spec) =>
+        spec.Resources.Values.Select(r => r.ProviderRef).Distinct().Take(2).ToArray() is [var alias] ? alias : null;
+
+    public bool HasPlanningSupport(NormalizedManifestSpec spec, ProviderAdapterKey provider) =>
+        spec.Resources.Values.All(r => registry.Find(new DurableActionAdmissionKey(r.Type, provider)) is not null);
+
+    public DurablePlanStatus Admit(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
+        PreparedProviderConfiguration? configuration = null)
     {
         if (!SupportsPilotShape(spec)) return DurablePlanStatus.UnsupportedShape;
-        var resource = spec.Resources.Single().Value;
-        if (resource.ProviderRef != inputs.Alias || provider.ImplementationId != inputs.ImplementationId)
+        if (SingleAlias(spec) != inputs.Alias || provider.ImplementationId != inputs.ImplementationId)
             return DurablePlanStatus.ProviderRevisionUnavailable;
-        var handler = registry.Find(new DurableActionAdmissionKey(resource.Type, provider));
-        if (handler is null) return DurablePlanStatus.ProviderCapabilityMismatch;
-        return handler.Validate(resource, inputs) ? DurablePlanStatus.Planned : DurablePlanStatus.UnsupportedShape;
+        foreach (var resource in spec.Resources)
+        {
+            var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider));
+            if (handler is null) return DurablePlanStatus.ProviderCapabilityMismatch;
+            var valid = handler is IDurableResourcePlanComposer composer && configuration is not null
+                ? composer.Validate(spec, resource.Key, inputs, configuration)
+                : spec.Resources.Count == 1 && spec.Components.Count == 0 && handler.Validate(resource.Value, inputs);
+            if (!valid) return DurablePlanStatus.UnsupportedShape;
+        }
+        return DurablePlanStatus.Planned;
     }
-    public DurableOperationGraph Plan(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs)
+    public DurableOperationGraph Plan(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
+        PreparedProviderConfiguration? configuration = null)
     {
-        var resource = spec.Resources.Single();
-        var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider))
-            ?? throw new InvalidDataException("Planning support unavailable.");
-        var graph = new DurableOperationGraph(handler.Plan(resource.Key, resource.Value, inputs));
+        if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned)
+            throw new InvalidDataException("Planning support unavailable.");
+        var nodes = new List<DurableOperationNode>();
+        foreach (var resource in spec.Resources.OrderBy(r => r.Key.Value, StringComparer.Ordinal))
+        {
+            var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider))!;
+            nodes.AddRange(handler is IDurableResourcePlanComposer composer && configuration is not null
+                ? composer.Plan(spec, resource.Key, inputs, configuration)
+                : handler.Plan(resource.Key, resource.Value, inputs));
+        }
+        var graph = new DurableOperationGraph(nodes);
         graph.ValidateReferences(inputs);
-        if (graph.Nodes.Any(n => n.ResourceId != resource.Key || n.Action.Admission != handler.Key.Admission))
-            throw new InvalidDataException("Graph ownership is inconsistent.");
+        if (!ValidateGraph(spec, provider, inputs, configuration, graph))
+            throw new InvalidDataException("Graph ownership or contracts are inconsistent.");
         return graph;
+    }
+    public bool ValidateGraph(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
+        PreparedProviderConfiguration? configuration, DurableOperationGraph graph)
+    {
+        if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned) return false;
+        graph.ValidateReferences(inputs);
+        foreach (var node in graph.Nodes)
+            if (!spec.Resources.TryGetValue(node.ResourceId, out var declared) ||
+                node.Action.Admission != new DurableActionAdmissionKey(declared.Type, provider)) return false;
+        foreach (var resource in spec.Resources)
+        {
+            var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider))!;
+            if (handler is IDurableResourcePlanComposer composer && configuration is not null)
+            {
+                if (!composer.ValidateGraph(spec, resource.Key, inputs, configuration, graph)) return false;
+            }
+            else if (!graph.Nodes.Any(n => n.ResourceId == resource.Key) ||
+                graph.Nodes.Where(n => n.ResourceId == resource.Key).Any(n => registry.Find(n.Action)?.Supports(n) != true ||
+                    n.OutputReferences.Any(o => o.OutputContract != GeneratedCredentialContracts.OutputContract))) return false;
+        }
+        return true;
     }
     public bool Supports(DurableOperationGraph graph) => graph.Nodes.All(n => registry.Find(n.Action)?.Supports(n) == true);
 }
