@@ -145,3 +145,36 @@ public sealed record ConfigurationRendererId : VersionedContractId
     private ConfigurationRendererId(string value) : base(value) { }
     public static ConfigurationRendererId Create(string value) => new(value);
 }
+
+/// <summary>Exact versioned external action contract, independent of CLR and package identity.</summary>
+public sealed record OperationContractId : VersionedContractId
+{
+    private OperationContractId(string value) : base(value) { }
+    public static OperationContractId Create(string value) => new(value);
+}
+
+public sealed record ProviderKindId : VersionedContractId
+{
+    private ProviderKindId(string value) : base(value) { }
+    public static ProviderKindId Create(string value) => new(value);
+}
+
+public sealed record ProviderConfigurationContractId : VersionedContractId
+{
+    private ProviderConfigurationContractId(string value) : base(value) { }
+    public static ProviderConfigurationContractId Create(string value) => new(value);
+}
+
+/// <summary>Opaque implementation identity; distinct from a versioned public contract.</summary>
+public sealed record ProviderImplementationId
+{
+    private ProviderImplementationId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128 || value.Any(char.IsControl))
+            throw new ArgumentException("Invalid Provider implementation identity.", nameof(value));
+        Value = value;
+    }
+    public string Value { get; }
+    public static ProviderImplementationId Create(string value) => new(value);
+    public override string ToString() => Value;
+}

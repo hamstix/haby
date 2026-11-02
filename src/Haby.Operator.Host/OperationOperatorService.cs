@@ -18,6 +18,7 @@ public sealed partial class ManifestOperatorService
         {
             Status = result.Outcome switch
             {
+                DurableCreateExecutionOutcome.HandlerUnavailable => OperationStatus.HandlerUnavailable,
                 DurableCreateExecutionOutcome.Succeeded => OperationStatus.Succeeded,
                 DurableCreateExecutionOutcome.Failed => OperationStatus.Failed,
                 DurableCreateExecutionOutcome.RetryableFailure => OperationStatus.RetryableFailure,

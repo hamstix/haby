@@ -120,4 +120,24 @@ public sealed class ValueObjectTests
         Assert.NotEqual(reference, ManifestRevisionRef.Create(ApplicationRecordId.New(), number));
         Assert.NotEqual(reference, ManifestRevisionRef.Create(applicationId, ManifestRevisionNumber.Create(2)));
     }
+
+    [Fact]
+    public void Action_registration_identifiers_are_distinct_and_require_exact_contract_versions()
+    {
+        var action = OperationContractId.Create("sample.queue.create/v1");
+        Assert.Equal(action, OperationContractId.Create("sample.queue.create/v1"));
+        Assert.NotEqual(action, OperationContractId.Create("sample.queue.create/v2"));
+        Assert.NotEqual<VersionedContractId>(action, ResourceTypeId.Create(action.Value));
+        Assert.NotEqual<VersionedContractId>(ProviderKindId.Create("sample/v1"),
+            ProviderConfigurationContractId.Create("sample/v1"));
+        foreach (var invalid in new[] { "", "sample", "sample/latest", "Sample/v1", "sample/v0" })
+        {
+            Assert.Throws<ArgumentException>(() => OperationContractId.Create(invalid));
+            Assert.Throws<ArgumentException>(() => ProviderKindId.Create(invalid));
+            Assert.Throws<ArgumentException>(() => ProviderConfigurationContractId.Create(invalid));
+        }
+        Assert.Equal("implementation-a", ProviderImplementationId.Create("implementation-a").Value);
+        Assert.Throws<ArgumentException>(() => ProviderImplementationId.Create("private\nvalue"));
+        Assert.Throws<ArgumentException>(() => ProviderImplementationId.Create(new string('a', 129)));
+    }
 }

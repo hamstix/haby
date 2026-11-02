@@ -11,7 +11,7 @@ namespace Haby.Persistence.PostgreSql;
 public sealed class PostgreSqlDurableDesiredStateCommitter(
     IDbContextFactory<ManifestCatalogDbContext> contexts,
     PostgreSqlDurableDeploymentPlanner planner,
-    ICheckpointProviderCapability capability, TimeProvider clock) : IDurableDesiredStateCommitter
+    TimeProvider clock) : IDurableDesiredStateCommitter
 {
     public async ValueTask<DurableCommitResult> CommitAsync(DeploymentChangeSetId changeSetId,
         DeploymentPlanId planId, string actorId, CancellationToken cancellationToken)
@@ -77,11 +77,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             row.ProviderInstanceId == plan.ProviderInstanceId &&
             row.RevisionNumber == plan.ConfigurationRevisionNumber &&
             row.EnvironmentRecordId == change.EnvironmentRecordId && row.IsSealed, cancellationToken);
-        if (revision is null || revision.ImplementationId != plan.ImplementationId ||
-            !capability.Supports(new ProviderResolution(plan.ProviderInstanceId.ToString(),
-                plan.ConfigurationRevisionNumber, plan.ImplementationId),
-                PostgreSqlDatabaseContract.Id) ||
-            !await planner.CodecAvailableAsync(context, revision, cancellationToken))
+        if (revision is null || revision.ImplementationId != plan.ImplementationId)
             return new DurableCommitResult.PlanInputUnavailable();
         var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(row =>
             row.Id == change.EnvironmentRecordId, cancellationToken);
@@ -105,13 +101,13 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         var declaration = NormalizedSnapshotCodec.Decode(manifestRow.Snapshot, manifestRow.InputApiVersion,
             manifestRow.NormalizedModelVersion, manifestRow.ApplicationId, manifestRow.SnapshotFormatVersion);
         var spec = declaration.Spec;
-        if (spec.Resources.Count != 1 || spec.Components.Count != 0 || spec.Exports.Count != 0 ||
-            spec.Parameters.Count != 0) return new DurableCommitResult.UnsupportedShape();
-        var resource = spec.Resources.Single();
-        if (!PostgreSqlDurableDeploymentPlanner.IsSupportedDatabaseResource(resource.Value))
-            return new DurableCommitResult.UnsupportedShape();
-        if (resource.Value.ProviderRef.Value != plan.ProviderAlias)
+        if (!DurableActionAdmission.SupportsPilotShape(spec)) return new DurableCommitResult.UnsupportedShape();
+        if (spec.Resources.Single().Value.ProviderRef.Value != plan.ProviderAlias)
             return new DurableCommitResult.PlanStale();
+        var admitted = await planner.AdmitAsync(context, spec, revision, inputs, cancellationToken);
+        if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
+        if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
+        var resource = spec.Resources.Single();
 
         cancellationToken.ThrowIfCancellationRequested();
         var deploymentId = ApplicationDeploymentId.New();

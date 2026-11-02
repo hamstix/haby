@@ -486,11 +486,38 @@ public sealed class DurableCreateExecutorTests
     {
         var services = new ServiceCollection().AddPostgreSqlDurableCreateOperationExecution();
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IDurableCreateOperationExecutor) &&
-            descriptor.ImplementationType == typeof(PostgreSqlDurableCreateOperationExecutor));
+            descriptor.ImplementationType == typeof(ExactDurableCreateOperationExecutor));
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IDurableCreateDispatchFaultHooks) &&
             descriptor.ImplementationType == typeof(NullDurableCreateDispatchFaultHooks));
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IPostgreSqlDatabaseCreateTarget) &&
             descriptor.ImplementationType == typeof(PostgreSqlDatabaseCreateTarget));
+    }
+
+    [Fact]
+    public async Task Missing_handler_dispatch_shares_adapter_gate_while_observation_remains_journal_only()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serialization = new DurableOperationSerialization();
+        var (adapter, journal, target, _) = Harness(new Fixture
+        {
+            BeforeMarker = async token => { entered.SetResult(); await release.Task.WaitAsync(token); }
+        }, serialization);
+        var common = new ExactDurableCreateOperationExecutor(journal, null!, null!,
+            new DurableActionRegistry([], [], []), serialization, TimeProvider.System);
+        var key = journal.Operation.Key;
+        var executing = adapter.ExecuteAsync(key, default).AsTask();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var missing = common.ExecuteAsync(key, default).AsTask();
+        var observing = common.ObserveAsync(key, default).AsTask();
+        Assert.False(missing.IsCompleted);
+        Assert.Equal(DurableCreateOperationState.Preparing,
+            (await observing.WaitAsync(TimeSpan.FromSeconds(5)))!.Operation.State);
+        release.SetResult();
+        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await executing).Outcome);
+        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await missing).Outcome);
+        Assert.Single(journal.Attempts);
+        Assert.Equal(2, target.Inputs.Count);
     }
 
     private const string OneResource =
@@ -502,7 +529,7 @@ public sealed class DurableCreateExecutorTests
         DeploymentGeneration.Create(1), ManifestLocalId.Create("database"), DurableOperationAction.Create);
 
     private static (PostgreSqlDurableCreateOperationExecutor Executor, FakeJournal Journal, FakeTarget Target,
-        TestHooks Hooks) Harness(Fixture? fixture = null)
+        TestHooks Hooks) Harness(Fixture? fixture = null, DurableOperationSerialization? serialization = null)
     {
         fixture ??= new Fixture();
         var attemptId = fixture.AttemptId;
@@ -533,7 +560,7 @@ public sealed class DurableCreateExecutorTests
         };
         var executor = new PostgreSqlDurableCreateOperationExecutor(journal,
             new FakeManifests(fixture.Manifest ?? Prepare(OneResource), fixture.CorruptManifest), target, hooks,
-            new FixedClock(DateTimeOffset.UnixEpoch));
+            new FixedClock(DateTimeOffset.UnixEpoch), serialization);
         return (executor, journal, target, hooks);
     }
 

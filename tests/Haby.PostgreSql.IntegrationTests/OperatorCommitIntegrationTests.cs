@@ -119,6 +119,8 @@ public sealed partial class OperatorHostIntegrationTests
                     .AddSingleton<TimeProvider, PastClock>().AddPostgreSqlProviderConfigurationCodec()
                     .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>()
                     .AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
+                    .AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
+                    .AddPostgreSqlDurableCreateOperationJournal().AddPostgreSqlDurableCreateOperationExecution()
                     .AddPostgreSqlDurableDeploymentPlanner().BuildServiceProvider())
                 {
                     var expired = (await past.GetRequiredService<IDurableDeploymentPlanner>().CreatePlanAsync(
@@ -280,7 +282,7 @@ public sealed partial class OperatorHostIntegrationTests
         Assert.Equal(DBNull.Value, await new NpgsqlCommand("SELECT dispatched_at FROM durable_create_operations", check).ExecuteScalarAsync());
     }
 
-    private static async Task<string> RunNativeCommitCli(string binary, string endpoint, string[] args)
+    private static async Task<string> RunNativeCommitCli(string binary, string endpoint, string[] args, int expectedExit = 0, string format = "json")
     {
         var config = Path.Combine(Path.GetTempPath(), "haby-native-commit-" + Guid.NewGuid().ToString("N") + ".yaml");
         await File.WriteAllTextAsync(config, $"""
@@ -297,7 +299,7 @@ public sealed partial class OperatorHostIntegrationTests
         try
         {
             var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var argument in args.Concat(new[] { "--config", config, "-o", "json" })) start.ArgumentList.Add(argument);
+            foreach (var argument in args.Concat(new[] { "--config", config, "-o", format })) start.ArgumentList.Add(argument);
             start.Environment["HABY_OPERATOR_SKIP_TLS_VALIDATION"] = "true";
             using var process = Process.Start(start)!;
             var stdout = process.StandardOutput.ReadToEndAsync();
@@ -305,7 +307,7 @@ public sealed partial class OperatorHostIntegrationTests
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             try { await process.WaitForExitAsync(timeout.Token); }
             catch { process.Kill(entireProcessTree: true); throw; }
-            Assert.Equal(0, process.ExitCode);
+            Assert.Equal(expectedExit, process.ExitCode);
             Assert.Equal("", await stderr);
             var result = await stdout;
             Assert.DoesNotContain("commit-secret-sentinel", result);

@@ -15,6 +15,7 @@ internal static class OperationPresentation
 {
     internal static string Outcome(OperationStatus value) => value switch
     {
+        OperationStatus.HandlerUnavailable => "handlerUnavailable",
         OperationStatus.Found => "found",
         OperationStatus.Succeeded => "succeeded",
         OperationStatus.Failed => "failed",
@@ -73,8 +74,9 @@ internal static class OperationPresentation
     {
         _ = Outcome(reply.Status);
         if (reply.Status is OperationStatus.Found or OperationStatus.Succeeded or OperationStatus.Failed
-                or OperationStatus.RetryableFailure or OperationStatus.NeedsAttention && reply.Operation is null)
+                or OperationStatus.RetryableFailure or OperationStatus.NeedsAttention or OperationStatus.HandlerUnavailable && reply.Operation is null)
             throw new InvalidDataException("Missing operation snapshot.");
+        if (reply.Status == OperationStatus.HandlerUnavailable) return CliApplication.UsageError;
         return reply.Status is OperationStatus.Found or OperationStatus.Succeeded ? CliApplication.Success : CliApplication.Rejected;
     }
 

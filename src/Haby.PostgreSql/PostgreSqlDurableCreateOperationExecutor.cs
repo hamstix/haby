@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
@@ -16,39 +15,33 @@ namespace Haby.PostgreSql;
 /// </summary>
 public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOperationJournal journal,
     IManifestRevisionQuery manifests, IPostgreSqlDatabaseCreateTarget target, IDurableCreateDispatchFaultHooks hooks,
-    TimeProvider clock) : IDurableCreateOperationExecutor
+    TimeProvider clock, DurableOperationSerialization? serialization = null) : IDurableCreateOperationExecutor
 {
     private readonly PostgreSqlDurableCreateInputResolver resolver = new(manifests);
-    private readonly ConcurrentDictionary<DurableCreateOperationKey, SemaphoreSlim> gates = new();
+    private readonly DurableOperationSerialization serialization = serialization ?? new();
 
-    public async ValueTask<DurableCreateExecutionResult> ExecuteAsync(DurableCreateOperationKey key,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(key);
-        var gate = gates.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
-        try
-        {
-            return await ExecuteCoreAsync(key, cancellationToken);
-        }
-        finally
-        {
-            gate.Release();
-        }
-    }
+    public ValueTask<DurableCreateExecutionResult> ExecuteAsync(DurableCreateOperationKey key,
+        CancellationToken cancellationToken) => serialization.RunAsync(key,
+            () => ExecuteCoreAsync(key, cancellationToken), cancellationToken);
 
+    // The exact dispatcher already holds the shared operation gate.
+    internal ValueTask<DurableCreateExecutionResult> ExecuteUnderLockAsync(DurableCreateOperationKey key,
+        PostgreSqlDatabaseCreateInput? input, CancellationToken cancellationToken) =>
+        ExecuteCoreAsync(key, cancellationToken, input, prepared: true);
+
+    // Observation retains the existing journal-only read behavior. It never transitions
+    // state and must remain available while an external request holds the execution gate.
     public async ValueTask<DurableCreateOperationView?> ObserveAsync(DurableCreateOperationKey key,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
         var operation = await journal.FindAsync(key, cancellationToken);
-        if (operation is null) return null;
-        var attempts = await journal.FindAttemptsAsync(key, cancellationToken);
-        return new DurableCreateOperationView(operation, attempts);
+        return operation is null ? null : new DurableCreateOperationView(operation,
+            await journal.FindAttemptsAsync(key, cancellationToken));
     }
 
     private async ValueTask<DurableCreateExecutionResult> ExecuteCoreAsync(DurableCreateOperationKey key,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, PostgreSqlDatabaseCreateInput? preparedInput = null, bool prepared = false)
     {
         var operation = await journal.FindAsync(key, cancellationToken);
         if (operation is null) return DurableCreateExecutionResult.NotFound();
@@ -84,7 +77,9 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         PostgreSqlDatabaseCreateInput input;
         try
         {
-            var shape = await resolver.ResolveAsync(key, operation, cancellationToken);
+            var shape = prepared
+                ? (Input: preparedInput, Reason: preparedInput is null ? DurableCreateOperationReason.InputInvalid : (DurableCreateOperationReason?)null, Definitive: true)
+                : await resolver.ResolveAsync(key, operation, cancellationToken);
             if (shape.Reason is { } rejection)
                 return await FailBeforeDispatchAsync(key, attemptId, rejection, shape.Definitive,
                     cancellationToken);
@@ -306,7 +301,10 @@ public static class PostgreSqlDurableCreateOperationExecutorServiceCollectionExt
     {
         services.TryAddSingleton<IDurableCreateDispatchFaultHooks, NullDurableCreateDispatchFaultHooks>();
         services.AddPostgreSqlDatabaseCreateTarget();
-        services.TryAddSingleton<IDurableCreateOperationExecutor, PostgreSqlDurableCreateOperationExecutor>();
+        services.AddPostgreSqlDatabaseCreateAction();
+        services.TryAddSingleton<PostgreSqlDurableCreateOperationExecutor>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDurableActionHandler, PostgreSqlDatabaseCreateAction>());
+        services.TryAddSingleton<IDurableCreateOperationExecutor, ExactDurableCreateOperationExecutor>();
         return services;
     }
 }

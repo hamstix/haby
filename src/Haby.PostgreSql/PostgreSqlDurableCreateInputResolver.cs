@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
@@ -7,9 +6,6 @@ namespace Haby.PostgreSql;
 
 internal sealed class PostgreSqlDurableCreateInputResolver(IManifestRevisionQuery manifests)
 {
-    private static readonly Regex SafeDatabase = new(@"\A[a-z][a-z0-9_]{0,62}\z",
-        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
-
     public async ValueTask<(PostgreSqlDatabaseCreateInput? Input, DurableCreateOperationReason? Reason, bool Definitive)>
         ResolveAsync(DurableCreateOperationKey key, DurableCreateOperation operation,
             CancellationToken cancellationToken)
@@ -34,13 +30,9 @@ internal sealed class PostgreSqlDurableCreateInputResolver(IManifestRevisionQuer
         var entry = spec.Resources.Single();
         if (entry.Key != key.ResourceId) return (null, DurableCreateOperationReason.InputInvalid, true);
         var resource = entry.Value;
-        if (resource.Type != PostgreSqlDatabaseContract.Id || resource.Properties.Members.Count != 1 ||
-            !resource.Properties.Members.TryGetValue("name", out var value) ||
-            value is not ConfigurationString name)
-            return (null, DurableCreateOperationReason.InputInvalid, true);
-        if (!SafeDatabase.IsMatch(name.Value))
-            return (null, DurableCreateOperationReason.InputInvalid, true);
+        var name = PostgreSqlDatabaseCreateValidation.Name(resource);
+        if (name is null) return (null, DurableCreateOperationReason.InputInvalid, true);
         return (new PostgreSqlDatabaseCreateInput(operation.Environment, operation.ProviderInstance,
-            operation.ConfigurationRevision, operation.ImplementationId, name.Value), null, false);
+            operation.ConfigurationRevision, operation.ImplementationId, name), null, false);
     }
 }

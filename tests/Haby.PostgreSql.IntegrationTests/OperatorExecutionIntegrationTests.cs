@@ -88,7 +88,7 @@ public sealed partial class OperatorHostIntegrationTests
             var executor = host.Services.GetRequiredService<IDurableCreateOperationExecutor>();
             using var scope = host.Services.CreateScope();
             Assert.Same(executor, scope.ServiceProvider.GetRequiredService<IDurableCreateOperationExecutor>());
-            Assert.IsType<PostgreSqlDurableCreateOperationExecutor>(executor);
+            Assert.IsType<ExactDurableCreateOperationExecutor>(executor);
             Assert.IsType<PostgreSqlDatabaseCreateTarget>(host.Services.GetRequiredService<IPostgreSqlDatabaseCreateTarget>());
             using var channel = Channel(host, scenario.Certificate);
             var client = new ManifestOperator.ManifestOperatorClient(channel);
