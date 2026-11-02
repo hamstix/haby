@@ -396,7 +396,7 @@ public sealed partial class OperatorHostIntegrationTests
         var password = "haby-execution-secret-" + Guid.NewGuid().ToString("N");
         await ExecutionSql(fixture.ConnectionString, $"CREATE ROLE \"{user}\" LOGIN CREATEDB PASSWORD '{password}'");
         var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Username = user, Password = password };
-        await store.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(password), default);
+        await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(password), default);
         var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!,
             secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
@@ -420,7 +420,7 @@ public sealed partial class OperatorHostIntegrationTests
         {
             var providers = Setup.GetRequiredService<IProviderConfigurationStore>();
             var alternateSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await Setup.GetRequiredService<ISecretStore>().CreateAsync(Environment, alternateSecret,
+            await Setup.GetRequiredService<ISecretStore>().CreateAsync(new SecretDefinition(new SecretOwner.Environment(Environment), SecretPurpose.ProviderAdministrator), alternateSecret,
                 Encoding.UTF8.GetBytes("unusable-alternate-secret"), default);
             var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", 1, "postgres", "alternate",
                 alternateSecret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);

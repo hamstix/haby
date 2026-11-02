@@ -90,7 +90,9 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
             var versionId = Guid.Parse(reference.Reference.SecretVersionId.ToString());
             var available = await (from secret in context.Secrets.AsNoTracking()
                                    join version in context.SecretVersions.AsNoTracking() on secret.Id equals version.SecretId
-                                   where secret.Id == secretId && secret.EnvironmentRecordId == environmentId &&
+                                   where secret.Owner == "Environment" && secret.Purpose == "ProviderAdministrator" &&
+                                         secret.ApplicationRecordId == null && secret.ResourceLocalId == null &&
+                                         secret.Id == secretId && secret.EnvironmentRecordId == environmentId &&
                                          version.Id == versionId
                                    select version.Id).AnyAsync(cancellationToken);
             if (!available) throw new InvalidOperationException("Provider secret reference is unavailable.");

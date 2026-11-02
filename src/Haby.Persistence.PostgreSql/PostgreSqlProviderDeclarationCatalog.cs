@@ -34,7 +34,9 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
             {
                 var selected = await (from secret in context.Secrets.AsNoTracking()
                                       join version in context.SecretVersions.AsNoTracking() on secret.Id equals version.SecretId
-                                      where secret.EnvironmentRecordId == env && secret.Name == entry.Value.SecretName &&
+                                      where secret.Owner == "Environment" && secret.Purpose == "ProviderAdministrator" &&
+                                      secret.ApplicationRecordId == null && secret.ResourceLocalId == null &&
+                                      secret.EnvironmentRecordId == env && secret.Name == entry.Value.SecretName &&
                                             version.Number == entry.Value.Version
                                       select new { secret.Id, VersionId = version.Id }).SingleOrDefaultAsync(cancellationToken);
                 if (selected is null) return new(ProviderOutcome.SecretReferenceUnavailable);

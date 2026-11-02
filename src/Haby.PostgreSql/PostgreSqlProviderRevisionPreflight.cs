@@ -47,7 +47,7 @@ public sealed class PostgreSqlProviderRevisionPreflight(IProviderConfigurationSt
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(10));
         SecretMaterial? material;
-        try { material = await secrets.ResolveAsync(environment, configuration.AdministratorPassword, deadline.Token); }
+        try { material = await secrets.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), configuration.AdministratorPassword, deadline.Token); }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         { throw new OperationCanceledException(cancellationToken); }
         catch (Exception) when (deadline.IsCancellationRequested)

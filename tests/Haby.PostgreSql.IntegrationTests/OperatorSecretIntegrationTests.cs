@@ -99,8 +99,7 @@ public sealed partial class OperatorHostIntegrationTests
                     }
             }
             // Resolve only internally through the configured backend, with an independent factory context.
-            using var material = await host.Services.GetRequiredService<ISecretStore>().ResolveAsync(
-                EnvironmentRecordId.Parse(original.EnvironmentRecordId),
+            using var material = await host.Services.GetRequiredService<ISecretStore>().ResolveAsync(new SecretDefinition(new SecretOwner.Environment(EnvironmentRecordId.Parse(original.EnvironmentRecordId)), SecretPurpose.ProviderAdministrator),
                 new SecretRef(SecretId.Parse(original.SecretId), SecretVersionId.Parse(original.Versions[0].VersionId)), default);
             Assert.NotNull(material);
             Assert.True(material.CopyBytes().AsSpan().SequenceEqual(bytes), "Stored BOM/newline bytes must be exact.");

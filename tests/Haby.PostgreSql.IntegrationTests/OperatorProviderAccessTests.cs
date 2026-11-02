@@ -334,7 +334,7 @@ internal sealed class CredentialFakePreflight(CredentialSampleCodec codec, ISecr
     {
         Interlocked.Increment(ref evidence.Calls);
         Assert.Equal("queue-cluster", configuration.Target);
-        using var material = await secrets.ResolveAsync(environment, new(SecretId.Parse(configuration.SecretId), SecretVersionId.Parse(configuration.SecretVersionId)), token);
+        using var material = await secrets.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), new(SecretId.Parse(configuration.SecretId), SecretVersionId.Parse(configuration.SecretVersionId)), token);
         Assert.NotNull(material);
         Assert.Equal(new byte[] { 1, 2, 3 }, material.CopyBytes());
         return new(evidence.Outcome);

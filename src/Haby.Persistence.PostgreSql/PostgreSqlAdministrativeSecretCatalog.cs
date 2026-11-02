@@ -43,19 +43,10 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
                 // Never compose the independently committing ISecretStore.CreateAsync operation here.
                 if (store is not PostgreSqlPlaintextSecretStore)
                     return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
-                secret = new SecretRow
-                {
-                    Id = Guid.Parse(SecretId.New().ToString()),
-                    EnvironmentRecordId = env,
-                    Name = name,
-                    CreatedAt = now,
-                    Owner = "Environment",
-                    Purpose = "ProviderAdministrator",
-                    Sensitivity = "Credential",
-                    ContentType = "application/octet-stream",
-                    OwnershipPolicy = "Managed",
-                    StorageBackend = "PostgreSqlPlaintext"
-                };
+                secret = SecretRowMapping.Create(new SecretDefinition(new SecretOwner.Environment(environment),
+                    SecretPurpose.ProviderAdministrator), Guid.Parse(SecretId.New().ToString()));
+                secret.Name = name;
+                secret.CreatedAt = now;
                 version = new SecretVersionRow
                 {
                     Id = Guid.Parse(SecretVersionId.New().ToString()),
@@ -74,16 +65,15 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
             else
             {
                 if (secret is null) return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
-                if (secret.Name != name || secret.Owner != "Environment" || secret.Purpose != "ProviderAdministrator" ||
-                    secret.Sensitivity != "Credential" || secret.ContentType != "application/octet-stream" || secret.OwnershipPolicy != "Managed")
+                if (secret.Name != name || !SecretRowMapping.IsAdministrative(secret))
                     return new(SecretOutcome.RequestContentConflict, RequestId: requestId);
                 version = await context.SecretVersions.SingleOrDefaultAsync(x => x.SecretId == secret.Id &&
                     (receipt == null ? x.Number == 1 : x.Id == receipt.VersionId), cancellationToken);
                 if (version is null) return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
                 var reference = new SecretRef(SecretId.Parse(secret.Id.ToString()), SecretVersionId.Parse(version.Id.ToString()));
                 using var accepted = store is PostgreSqlPlaintextSecretStore postgres
-                    ? await postgres.ResolveAsync(context, environment, reference, cancellationToken)
-                    : await store.ResolveAsync(environment, reference, cancellationToken);
+                    ? await postgres.ResolveAsync(context, new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, cancellationToken)
+                    : await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, cancellationToken);
                 if (accepted is null) return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
                 var original = accepted.CopyBytes();
                 try
@@ -123,8 +113,8 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var env = Guid.Parse(environment.ToString());
         var identity = id is null ? (Guid?)null : Guid.Parse(id.ToString());
-        var row = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env &&
-            (identity == null ? x.Name == name : x.Id == identity), cancellationToken);
+        var row = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env && x.Owner == "Environment" && x.Purpose == "ProviderAdministrator" &&
+            x.ApplicationRecordId == null && x.ResourceLocalId == null && (identity == null ? x.Name == name : x.Id == identity), cancellationToken);
         if (row is null) return null;
         // Discovery reports the initial numbered version only. Legacy versions remain explicitly unnumbered.
         var versions = await context.SecretVersions.AsNoTracking().Where(x => x.SecretId == row.Id &&
@@ -137,7 +127,8 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
         if (limit is < 1 or > SecretAdministration.MaxPageSize + 1) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var env = Guid.Parse(environment.ToString());
-        var query = context.Secrets.AsNoTracking().Where(x => x.EnvironmentRecordId == env);
+        var query = context.Secrets.AsNoTracking().Where(x => x.EnvironmentRecordId == env &&
+            x.Owner == "Environment" && x.Purpose == "ProviderAdministrator" && x.ApplicationRecordId == null && x.ResourceLocalId == null);
         if (after is not null) query = query.Where(x => string.Compare(EF.Functions.Collate(x.Name ?? "~" + x.Id.ToString(), "C"), after) > 0);
         var rows = await query.OrderBy(x => EF.Functions.Collate(x.Name ?? "~" + x.Id.ToString(), "C")).Take(limit).ToArrayAsync(cancellationToken);
         var ids = rows.Select(x => x.Id).ToArray();
@@ -148,6 +139,7 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
     }
 
     private static SecretMetadata Metadata(SecretRow row, IReadOnlyList<SecretVersionRow> versions) => new(
-        EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()), SecretId.Parse(row.Id.ToString()), row.Name,
-        row.Purpose, row.CreatedAt, versions.Select(v => new SecretVersionMetadata(SecretVersionId.Parse(v.Id.ToString()), v.Number, v.CreatedAt)).ToArray());
+        EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
+        new SecretOwner.Environment(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString())), SecretId.Parse(row.Id.ToString()), row.Name,
+        SecretPurpose.ProviderAdministrator, row.CreatedAt, versions.Select(v => new SecretVersionMetadata(SecretVersionId.Parse(v.Id.ToString()), v.Number, v.CreatedAt)).ToArray());
 }

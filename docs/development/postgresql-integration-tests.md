@@ -272,3 +272,15 @@ and advances the generation once without changing the decision. The normal
 one-database Host/generated RPC/published Native AOT CLI scenarios remain gates.
 Fresh-schema/model checks replace superseded upgrade/downgrade matrices. Startup
 refuses unsupported catalogs safely and never resets persistent data.
+
+## Generated credential slots (issue #108)
+
+`GeneratedCredentialSlotTests` uses a queue-user Resource owner without Provider
+registration or a database Resource. It verifies eight synchronized candidates,
+exact reference and bytes after restart/lost responses, one immutable creation
+audit, owner/profile isolation, invalid/missing/corrupt material refusal,
+precommit rollback/cancellation and administrative/Provider isolation. The
+current-build real dump/restore test repeats the same slot after restore and
+checks unchanged material and audit. Fast guard tests remain infrastructure-free.
+The [internal contract](108-generated-credential-slots.md) describes typed scope,
+commit cancellation, retained unused material and the fresh-catalog requirement.

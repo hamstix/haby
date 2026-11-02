@@ -33,15 +33,15 @@ public sealed class SecretMaterial : IDisposable
     public override string ToString() => nameof(SecretMaterial);
 }
 
-/// <summary>Internal storage boundary. The caller supplies a trusted Environment identity.</summary>
+/// <summary>Internal storage boundary. The trusted caller supplies explicit typed owner/purpose scope.</summary>
 public interface ISecretStore
 {
     /// <summary>Compatibility helper: create-or-get metadata only. Prefer EnvironmentAdministration for explicit administration.</summary>
     ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id, CancellationToken cancellationToken);
-    ValueTask CreateAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,
+    ValueTask CreateAsync(SecretDefinition definition, SecretRef reference, byte[] material,
         CancellationToken cancellationToken);
     ValueTask AddVersionAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,
         CancellationToken cancellationToken);
-    ValueTask<SecretMaterial?> ResolveAsync(EnvironmentRecordId environment, SecretRef reference,
+    ValueTask<SecretMaterial?> ResolveAsync(SecretDefinition definition, SecretRef reference,
         CancellationToken cancellationToken);
 }

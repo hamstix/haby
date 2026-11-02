@@ -90,11 +90,11 @@ public sealed class PostgreSqlProviderRevisionPreflightTests
         public bool ResolveCalled { get; private set; }
         public ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id,
             CancellationToken cancellationToken) => throw new NotSupportedException();
-        public ValueTask CreateAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,
+        public ValueTask CreateAsync(SecretDefinition definition, SecretRef reference, byte[] material,
             CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask AddVersionAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material,
             CancellationToken cancellationToken) => throw new NotSupportedException();
-        public ValueTask<SecretMaterial?> ResolveAsync(EnvironmentRecordId environment, SecretRef reference,
+        public ValueTask<SecretMaterial?> ResolveAsync(SecretDefinition definition, SecretRef reference,
             CancellationToken cancellationToken)
         {
             ResolveCalled = true;

@@ -368,7 +368,7 @@ public sealed class DurableExecutionTests(PostgreSqlFixture fixture) : IClassFix
         }
         var secrets = services.GetRequiredService<ISecretStore>();
         var otherSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await secrets.CreateAsync(prepared.Environment, otherSecret, Encoding.UTF8.GetBytes(otherPassword), default);
+        await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(prepared.Environment), SecretPurpose.ProviderAdministrator), otherSecret, Encoding.UTF8.GetBytes(otherPassword), default);
         var provider = services.GetRequiredService<IProviderConfigurationStore>();
         var adminTarget = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
         var other = new PostgreSqlProviderConfiguration(1, adminTarget.Host!, adminTarget.Port,
@@ -801,7 +801,7 @@ public sealed class DurableExecutionTests(PostgreSqlFixture fixture) : IClassFix
                 await role.ExecuteNonQueryAsync();
             }
             var otherSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(prepared.Environment, otherSecret,
+            await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(prepared.Environment), SecretPurpose.ProviderAdministrator), otherSecret,
                 Encoding.UTF8.GetBytes(otherPassword), default);
             var provider = services.GetRequiredService<IProviderConfigurationStore>();
             var admin = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
@@ -917,7 +917,7 @@ public sealed class DurableExecutionTests(PostgreSqlFixture fixture) : IClassFix
                 await role.ExecuteNonQueryAsync();
             }
             var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(password), default);
+            await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(password), default);
             var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
             { Username = user, Password = password };
             var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,

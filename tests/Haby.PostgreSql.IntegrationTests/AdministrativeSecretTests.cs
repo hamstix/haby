@@ -319,7 +319,7 @@ public sealed class AdministrativeSecretTests(PostgreSqlFixture fixture) : IClas
         var created = await Create(services, "admin", Guid.NewGuid());
         var store = services.GetRequiredService<ISecretStore>();
         for (var i = 0; i < 2; i++)
-            await store.CreateAsync(created.Secret!.Environment, new SecretRef(SecretId.New(), SecretVersionId.New()), [1], default);
+            await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(created.Secret!.Environment), SecretPurpose.ProviderAdministrator), new SecretRef(SecretId.New(), SecretVersionId.New()), [1], default);
         var useCase = services.GetRequiredService<SecretAdministration>();
         var page = await useCase.ListAsync("pilot", 1, null, default);
         Assert.Equal("admin", Assert.Single(page.Items).Name);
@@ -334,7 +334,7 @@ public sealed class AdministrativeSecretTests(PostgreSqlFixture fixture) : IClas
     }
 
     [Fact]
-    public async Task Migration_preserves_unnamed_exact_references_without_assigning_names_numbers_or_dates()
+    public async Task Earlier_secret_catalog_is_refused_without_backfill_or_reset()
     {
         var connection = await DatabaseAsync(migrate: false);
         var environment = Guid.Parse(EnvironmentRecordId.New().ToString());
@@ -349,26 +349,21 @@ public sealed class AdministrativeSecretTests(PostgreSqlFixture fixture) : IClas
             await arrange.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO secret_payloads (secret_version_id, bytes) VALUES ({version}, {new byte[] { 1 }})");
             await arrange.Database.ExecuteSqlInterpolatedAsync($"UPDATE secrets SET current_version_id = {version} WHERE id = {secret}");
         }
-        await using (var act = Context(connection)) await act.Database.MigrateAsync();
         await using (var services = Services(connection))
         {
-            var reference = new SecretRef(SecretId.Parse(secret.ToString()), SecretVersionId.Parse(version.ToString()));
-            using var material = await services.GetRequiredService<ISecretStore>().ResolveAsync(EnvironmentRecordId.Parse(environment.ToString()), reference, default);
-            Assert.NotNull(material);
-            Assert.True(material.CopyBytes().AsSpan().SequenceEqual(new byte[] { 1 }), "Exact stored bytes must remain unchanged.");
-            var metadata = await services.GetRequiredService<SecretAdministration>().GetAsync("legacy", null, secret.ToString(), default);
-            Assert.Equal(SecretOutcome.Found, metadata.Outcome);
-            Assert.Null(metadata.Secret!.Name);
-            Assert.Null(metadata.Secret.CreatedAt);
-            Assert.Null(Assert.Single(metadata.Secret.Versions).Number);
-            var page = await services.GetRequiredService<SecretAdministration>().ListAsync("legacy", 1, null, default);
-            Assert.Equal(SecretOutcome.Listed, page.Outcome);
-            Assert.Null(Assert.Single(page.Items).Name);
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
+            Assert.Equal("Unsupported catalog schema. Explicitly initialize a fresh catalog; external resources remain unchanged.", error.Message);
         }
-        await using var check = Context(connection);
-        Assert.Equal(secret, (await check.Secrets.AsNoTracking().SingleAsync()).Id);
-        Assert.Equal(version, (await check.SecretVersions.AsNoTracking().SingleAsync()).Id);
-        Assert.Empty(await check.SecretCreationReceipts.AsNoTracking().ToArrayAsync());
+        await using var check = new NpgsqlConnection(connection);
+        await check.OpenAsync();
+        await using var query = new NpgsqlCommand("SELECT id FROM secrets", check);
+        Assert.Equal(secret, (Guid)(await query.ExecuteScalarAsync())!);
+        await using var payload = new NpgsqlCommand("SELECT count(*) FROM secret_payloads", check);
+        Assert.Equal(1L, (long)(await payload.ExecuteScalarAsync())!);
+        await using var schema = Context(connection);
+        Assert.DoesNotContain(await schema.Database.GetAppliedMigrationsAsync(),
+            id => id.EndsWith("AddGeneratedCredentialSlots", StringComparison.Ordinal));
     }
 
     private static async Task<SecretResult> Create(ServiceProvider services, string name, Guid request,

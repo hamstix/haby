@@ -26,26 +26,26 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
             var store = services.GetRequiredService<ISecretStore>();
             environment = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
             wrong = await store.CreateEnvironmentAsync(EnvironmentId.Create("other"), default);
-            await store.CreateAsync(environment, first, input, default);
+            await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), first, input, default);
             input[0] = 0;
             await store.AddVersionAsync(environment, second, new byte[] { 51 }, default);
-            await store.CreateAsync(wrong, other, new byte[] { 61 }, default);
+            await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(wrong), SecretPurpose.ProviderAdministrator), other, new byte[] { 61 }, default);
         }
         await using (var services = Services(connection))
         {
             var store = services.GetRequiredService<ISecretStore>();
-            var material = await store.ResolveAsync(environment, first, default);
+            var material = await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), first, default);
             Assert.NotNull(material);
             var copy = material.CopyBytes();
             Assert.Equal(new byte[] { 41, 42, 43 }, copy);
             copy[0] = 0;
             Assert.Equal(new byte[] { 41, 42, 43 }, material.CopyBytes());
             Assert.DoesNotContain("41", material.ToString());
-            Assert.Equal(new byte[] { 51 }, (await store.ResolveAsync(environment, second, default))!.CopyBytes());
-            Assert.Null(await store.ResolveAsync(wrong, first, default));
-            Assert.Null(await store.ResolveAsync(environment, new SecretRef(other.SecretId, first.SecretVersionId), default));
-            Assert.Null(await store.ResolveAsync(environment, new SecretRef(first.SecretId, other.SecretVersionId), default));
-            Assert.Null(await store.ResolveAsync(environment, new SecretRef(first.SecretId, SecretVersionId.New()), default));
+            Assert.Equal(new byte[] { 51 }, (await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), second, default))!.CopyBytes());
+            Assert.Null(await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(wrong), SecretPurpose.ProviderAdministrator), first, default));
+            Assert.Null(await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), new SecretRef(other.SecretId, first.SecretVersionId), default));
+            Assert.Null(await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), new SecretRef(first.SecretId, other.SecretVersionId), default));
+            Assert.Null(await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), new SecretRef(first.SecretId, SecretVersionId.New()), default));
         }
     }
 
@@ -62,7 +62,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
         {
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-                await store.CreateAsync(environment, reference, new byte[] { 1 }, cancellation.Token));
+                await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, new byte[] { 1 }, cancellation.Token));
         }
         await using (var check = new NpgsqlConnection(connection))
         {
@@ -72,7 +72,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
             await trigger.ExecuteNonQueryAsync();
         }
         var failure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await store.CreateAsync(environment, reference, new byte[] { 2 }, default));
+            await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, new byte[] { 2 }, default));
         Assert.Equal("Secret storage write failed.", failure.Message);
         Assert.Null(failure.InnerException);
         await using (var check = new NpgsqlConnection(connection))
@@ -97,14 +97,14 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
             owner = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
             wrong = await store.CreateEnvironmentAsync(EnvironmentId.Create("other"), default);
             first = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await store.CreateAsync(owner, first, new byte[] { 10 }, default);
+            await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(owner), SecretPurpose.ProviderAdministrator), first, new byte[] { 10 }, default);
         }
 
         await using (var services = Services(connection))
         {
             var store = services.GetRequiredService<ISecretStore>();
             await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-                await store.CreateAsync(EnvironmentRecordId.New(),
+                await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(EnvironmentRecordId.New()), SecretPurpose.ProviderAdministrator),
                     new SecretRef(SecretId.New(), SecretVersionId.New()), new byte[] { 11 }, default));
             await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await store.AddVersionAsync(wrong,
@@ -118,7 +118,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
         Assert.Equal(1, await CountAsync(check, "secret_payloads"));
         await using var fresh = Services(connection);
         Assert.Equal(new byte[] { 10 }, (await fresh.GetRequiredService<ISecretStore>()
-            .ResolveAsync(owner, first, default))!.CopyBytes());
+            .ResolveAsync(new SecretDefinition(new SecretOwner.Environment(owner), SecretPurpose.ProviderAdministrator), first, default))!.CopyBytes());
     }
 
 
@@ -138,7 +138,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
             await trigger.ExecuteNonQueryAsync();
         }
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await store.CreateAsync(environment,
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator),
             new SecretRef(SecretId.New(), SecretVersionId.New()), new byte[] { 99 }, cancellation.Token));
         Assert.True(cancellation.IsCancellationRequested);
         await using var verify = new NpgsqlConnection(connection);
@@ -157,7 +157,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
         var store = services.GetRequiredService<ISecretStore>();
         var environment = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var first = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await store.CreateAsync(environment, first, new byte[] { 7 }, default);
+        await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), first, new byte[] { 7 }, default);
         var next = new SecretRef(first.SecretId, SecretVersionId.New());
         var attempts = await Task.WhenAll(
             Attempt(() => store.AddVersionAsync(environment, next, new byte[] { 8 }, default)),
@@ -175,7 +175,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
             await corrupt.ExecuteNonQueryAsync();
         }
         var error = await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await store.ResolveAsync(environment, first, default));
+            await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), first, default));
         Assert.Equal("Unsupported stored secret protection format.", error.Message);
         await using (var check = new NpgsqlConnection(connection))
         {
@@ -185,7 +185,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
             await change.ExecuteNonQueryAsync();
         }
         await Assert.ThrowsAsync<InvalidDataException>(async () =>
-            await store.ResolveAsync(environment, first, default));
+            await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), first, default));
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
             Assert.Equal(PostgresErrorCodes.UniqueViolation, error.SqlState);
         }
         var reference = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await store.CreateAsync(environment, reference, new byte[] { 83 }, default);
+        await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, new byte[] { 83 }, default);
         await using var check = new NpgsqlConnection(connection);
         await check.OpenAsync();
         await using var overwrite = new NpgsqlCommand("UPDATE secret_payloads SET bytes = @bytes WHERE secret_version_id = @id", check);
@@ -218,7 +218,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
         await using var remove = new NpgsqlCommand("DELETE FROM secret_versions WHERE id = @id", check);
         remove.Parameters.AddWithValue("id", Guid.Parse(reference.SecretVersionId.ToString()));
         await Assert.ThrowsAsync<PostgresException>(async () => await remove.ExecuteNonQueryAsync());
-        Assert.Equal(new byte[] { 83 }, (await store.ResolveAsync(environment, reference, default))!.CopyBytes());
+        Assert.Equal(new byte[] { 83 }, (await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, default))!.CopyBytes());
     }
 
     [Fact]
@@ -237,7 +237,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
                 await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
                 var store = services.GetRequiredService<ISecretStore>();
                 environment = await store.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
-                await store.CreateAsync(environment, reference, expected, default);
+                await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, expected, default);
             }
             await fixture.RunClientUtilityAsync("pg_dump", "-U", "postgres", "--format=custom", "--file=" + dump,
                 "--dbname=" + new NpgsqlConnectionStringBuilder(source).Database);
@@ -245,7 +245,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
                 "--no-privileges", "--dbname=" + new NpgsqlConnectionStringBuilder(target).Database, dump);
             await using var fresh = Services(target);
             Assert.Equal(expected, (await fresh.GetRequiredService<ISecretStore>()
-                .ResolveAsync(environment, reference, default))!.CopyBytes());
+                .ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, default))!.CopyBytes());
         }
         finally
         {

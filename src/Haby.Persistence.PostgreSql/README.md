@@ -12,8 +12,12 @@ PostgreSQL `Plaintext` implementation. It is not registered by the host or by
 `AddPostgreSqlManifestCatalog`, so this slice does not select a global write
 mode or expose a credential endpoint. Callers must supply a trusted, already
 authorized `EnvironmentRecordId`; this storage contract does not authenticate
-or authorize operators. It accepts only Environment-owned, managed Provider
-administrator credentials. Each `SecretRef` names one immutable version.
+or authorize operators. Explicit typed owner/purpose metadata distinguishes
+Environment-owned Provider administrator credentials from Resource-owned
+application credentials. The latter use the atomic internal generated-slot
+service registered alongside this selected backend; see
+[the generated-slot contract](../../docs/development/108-generated-credential-slots.md).
+Each `SecretRef` names one immutable version.
 The payload is stored as `bytea` in `secret_payloads`, apart from Secret and
 version metadata. Reads verify both Secret/version and Secret/Environment
 membership and reject unknown protection formats or format versions.

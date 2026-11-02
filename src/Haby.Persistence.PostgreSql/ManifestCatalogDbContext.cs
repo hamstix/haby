@@ -12,6 +12,8 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<SecretVersionRow> SecretVersions => Set<SecretVersionRow>();
     internal DbSet<SecretCreationReceiptRow> SecretCreationReceipts => Set<SecretCreationReceiptRow>();
     internal DbSet<SecretPayloadRow> SecretPayloads => Set<SecretPayloadRow>();
+    internal DbSet<GeneratedCredentialSlotRow> GeneratedCredentialSlots => Set<GeneratedCredentialSlotRow>();
+    internal DbSet<GeneratedCredentialCreationAuditRow> GeneratedCredentialCreationAudits => Set<GeneratedCredentialCreationAuditRow>();
     internal DbSet<ProviderInstanceRow> ProviderInstances => Set<ProviderInstanceRow>();
     internal DbSet<ProviderConfigurationRevisionRow> ProviderConfigurationRevisions => Set<ProviderConfigurationRevisionRow>();
     internal DbSet<ProviderRevisionSecretRefRow> ProviderRevisionSecretRefs => Set<ProviderRevisionSecretRefRow>();
@@ -76,6 +78,9 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
             entity.Property(row => row.Owner).HasColumnName("owner").HasMaxLength(64).IsRequired();
+            entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
+            entity.Property(row => row.ResourceLocalId).HasColumnName("resource_local_id").HasMaxLength(63);
+            entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(row => row.Purpose).HasColumnName("purpose").HasMaxLength(64).IsRequired();
             entity.Property(row => row.Sensitivity).HasColumnName("sensitivity").HasMaxLength(32).IsRequired();
             entity.Property(row => row.ContentType).HasColumnName("content_type").HasMaxLength(64).IsRequired();
@@ -103,6 +108,34 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.FormatVersion).HasColumnName("format_version");
             entity.HasOne<SecretRow>().WithMany().HasForeignKey(row => row.SecretId).OnDelete(DeleteBehavior.Restrict);
             entity.HasAlternateKey(row => new { row.SecretId, row.Id });
+        });
+        modelBuilder.Entity<GeneratedCredentialSlotRow>(entity =>
+        {
+            entity.ToTable("generated_credential_slots");
+            entity.HasKey(row => new { row.EnvironmentRecordId, row.ApplicationRecordId, row.ResourceLocalId, row.SlotId });
+            entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
+            entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
+            entity.Property(row => row.ResourceLocalId).HasColumnName("resource_local_id").HasMaxLength(63);
+            entity.Property(row => row.SlotId).HasColumnName("slot_id").HasMaxLength(64);
+            entity.Property(row => row.GenerationProfile).HasColumnName("generation_profile").HasMaxLength(64).IsRequired();
+            entity.Property(row => row.SecretId).HasColumnName("secret_id");
+            entity.Property(row => row.VersionId).HasColumnName("version_id");
+            entity.HasAlternateKey(row => row.SecretId);
+            entity.HasOne<ApplicationRow>().WithMany().HasForeignKey(row => row.ApplicationRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SecretRow>().WithMany().HasForeignKey(row => new { row.SecretId, row.EnvironmentRecordId })
+                .HasPrincipalKey(row => new { row.Id, row.EnvironmentRecordId }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SecretVersionRow>().WithMany().HasForeignKey(row => new { row.SecretId, row.VersionId })
+                .HasPrincipalKey(row => new { row.SecretId, row.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GeneratedCredentialCreationAuditRow>(entity =>
+        {
+            entity.ToTable("generated_credential_creation_audits");
+            entity.HasKey(row => row.SecretId);
+            entity.Property(row => row.SecretId).HasColumnName("secret_id");
+            entity.Property(row => row.TechnicalActor).HasColumnName("technical_actor").HasMaxLength(64).IsRequired();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasOne<GeneratedCredentialSlotRow>().WithOne().HasForeignKey<GeneratedCredentialCreationAuditRow>(row => row.SecretId)
+                .HasPrincipalKey<GeneratedCredentialSlotRow>(row => row.SecretId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SecretCreationReceiptRow>(entity =>
         {
@@ -601,6 +634,8 @@ internal sealed class EnvironmentRow
 
 internal sealed class SecretRow
 {
+    public Guid? ApplicationRecordId { get; set; }
+    public string? ResourceLocalId { get; set; }
     public string? Name { get; set; }
     public DateTimeOffset? CreatedAt { get; set; }
     public Guid Id { get; set; }
@@ -612,6 +647,24 @@ internal sealed class SecretRow
     public required string StorageBackend { get; set; }
     public required string OwnershipPolicy { get; set; }
     public Guid? CurrentVersionId { get; set; }
+}
+
+internal sealed class GeneratedCredentialSlotRow
+{
+    public Guid EnvironmentRecordId { get; set; }
+    public Guid ApplicationRecordId { get; set; }
+    public required string ResourceLocalId { get; set; }
+    public required string SlotId { get; set; }
+    public required string GenerationProfile { get; set; }
+    public Guid SecretId { get; set; }
+    public Guid VersionId { get; set; }
+}
+
+internal sealed class GeneratedCredentialCreationAuditRow
+{
+    public Guid SecretId { get; set; }
+    public required string TechnicalActor { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 internal sealed class SecretVersionRow
