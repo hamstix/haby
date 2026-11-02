@@ -587,8 +587,16 @@ explicit sequential execution and manual recovery share aggregate completion.
 The graph revision requires a fresh catalog under ADR-033. Multi-step effects
 remain test-only; production still admits one database Create.
 Keep the existing one-database production admission; further effects need separate decisions.
-Role/grant ownership, generated-secret lifecycle and confidential configuration
-retrieval still require their own decisions before implementation.
+Confidential configuration retrieval still requires its own decision before
+implementation; the accepted credential and ownership policy follows below.
+
+[ADR-034](docs/adr/0034-application-credentials-and-postgresql-role-policy.md)
+accepts Provider-neutral generated slots and typed outputs plus the PostgreSQL
+database-owner/v1 pilot policy. Implement typed secret ownership and atomic
+generated slots first, without external Provider effects. PostgreSQL-specific
+pair admission and ownership remain adapter policies; RabbitMQ credentials must
+not require a database. New role/access recovery and confidential Configuration
+delivery remain deferred; uncertainty must still stop execution safely.
 
 Deliver this goal in narrow vertical slices. Finish operation/recovery restore
 rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize
@@ -779,6 +787,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-031](docs/adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md): PostgreSQL-specific execution inputs/ports and mandatory replacement of legacy specialized reasons through compatible generic contracts.
 - [ADR-032](docs/adr/0032-dependent-operation-plans-and-exact-dispatch.md): Exact admission, fixed dependent operation plans, sequential execution, aggregate generation completion and compatible Provider-neutral reasons.
 - [ADR-033](docs/adr/0033-development-compatibility-and-catalog-resets.md): Breaking development changes and explicit catalog resets without carrying intermediate alpha compatibility; current-build runtime safety remains mandatory.
+- [ADR-034](docs/adr/0034-application-credentials-and-postgresql-role-policy.md): Provider-neutral generated credentials/outputs, PostgreSQL database-owner pilot and deferred new role/access recovery.
 
 ## Out of scope for the first milestones
 
