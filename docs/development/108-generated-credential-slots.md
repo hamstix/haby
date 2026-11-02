@@ -51,6 +51,11 @@ field of the immutable association, not part of its primary key. A competing
 candidate rolls back all its rows before reading the committed winner through a
 fresh DbContext. There is no nested independently committing SecretStore write.
 
+With Read Committed isolation, a winner can commit between an absent-slot lookup
+and the retained-secret check. Before treating that Secret as orphaned, reread
+the same slot and validate the complete winner. An absent or inconsistent
+association still refuses without generating a replacement.
+
 The immutable creation audit records trusted technical attribution and UTC time.
 Its unique SecretId foreign key joins the immutable slot's safe owner, slot,
 profile and exact SecretRef identities without copying material. Existing calls

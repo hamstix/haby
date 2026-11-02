@@ -36,7 +36,10 @@ public sealed class PostgreSqlGeneratedCredentialSlots(IDbContextFactory<Manifes
             // A lost association is not permission to replace retained Resource material.
             if (await context.Secrets.AnyAsync(x => x.EnvironmentRecordId == env && x.ApplicationRecordId == app &&
                 x.ResourceLocalId == resource, cancellationToken))
-                return new(GeneratedCredentialOutcome.MaterialUnavailable);
+                // Under Read Committed, a winner may have committed since the absent-slot read.
+                // Distinguish that complete winner from a genuinely orphaned Secret without creating a candidate.
+                return await ReadAsync(context, slot, generationProfile, cancellationToken) ??
+                    new(GeneratedCredentialOutcome.MaterialUnavailable);
             if (generationProfile != GeneratedCredentialSlot.RandomPasswordV1)
                 return new(GeneratedCredentialOutcome.ProfileConflict);
 

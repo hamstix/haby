@@ -14,6 +14,31 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class GeneratedCredentialSlotTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     [Fact]
+    public async Task Winner_committing_between_absent_slot_lookup_and_orphan_check_is_reused()
+    {
+        var (connection, slot) = await ArrangeAsync();
+        var pause = new PauseFirstSlotLookup();
+        var delayed = new PostgreSqlGeneratedCredentialSlots(new Factory(connection, pause));
+        var pending = Ensure(delayed, slot);
+        GeneratedCredentialResult winner;
+        byte[] original;
+        await using var services = Services(connection);
+        try
+        {
+            await pause.LookupExecuted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            winner = await Ensure(services.GetRequiredService<IGeneratedCredentialSlots>(), slot);
+            Assert.Equal(GeneratedCredentialOutcome.Created, winner.Outcome);
+            original = await Bytes(services, slot, winner.Reference!);
+        }
+        finally { pause.Continue.TrySetResult(); }
+        var observed = await pending;
+        Assert.Equal(new(GeneratedCredentialOutcome.Existing, winner.Reference), observed);
+        Assert.True(Enumerable.SequenceEqual(original, await Bytes(services, slot, observed.Reference!)),
+            "The concurrent winner's exact material must remain unchanged.");
+        await Counts(connection, 1);
+    }
+
+    [Fact]
     public async Task Non_database_owner_parallel_candidates_converge_on_one_reference_value_and_audit_after_restart()
     {
         var (connection, slot) = await ArrangeAsync();
@@ -245,9 +270,13 @@ public sealed class GeneratedCredentialSlotTests(PostgreSqlFixture fixture) : IC
             .AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
             .AddPostgreSqlProviderConfigurationCodec().BuildServiceProvider();
         var generated = await Ensure(services.GetRequiredService<IGeneratedCredentialSlots>(), slot);
-        var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", 5432, "postgres", "admin", generated.Reference!,
+        var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
+        var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!, generated.Reference!,
             PostgreSqlDatabaseCheckpointCapability.ImplementationId);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
+        var preflight = new PostgreSqlProviderRevisionPreflight(providers, services.GetRequiredService<ISecretStore>());
+        Assert.Equal(ProviderPreflightOutcome.SecretUnavailable,
+            (await preflight.CheckConfigurationAsync(slot.Owner.EnvironmentRecordId, configuration, default)).Outcome);
         var instance = await providers.CreateInstanceAsync(slot.Owner.EnvironmentRecordId, configuration, default);
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => providers.AddRevisionAsync(slot.Owner.EnvironmentRecordId,
             instance, ProviderConfigurationRevisionNumber.Create(1), configuration, default).AsTask());
@@ -366,6 +395,24 @@ public sealed class GeneratedCredentialSlotTests(PostgreSqlFixture fixture) : IC
             {
                 if (Interlocked.Increment(ref _arrived) == count) _ready.SetResult();
                 await _ready.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class PauseFirstSlotLookup : DbCommandInterceptor
+    {
+        private int _lookups;
+        internal TaskCompletionSource LookupExecuted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Continue { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("generated_credential_slots", StringComparison.Ordinal) &&
+                Interlocked.Increment(ref _lookups) == 1)
+            {
+                LookupExecuted.TrySetResult();
+                await Continue.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
             }
             return result;
         }
