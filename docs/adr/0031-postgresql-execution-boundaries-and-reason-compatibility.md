@@ -6,6 +6,11 @@
 
 ## Context
 
+[ADR-032](0032-dependent-operation-plans-and-exact-dispatch.md) accepts the
+successor design and its ordered implementation, starting with issue #100.
+The temporary representations below remain compatibility requirements; the
+successor changes new emissions without rewriting historical reasons.
+
 The database-only operator rehearsal validated bootstrap, explicit desired-state
 commit, execution, safe repeats and restart persistence. Before adding roles or
 grants, the Provider-neutrality audit found database-specific execution inputs

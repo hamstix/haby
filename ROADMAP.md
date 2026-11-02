@@ -570,6 +570,16 @@ Issue #91 must define a Provider-neutral reason model and explicit historical
 mapping; implement it before admitting role/grant or other new effect kinds,
 together with dependency and aggregate generation-completion rules.
 
+[ADR-032](docs/adr/0032-dependent-operation-plans-and-exact-dispatch.md) accepts
+the #91 design: explicit single-instance sequential execution, an immutable
+operation graph, shared exact admission across Plan/Check/Commit, per-operation
+dispatch barriers and generation completion only after all required operations
+succeed. Deliver common reasons and historical compatibility first, exact
+admission second, then graph persistence/execution and aggregate completion.
+Keep the existing one-database admission until those safeguards are complete.
+Role/grant ownership, generated-secret lifecycle and confidential configuration
+retrieval still require their own decisions before implementation.
+
 Deliver this goal in narrow vertical slices. Finish operation/recovery restore
 rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize
 credential provisioning, configuration rendering and API retrieval. Use the
@@ -757,6 +767,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-029](docs/adr/0029-named-administrative-secret-bootstrap.md): Named administrative secrets, explicit versions and durable creation receipts.
 - [ADR-030](docs/adr/0030-provider-declarations-and-logical-identity.md): Provider JSON declarations, confirmed logical-identity continuity and exact typed preflight dispatch.
 - [ADR-031](docs/adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md): PostgreSQL-specific execution inputs/ports and mandatory replacement of legacy specialized reasons through compatible generic contracts.
+- [ADR-032](docs/adr/0032-dependent-operation-plans-and-exact-dispatch.md): Exact admission, fixed dependent operation plans, sequential execution, aggregate generation completion and compatible Provider-neutral reasons.
 
 ## Out of scope for the first milestones
 
