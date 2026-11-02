@@ -132,6 +132,7 @@ public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<Ma
         if ((outcome == DurableCreateAttemptOutcome.CanceledBeforeDispatch && reason is not null) ||
             (outcome == DurableCreateAttemptOutcome.FailedBeforeDispatch &&
              reason is not (DurableCreateOperationReason.ProviderInputUnavailable or
+                 DurableCreateOperationReason.InputUnavailable or
                  DurableCreateOperationReason.SecretUnavailable or DurableCreateOperationReason.Connectivity)) ||
             outcome is not (DurableCreateAttemptOutcome.CanceledBeforeDispatch or
                 DurableCreateAttemptOutcome.FailedBeforeDispatch))
@@ -145,7 +146,7 @@ public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<Ma
                           row.State == nameof(DurableCreateOperationState.Preparing) &&
                           row.CurrentAttemptId == attemptId)
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.ReasonCode, reason == null ? null : reason.ToString())
+                .SetProperty(row => row.ReasonCode, FormatReason(reason))
                 .SetProperty(row => row.UpdatedAt, at), cancellationToken);
         if (held == 0)
         {
@@ -181,7 +182,7 @@ public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<Ma
                            row.State == nameof(DurableCreateOperationState.Dispatching)))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(row => row.State, terminal.ToString())
-                .SetProperty(row => row.ReasonCode, reason.ToString())
+                .SetProperty(row => row.ReasonCode, FormatReason(reason))
                 .SetProperty(row => row.FinalizedAt, at)
                 .SetProperty(row => row.UpdatedAt, at), cancellationToken);
         if (affected == 0)
@@ -328,9 +329,30 @@ public sealed class PostgreSqlDurableCreateOperationJournal(IDbContextFactory<Ma
         _ => throw new InvalidDataException("Stored create operation state is unsupported.")
     };
 
+    private static string? FormatReason(DurableCreateOperationReason? reason) => reason switch
+    {
+        null => null,
+        DurableCreateOperationReason.ProviderInputUnavailable => nameof(DurableCreateOperationReason.ProviderInputUnavailable),
+        DurableCreateOperationReason.SecretUnavailable => nameof(DurableCreateOperationReason.SecretUnavailable),
+        DurableCreateOperationReason.UnsupportedShape => nameof(DurableCreateOperationReason.UnsupportedShape),
+        DurableCreateOperationReason.DatabaseNameInvalid => nameof(DurableCreateOperationReason.DatabaseNameInvalid),
+        DurableCreateOperationReason.Connectivity => nameof(DurableCreateOperationReason.Connectivity),
+        DurableCreateOperationReason.Conflict => nameof(DurableCreateOperationReason.Conflict),
+        DurableCreateOperationReason.ServerRejected => nameof(DurableCreateOperationReason.ServerRejected),
+        DurableCreateOperationReason.UncertainAfterDispatch => nameof(DurableCreateOperationReason.UncertainAfterDispatch),
+        DurableCreateOperationReason.InputInvalid => nameof(DurableCreateOperationReason.InputInvalid),
+        DurableCreateOperationReason.InputUnavailable => nameof(DurableCreateOperationReason.InputUnavailable),
+        DurableCreateOperationReason.HandlerUnavailable => nameof(DurableCreateOperationReason.HandlerUnavailable),
+        _ => throw new ArgumentOutOfRangeException(nameof(reason), "Operation reason is unsupported.")
+    };
+
     private static DurableCreateOperationReason? ParseReason(string? value) => value switch
     {
         null => null,
+        nameof(DurableCreateOperationReason.InputInvalid) => DurableCreateOperationReason.InputInvalid,
+        nameof(DurableCreateOperationReason.InputUnavailable) => DurableCreateOperationReason.InputUnavailable,
+        nameof(DurableCreateOperationReason.HandlerUnavailable) => DurableCreateOperationReason.HandlerUnavailable,
+
         nameof(DurableCreateOperationReason.ProviderInputUnavailable) =>
             DurableCreateOperationReason.ProviderInputUnavailable,
         nameof(DurableCreateOperationReason.SecretUnavailable) => DurableCreateOperationReason.SecretUnavailable,

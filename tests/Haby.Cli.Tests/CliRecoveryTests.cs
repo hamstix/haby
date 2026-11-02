@@ -33,19 +33,30 @@ public sealed class CliRecoveryTests
         Assert.DoesNotContain("protected-note-sentinel", text.ToString() + json);
     }
 
-    [Fact]
-    public void Historical_database_name_reason_remains_renderable_in_recovery_inspection()
+    [Theory]
+    [InlineData(1, "providerInputUnavailable")]
+    [InlineData(2, "secretUnavailable")]
+    [InlineData(3, "unsupportedShape")]
+    [InlineData(4, "databaseNameInvalid")]
+    [InlineData(5, "connectivity")]
+    [InlineData(6, "conflict")]
+    [InlineData(7, "serverRejected")]
+    [InlineData(8, "uncertainAfterDispatch")]
+    [InlineData(9, "inputInvalid")]
+    [InlineData(10, "inputUnavailable")]
+    [InlineData(11, "handlerUnavailable")]
+    public void Reasons_preserve_wire_numbers_and_exact_json_spelling(int number, string spelling)
     {
         var reply = Reply(RecoveryStatus.Found);
         reply.Preview.Operation.State = OperationState.Failed;
-        reply.Preview.Operation.Reason = (OperationReason)4;
+        reply.Preview.Operation.Reason = (OperationReason)number;
         using var json = new StringWriter(); using var text = new StringWriter();
         Assert.Equal(0, new CliJsonPresenter(json).PrintRecovery("operation recovery inspect", reply));
         Assert.Equal(0, new CliTextPresenter(text).PrintRecovery("operation recovery inspect", reply));
         using var document = JsonDocument.Parse(json.ToString());
-        Assert.Equal("databaseNameInvalid", document.RootElement.GetProperty("data")
+        Assert.Equal(spelling, document.RootElement.GetProperty("data")
             .GetProperty("preview").GetProperty("operation").GetProperty("reason").GetString());
-        Assert.Contains("reason: databaseNameInvalid", text.ToString());
+        Assert.Contains("reason: " + spelling, text.ToString());
     }
 
     [Theory]

@@ -118,6 +118,9 @@ public sealed partial class ManifestOperatorService
             Reason = value.Reason switch
             {
                 null => OperationReason.Unspecified,
+                DurableCreateOperationReason.InputInvalid => OperationReason.InputInvalid,
+                DurableCreateOperationReason.InputUnavailable => OperationReason.InputUnavailable,
+                DurableCreateOperationReason.HandlerUnavailable => OperationReason.HandlerUnavailable,
                 DurableCreateOperationReason.ProviderInputUnavailable => OperationReason.ProviderInputUnavailable,
                 DurableCreateOperationReason.SecretUnavailable => OperationReason.SecretUnavailable,
                 DurableCreateOperationReason.UnsupportedShape => OperationReason.UnsupportedShape,

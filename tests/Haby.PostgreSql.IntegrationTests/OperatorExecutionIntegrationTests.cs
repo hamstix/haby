@@ -19,6 +19,65 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class OperatorHostIntegrationTests
 {
+    [Theory]
+    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable, 1)]
+    [InlineData(DurableCreateOperationReason.SecretUnavailable, 2)]
+    [InlineData(DurableCreateOperationReason.UnsupportedShape, 3)]
+    [InlineData(DurableCreateOperationReason.DatabaseNameInvalid, 4)]
+    [InlineData(DurableCreateOperationReason.Connectivity, 5)]
+    [InlineData(DurableCreateOperationReason.Conflict, 6)]
+    [InlineData(DurableCreateOperationReason.ServerRejected, 7)]
+    [InlineData(DurableCreateOperationReason.UncertainAfterDispatch, 8)]
+    [InlineData(DurableCreateOperationReason.InputInvalid, 9)]
+    [InlineData(DurableCreateOperationReason.InputUnavailable, 10)]
+    [InlineData(DurableCreateOperationReason.HandlerUnavailable, 11)]
+    public async Task Retained_reasons_round_trip_through_restarted_Host_operation_and_recovery(
+        DurableCreateOperationReason reason, int wireNumber)
+    {
+        await using var scenario = await ExecutionScenarioAsync();
+        OperationRequest request;
+        await using (var host = await StartAsync(scenario.Connection, scenario.CertificatePath))
+        {
+            using var channel = Channel(host, scenario.Certificate);
+            request = await CommitExecutionAsync(new ManifestOperator.ManifestOperatorClient(channel), scenario.Database);
+            var key = ExecutionKey(request);
+            var journal = host.Services.GetRequiredService<IDurableCreateOperationJournal>();
+            var at = DateTimeOffset.UtcNow;
+            var attempt = Assert.IsType<DurableCreateBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, at, default));
+            if (reason == DurableCreateOperationReason.UncertainAfterDispatch)
+                Assert.IsType<DurableCreateMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, attempt.AttemptId, at, default));
+            Assert.True(await journal.TryFinalizeFailureAsync(key, attempt.AttemptId,
+                reason == DurableCreateOperationReason.UncertainAfterDispatch
+                    ? DurableCreateOperationState.NeedsAttention : DurableCreateOperationState.Failed, reason, at, default));
+        }
+        await using (var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath))
+        {
+            using var channel = Channel(restarted, scenario.Certificate);
+            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var operation = await client.GetOperationAsync(request);
+            Assert.Equal(wireNumber, (int)operation.Operation.Reason);
+            Assert.Equal(wireNumber, (int)OperationReply.Parser.ParseFrom(operation.ToByteArray()).Operation.Reason);
+            var recovery = await client.InspectOperationRecoveryAsync(request);
+            Assert.Equal(RecoveryStatus.Found, recovery.Status);
+            Assert.Equal(wireNumber, (int)recovery.Preview.Operation.Reason);
+            Assert.Single(operation.Attempts);
+            Assert.DoesNotContain(scenario.Password, operation.ToString() + recovery);
+            var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+            if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
+            if (binary is not null)
+            {
+                string[] spellings = ["providerInputUnavailable", "secretUnavailable", "unsupportedShape", "databaseNameInvalid",
+                    "connectivity", "conflict", "serverRejected", "uncertainAfterDispatch", "inputInvalid", "inputUnavailable", "handlerUnavailable"];
+                using var ordinary = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(),
+                    ["operation", "get", request.DeploymentId, "1", "db", "--action", "create"]));
+                using var inspection = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(),
+                    ["operation", "recovery", "inspect", request.DeploymentId, "1", "db", "--action", "create"]));
+                Assert.Equal(spellings[wireNumber - 1], ordinary.RootElement.GetProperty("data"u8).GetProperty("operation"u8).GetProperty("reason"u8).GetString());
+                Assert.Equal(spellings[wireNumber - 1], inspection.RootElement.GetProperty("data"u8).GetProperty("preview"u8).GetProperty("operation"u8).GetProperty("reason"u8).GetString());
+            }
+        }
+    }
+
     [Fact]
     public async Task Explicit_execution_uses_production_singleton_and_pinned_inputs_and_survives_restart()
     {

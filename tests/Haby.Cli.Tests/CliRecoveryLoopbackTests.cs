@@ -28,6 +28,8 @@ public sealed partial class CliLoopbackTests
             if (request.ResourceId == "stale") reply.Preview.UncertainAttemptId = "01a1838d-981a-7913-9e18-b42480d65e12";
             if (request.ResourceId is "retry" or "uuid-retry")
             { reply.Preview.ClearUncertainAttemptId(); reply.Preview.Operation.State = OperationState.Succeeded; }
+            if (request.ResourceId.StartsWith("reason-", StringComparison.Ordinal))
+                reply.Preview.Operation.Reason = (OperationReason)int.Parse(request.ResourceId[7..], System.Globalization.CultureInfo.InvariantCulture);
             return Task.FromResult(reply);
         }
         public override Task<RecoveryReply> AssignExistingOperation(AssignExistingOperationRequest request, ServerCallContext context)
@@ -73,6 +75,9 @@ public sealed partial class CliLoopbackTests
                     await Run(args, format, expected, resource is not ("stale" or "transport"), summary: resource != "transport");
                 }
             await Run(["operation", "recovery", "inspect", "deployment", "1", "db", "--action", "create"], "json", 0, false, summary: false);
+            foreach (var format in new[] { "text", "json" })
+                foreach (var number in Enumerable.Range(0, 12))
+                    await Run(["operation", "recovery", "inspect", "deployment", "1", "reason-" + number, "--action", "create"], format, 0, false, summary: false);
             var valid = AssignmentArgs("db");
             foreach (var option in new[] { "--acknowledge-assignment", "--note-file", "--expected-attempt-id", "--environment-record-id", "--reason" })
             {
@@ -119,6 +124,22 @@ public sealed partial class CliLoopbackTests
                 {
                     Assert.DoesNotContain("note-secret-sentinel", text + error);
                     if (summary) { Assert.Contains("example_db", error); Assert.Contains("Pinned Provider", error); }
+                    var resource = args[5];
+                    if (resource.StartsWith("reason-", StringComparison.Ordinal))
+                    {
+                        string?[] spellings = [null, "providerInputUnavailable", "secretUnavailable", "unsupportedShape",
+                            "databaseNameInvalid", "connectivity", "conflict", "serverRejected", "uncertainAfterDispatch",
+                            "inputInvalid", "inputUnavailable", "handlerUnavailable"];
+                        var expectedReason = spellings[int.Parse(resource[7..], System.Globalization.CultureInfo.InvariantCulture)];
+                        if (expectedReason is not null) Assert.Contains(expectedReason, text);
+                        if (format == "json")
+                        {
+                            using var json = JsonDocument.Parse(text);
+                            var operation = json.RootElement.GetProperty("data").GetProperty("preview").GetProperty("operation");
+                            if (expectedReason is null) Assert.False(operation.TryGetProperty("reason", out _));
+                            else Assert.Equal(expectedReason, operation.GetProperty("reason").GetString());
+                        }
+                    }
                     if (exit >= 2) { Assert.Equal("", text); return; }
                     if (format == "json") { using var document = JsonDocument.Parse(text); Assert.Equal(1, document.RootElement.GetProperty("formatVersion"u8).GetInt32()); }
                 }

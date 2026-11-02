@@ -409,7 +409,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                             t.HasCheckConstraint("CK_durable_create_operations_needs_attention", "reason_code IS DISTINCT FROM 'UncertainAfterDispatch' OR state = 'NeedsAttention'");
 
-                            t.HasCheckConstraint("CK_durable_create_operations_reason", "reason_code IS NULL OR reason_code IN ('ProviderInputUnavailable', 'SecretUnavailable', 'UnsupportedShape', 'DatabaseNameInvalid', 'Connectivity', 'Conflict', 'ServerRejected', 'UncertainAfterDispatch')");
+                            t.HasCheckConstraint("CK_durable_create_operations_reason", "reason_code IS NULL OR reason_code IN ('ProviderInputUnavailable', 'SecretUnavailable', 'UnsupportedShape', 'DatabaseNameInvalid', 'Connectivity', 'Conflict', 'ServerRejected', 'UncertainAfterDispatch', 'InputInvalid', 'InputUnavailable', 'HandlerUnavailable')");
 
                             t.HasCheckConstraint("CK_durable_create_operations_resource_id", "length(resource_id) > 0");
 

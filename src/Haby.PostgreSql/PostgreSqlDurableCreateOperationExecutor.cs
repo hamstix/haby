@@ -276,15 +276,17 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         absence switch
         {
             PostgreSqlDatabaseAbsenceOutcome.Present => DurableCreateOperationReason.Conflict,
-            PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid => DurableCreateOperationReason.DatabaseNameInvalid,
+            PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid => DurableCreateOperationReason.InputInvalid,
             PostgreSqlDatabaseAbsenceOutcome.Connectivity => DurableCreateOperationReason.Connectivity,
             PostgreSqlDatabaseAbsenceOutcome.SecretUnavailable => DurableCreateOperationReason.SecretUnavailable,
-            _ => DurableCreateOperationReason.ProviderInputUnavailable
+            PostgreSqlDatabaseAbsenceOutcome.ProviderInputUnavailable => DurableCreateOperationReason.InputUnavailable,
+            _ => DurableCreateOperationReason.InputUnavailable
         };
 
     private static DurableCreateExecutionResult MapObserved(DurableCreateOperation operation) => new(
         operation.State == DurableCreateOperationState.Preparing &&
         operation.Reason is DurableCreateOperationReason.ProviderInputUnavailable or
+            DurableCreateOperationReason.InputUnavailable or
             DurableCreateOperationReason.SecretUnavailable or DurableCreateOperationReason.Connectivity
             ? DurableCreateExecutionOutcome.RetryableFailure
             : MapTerminal(operation.State), operation);

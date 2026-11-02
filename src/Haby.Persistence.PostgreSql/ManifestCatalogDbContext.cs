@@ -349,7 +349,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                 table.HasCheckConstraint("CK_durable_create_operations_reason",
                     "reason_code IS NULL OR reason_code IN ('ProviderInputUnavailable', 'SecretUnavailable', " +
                     "'UnsupportedShape', 'DatabaseNameInvalid', 'Connectivity', 'Conflict', 'ServerRejected', " +
-                    "'UncertainAfterDispatch')");
+                    "'UncertainAfterDispatch', 'InputInvalid', 'InputUnavailable', 'HandlerUnavailable')");
                 table.HasCheckConstraint("CK_durable_create_operations_needs_attention",
                     "reason_code IS DISTINCT FROM 'UncertainAfterDispatch' OR state = 'NeedsAttention'");
             });

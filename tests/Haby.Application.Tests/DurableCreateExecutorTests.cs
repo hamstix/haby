@@ -21,6 +21,21 @@ public sealed class DurableCreateExecutorTests
         [new ResourceTypeDefinition(PostgreSqlDatabaseContract.Id, DatabaseSchema)],
         [], [], []);
 
+    [Theory]
+    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable, 0)]
+    [InlineData(DurableCreateOperationReason.SecretUnavailable, 1)]
+    [InlineData(DurableCreateOperationReason.UnsupportedShape, 2)]
+    [InlineData(DurableCreateOperationReason.DatabaseNameInvalid, 3)]
+    [InlineData(DurableCreateOperationReason.Connectivity, 4)]
+    [InlineData(DurableCreateOperationReason.Conflict, 5)]
+    [InlineData(DurableCreateOperationReason.ServerRejected, 6)]
+    [InlineData(DurableCreateOperationReason.UncertainAfterDispatch, 7)]
+    [InlineData(DurableCreateOperationReason.InputInvalid, 8)]
+    [InlineData(DurableCreateOperationReason.InputUnavailable, 9)]
+    [InlineData(DurableCreateOperationReason.HandlerUnavailable, 10)]
+    public void Reason_CLR_ordinals_are_append_only(DurableCreateOperationReason reason, int number) =>
+        Assert.Equal(number, (int)reason);
+
     [Fact]
     public async Task Success_commits_the_marker_before_SQL_and_advances_the_applied_generation_once()
     {
@@ -50,13 +65,18 @@ public sealed class DurableCreateExecutorTests
         Assert.Single(journal.Attempts);
     }
 
-    [Fact]
-    public async Task Restart_from_dispatching_moves_to_needs_attention_without_SQL()
+    [Theory]
+    [InlineData(null)]
+    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable)]
+    [InlineData(DurableCreateOperationReason.InputUnavailable)]
+    [InlineData(DurableCreateOperationReason.HandlerUnavailable)]
+    public async Task Restart_from_dispatching_moves_to_needs_attention_without_SQL(DurableCreateOperationReason? reason)
     {
         var attemptId = Guid.CreateVersion7();
         var (executor, journal, target, _) = Harness(new Fixture
         {
             State = DurableCreateOperationState.Dispatching,
+            Reason = reason,
             AttemptId = attemptId,
             AttemptNumber = 1,
             OpenAttempt = true
@@ -113,7 +133,7 @@ public sealed class DurableCreateExecutorTests
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
         Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.UnsupportedShape, result.Operation!.Reason);
+        Assert.Equal(DurableCreateOperationReason.InputInvalid, result.Operation!.Reason);
         Assert.Empty(target.Inputs);
         Assert.DoesNotContain("create", journal.Log);
     }
@@ -131,12 +151,12 @@ public sealed class DurableCreateExecutorTests
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
         Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.DatabaseNameInvalid, result.Operation!.Reason);
+        Assert.Equal(DurableCreateOperationReason.InputInvalid, result.Operation!.Reason);
         Assert.Empty(target.Inputs);
     }
 
     [Fact]
-    public async Task Adapter_local_name_validation_maps_to_the_legacy_reason_without_dispatch()
+    public async Task Adapter_local_name_validation_maps_to_input_invalid_without_dispatch()
     {
         var (executor, journal, _, _) = Harness(new Fixture
         { Absence = PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid });
@@ -144,7 +164,7 @@ public sealed class DurableCreateExecutorTests
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
         Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.DatabaseNameInvalid, result.Operation!.Reason);
+        Assert.Equal(DurableCreateOperationReason.InputInvalid, result.Operation!.Reason);
         Assert.Equal(DurableCreateAttemptOutcome.FailedBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
         Assert.False(journal.AppliedGenerationAdvanced);
         Assert.DoesNotContain("marker", journal.Log);
@@ -174,7 +194,7 @@ public sealed class DurableCreateExecutorTests
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
         Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.ProviderInputUnavailable, result.Operation!.Reason);
+        Assert.Equal(DurableCreateOperationReason.InputUnavailable, result.Operation!.Reason);
         Assert.Equal(DurableCreateAttemptOutcome.FailedBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
         Assert.Empty(target.Inputs);
         Assert.DoesNotContain("marker", journal.Log);
@@ -362,6 +382,21 @@ public sealed class DurableCreateExecutorTests
         Assert.Equal(0, decisions.AssignCalls);
     }
 
+    [Theory]
+    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable)]
+    [InlineData(DurableCreateOperationReason.UnsupportedShape)]
+    [InlineData(DurableCreateOperationReason.DatabaseNameInvalid)]
+    public async Task Historical_recovery_reason_is_preserved_when_pinned_inputs_cannot_be_read(DurableCreateOperationReason reason)
+    {
+        var (_, journal, target, _) = Harness(new Fixture { State = DurableCreateOperationState.Failed, Reason = reason });
+        var recovery = new PostgreSqlDatabaseRecovery(journal, new FakeRecoveryDecisions(),
+            new FakeManifests(Prepare(OneResource), true), target, new FixedClock(DateTimeOffset.UnixEpoch));
+        var preview = await recovery.InspectAsync(journal.Operation.Key, default);
+        Assert.Equal(reason, preview!.Reason);
+        Assert.Null(preview.DatabaseName);
+        Assert.Empty(target.Inputs);
+    }
+
     [Fact]
     public async Task Corrupt_pinned_manifest_rejects_recovery_without_provider_access()
     {
@@ -374,7 +409,7 @@ public sealed class DurableCreateExecutorTests
             new FixedClock(DateTimeOffset.UnixEpoch));
         var preview = await recovery.InspectAsync(journal.Operation.Key, default);
         Assert.Null(preview!.DatabaseName);
-        Assert.Equal(DurableCreateOperationReason.ProviderInputUnavailable, preview.Reason);
+        Assert.Equal(DurableCreateOperationReason.InputUnavailable, preview.Reason);
         var command = new AssignExistingPostgreSqlDatabase(journal.Operation.Key,
             journal.Operation.Environment, attemptId, true,
             PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "checked", "tester");

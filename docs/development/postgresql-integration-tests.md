@@ -241,18 +241,25 @@ No persistence schema or wire contract changes are needed for this source move.
 
 Within this adapter, an existing database or a definitive duplicate response maps
 to Conflict; a definitive PostgreSQL rejection maps to ServerRejected. Those
-shared reasons remain general conflict/rejection categories. The adapter-local
-DatabaseNameInvalid outcome maps to the unchanged durable DatabaseNameInvalid
-reason. This shared specialized reason is temporary compatibility debt under
-[ADR-031](../adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md):
-issue #91 must define a Provider-neutral successor and explicit legacy mapping,
-implemented before role/grant or any other new effect kind is admitted.
+shared reasons remain general conflict/rejection categories. Under
+[ADR-032](../adr/0032-dependent-operation-plans-and-exact-dispatch.md),
+new adapter-local DatabaseNameInvalid and unsupported-shape failures map to
+InputInvalid; broad pinned-input failures map to InputUnavailable. Definitive
+versus transient classification, cancellation and dispatch ordering are unchanged.
+HandlerUnavailable is readable and renderable but is not emitted by generic
+resolver failures; exact handler admission remains a later slice.
 
 The boundary tests check adapter ownership and the absence of an Application
-reference to the concrete adapter. The disposable PostgreSQL suite checks the
-literal persisted `DatabaseNameInvalid`, fresh-context history and recovery reads,
-and terminal retry without dispatch. CLI tests distinguish protobuf value `4`
-and JSON `databaseNameInvalid` in historical operation/recovery presentation;
-the published Native AOT loopback test also renders the historical operation.
+reference to the concrete adapter. The disposable PostgreSQL suite checks
+legacy and new reason strings through
+fresh-context history, restart, Host wire mapping and recovery reads. Upgrade
+retains legacy strings and resumable ProviderInputUnavailable attempts. New
+InputUnavailable failures still resume only before dispatch. Unknown stored
+codes fail with a bounded error. Fresh migration and upgrade tests verify the
+reason constraint; downgrade with new-code rows must reject atomically while
+retaining rows, attempts, migration history and the current constraint. Downgrade
+without new-code rows remains possible. CLI and published Native AOT loopback
+tests check all numbers 0-11 in operation and recovery text/JSON, including
+historical value `4` / `databaseNameInvalid`.
 The existing dispatch, cancellation, uncertainty, pinned-input, recovery, restart
 and dump/restore suites continue to exercise the same execution behavior.

@@ -31,11 +31,17 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableCreateOperationJournal op
                     attempt.FinishedAt is not null && attempt.Outcome == DurableCreateAttemptOutcome.Uncertain) == 1)
                 uncertainAttempt = attemptId;
         }
+        // Historical reasons remain an exact view of retained history, including when current
+        // pinned-input resolution would now report the Provider-neutral successor.
+        var reason = shape.Reason ?? operation.Reason;
+        if (operation.Reason is DurableCreateOperationReason.ProviderInputUnavailable or
+            DurableCreateOperationReason.UnsupportedShape or DurableCreateOperationReason.DatabaseNameInvalid)
+            reason = operation.Reason;
+        if (operation.State == DurableCreateOperationState.NeedsAttention && uncertainAttempt is null)
+            reason = DurableCreateOperationReason.InputUnavailable;
         return new PostgreSqlDatabaseRecoveryPreview(key, operation.Environment, operation.Application,
             shape.Input?.DatabaseName, operation.ProviderInstance, operation.ConfigurationRevision,
-            operation.ImplementationId, uncertainAttempt, operation.State,
-            operation.State == DurableCreateOperationState.NeedsAttention && uncertainAttempt is null
-                ? DurableCreateOperationReason.ProviderInputUnavailable : shape.Reason ?? operation.Reason)
+            operation.ImplementationId, uncertainAttempt, operation.State, reason)
         { Snapshot = operation };
     }
 

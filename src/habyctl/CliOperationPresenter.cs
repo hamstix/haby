@@ -42,6 +42,9 @@ internal static class OperationPresentation
     internal static string? Reason(OperationReason value) => value switch
     {
         OperationReason.Unspecified => null,
+        OperationReason.InputInvalid => "inputInvalid",
+        OperationReason.InputUnavailable => "inputUnavailable",
+        OperationReason.HandlerUnavailable => "handlerUnavailable",
         OperationReason.ProviderInputUnavailable => "providerInputUnavailable",
         OperationReason.SecretUnavailable => "secretUnavailable",
         OperationReason.UnsupportedShape => "unsupportedShape",
