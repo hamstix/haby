@@ -587,8 +587,8 @@ explicit sequential execution and manual recovery share aggregate completion.
 The graph revision requires a fresh catalog under ADR-033. Multi-step effects
 remain test-only; production still admits one database Create.
 Keep the existing one-database production admission; further effects need separate decisions.
-Role/grant ownership, generated-secret lifecycle and confidential configuration
-retrieval still require their own decisions before implementation.
+Confidential configuration retrieval still requires its own decision before
+implementation; the accepted credential and ownership policy follows below.
 
 [ADR-034](docs/adr/0034-application-credentials-and-postgresql-role-policy.md)
 accepts Provider-neutral generated slots and typed outputs plus the PostgreSQL
