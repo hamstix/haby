@@ -5,18 +5,18 @@ namespace Haby.Application;
 /// <summary>One PostgreSQL-specific manual recovery decision. This is not a general Provider contract.</summary>
 public enum PostgreSqlRecoveryReason { OperatorAcceptedExistingDatabase }
 
-public sealed record PostgreSqlDatabaseRecoveryPreview(DurableCreateOperationKey Key,
+public sealed record PostgreSqlDatabaseRecoveryPreview(DurableOperationKey Key,
     EnvironmentRecordId Environment, ApplicationRecordId Application, string? DatabaseName,
     ProviderInstanceId ProviderInstance, ProviderConfigurationRevisionNumber ConfigurationRevision,
-    string ImplementationId, Guid? UncertainAttemptId, DurableCreateOperationState State,
-    DurableCreateOperationReason? Reason)
+    string ImplementationId, Guid? UncertainAttemptId, DurableOperationState State,
+    DurableOperationReason? Reason)
 {
     /// <summary>The single read used for this preview, so adapters cannot mix attempt/state snapshots.</summary>
-    public required DurableCreateOperation Snapshot { get; init; }
+    public required DurableOperation Snapshot { get; init; }
 }
 
 /// <summary>The caller must affirmatively accept provenance responsibility for this exact attempt.</summary>
-public sealed record AssignExistingPostgreSqlDatabase(DurableCreateOperationKey Key,
+public sealed record AssignExistingPostgreSqlDatabase(DurableOperationKey Key,
     EnvironmentRecordId Environment, Guid ExpectedAttemptId, bool Acknowledged,
     PostgreSqlRecoveryReason Reason, string Note, string TechnicalActor)
 {
@@ -33,8 +33,8 @@ public enum PostgreSqlDatabaseAssignmentOutcome
 }
 
 /// <summary>A value-free receipt. The operator note is available only through the protected audit query.</summary>
-public sealed record PostgreSqlDatabaseRecoveryReceipt(Guid DecisionId, DurableCreateOperationKey Key,
-    Guid AttemptId, PostgreSqlRecoveryReason Reason, string TechnicalActor, DateTimeOffset DecidedAt);
+public sealed record PostgreSqlDatabaseRecoveryReceipt(Guid DecisionId, DurableOperationKey Key,
+    Guid AttemptId, PostgreSqlRecoveryReason Reason, string TechnicalActor, DateTimeOffset DecidedAt, long? AppliedGenerationAtDecision);
 
 public sealed record PostgreSqlDatabaseAssignmentResult(PostgreSqlDatabaseAssignmentOutcome Outcome,
     PostgreSqlDatabaseRecoveryReceipt? Decision);
@@ -49,7 +49,7 @@ public sealed record PostgreSqlDatabaseRecoveryAudit(PostgreSqlDatabaseRecoveryR
 /// <summary>Single-instance manual recovery boundary. Operator adapters delegate validation and decisions here.</summary>
 public interface IPostgreSqlDatabaseRecovery
 {
-    ValueTask<PostgreSqlDatabaseRecoveryPreview?> InspectAsync(DurableCreateOperationKey key,
+    ValueTask<PostgreSqlDatabaseRecoveryPreview?> InspectAsync(DurableOperationKey key,
         CancellationToken cancellationToken);
     ValueTask<PostgreSqlDatabaseAssignmentResult> AssignExistingDatabaseAsync(
         AssignExistingPostgreSqlDatabase command, CancellationToken cancellationToken);
@@ -58,7 +58,7 @@ public interface IPostgreSqlDatabaseRecovery
 /// <summary>Internal durable compare-and-transition and protected audit access.</summary>
 public interface IPostgreSqlDatabaseRecoveryJournal
 {
-    ValueTask<PostgreSqlDatabaseRecoveryAudit?> FindDecisionAsync(DurableCreateOperationKey key,
+    ValueTask<PostgreSqlDatabaseRecoveryAudit?> FindDecisionAsync(DurableOperationKey key,
         Guid attemptId, CancellationToken cancellationToken);
     ValueTask<PostgreSqlDatabaseAssignmentResult> TryAssignAsync(AssignExistingPostgreSqlDatabase command,
         DateTimeOffset at, CancellationToken cancellationToken);

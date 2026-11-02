@@ -7,6 +7,25 @@ namespace Haby.Cli.Tests;
 
 public sealed class CliOperationTests
 {
+    [Fact]
+    public void Operation_identity_uses_a_distinct_wire_field_and_rejects_removed_identity_fields()
+    {
+        var current = new OperationRequest { DeploymentId = "deployment", Generation = 1, OperationId = "db-create" };
+        Assert.Equal(5, OperationRequest.Descriptor.FindFieldByName("operation_id").FieldNumber);
+        Assert.Null(OperationRequest.Descriptor.FindFieldByNumber(3));
+        Assert.Null(OperationRequest.Descriptor.FindFieldByNumber(4));
+        Assert.Equal(current, OperationRequest.Parser.ParseFrom(current.ToByteArray()));
+        using var bytes = new MemoryStream();
+        using (var wire = new CodedOutputStream(bytes, leaveOpen: true))
+        {
+            new OperationRequest { DeploymentId = current.DeploymentId, Generation = current.Generation }.WriteTo(wire);
+            wire.WriteTag(3, WireFormat.WireType.LengthDelimited); wire.WriteString(current.OperationId);
+            wire.WriteTag(4, WireFormat.WireType.Varint); wire.WriteEnum(1);
+        }
+        var unsupported = OperationRequest.Parser.ParseFrom(bytes.ToArray());
+        Assert.Equal("", unsupported.OperationId);
+    }
+
     [Theory]
     [InlineData(OperationStatus.InvalidRequest, "invalidRequest")]
     [InlineData(OperationStatus.UnsupportedAction, "unsupportedAction")]
@@ -46,7 +65,7 @@ public sealed class CliOperationTests
         Assert.Equal(exit, new CliTextPresenter(text).PrintOperation("operation get", received));
         using var document = JsonDocument.Parse(json.ToString());
         var data = document.RootElement.GetProperty("data"u8);
-        Assert.Equal("create", data.GetProperty("operation"u8).GetProperty("key"u8).GetProperty("action"u8).GetString());
+        Assert.Equal("db", data.GetProperty("operation"u8).GetProperty("key"u8).GetProperty("operationId"u8).GetString());
         Assert.Equal("uncertain", data.GetProperty("attempts"u8)[0].GetProperty("outcome"u8).GetString());
         Assert.Contains("attempt-id", text.ToString());
         Assert.DoesNotContain("secret-payload-sentinel", json.ToString() + text);
@@ -55,10 +74,7 @@ public sealed class CliOperationTests
     }
 
     [Theory]
-    [InlineData(1, "providerInputUnavailable")]
     [InlineData(2, "secretUnavailable")]
-    [InlineData(3, "unsupportedShape")]
-    [InlineData(4, "databaseNameInvalid")]
     [InlineData(5, "connectivity")]
     [InlineData(6, "conflict")]
     [InlineData(7, "serverRejected")]
@@ -66,10 +82,10 @@ public sealed class CliOperationTests
     [InlineData(9, "inputInvalid")]
     [InlineData(10, "inputUnavailable")]
     [InlineData(11, "handlerUnavailable")]
-    public void Reasons_preserve_wire_numbers_and_exact_json_spelling(int number, string spelling)
+    public void Current_reasons_have_explicit_text_and_json_mapping(int number, string spelling)
     {
         Assert.Equal(spelling, char.ToLowerInvariant(((OperationReason)number).ToString()[0]) + ((OperationReason)number).ToString()[1..]);
-        // Decode the literal historical field value, independently of the generated enum name.
+        // Decode independently of the generated enum name.
         var historical = DurableOperationSummary.Parser.ParseFrom(new byte[] { 24, (byte)number });
         Assert.Equal((OperationReason)number, historical.Reason);
         var reply = Snapshot(OperationStatus.Found, OperationState.Failed);
@@ -89,7 +105,6 @@ public sealed class CliOperationTests
     [InlineData("state")]
     [InlineData("reason")]
     [InlineData("attempt")]
-    [InlineData("action")]
     public void Unknown_or_incomplete_wire_results_fail_before_output(string field)
     {
         var reply = Snapshot(OperationStatus.Found, OperationState.Pending);
@@ -100,7 +115,6 @@ public sealed class CliOperationTests
             case "state": reply.Operation.State = (OperationState)999; break;
             case "reason": reply.Operation.Reason = (OperationReason)999; break;
             case "attempt": reply.Attempts[0].Outcome = (OperationAttemptOutcome)999; break;
-            case "action": reply.Operation.Key.Action = (OperationAction)999; break;
         }
         using var json = new StringWriter(); using var text = new StringWriter();
         Assert.Throws<InvalidDataException>(() => new CliJsonPresenter(json).PrintOperation("operation get", reply));
@@ -112,8 +126,8 @@ public sealed class CliOperationTests
     [InlineData("operation")]
     [InlineData("operation execute")]
     [InlineData("operation get deployment 1")]
-    [InlineData("operation execute deployment 1 db")]
-    [InlineData("operation execute deployment latest db --action create")]
+    [InlineData("operation execute deployment")]
+    [InlineData("operation execute deployment latest db")]
     [InlineData("operation execute deployment 1 db --action delete")]
     [InlineData("operation execute deployment 1 db --action create --password secret-sentinel")]
     public async Task Incomplete_or_unsupported_commands_never_contact_registry(string command)
@@ -130,7 +144,7 @@ public sealed class CliOperationTests
         Status = status,
         Operation = new DurableOperationSummary
         {
-            Key = new OperationRequest { DeploymentId = "deployment", Generation = 1, ResourceId = "db", Action = OperationAction.Create },
+            Key = new OperationRequest { DeploymentId = "deployment", Generation = 1, OperationId = "db" },
             State = state,
             Reason = OperationReason.UncertainAfterDispatch,
             Reference = new RevisionReference { ApplicationRecordId = "application", RevisionNumber = 1 },

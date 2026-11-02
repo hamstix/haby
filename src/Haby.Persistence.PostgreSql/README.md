@@ -53,51 +53,36 @@ must restrict schema migration to one Haby instance.
 
 ## Durable one-Application planning
 
-`AddPostgreSqlDurableDeploymentPlanner()` registers the internal asynchronous
-`IDurableDeploymentPlanner` boundary. It stores one exact Manifest revision and
-an `ExpectedAbsence` precondition per ChangeSet. `ExpectedGeneration` is
-explicitly unsupported until durable ApplicationDeployments exist. Planning
-accepts only one `postgresql.database/v1alpha1` Resource with a validated
-database name. It resolves an Environment-local Provider alias to one sealed,
-decodable configuration revision and registered implementation, then stores
-only the exact identities and a versioned fingerprint. No credential or
-configuration payload is copied into a Plan.
+`AddPostgreSqlDurableDeploymentPlanner()` registers the asynchronous
+`IDurableDeploymentPlanner`. A ChangeSet pins one exact Manifest revision and
+ExpectedAbsence. Updates and generation 2 remain unsupported. Production planning
+accepts one PostgreSQL database Resource without Components/Workloads, exports or
+parameters. Exact registered planners emit the immutable operation graph and
+versioned non-secret action inputs; no credentials or Provider configuration
+payload enter the Plan. Generic code validates identity/dependencies and exact
+references without interpreting database properties.
 
-Every Plan expires 24 hours after creation. `ClosePlanAsync` records an
-independent, immutable closure with its technical actor. Closed and expired
-Plans remain readable for audit but `CheckPlanAsync` rejects them. Expiry wins
-when both conditions hold; closing an expired Plan still records the actor.
-No retention deletion runs in this
-slice. `CheckPlanAsync` compares the exact typed inputs and fingerprint; an
-alias switch makes the prior Plan stale and a new Plan can be
-created for the same ChangeSet. The application boundary exposes no desired
-state commit or Provider execution.
+Plans expire after 24 hours. Closure is an independent immutable record. Closed
+and expired Plans remain readable but cannot be committed. Check re-evaluates
+freshness, exact support and input references without changing/replanning the
+stored graph. An alias switch makes the prior Plan stale; recalculation creates a
+new Plan. Durable deployments make competing ExpectedAbsence intent stale.
+Planning and checking perform no Provider I/O or secret-material reads.
 
-Planning reads several durable records through separate contexts, so it is not
-snapshot-isolated across a concurrent alias switch. A Plan may therefore be
-stale immediately after creation; callers must check it again before any
-future desired-state acceptance. In this slice no durable deployment exists,
-so only expected absence is stored and a ChangeSet-stale mismatch has no
-reachable producer. A later deployment/commit slice must add the actual
-generation mismatch detail required by ADR-016. Corrupt historical Plan rows
-fail closed with `InvalidDataException`; a future operator transport must map
-that to a redacted typed error. `ImplementationId` remains a string to match
-the current Provider alias resolver; these contracts are internal pilot APIs.
-
-EF migration tooling uses `ManifestCatalogDesignTimeFactory` to inspect or add
-migrations without a database connection. Supply a connection explicitly when
-running a database operation through the CLI; normal startup migrations use
-the registered context and its configured connection.
+The committer independently checks freshness while holding the locks described
+below. Unsupported current snapshot/graph formats fail closed. Development
+catalogs from before the graph revision require explicit reinitialization under
+ADR-033; startup never rewrites or silently resets them. EF tooling uses
+`ManifestCatalogDesignTimeFactory` without opening a database connection.
 
 ## First durable desired generation
 
 `IDurableDesiredStateCommitter` accepts only a persisted one-Application
-`ExpectedAbsence` Plan. The additive migration stores one deployment, immutable
+`ExpectedAbsence` Plan. Acceptance stores one deployment, immutable
 generation-1 snapshot and one ChangeSetCommit. The snapshot contains exact
 Manifest and Provider identities, explicit `Present` presence, alias provenance
-and the Plan fingerprint;
-it has no Provider configuration payload or credential. AppliedGeneration stays
-null. Provider execution and operator transport remain separate.
+and the Plan fingerprint plus frozen graph and action inputs. It has no Provider
+configuration payload or credential. AppliedGeneration stays null at acceptance.
 
 Commit uses a PostgreSQL transaction at READ COMMITTED. It locks the ChangeSet
 row, then takes a transaction-scoped advisory lock keyed by Environment and
@@ -114,16 +99,13 @@ that cannot acquire the alias row lock returns `StoreUnavailable`, and the
 operator may retry it after the commit finishes. This is not a reservation or
 an external Provider effect.
 
-The first desired-generation transaction also inserts one `durable_create_operations`
-row for the exact local database Resource ID. Its composite primary key is the
-deployment, generation, Resource ID and `Create` action. `Pending` means no
-attempt has crossed the dispatch barrier. The operation references the immutable
-generation for its exact ProviderInstance, configuration revision and
-ImplementationId; reads do not resolve the current alias. The journal stores no
-Provider configuration payload, SecretVersion material or connection string.
-The pilot journal row rejects deletion. ADR-025 state transitions update the
-retained row; see the next section.
-This commit transaction does not dispatch SQL or advance `AppliedGeneration`.
+The desired-generation transaction also inserts every initial Pending operation
+in `durable_create_operations`. Its composite key is deployment + generation +
+OperationId; the immutable graph separately records owning Resource, action
+contract and dependencies. Production emits one database Create, while typed
+tests compose multiple steps for one Resource. No operation starts before the
+entire graph commits. Journal reads never resolve a current alias, and this
+acceptance transaction never dispatches SQL or advances AppliedGeneration.
 
 Before applying a reviewed migration, stop catalog writes and take a verified
 database backup. With PostgreSQL client environment variables supplied by the
@@ -173,94 +155,60 @@ The real PostgreSQL integration tests use the existing disposable container
 suite and Windows WSLc helper documented in
 [`docs/development/postgresql-integration-tests.md`](../../docs/development/postgresql-integration-tests.md).
 
-## Durable create dispatch barrier (ADR-025)
+## Persisted operation graph and dispatch barrier
 
-`AddPostgreSqlDurableCreateOperationJournal()` registers the typed operation
-journal, and `AddPostgreSqlDurableCreateOperationExecution()` (in
-`Haby.PostgreSql`) registers the internal single-instance executor over it.
-`PostgreSqlDurableCreateOperationExecutor.ExecuteAsync` runs one exact
-`DurableCreateOperationKey`: it re-reads the accepted generation's pinned
-Provider instance, configuration revision and implementation, revalidates the
-database name from the pinned Manifest revision, and rejects bounded invalid
-inputs before any SQL. It is not exposed through the operator host; there is no
-operator endpoint or scheduler. The separate internal recovery boundary below
-can assign a verified existing database from `NeedsAttention` with explicit consent.
+The graph revision under ADR-032/033 requires a fresh catalog. The migration
+initializer rejects pre-graph/unknown migration histories without modifying them.
+Never reset a developer catalog automatically; external databases/roles survive
+catalog reinitialization and do not become owned by the new catalog.
 
-State transitions (all compare-and-transition updates, never read-modify-write):
+`DurablePlan.Graph` is a canonical immutable graph, encoded with generated JSON
+metadata on both Plan and accepted generation. `OperationId` identifies a step
+within deployment + generation; Resource ownership and exact versioned action
+contract remain separate node fields. Explicit dependencies and frozen typed,
+versioned non-secret payloads participate in the deterministic fingerprint.
+Execution decodes those payloads without consulting current aliases, manifest
+properties or current planning behavior. Production still plans exactly one
+PostgreSQL database Create. Multi-step actions are test-only.
 
-- `Pending -> Preparing`: `TryBeginAttemptAsync` opens a new attempt row in
-  `durable_create_operation_attempts` with its own attempt identity and number;
-  an earlier attempt that never reached the barrier is closed as
-  `AbandonedBeforeDispatch`. Preparing is resumable after a restart.
-- `Preparing -> Dispatching`: `TryCommitDispatchMarkerAsync` commits the unique
-  attempt's `Dispatching` marker in Haby PostgreSQL immediately before Npgsql
-  `CREATE DATABASE` is sent. If the marker commit outcome is uncertain, no SQL
-  is sent and the operation stays recoverable.
-- `Preparing -> Preparing`: an unavailable Provider input, SecretStore read or
-  target connection closes only the attempt with a bounded reason. A later call
-  opens a new attempt against the same pinned generation and clears that reason;
-  no marker or Create was sent for the closed attempt.
-- `Preparing -> Failed`: a definitive pre-dispatch rejection (present database,
-  invalid name, unsupported or corrupt immutable Manifest shape) records a safe
-  reason code and closes the operation.
-- `Dispatching -> Succeeded`: requires the confirmed `CREATE` response, an
-  independent existence read and `AppliedGeneration` advanced from null to the
-  generation in the same transaction. A preexisting database is a conflict,
-  never an adoption.
-- `Dispatching -> Failed`: a definitive server rejection including
-  `duplicate_database` records `Conflict` or `ServerRejected` without adoption.
-- `Dispatching -> NeedsAttention`: after a committed marker, cancellation,
-  connection loss or any uncertainty records `UncertainAfterDispatch`. Nothing
-  is retried automatically and no false success is recorded, even when the
-  database exists.
-- Restart over `Dispatching`: `TryRecoverDispatchingAsync` moves the operation
-  to `NeedsAttention` without touching the Provider, even if the database is
-  present.
+`AddPostgreSqlDurableOperationJournal()` registers the per-node journal.
+`AddPostgreSqlDurableOperationExecution()` registers exact dispatch and the internal
+`DurableGenerationRunner`. Execution is explicit and sequential. One singleton
+generation gate covers direct execution, the runner and manual assignment; reads
+do not wait for the gate or need handlers/secrets/connectivity. Ready nodes run in
+ordinal OperationId order. Every dependency must have Succeeded, including on
+direct calls. Any failure, refusal, uncertainty or cancellation stops the pass.
+An explicit later pass skips successful nodes and resumes only safe work.
 
-Terminal rows and closed attempt outcomes are protected through database
-guards: update triggers reject identity changes and terminal rewrites except
-the audited `NeedsAttention -> Succeeded` recovery transition, attempt
-history is append-only, and check constraints bind `Dispatching` to
-`dispatched_at` without `finalized_at`, attempt numbering to the current
-attempt identity, and `UncertainAfterDispatch` to `NeedsAttention`.
+Each attempt retains the Preparing -> confirmed durable Dispatching -> external
+effect barrier. Restarted Dispatching becomes NeedsAttention before action
+selection and never redispatches, including when support is missing. Missing
+Pending/Preparing handlers or unknown input formats return value-free refusals
+without new attempts or fabricated journal reasons. State, reason, attempt and
+current-attempt guards live in C# compare-and-transition transactions. Declarative
+checks/FKs enforce attributable history and consistent states; retained audit
+rows and immutable Plan/generation rows retain their existing mutation guards.
+Valid privileged catalog edits remain within ADR-023's trust boundary.
 
-`AppliedGeneration` is never advanced for an uncertain or interrupted window.
-If recording a confirmed success fails, the operation remains `Dispatching`
-(recoverable) instead of leaving an applied generation that was not durably
-recorded and independently verified.
+`DurableAggregateCompletion` runs inside the finalization/recovery transaction and
+locks the deployment row. A node success and its attempt close persist without
+advancing AppliedGeneration while siblings remain incomplete. Final-node success
+and the eligible pointer advance commit together or roll back together. Partial
+external successes remain visible; no rollback of external effects is implied.
 
-Restart procedure for a `NeedsAttention` create operation: stop the pilot
-writer and inspect the exact operation through `IPostgreSqlDatabaseRecovery.InspectAsync`
-before deciding. The internal `AssignExistingDatabaseAsync` command requires the
-same Environment and uncertain attempt, affirmative acknowledgment, the fixed
-`OperatorAcceptedExistingDatabase` reason, a required note of at most 512
-characters and a trusted technical actor. It checks database existence through
-the pinned Provider revision and SecretRef without issuing `CREATE DATABASE`.
-The database's presence does not prove that Haby created it. The operator accepts
-that provenance risk; if unsure, leave the operation in `NeedsAttention`.
+Specialized PostgreSQL assignment requires the exact uncertain attempt,
+affirmative consent, a bounded protected note and independent existence evidence
+against the frozen pinned target. Existence does not prove provenance. Assignment
+never sends CREATE. Its immutable receipt identifies resolved OperationId and
+target generation and records nullable actual AppliedGeneration at decision time.
+Receipt replay performs no new external read or aggregate advancement. Later
+sibling completion never rewrites the original audit/receipt.
 
-The note is protected audit data, available through the internal journal's
-`FindDecisionAsync` only. Do not include credentials, connection strings,
-Provider payloads or driver errors. Input validation rejects obvious patterns
-but cannot prove the text is secret-free. The technical actor records the
-allowed caller's claim; it does not authenticate a person. The single-instance,
-network-restricted operator boundary remains necessary. A successful decision,
-`Succeeded` and `AppliedGeneration` commit together; the uncertain attempt stays
-unchanged. A lost-response retry returns the original receipt without a new
-Provider check. The [alpha operator recovery commands](../../docs/development/alpha-operator-local.md#explicit-recovery-of-one-uncertain-operation)
-adapt this command without changing those decisions. Absent databases have no
-authorized retry path in this slice.
-
-Under ADR-026, the recovery journal uses an EF Core transaction and conditional
-updates for the assignment. Declarative checks and deferred foreign keys tie a
-committed decision to the exact current `Uncertain` attempt, `Succeeded` state,
-and immutable generation history. The transaction advances `AppliedGeneration`
-before the guarded operation transition; the terminal guard requires that
-pointer to match at transition time. Later generations may advance the pointer
-without invalidating the retained decision. The only new trigger prevents
-UPDATE/DELETE of retained decisions; the existing terminal-operation guard gains
-only the audited recovery transition. These guards prevent rewriting retained
-rows, but do not authenticate
-a privileged database writer or make an inserted decision proof of a human's
-identity. PostgreSQL-specific deferred foreign-key DDL and the exact row lock
-remain because EF Core cannot express those semantics directly.
+The internal read-only progress query reports completed/total, node identities,
+states, blocking dependencies, last-attempt outcome, stopped work and desired/applied
+generation. Host/CLI expose exact operation IDs and action/dependency summaries
+without raw action payloads. Current-build pg_dump/pg_restore must preserve the
+entire graph, payloads, partial state, attempts and recovery decisions; restored
+startup and inspection send no effects. See the
+[implementation and evidence design](../../docs/development/104-durable-operation-graph.md)
+and [operator commands](../../docs/development/alpha-operator-local.md).

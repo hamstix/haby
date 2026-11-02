@@ -2,8 +2,8 @@ using Haby.Operator.Contracts;
 
 namespace Haby.Cli;
 
-internal sealed record CliOperationKey(string DeploymentId, long Generation, string ResourceId, string Action);
-internal sealed record CliOperation(CliOperationKey Key, string State, string? Reason,
+internal sealed record CliOperationKey(string DeploymentId, long Generation, string OperationId);
+internal sealed record CliOperation(CliOperationKey Key, string ResourceId, string ActionContract, string State, string? Reason,
     string EnvironmentRecordId, string ApplicationRecordId, CliReference Reference, string ProviderInstanceId,
     long ConfigurationRevision, string ImplementationId, string CreatedAtUtc, string? UpdatedAtUtc,
     string? AttemptId, long AttemptNumber, string? DispatchedAtUtc, string? FinalizedAtUtc);
@@ -15,6 +15,8 @@ internal static class OperationPresentation
 {
     internal static string Outcome(OperationStatus value) => value switch
     {
+        OperationStatus.Blocked => "blocked",
+        OperationStatus.InputUnavailable => "inputUnavailable",
         OperationStatus.HandlerUnavailable => "handlerUnavailable",
         OperationStatus.Found => "found",
         OperationStatus.Succeeded => "succeeded",
@@ -46,10 +48,7 @@ internal static class OperationPresentation
         OperationReason.InputInvalid => "inputInvalid",
         OperationReason.InputUnavailable => "inputUnavailable",
         OperationReason.HandlerUnavailable => "handlerUnavailable",
-        OperationReason.ProviderInputUnavailable => "providerInputUnavailable",
         OperationReason.SecretUnavailable => "secretUnavailable",
-        OperationReason.UnsupportedShape => "unsupportedShape",
-        OperationReason.DatabaseNameInvalid => "databaseNameInvalid",
         OperationReason.Connectivity => "connectivity",
         OperationReason.Conflict => "conflict",
         OperationReason.ServerRejected => "serverRejected",
@@ -82,9 +81,9 @@ internal static class OperationPresentation
 
     internal static CliOperationData Data(OperationReply reply) => new(
         reply.Operation is not { } o ? null : new(
-            o.Key is { Action: OperationAction.Create } k ? new(k.DeploymentId, k.Generation, k.ResourceId, "create")
+            o.Key is { } k ? new(k.DeploymentId, k.Generation, k.OperationId)
                 : throw new InvalidDataException("Unsupported operation identity."),
-            State(o.State), Reason(o.Reason), o.EnvironmentRecordId, o.ApplicationRecordId,
+            o.ResourceId, o.ActionContract, State(o.State), Reason(o.Reason), o.EnvironmentRecordId, o.ApplicationRecordId,
             o.Reference is { } r ? new(r.ApplicationRecordId, r.RevisionNumber) : throw new InvalidDataException("Missing revision."),
             o.ProviderInstanceId, o.ConfigurationRevision, o.ImplementationId, o.CreatedAtUtc,
             o.HasUpdatedAtUtc ? o.UpdatedAtUtc : null, o.HasAttemptId ? o.AttemptId : null, o.AttemptNumber,
@@ -113,7 +112,7 @@ internal sealed partial class CliTextPresenter
         _output.WriteLine(OperationPresentation.Outcome(reply.Status));
         if (data.Operation is { } o)
         {
-            _output.WriteLine($"Operation: {o.Key.DeploymentId} generation {o.Key.Generation}; Resource: {o.Key.ResourceId}; action: {o.Key.Action}");
+            _output.WriteLine($"Operation: {o.Key.DeploymentId} generation {o.Key.Generation}; step: {o.Key.OperationId}; Resource: {o.ResourceId}; action: {o.ActionContract}");
             _output.WriteLine($"State: {o.State}; reason: {o.Reason ?? "(none)"}");
             _output.WriteLine($"Environment record: {o.EnvironmentRecordId}; Application: {o.ApplicationRecordId}");
             _output.WriteLine($"Revision: {o.Reference.ApplicationRecordId} {o.Reference.RevisionNumber}");

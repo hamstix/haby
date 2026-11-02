@@ -49,7 +49,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()
             .CreateDbContextAsync();
         Assert.Empty(await verify.DeploymentGenerations.AsNoTracking().ToListAsync());
-        Assert.Empty(await verify.DurableCreateOperations.AsNoTracking().ToListAsync());
+        Assert.Empty(await verify.DurableOperations.AsNoTracking().ToListAsync());
     }
 
     [Fact]
@@ -111,18 +111,17 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         await using (var restarted = Services(connection, time))
         {
             var committer = restarted.GetRequiredService<IDurableDesiredStateCommitter>();
-            var operation = await restarted.GetRequiredService<IDurableCreateOperationQuery>().FindAsync(
-                new DurableCreateOperationKey(original.DeploymentId, original.Generation,
-                    ManifestLocalId.Create("db"), DurableOperationAction.Create), default);
+            var operation = await restarted.GetRequiredService<IDurableOperationQuery>().FindAsync(
+                new DurableOperationKey(original.DeploymentId, original.Generation,
+                    OperationId.Create("db" + "-create")), default);
             Assert.NotNull(operation);
-            Assert.Equal(DurableCreateOperationState.Pending, operation.State);
-            Assert.Equal(ManifestLocalId.Create("db"), operation.Key.ResourceId);
-            Assert.Equal(DurableOperationAction.Create, operation.Key.Action);
+            Assert.Equal(DurableOperationState.Pending, operation.State);
+            Assert.Equal(ManifestLocalId.Create("db"), operation.Node.ResourceId);
             Assert.Equal(winningPlan.Inputs.ProviderInstance, operation.ProviderInstance);
             Assert.Equal(winningPlan.Inputs.ConfigurationRevision, operation.ConfigurationRevision);
             Assert.Equal(winningPlan.Inputs.ImplementationId, operation.ImplementationId);
-            Assert.Null(await restarted.GetRequiredService<IDurableCreateOperationQuery>().FindAsync(
-                operation.Key with { ResourceId = ManifestLocalId.Create("other") }, default));
+            Assert.Null(await restarted.GetRequiredService<IDurableOperationQuery>().FindAsync(
+                operation.Key with { OperationId = OperationId.Create("other") }, default));
             Assert.Equal(original, await committer.FindCommitAsync(changeSetId, default));
             Assert.Equal(firstBinding.RevisionNumber, (await committer.FindGenerationAsync(original.DeploymentId,
                 original.Generation, default))!.Inputs.ConfigurationRevision);
@@ -135,11 +134,11 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM application_deployment_generations", database).ExecuteScalarAsync())!);
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM change_set_commits", database).ExecuteScalarAsync())!);
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
-        Assert.Equal("db", await new NpgsqlCommand("SELECT resource_id FROM durable_create_operations", database).ExecuteScalarAsync());
+        Assert.Equal("db-create", await new NpgsqlCommand("SELECT operation_id FROM durable_create_operations", database).ExecuteScalarAsync());
         Assert.Equal("Pending", await new NpgsqlCommand("SELECT state FROM durable_create_operations", database).ExecuteScalarAsync());
         await using (var duplicate = new NpgsqlCommand("""
-            INSERT INTO durable_create_operations (deployment_id, generation, resource_id, action, state, created_at)
-            SELECT deployment_id, generation, resource_id, action, state, created_at
+            INSERT INTO durable_create_operations (deployment_id, generation, operation_id, state, created_at)
+            SELECT deployment_id, generation, operation_id, state, created_at
             FROM durable_create_operations
             """, database))
         {
@@ -150,17 +149,12 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         await AssertConstraintRejected(database,
             "UPDATE durable_create_operations SET state = 'Dispatching' WHERE deployment_id = @id",
             PostgresErrorCodes.CheckViolation, deploymentGuid);
-        // The dispatch-barrier identity trigger rejects tampering with the operation identity
-        // before any check constraint is reached.
-        await AssertImmutableRejected(database,
-            "UPDATE durable_create_operations SET action = 'Delete' WHERE deployment_id = @id",
-            deploymentGuid);
-        await AssertImmutableRejected(database,
-            "UPDATE durable_create_operations SET resource_id = '' WHERE deployment_id = @id",
-            deploymentGuid);
+        await AssertConstraintRejected(database,
+            "UPDATE durable_create_operations SET operation_id = '' WHERE deployment_id = @id",
+            PostgresErrorCodes.CheckViolation, deploymentGuid);
         await AssertConstraintRejected(database, """
-            INSERT INTO durable_create_operations (deployment_id, generation, resource_id, action, state, created_at)
-            VALUES (@id, 1, 'db', 'Create', 'Pending', now())
+            INSERT INTO durable_create_operations (deployment_id, generation, operation_id, state, created_at)
+            VALUES (@id, 1, 'db-create', 'Pending', now())
             """, PostgresErrorCodes.ForeignKeyViolation, Guid.NewGuid());
         Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT desired_generation FROM application_deployments", database).ExecuteScalarAsync())!);
         Assert.Equal(DBNull.Value, await new NpgsqlCommand("SELECT applied_generation FROM application_deployments", database).ExecuteScalarAsync());
@@ -648,8 +642,8 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
         else services.AddSingleton<ICheckpointProviderCapability, RejectCapability>();
         if (registerCodec) services.AddPostgreSqlProviderConfigurationCodec();
         services.AddPostgreSqlProviderRevisionPreflight()
-            .AddPostgreSqlDurableCreateOperationJournal()
-            .AddPostgreSqlDurableCreateOperationExecution()
+            .AddPostgreSqlDurableOperationJournal()
+            .AddPostgreSqlDurableOperationExecution()
             .AddPostgreSqlDurableDesiredStateCommitter();
         if (!supportsCapability) services.RemoveAll<IDurableActionAdmissionHandler>().RemoveAll<IDurableActionHandler>();
         return services.BuildServiceProvider();

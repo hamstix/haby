@@ -108,6 +108,10 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             resolved.ImplementationId);
         var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
         if (admitted != DurablePlanStatus.Planned) return new(admitted);
+        DurableOperationGraph graph;
+        try { graph = await PlanGraphAsync(context, spec, revisionRow, inputs, cancellationToken); }
+        catch (InvalidDataException) { return new(DurablePlanStatus.UnsupportedShape); }
+        if (!admission.Supports(graph)) return new(DurablePlanStatus.ProviderCapabilityMismatch);
         var id = DeploymentPlanId.New();
         var createdAt = clock.GetUtcNow();
         var planRow = new DurablePlanRow
@@ -123,7 +127,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ConfigurationRevisionNumber = resolved.Binding.RevisionNumber.Value,
             ImplementationId = resolved.ImplementationId,
             SnapshotFormatVersion = 1,
-            Fingerprint = Fingerprint(inputs),
+            GraphJson = DurableOperationGraphCodec.Encode(graph),
+            Fingerprint = DurableOperationGraphCodec.Fingerprint(inputs, graph),
             CreatedAt = createdAt,
             ExpiresAt = createdAt.Add(Lifetime),
             ActorId = actorId
@@ -182,7 +187,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(id);
-        var plan = await FindPlanAsync(id, cancellationToken);
+        DurablePlan? plan;
+        try { plan = await FindPlanAsync(id, cancellationToken); }
+        catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
         if (plan is null) return DurablePlanCurrentStatus.PlanNotFound;
         if (clock.GetUtcNow() >= plan.ExpiresAt) return DurablePlanCurrentStatus.Expired;
         if (plan.ClosedAt is not null) return DurablePlanCurrentStatus.Closed;
@@ -192,9 +199,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (result.Status == DurablePlanStatus.ChangeSetStale) return DurablePlanCurrentStatus.ChangeSetStale;
         if (result.Status != DurablePlanStatus.Planned || result.Inputs is null)
             return DurablePlanCurrentStatus.PlanInputUnavailable;
-        if (result.Inputs != plan.Inputs || Fingerprint(result.Inputs) != plan.Fingerprint)
+        if (result.Inputs != plan.Inputs || DurableOperationGraphCodec.Fingerprint(result.Inputs, plan.Graph) != plan.Fingerprint)
             return DurablePlanCurrentStatus.PlanStale;
-        return DurablePlanCurrentStatus.Current;
+        return admission.Supports(plan.Graph) ? DurablePlanCurrentStatus.Current : DurablePlanCurrentStatus.PlanInputUnavailable;
     }
 
     private async ValueTask<(DurablePlanStatus Status, DurablePlanningInputs? Inputs)> CreateCurrentInputsAsync(
@@ -312,20 +319,20 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(row.RevisionNumber)),
             ProviderAlias.Create(row.ProviderAlias), ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
-        if (Fingerprint(inputs) != row.Fingerprint) throw new InvalidDataException("Planning snapshot is inconsistent.");
+        var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
+        if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint) throw new InvalidDataException("Planning snapshot is inconsistent.");
         return new(DeploymentPlanId.Parse(row.Id.ToString()), DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()),
-            inputs, row.Fingerprint, row.CreatedAt, row.ExpiresAt, row.ActorId, closedAt, closedByActorId);
+            inputs, row.Fingerprint, row.CreatedAt, row.ExpiresAt, row.ActorId, closedAt, closedByActorId)
+        { Graph = graph };
     }
 
-    internal static string Fingerprint(DurablePlanningInputs inputs)
+    internal bool Supports(DurableOperationGraph graph) => admission.Supports(graph);
+    internal async Task<DurableOperationGraph> PlanGraphAsync(ManifestCatalogDbContext context,
+        NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs,
+        CancellationToken cancellationToken)
     {
-        var text = string.Join('\n', "haby-durable-plan-inputs/v1", inputs.Environment.ToString(),
-            inputs.EnvironmentKey.Value, inputs.Revision.ApplicationRecordId.ToString(),
-            inputs.Revision.RevisionNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            inputs.Alias.Value, inputs.ProviderInstance.ToString(),
-            inputs.ConfigurationRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            inputs.ImplementationId);
-        return "v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+        var instance = await context.ProviderInstances.AsNoTracking().SingleAsync(row => row.Id == revision.ProviderInstanceId, cancellationToken);
+        return admission.Plan(spec, new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs);
     }
 
     internal static void ValidateActor(string actorId)

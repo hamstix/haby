@@ -10,7 +10,7 @@ namespace Haby.Persistence.PostgreSql;
 public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<ManifestCatalogDbContext> contexts)
     : IPostgreSqlDatabaseRecoveryJournal
 {
-    public async ValueTask<PostgreSqlDatabaseRecoveryAudit?> FindDecisionAsync(DurableCreateOperationKey key,
+    public async ValueTask<PostgreSqlDatabaseRecoveryAudit?> FindDecisionAsync(DurableOperationKey key,
         Guid attemptId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
@@ -31,18 +31,17 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         var environment = Guid.Parse(command.Environment.ToString());
         var generation = key.Generation.Value;
-        var resource = key.ResourceId.Value;
-        var action = key.Action.ToString();
+        var resource = key.OperationId.Value;
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
             // Lock the exact operation before deciding. The second concurrent caller sees the
             // committed decision after the first transaction releases this row lock.
-            var operation = await context.DurableCreateOperations.FromSqlInterpolated($"""
+            var operation = await context.DurableOperations.FromSqlInterpolated($"""
                 SELECT * FROM durable_create_operations
                 WHERE deployment_id = {deployment} AND generation = {generation}
-                  AND resource_id = {resource} AND action = {action} FOR UPDATE
+                  AND operation_id = {resource} FOR UPDATE
                 """).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
             var existing = await DecisionQuery(context, key, command.ExpectedAttemptId)
                 .SingleOrDefaultAsync(cancellationToken);
@@ -52,18 +51,18 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                 return new(PostgreSqlDatabaseAssignmentOutcome.AlreadyAssigned,
                     ToAudit(key, existing).Receipt);
             }
-            if (operation is null || operation.State != nameof(DurableCreateOperationState.NeedsAttention) ||
-                operation.ReasonCode != nameof(DurableCreateOperationReason.UncertainAfterDispatch) ||
+            if (operation is null || operation.State != nameof(DurableOperationState.NeedsAttention) ||
+                operation.ReasonCode != nameof(DurableOperationReason.UncertainAfterDispatch) ||
                 operation.CurrentAttemptId != command.ExpectedAttemptId || operation.DispatchedAt is null ||
                 operation.FinalizedAt is null)
                 return Rejected();
 
-            var attempt = await context.DurableCreateOperationAttempts.AsNoTracking()
+            var attempt = await context.DurableOperationAttempts.AsNoTracking()
                 .SingleOrDefaultAsync(row => row.AttemptId == command.ExpectedAttemptId &&
                     row.DeploymentId == deployment && row.Generation == generation &&
-                    row.ResourceId == resource && row.Action == action &&
+                    row.OperationId == resource &&
                     row.AttemptNumber == operation.AttemptNumber && row.DispatchedAt != null &&
-                    row.FinishedAt != null && row.Outcome == nameof(DurableCreateAttemptOutcome.Uncertain),
+                    row.FinishedAt != null && row.Outcome == nameof(DurableAttemptOutcome.Uncertain),
                     cancellationToken);
             var stillCurrent = await context.ApplicationDeployments.AsNoTracking().AnyAsync(row =>
                 row.Id == deployment && row.EnvironmentRecordId == environment &&
@@ -76,43 +75,36 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                 Id = Guid.CreateVersion7(),
                 DeploymentId = deployment,
                 Generation = generation,
-                ResourceId = resource,
-                Action = action,
+                OperationId = resource,
                 AttemptId = command.ExpectedAttemptId,
                 AttemptNumber = operation.AttemptNumber,
-                AttemptOutcome = nameof(DurableCreateAttemptOutcome.Uncertain),
+                AttemptOutcome = nameof(DurableAttemptOutcome.Uncertain),
                 Reason = command.Reason.ToString(),
                 Note = command.Note,
                 TechnicalActor = command.TechnicalActor,
                 Acknowledged = command.Acknowledged,
                 DecidedAt = at,
-                OperationState = nameof(DurableCreateOperationState.Succeeded),
-                AppliedGeneration = generation
+                OperationState = nameof(DurableOperationState.Succeeded),
+                AppliedGeneration = null
             };
-            context.PostgreSqlDatabaseRecoveryDecisions.Add(decision);
-            await context.SaveChangesAsync(cancellationToken);
 
-            var advanced = await context.ApplicationDeployments
-                .Where(row => row.Id == deployment && row.EnvironmentRecordId == environment &&
-                    row.DesiredGeneration == generation && row.AppliedGeneration == null)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(row => row.AppliedGeneration, generation)
-                    .SetProperty(row => row.ConcurrencyToken, row => row.ConcurrencyToken + 1),
-                    cancellationToken);
-            if (advanced != 1) return Rejected();
-
-            var updated = await context.DurableCreateOperations
+            var updated = await context.DurableOperations
                 .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
-                    row.ResourceId == resource && row.Action == action &&
-                    row.State == nameof(DurableCreateOperationState.NeedsAttention) &&
-                    row.ReasonCode == nameof(DurableCreateOperationReason.UncertainAfterDispatch) &&
+                    row.OperationId == resource &&
+                    row.State == nameof(DurableOperationState.NeedsAttention) &&
+                    row.ReasonCode == nameof(DurableOperationReason.UncertainAfterDispatch) &&
                     row.CurrentAttemptId == command.ExpectedAttemptId)
                 .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(row => row.State, nameof(DurableCreateOperationState.Succeeded))
+                    .SetProperty(row => row.State, nameof(DurableOperationState.Succeeded))
                     .SetProperty(row => row.ReasonCode, (string?)null)
                     .SetProperty(row => row.UpdatedAt, at), cancellationToken);
             if (updated != 1) return Rejected();
 
+            if (!await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken)) return Rejected();
+            decision.AppliedGeneration = await context.ApplicationDeployments.AsNoTracking().Where(r => r.Id == deployment)
+                .Select(r => r.AppliedGeneration).SingleAsync(cancellationToken);
+            context.PostgreSqlDatabaseRecoveryDecisions.Add(decision);
+            await context.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(CancellationToken.None);
             return new(PostgreSqlDatabaseAssignmentOutcome.Assigned, ToAudit(key, decision).Receipt);
         }
@@ -125,19 +117,19 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
     }
 
     private static IQueryable<PostgreSqlDatabaseRecoveryDecisionRow> DecisionQuery(
-        ManifestCatalogDbContext context, DurableCreateOperationKey key, Guid attemptId)
+        ManifestCatalogDbContext context, DurableOperationKey key, Guid attemptId)
     {
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         return context.PostgreSqlDatabaseRecoveryDecisions.AsNoTracking().Where(row =>
             row.DeploymentId == deployment && row.Generation == key.Generation.Value &&
-            row.ResourceId == key.ResourceId.Value && row.Action == key.Action.ToString() &&
+            row.OperationId == key.OperationId.Value &&
             row.AttemptId == attemptId);
     }
 
-    private static PostgreSqlDatabaseRecoveryAudit ToAudit(DurableCreateOperationKey key,
+    private static PostgreSqlDatabaseRecoveryAudit ToAudit(DurableOperationKey key,
         PostgreSqlDatabaseRecoveryDecisionRow row) =>
         new(new PostgreSqlDatabaseRecoveryReceipt(row.Id, key, row.AttemptId,
-                PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, row.TechnicalActor, row.DecidedAt),
+                PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, row.TechnicalActor, row.DecidedAt, row.AppliedGeneration),
             row.Acknowledged, row.Note);
 
     private static PostgreSqlDatabaseAssignmentResult Rejected() =>

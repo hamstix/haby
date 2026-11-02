@@ -5,7 +5,7 @@ namespace Haby.Cli;
 internal sealed record CliRecoveryPreview(CliOperation Operation, string TargetContract, string? TargetName,
     string? UncertainAttemptId);
 internal sealed record CliRecoveryReceipt(string DecisionId, CliOperationKey Key, string AttemptId, string Reason,
-    string TechnicalActor, string DecidedAtUtc);
+    string TechnicalActor, string DecidedAtUtc, long? AppliedGenerationAtDecision);
 internal sealed record CliRecoveryData(CliRecoveryPreview? Preview, CliRecoveryReceipt? Receipt);
 
 internal static class RecoveryPresentation
@@ -42,10 +42,10 @@ internal static class RecoveryPresentation
             preview.TargetContract, preview.HasTargetName ? preview.TargetName : null,
             preview.HasUncertainAttemptId ? preview.UncertainAttemptId : null),
             receipt is null ? null : new(receipt.DecisionId,
-                receipt.Key is { Action: OperationAction.Create } key ? new(key.DeploymentId, key.Generation, key.ResourceId, "create")
+                receipt.Key is { } key ? new(key.DeploymentId, key.Generation, key.OperationId)
                     : throw new InvalidDataException("Unsupported operation identity."),
                 receipt.AttemptId, receipt.Reason == RecoveryReason.OperatorAcceptedExistingDatabase ? "operatorAcceptedExistingDatabase"
-                    : throw new InvalidDataException("Unknown recovery reason."), receipt.TechnicalActor, receipt.DecidedAtUtc));
+                    : throw new InvalidDataException("Unknown recovery reason."), receipt.TechnicalActor, receipt.DecidedAtUtc, receipt.HasAppliedGenerationAtDecision ? receipt.AppliedGenerationAtDecision : null));
     }
 }
 
@@ -70,7 +70,7 @@ internal sealed partial class CliTextPresenter
         if (data.Preview is { } p)
         {
             var o = p.Operation;
-            _output.WriteLine($"Operation: {o.Key.DeploymentId} generation {o.Key.Generation}; Resource: {o.Key.ResourceId}; action: {o.Key.Action}");
+            _output.WriteLine($"Operation: {o.Key.DeploymentId} generation {o.Key.Generation}; step: {o.Key.OperationId}; Resource: {o.ResourceId}; action: {o.ActionContract}");
             _output.WriteLine($"Environment record: {o.EnvironmentRecordId}; Application: {o.ApplicationRecordId}");
             _output.WriteLine($"Pinned Provider: {o.ProviderInstanceId} revision {o.ConfigurationRevision}; implementation: {o.ImplementationId}");
             _output.WriteLine($"Target contract: {p.TargetContract}; target: {p.TargetName ?? "(unavailable)"}");
@@ -78,7 +78,7 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine("Assignment accepts provenance responsibility; existence alone does not prove ownership. No Create is dispatched.");
         }
         if (data.Receipt is { } r)
-            _output.WriteLine($"Decision: {r.DecisionId}; attempt: {r.AttemptId}; reason: {r.Reason}; technical actor: {r.TechnicalActor}; decided UTC: {r.DecidedAtUtc}");
+            _output.WriteLine($"Decision: {r.DecisionId}; attempt: {r.AttemptId}; reason: {r.Reason}; technical actor: {r.TechnicalActor}; decided UTC: {r.DecidedAtUtc}; applied generation at decision: {r.AppliedGenerationAtDecision?.ToString() ?? "(incomplete)"}");
         return exit;
     }
 }

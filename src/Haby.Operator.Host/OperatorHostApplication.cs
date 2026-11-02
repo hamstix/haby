@@ -82,8 +82,8 @@ public static class OperatorHostApplication
         // Explicit pilot storage choice under ADR-006: database rows and backups contain recoverable secrets.
         builder.Services.AddPostgreSqlPlaintextSecretStore();
         builder.Services.AddPostgreSqlProviderConfigurationStore();
-        builder.Services.AddPostgreSqlDurableCreateOperationJournal();
-        builder.Services.AddPostgreSqlDurableCreateOperationExecution();
+        builder.Services.AddPostgreSqlDurableOperationJournal();
+        builder.Services.AddPostgreSqlDurableOperationExecution();
         builder.Services.AddPostgreSqlDatabaseRecoveryJournal();
         builder.Services.AddPostgreSqlDatabaseRecovery();
         builder.Services.AddSingleton<PostgreSqlOperationRecoveryAdapter>();

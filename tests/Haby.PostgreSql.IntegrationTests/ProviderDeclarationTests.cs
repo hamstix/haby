@@ -69,7 +69,7 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         Assert.NotNull(revisions[1].ConfirmedAt);
         Assert.Equal(2, await check.ProviderRevisionSecretRefs.CountAsync());
         Assert.Empty(await check.ProviderAliases.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await check.DurableCreateOperations.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await check.DurableOperations.AsNoTracking().ToArrayAsync());
     }
 
     [Fact]
@@ -267,56 +267,7 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         await Assert.ThrowsAsync<DbUpdateException>(() => duplicate.SaveChangesAsync());
     }
 
-    [Fact]
-    public async Task Additive_migration_keeps_legacy_unnamed_identity_payload_and_pinned_reads()
-    {
-        var connection = await Database(migrate: false);
-        ProviderInstanceId instance = ProviderInstanceId.New();
-        EnvironmentRecordId env;
-        string payload;
-        await using (var services = Services(connection))
-        {
-            var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
-            await using (var migration = await factory.CreateDbContextAsync())
-                await migration.GetService<IMigrator>().MigrateAsync("20261029084704_AddNamedAdministrativeSecrets");
-            env = (await services.GetRequiredService<IEnvironmentCatalog>().CreateOrGetAsync(EnvironmentId.Create("pilot"), default)).Environment.RecordId;
-            using var material = new SecretMaterial([1]);
-            var secret = (await services.GetRequiredService<SecretAdministration>().CreateAsync("pilot", "admin", Guid.NewGuid(), material, "actor", default)).Secret!;
-            var exact = new SecretRef(secret.SecretId, secret.Versions.Single().VersionId);
-            var prepared = new PostgreSqlProviderConfigurationCodec(new PostgreSqlDatabaseCheckpointCapability()).Encode(
-                new PostgreSqlProviderConfiguration(1, "old.invalid", 5432, "postgres", "admin", exact, "haby.postgresql.database/v1alpha1"));
-            payload = prepared.PayloadJson;
-            // Historical columns only. Today's EF model must not arrange the previous schema.
-            await using (var arrange = await factory.CreateDbContextAsync())
-            {
-                await using var transaction = await arrange.Database.BeginTransactionAsync();
-                var id = Guid.Parse(instance.ToString());
-                var environment = Guid.Parse(env.ToString());
-                var secretId = Guid.Parse(exact.SecretId.ToString());
-                var versionId = Guid.Parse(exact.SecretVersionId.ToString());
-                await arrange.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO provider_instances (id, environment_record_id, provider_kind_id, target_format_version, target_identity) VALUES ({id}, {environment}, {prepared.ProviderKindId}, {prepared.TargetIdentity.FormatVersion}, {prepared.TargetIdentity.Value})");
-                await arrange.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO provider_configuration_revisions (provider_instance_id, revision_number, environment_record_id, implementation_id, configuration_shape_id, payload_format_version, payload_json, is_sealed) VALUES ({id}, 1, {environment}, {prepared.ImplementationId}, {prepared.ShapeId}, {prepared.PayloadFormatVersion}, {payload}, false)");
-                await arrange.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO provider_revision_secret_refs (provider_instance_id, revision_number, environment_record_id, slot, secret_id, secret_version_id) VALUES ({id}, 1, {environment}, 'administrator-password', {secretId}, {versionId})");
-                await arrange.Database.ExecuteSqlInterpolatedAsync($"UPDATE provider_configuration_revisions SET is_sealed = true WHERE provider_instance_id = {id}");
-                await transaction.CommitAsync();
-            }
-            await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-        }
-        await using (var restarted = Services(connection))
-        {
-            var page = await restarted.GetRequiredService<ProviderAdministration>().ListAsync("pilot", 50, null, default);
-            Assert.Equal(instance, Assert.Single(page.Items).InstanceId);
-            Assert.Null(page.Items[0].Name);
-            var pinned = await restarted.GetRequiredService<IProviderConfigurationStore>().FindRevisionAsync<PostgreSqlProviderConfiguration>(env, instance,
-                ProviderConfigurationRevisionNumber.Create(1), default);
-            Assert.Equal("old.invalid", pinned!.Configuration.Host);
-        }
-        await using var check = Context(connection);
-        Assert.Null((await check.ProviderInstances.AsNoTracking().SingleAsync()).Name);
-        var row = await check.ProviderConfigurationRevisions.AsNoTracking().SingleAsync();
-        Assert.Equal(payload, row.PayloadJson);
-        Assert.Null(row.ConfirmedPreviousRevision);
-    }
+
 
     [Fact]
     public async Task Transfer_does_not_follow_alias_or_invalidate_pinned_plans_generations_or_new_revision_planning()
@@ -364,7 +315,7 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         Assert.Equal(1, generation.Inputs.ConfigurationRevision.Value);
         Assert.Equal(persistedOldPlan, await planner.FindPlanAsync(oldPlan.Id, default));
         await using var check = Context(connection);
-        var operation = await check.DurableCreateOperations.AsNoTracking().SingleAsync();
+        var operation = await check.DurableOperations.AsNoTracking().SingleAsync();
         Assert.Equal("Pending", operation.State);
         Assert.Null(operation.DispatchedAt);
 
@@ -464,8 +415,8 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
             .AddPostgreSqlProviderConfigurationStore().AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
             .AddPostgreSqlProviderConfigurationCodec().AddSingleton(TimeProvider.System)
             .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>().AddPostgreSqlDatabaseCreateAction()
-            .AddPostgreSqlDurableCreateOperationJournal()
-            .AddPostgreSqlDurableCreateOperationExecution()
+            .AddPostgreSqlDurableOperationJournal()
+            .AddPostgreSqlDurableOperationExecution()
             .AddPostgreSqlDurableDesiredStateCommitter();
         if (sample) services.AddSingleton<SampleConfigurationCodec>()
                 .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<SampleConfigurationCodec>())

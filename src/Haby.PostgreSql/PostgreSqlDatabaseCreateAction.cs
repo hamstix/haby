@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
@@ -6,16 +9,23 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.PostgreSql;
 
-/// <summary>Frozen interpretation of historical ResourceId + Create database operations.</summary>
-public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseCreateInput>
+/// <summary>Pure planning of the current frozen database action.</summary>
+public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>
 {
     public override DurableActionExecutionKey Key => PostgreSqlDatabaseCreateAction.RegistrationKey;
-    public override PostgreSqlDatabaseCreateInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
-        PostgreSqlDatabaseCreateValidation.Prepare(resource, inputs);
+    public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
+        PostgreSqlDatabaseCreateValidation.Name(resource) is { } name ? new(name) : null;
+    public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
+    {
+        var references = new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId);
+        var input = Prepare(resource, references) ?? throw new InvalidDataException("Invalid database input.");
+        return [new(OperationId.Create(resourceId.Value + "-create"), resourceId, Key, references,
+            new(PostgreSqlDatabaseCreateAction.Format, JsonSerializer.Serialize(input, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), [])];
+    }
 }
 
-public sealed class PostgreSqlDatabaseCreateAction(PostgreSqlDurableCreateOperationExecutor executor)
-    : DurableActionHandler<PostgreSqlDatabaseCreateInput>
+public sealed class PostgreSqlDatabaseCreateAction(PostgreSqlDurableOperationExecutor executor)
+    : DurableActionHandler<PostgreSqlDatabaseActionInput>
 {
     public static OperationContractId Contract { get; } = OperationContractId.Create("postgresql.database.create/v1alpha1");
     public static DurableActionExecutionKey RegistrationKey { get; } = new(
@@ -23,12 +33,18 @@ public sealed class PostgreSqlDatabaseCreateAction(PostgreSqlDurableCreateOperat
             PostgreSqlDatabaseCheckpointCapability.ImplementationId)), Contract);
     public override DurableActionExecutionKey Key => RegistrationKey;
 
-    public override PostgreSqlDatabaseCreateInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
-        PostgreSqlDatabaseCreateValidation.Prepare(resource, inputs);
+    public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) =>
+        [PrepareNode(OperationId.Create(resourceId.Value + "-create"), resourceId, resource, inputs)];
+    public const string Format = "haby.postgresql.database-create/v1";
+    public override string InputFormat => Format;
+    public override JsonTypeInfo<PostgreSqlDatabaseActionInput> InputTypeInfo => PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput;
+    public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
+        PostgreSqlDatabaseCreateValidation.Name(resource) is { } name ? new(name) : null;
 
-    public override ValueTask<DurableCreateExecutionResult> ExecuteTypedAsync(DurableCreateOperation operation,
-        PostgreSqlDatabaseCreateInput? input, CancellationToken cancellationToken) =>
-        executor.ExecuteUnderLockAsync(operation.Key, input, cancellationToken);
+    public override ValueTask<DurableExecutionResult> ExecuteTypedAsync(DurableOperation operation,
+        PostgreSqlDatabaseActionInput? input, CancellationToken cancellationToken) =>
+        executor.ExecuteUnderLockAsync(operation.Key, input is null ? null : new(operation.Environment,
+            operation.ProviderInstance, operation.ConfigurationRevision, operation.ImplementationId, input.DatabaseName), cancellationToken);
 }
 
 internal static class PostgreSqlDatabaseCreateValidation
@@ -51,14 +67,14 @@ public static class DurableActionServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDatabaseCreateAction(this IServiceCollection services)
     {
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDurableActionAdmissionHandler, PostgreSqlDatabaseCreateAdmission>());
-        // Register separately so saved Create remains explicitly interpretable when an action is removed.
-        if (!services.Any(descriptor => descriptor.ServiceType == typeof(DurableCreateActionMapping) &&
-            descriptor.ImplementationInstance is DurableCreateActionMapping mapping &&
-            mapping.ResourceContract == PostgreSqlDatabaseContract.Id))
-            services.AddSingleton(new DurableCreateActionMapping(PostgreSqlDatabaseContract.Id, PostgreSqlDatabaseCreateAction.Contract));
         services.TryAddSingleton<DurableActionRegistry>();
         services.TryAddSingleton<DurableActionAdmission>();
         services.TryAddSingleton<DurableOperationSerialization>();
         return services;
     }
 }
+
+public sealed record PostgreSqlDatabaseActionInput(string DatabaseName);
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSerializable(typeof(PostgreSqlDatabaseActionInput))]
+internal partial class PostgreSqlActionJsonContext : JsonSerializerContext;

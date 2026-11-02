@@ -1,0 +1,122 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Haby.Domain;
+
+namespace Haby.Application;
+
+/// <summary>Deterministic step identity, independent of Resource ownership.</summary>
+public sealed record OperationId
+{
+    public string Value { get; }
+    private OperationId(string value) => Value = value;
+    public static OperationId Create(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 128 ||
+            value.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')))
+            throw new ArgumentException("Invalid operation identity.");
+        return new(value);
+    }
+    public override string ToString() => Value;
+}
+
+public sealed record DurableActionPayload(string Format, string Json);
+public sealed record DurableOperationNode(OperationId Id, ManifestLocalId ResourceId,
+    DurableActionExecutionKey Action, DurableActionInputReferences References,
+    DurableActionPayload Input, IReadOnlyList<OperationId> Dependencies);
+
+/// <summary>Validated, defensively copied and canonically ordered immutable graph.</summary>
+public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
+{
+    public IReadOnlyList<DurableOperationNode> Nodes { get; }
+    public DurableOperationGraph(IEnumerable<DurableOperationNode> nodes)
+    {
+        var ordered = nodes.OrderBy(n => n.Id.Value, StringComparer.Ordinal).Select(n => n with
+        { Dependencies = Array.AsReadOnly(n.Dependencies.OrderBy(d => d.Value, StringComparer.Ordinal).ToArray()) }).ToArray();
+        if (ordered.Length is 0 or > 256 || ordered.Select(n => n.Id).Distinct().Count() != ordered.Length)
+            throw new InvalidDataException("Invalid graph identity set.");
+        var ids = ordered.Select(n => n.Id).ToHashSet();
+        foreach (var node in ordered)
+        {
+            if (node.Dependencies.Distinct().Count() != node.Dependencies.Count ||
+                node.Dependencies.Any(d => !ids.Contains(d)) || node.ResourceId is null ||
+                node.Action?.ActionContract is null || node.Action.Admission?.ResourceContract is null || node.Action.Admission.ProviderKind is null ||
+                node.Action.Admission.ConfigurationContract is null || node.Action.Admission.ImplementationId is null ||
+                node.References is null || node.Input is null || string.IsNullOrEmpty(node.Input.Format) ||
+                string.IsNullOrEmpty(node.Input.Json)) throw new InvalidDataException("Invalid graph node.");
+        }
+        var remaining = ordered.ToList();
+        var visited = new HashSet<OperationId>();
+        while (remaining.Count > 0)
+        {
+            var ready = remaining.Where(n => n.Dependencies.All(visited.Contains)).ToArray();
+            if (ready.Length == 0) throw new InvalidDataException("Cyclic operation graph.");
+            foreach (var node in ready) { visited.Add(node.Id); remaining.Remove(node); }
+        }
+        Nodes = Array.AsReadOnly(ordered);
+    }
+
+    public bool Equals(DurableOperationGraph? other) => other is not null &&
+        DurableOperationGraphCodec.Encode(this) == DurableOperationGraphCodec.Encode(other);
+    public override bool Equals(object? obj) => obj is DurableOperationGraph other && Equals(other);
+    public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(DurableOperationGraphCodec.Encode(this));
+
+    public void ValidateReferences(DurablePlanningInputs inputs)
+    {
+        foreach (var node in Nodes)
+            if (node.References != new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance,
+                    inputs.ConfigurationRevision, inputs.ImplementationId) ||
+                node.Action.Admission.ImplementationId.Value != inputs.ImplementationId)
+                throw new InvalidDataException("Inconsistent graph references.");
+    }
+}
+
+/// <summary>One current, explicitly versioned graph format. No legacy readers.</summary>
+public static class DurableOperationGraphCodec
+{
+    public static string Encode(DurableOperationGraph graph) => JsonSerializer.Serialize(new GraphDocument(1,
+        graph.Nodes.Select(n => new NodeDocument(n.Id.Value, n.ResourceId.Value,
+            n.Action.Admission.ResourceContract.Value, n.Action.Admission.ProviderKind.Value,
+            n.Action.Admission.ConfigurationContract.Value, n.Action.Admission.ImplementationId.Value,
+            n.Action.ActionContract.Value, n.References.Environment.ToString(), n.References.ProviderInstance.ToString(),
+            n.References.ConfigurationRevision.Value, n.Input.Format, n.Input.Json,
+            n.Dependencies.Select(d => d.Value).ToArray())).ToArray()), GraphJsonContext.Default.GraphDocument);
+
+    public static DurableOperationGraph Decode(string json)
+    {
+        try
+        {
+            var document = JsonSerializer.Deserialize(json, GraphJsonContext.Default.GraphDocument);
+            if (document is null || document.Version != 1 || document.Nodes is null)
+                throw new InvalidDataException("Unsupported operation graph format.");
+            return new(document.Nodes.Select(n => new DurableOperationNode(OperationId.Create(n.Id),
+                ManifestLocalId.Create(n.Resource), new(new(ResourceTypeId.Create(n.ResourceContract),
+                    ProviderKindId.Create(n.Kind), ProviderConfigurationContractId.Create(n.Configuration),
+                    ProviderImplementationId.Create(n.Implementation)), OperationContractId.Create(n.Action)),
+                new(EnvironmentRecordId.Parse(n.Environment), ProviderInstanceId.Parse(n.Provider),
+                    ProviderConfigurationRevisionNumber.Create(n.Revision), n.Implementation),
+                new(n.Format, n.Input), n.Dependencies.Select(OperationId.Create).ToArray())));
+        }
+        catch (Exception e) when (e is JsonException or ArgumentException or NullReferenceException)
+        { throw new InvalidDataException("Invalid operation graph."); }
+    }
+
+    public static string Fingerprint(DurablePlanningInputs inputs, DurableOperationGraph graph)
+    {
+        graph.ValidateReferences(inputs);
+        var text = string.Join('\n', "haby-operation-plan/v1", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
+            inputs.Revision.ApplicationRecordId.ToString(), inputs.Revision.RevisionNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            inputs.Alias.Value, inputs.ProviderInstance.ToString(),
+            inputs.ConfigurationRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), inputs.ImplementationId, Encode(graph));
+        return "v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+    }
+}
+
+internal sealed record GraphDocument(int Version, NodeDocument[] Nodes);
+internal sealed record NodeDocument(string Id, string Resource, string ResourceContract, string Kind,
+    string Configuration, string Implementation, string Action, string Environment, string Provider,
+    long Revision, string Format, string Input, string[] Dependencies);
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSerializable(typeof(GraphDocument))]
+internal partial class GraphJsonContext : JsonSerializerContext;

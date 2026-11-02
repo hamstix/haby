@@ -33,20 +33,20 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(OperationStatus.Succeeded, (await client.ExecuteOperationAsync(request)).Status);
             else if (state != OperationState.Pending)
             {
-                var journal = host.Services.GetRequiredService<IDurableCreateOperationJournal>();
+                var journal = host.Services.GetRequiredService<IDurableOperationJournal>();
                 var key = ExecutionKey(request);
-                var begun = Assert.IsType<DurableCreateBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, DateTimeOffset.UtcNow, default));
+                var begun = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, DateTimeOffset.UtcNow, default));
                 if (state is OperationState.Dispatching or OperationState.NeedsAttention)
-                    Assert.IsType<DurableCreateMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, begun.AttemptId, DateTimeOffset.UtcNow, default));
+                    Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, begun.AttemptId, DateTimeOffset.UtcNow, default));
                 if (state == OperationState.NeedsAttention)
                     Assert.True(await journal.TryRecoverDispatchingAsync(key, DateTimeOffset.UtcNow, default));
                 if (closedAttempt)
                     Assert.True(await journal.TryCloseAttemptBeforeDispatchAsync(key, begun.AttemptId,
-                        DurableCreateAttemptOutcome.FailedBeforeDispatch, DurableCreateOperationReason.Connectivity,
+                        DurableAttemptOutcome.FailedBeforeDispatch, DurableOperationReason.Connectivity,
                         DateTimeOffset.UtcNow, default));
                 if (state == OperationState.Failed)
-                    Assert.True(await journal.TryFinalizeFailureAsync(key, begun.AttemptId, DurableCreateOperationState.Failed,
-                        DurableCreateOperationReason.InputInvalid, DateTimeOffset.UtcNow, default));
+                    Assert.True(await journal.TryFinalizeFailureAsync(key, begun.AttemptId, DurableOperationState.Failed,
+                        DurableOperationReason.InputInvalid, DateTimeOffset.UtcNow, default));
             }
             before = await client.GetOperationAsync(request);
         }
@@ -89,7 +89,7 @@ public sealed partial class OperatorHostIntegrationTests
                 foreach (var format in new[] { "text", "json" })
                 {
                     var text = await RunNativeCommitCli(binary, missing.Urls.Single(),
-                        ["operation", "execute", request.DeploymentId, "1", "db", "--action", "create"], 2, format);
+                        ["operation", "execute", request.DeploymentId, "1", "db-create"], 2, format);
                     Assert.Contains("handlerUnavailable", text);
                     Assert.DoesNotContain(scenario.Password, text);
                     if (format == "json")

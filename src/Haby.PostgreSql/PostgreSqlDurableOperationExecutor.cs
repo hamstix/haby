@@ -13,62 +13,66 @@ namespace Haby.PostgreSql;
 /// both the Create response and an independent existence read. The operator host delegates here;
 /// this executor performs no manual assignment from <c>NeedsAttention</c>.
 /// </summary>
-public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOperationJournal journal,
-    IManifestRevisionQuery manifests, IPostgreSqlDatabaseCreateTarget target, IDurableCreateDispatchFaultHooks hooks,
-    TimeProvider clock, DurableOperationSerialization? serialization = null) : IDurableCreateOperationExecutor
+public sealed class PostgreSqlDurableOperationExecutor(IDurableOperationJournal journal,
+    IPostgreSqlDatabaseCreateTarget target, IDurableCreateDispatchFaultHooks hooks,
+    TimeProvider clock, DurableOperationSerialization serialization) : IDurableOperationExecutor
 {
-    private readonly PostgreSqlDurableCreateInputResolver resolver = new(manifests);
-    private readonly DurableOperationSerialization serialization = serialization ?? new();
+    private readonly PostgreSqlDurableCreateInputResolver resolver = new();
 
-    public ValueTask<DurableCreateExecutionResult> ExecuteAsync(DurableCreateOperationKey key,
+    public ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperationKey key,
         CancellationToken cancellationToken) => serialization.RunAsync(key,
             () => ExecuteCoreAsync(key, cancellationToken), cancellationToken);
 
     // The exact dispatcher already holds the shared operation gate.
-    internal ValueTask<DurableCreateExecutionResult> ExecuteUnderLockAsync(DurableCreateOperationKey key,
+    internal ValueTask<DurableExecutionResult> ExecuteUnderLockAsync(DurableOperationKey key,
         PostgreSqlDatabaseCreateInput? input, CancellationToken cancellationToken) =>
         ExecuteCoreAsync(key, cancellationToken, input, prepared: true);
 
     // Observation retains the existing journal-only read behavior. It never transitions
     // state and must remain available while an external request holds the execution gate.
-    public async ValueTask<DurableCreateOperationView?> ObserveAsync(DurableCreateOperationKey key,
+    public async ValueTask<DurableOperationView?> ObserveAsync(DurableOperationKey key,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
         var operation = await journal.FindAsync(key, cancellationToken);
-        return operation is null ? null : new DurableCreateOperationView(operation,
+        return operation is null ? null : new DurableOperationView(operation,
             await journal.FindAttemptsAsync(key, cancellationToken));
     }
 
-    private async ValueTask<DurableCreateExecutionResult> ExecuteCoreAsync(DurableCreateOperationKey key,
+    private async ValueTask<DurableExecutionResult> ExecuteCoreAsync(DurableOperationKey key,
         CancellationToken cancellationToken, PostgreSqlDatabaseCreateInput? preparedInput = null, bool prepared = false)
     {
         var operation = await journal.FindAsync(key, cancellationToken);
-        if (operation is null) return DurableCreateExecutionResult.NotFound();
-        if (operation.State is not (DurableCreateOperationState.Pending or DurableCreateOperationState.Preparing
-            or DurableCreateOperationState.Dispatching))
-            return new DurableCreateExecutionResult(MapTerminal(operation.State), operation);
-        if (operation.State == DurableCreateOperationState.Dispatching)
+        if (operation is null) return DurableExecutionResult.NotFound();
+        if (operation.State is not (DurableOperationState.Pending or DurableOperationState.Preparing
+            or DurableOperationState.Dispatching))
+            return new DurableExecutionResult(MapTerminal(operation.State), operation);
+        if (operation.State == DurableOperationState.Dispatching)
             return await RecoverDispatchingAsync(key, cancellationToken);
+
+        var progress = await journal.ProgressAsync(key.DeploymentId, key.Generation, cancellationToken);
+        if (progress is null) return DurableExecutionResult.NotFound();
+        if (operation.Node.Dependencies.Any(d => !progress.Nodes.Any(n => n.Operation.Key.OperationId == d &&
+            n.Operation.State == DurableOperationState.Succeeded))) return new(DurableExecutionOutcome.Blocked, operation);
 
         var attemptId = Guid.Empty;
         switch (await journal.TryBeginAttemptAsync(key, clock.GetUtcNow(), cancellationToken))
         {
-            case DurableCreateBeginAttemptResult.Started started:
+            case DurableBeginAttemptResult.Started started:
                 {
                     attemptId = started.AttemptId;
                     operation = started.Operation;
                     break;
                 }
-            case DurableCreateBeginAttemptResult.Terminal terminal:
+            case DurableBeginAttemptResult.Terminal terminal:
                 {
-                    if (terminal.Operation.State == DurableCreateOperationState.Dispatching)
+                    if (terminal.Operation.State == DurableOperationState.Dispatching)
                         return await RecoverDispatchingAsync(key, cancellationToken);
                     return MapObserved(terminal.Operation);
                 }
             default:
                 {
-                    return DurableCreateExecutionResult.NotFound();
+                    return DurableExecutionResult.NotFound();
                 }
         }
 
@@ -78,7 +82,7 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         try
         {
             var shape = prepared
-                ? (Input: preparedInput, Reason: preparedInput is null ? DurableCreateOperationReason.InputInvalid : (DurableCreateOperationReason?)null, Definitive: true)
+                ? (Input: preparedInput, Reason: preparedInput is null ? DurableOperationReason.InputInvalid : (DurableOperationReason?)null, Definitive: true)
                 : await resolver.ResolveAsync(key, operation, cancellationToken);
             if (shape.Reason is { } rejection)
                 return await FailBeforeDispatchAsync(key, attemptId, rejection, shape.Definitive,
@@ -93,14 +97,14 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await journal.TryCloseAttemptBeforeDispatchAsync(key, attemptId,
-                DurableCreateAttemptOutcome.CanceledBeforeDispatch, null, clock.GetUtcNow(), CancellationToken.None);
+                DurableAttemptOutcome.CanceledBeforeDispatch, null, clock.GetUtcNow(), CancellationToken.None);
             throw;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         await hooks.BeforeDispatchMarkerAsync(cancellationToken);
 
-        DurableCreateMarkerResult marker;
+        DurableMarkerResult marker;
         try
         {
             marker = await journal.TryCommitDispatchMarkerAsync(key, attemptId, clock.GetUtcNow(), cancellationToken);
@@ -116,10 +120,10 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
             return await UncertainResultAsync(key, cancellationToken);
         }
 
-        if (marker is DurableCreateMarkerResult.Rejected rejected)
+        if (marker is DurableMarkerResult.Rejected rejected)
         {
-            return rejected.Operation.State is DurableCreateOperationState.Succeeded
-                    or DurableCreateOperationState.Failed or DurableCreateOperationState.NeedsAttention
+            return rejected.Operation.State is DurableOperationState.Succeeded
+                    or DurableOperationState.Failed or DurableOperationState.NeedsAttention
                 ? MapObserved(rejected.Operation)
                 : await UncertainResultAsync(key, cancellationToken);
         }
@@ -183,7 +187,7 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
                     }
 
                     return recorded
-                        ? new DurableCreateExecutionResult(DurableCreateExecutionOutcome.Succeeded,
+                        ? new DurableExecutionResult(DurableExecutionOutcome.Succeeded,
                             await journal.FindAsync(key, CancellationToken.None) ?? operation)
                         : await UncertainResultAsync(key, cancellationToken);
                 }
@@ -191,14 +195,14 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
                 {
                     // A duplicate answer after dispatch is a definitive conflict; an existing database is
                     // never adopted. The post-marker outcome is recorded regardless of the caller token.
-                    await journal.TryFinalizeFailureAsync(key, attemptId, DurableCreateOperationState.Failed,
-                        DurableCreateOperationReason.Conflict, clock.GetUtcNow(), CancellationToken.None);
+                    await journal.TryFinalizeFailureAsync(key, attemptId, DurableOperationState.Failed,
+                        DurableOperationReason.Conflict, clock.GetUtcNow(), CancellationToken.None);
                     return await RereadResultAsync(key, cancellationToken);
                 }
             case PostgreSqlDatabaseCreateDispatchOutcome.ServerRejected:
                 {
-                    await journal.TryFinalizeFailureAsync(key, attemptId, DurableCreateOperationState.Failed,
-                        DurableCreateOperationReason.ServerRejected, clock.GetUtcNow(), CancellationToken.None);
+                    await journal.TryFinalizeFailureAsync(key, attemptId, DurableOperationState.Failed,
+                        DurableOperationReason.ServerRejected, clock.GetUtcNow(), CancellationToken.None);
                     return await RereadResultAsync(key, cancellationToken);
                 }
             default:
@@ -208,40 +212,40 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         }
     }
 
-    private async ValueTask<DurableCreateExecutionResult> RecoverDispatchingAsync(DurableCreateOperationKey key,
+    private async ValueTask<DurableExecutionResult> RecoverDispatchingAsync(DurableOperationKey key,
         CancellationToken cancellationToken)
     {
         // A durably committed marker survived a restart. No SQL is sent, even when the database
         // exists; only manual recovery may resolve the uncertainty.
         var recovered = await journal.TryRecoverDispatchingAsync(key, clock.GetUtcNow(), cancellationToken);
         var operation = await journal.FindAsync(key, cancellationToken);
-        if (operation is null) return DurableCreateExecutionResult.NotFound();
-        return new DurableCreateExecutionResult(
-            recovered && operation.State == DurableCreateOperationState.NeedsAttention
-                ? DurableCreateExecutionOutcome.NeedsAttention
+        if (operation is null) return DurableExecutionResult.NotFound();
+        return new DurableExecutionResult(
+            recovered && operation.State == DurableOperationState.NeedsAttention
+                ? DurableExecutionOutcome.NeedsAttention
                 : MapTerminal(operation.State), operation);
     }
 
-    private async ValueTask<DurableCreateExecutionResult> FailBeforeDispatchAsync(DurableCreateOperationKey key,
-        Guid attemptId, DurableCreateOperationReason reason, bool definitive, CancellationToken cancellationToken)
+    private async ValueTask<DurableExecutionResult> FailBeforeDispatchAsync(DurableOperationKey key,
+        Guid attemptId, DurableOperationReason reason, bool definitive, CancellationToken cancellationToken)
     {
         if (definitive)
-            await journal.TryFinalizeFailureAsync(key, attemptId, DurableCreateOperationState.Failed, reason,
+            await journal.TryFinalizeFailureAsync(key, attemptId, DurableOperationState.Failed, reason,
                 clock.GetUtcNow(), cancellationToken);
         else
             await journal.TryCloseAttemptBeforeDispatchAsync(key, attemptId,
-                DurableCreateAttemptOutcome.FailedBeforeDispatch, reason, clock.GetUtcNow(), cancellationToken);
+                DurableAttemptOutcome.FailedBeforeDispatch, reason, clock.GetUtcNow(), cancellationToken);
         return await RereadResultAsync(key, cancellationToken);
     }
 
-    private async ValueTask<DurableCreateExecutionResult> FinalizeUncertainAsync(DurableCreateOperationKey key,
+    private async ValueTask<DurableExecutionResult> FinalizeUncertainAsync(DurableOperationKey key,
         Guid attemptId, CancellationToken cancellationToken)
     {
         try
         {
             // The NeedsAttention bookkeeping for a dispatched window must survive caller cancellation.
-            await journal.TryFinalizeFailureAsync(key, attemptId, DurableCreateOperationState.NeedsAttention,
-                DurableCreateOperationReason.UncertainAfterDispatch, clock.GetUtcNow(), CancellationToken.None);
+            await journal.TryFinalizeFailureAsync(key, attemptId, DurableOperationState.NeedsAttention,
+                DurableOperationReason.UncertainAfterDispatch, clock.GetUtcNow(), CancellationToken.None);
         }
         catch (Exception)
         {
@@ -251,60 +255,61 @@ public sealed class PostgreSqlDurableCreateOperationExecutor(IDurableCreateOpera
         return await RereadResultAsync(key, cancellationToken);
     }
 
-    private async ValueTask<DurableCreateExecutionResult> UncertainResultAsync(DurableCreateOperationKey key,
+    private async ValueTask<DurableExecutionResult> UncertainResultAsync(DurableOperationKey key,
         CancellationToken cancellationToken)
     {
         var operation = await journal.FindAsync(key, CancellationToken.None);
-        return new DurableCreateExecutionResult(DurableCreateExecutionOutcome.DispatchUncertain, operation);
+        return new DurableExecutionResult(DurableExecutionOutcome.DispatchUncertain, operation);
     }
 
-    private async ValueTask<DurableCreateExecutionResult> RereadResultAsync(DurableCreateOperationKey key,
+    private async ValueTask<DurableExecutionResult> RereadResultAsync(DurableOperationKey key,
         CancellationToken cancellationToken)
     {
         var operation = await journal.FindAsync(key, CancellationToken.None);
         return operation is null
-            ? DurableCreateExecutionResult.NotFound()
+            ? DurableExecutionResult.NotFound()
             : MapObserved(operation);
     }
 
-    private static DurableCreateOperationReason MapAbsenceFailure(PostgreSqlDatabaseAbsenceOutcome absence) =>
+    private static DurableOperationReason MapAbsenceFailure(PostgreSqlDatabaseAbsenceOutcome absence) =>
         absence switch
         {
-            PostgreSqlDatabaseAbsenceOutcome.Present => DurableCreateOperationReason.Conflict,
-            PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid => DurableCreateOperationReason.InputInvalid,
-            PostgreSqlDatabaseAbsenceOutcome.Connectivity => DurableCreateOperationReason.Connectivity,
-            PostgreSqlDatabaseAbsenceOutcome.SecretUnavailable => DurableCreateOperationReason.SecretUnavailable,
-            PostgreSqlDatabaseAbsenceOutcome.ProviderInputUnavailable => DurableCreateOperationReason.InputUnavailable,
-            _ => DurableCreateOperationReason.InputUnavailable
+            PostgreSqlDatabaseAbsenceOutcome.Present => DurableOperationReason.Conflict,
+            PostgreSqlDatabaseAbsenceOutcome.DatabaseNameInvalid => DurableOperationReason.InputInvalid,
+            PostgreSqlDatabaseAbsenceOutcome.Connectivity => DurableOperationReason.Connectivity,
+            PostgreSqlDatabaseAbsenceOutcome.SecretUnavailable => DurableOperationReason.SecretUnavailable,
+            PostgreSqlDatabaseAbsenceOutcome.ProviderInputUnavailable => DurableOperationReason.InputUnavailable,
+            _ => DurableOperationReason.InputUnavailable
         };
 
-    private static DurableCreateExecutionResult MapObserved(DurableCreateOperation operation) => new(
-        operation.State == DurableCreateOperationState.Preparing &&
-        operation.Reason is DurableCreateOperationReason.ProviderInputUnavailable or
-            DurableCreateOperationReason.InputUnavailable or
-            DurableCreateOperationReason.SecretUnavailable or DurableCreateOperationReason.Connectivity
-            ? DurableCreateExecutionOutcome.RetryableFailure
+    private static DurableExecutionResult MapObserved(DurableOperation operation) => new(
+        operation.State == DurableOperationState.Preparing &&
+        operation.Reason is DurableOperationReason.InputUnavailable or
+            DurableOperationReason.SecretUnavailable or DurableOperationReason.Connectivity
+            ? DurableExecutionOutcome.RetryableFailure
             : MapTerminal(operation.State), operation);
 
-    private static DurableCreateExecutionOutcome MapTerminal(DurableCreateOperationState state) => state switch
+    private static DurableExecutionOutcome MapTerminal(DurableOperationState state) => state switch
     {
-        DurableCreateOperationState.Succeeded => DurableCreateExecutionOutcome.Succeeded,
-        DurableCreateOperationState.Failed => DurableCreateExecutionOutcome.Failed,
-        DurableCreateOperationState.NeedsAttention => DurableCreateExecutionOutcome.NeedsAttention,
-        _ => DurableCreateExecutionOutcome.DispatchUncertain
+        DurableOperationState.Succeeded => DurableExecutionOutcome.Succeeded,
+        DurableOperationState.Failed => DurableExecutionOutcome.Failed,
+        DurableOperationState.NeedsAttention => DurableExecutionOutcome.NeedsAttention,
+        _ => DurableExecutionOutcome.DispatchUncertain
     };
 }
 
-public static class PostgreSqlDurableCreateOperationExecutorServiceCollectionExtensions
+public static class PostgreSqlDurableOperationExecutorServiceCollectionExtensions
 {
-    public static IServiceCollection AddPostgreSqlDurableCreateOperationExecution(this IServiceCollection services)
+    public static IServiceCollection AddPostgreSqlDurableOperationExecution(this IServiceCollection services)
     {
         services.TryAddSingleton<IDurableCreateDispatchFaultHooks, NullDurableCreateDispatchFaultHooks>();
         services.AddPostgreSqlDatabaseCreateTarget();
         services.AddPostgreSqlDatabaseCreateAction();
-        services.TryAddSingleton<PostgreSqlDurableCreateOperationExecutor>();
+        services.TryAddSingleton<PostgreSqlDurableOperationExecutor>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDurableActionHandler, PostgreSqlDatabaseCreateAction>());
-        services.TryAddSingleton<IDurableCreateOperationExecutor, ExactDurableCreateOperationExecutor>();
+        services.TryAddSingleton<ExactDurableOperationExecutor>();
+        services.TryAddSingleton<IDurableOperationExecutor>(p => p.GetRequiredService<ExactDurableOperationExecutor>());
+        services.TryAddSingleton<DurableGenerationRunner>();
         return services;
     }
 }

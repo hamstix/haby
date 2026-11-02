@@ -14,11 +14,11 @@ public sealed class DurablePlannerGuardTests
     {
         using var context = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>()
             .UseNpgsql().Options);
-        var entity = context.Model.FindEntityType(typeof(DurableCreateOperationRow))!;
-        Assert.Equal(["DeploymentId", "Generation", "ResourceId", "Action"],
+        var entity = context.Model.FindEntityType(typeof(DurableOperationRow))!;
+        Assert.Equal(["DeploymentId", "Generation", "OperationId"],
             entity.FindPrimaryKey()!.Properties.Select(property => property.Name).ToArray());
-        Assert.Equal(["Action", "AttemptNumber", "CreatedAt", "CurrentAttemptId", "DeploymentId", "DispatchedAt",
-            "FinalizedAt", "Generation", "ReasonCode", "ResourceId", "State", "UpdatedAt"],
+        Assert.Equal(["AttemptNumber", "CreatedAt", "CurrentAttemptId", "DeploymentId", "DispatchedAt",
+            "FinalizedAt", "Generation", "OperationId", "ReasonCode", "State", "UpdatedAt"],
             entity.GetProperties().Select(property => property.Name).OrderBy(name => name).ToArray());
     }
 
@@ -27,14 +27,14 @@ public sealed class DurablePlannerGuardTests
     {
         using var context = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>()
             .UseNpgsql().Options);
-        var entity = context.Model.FindEntityType(typeof(DurableCreateOperationAttemptRow))!;
+        var entity = context.Model.FindEntityType(typeof(DurableOperationAttemptRow))!;
         Assert.Equal(["AttemptId"], entity.FindPrimaryKey()!.Properties.Select(p => p.Name).ToArray());
-        Assert.Equal(["Action", "AttemptId", "AttemptNumber", "DeploymentId", "DispatchedAt", "FinishedAt",
-            "Generation", "Outcome", "ResourceId", "StartedAt"],
+        Assert.Equal(["AttemptId", "AttemptNumber", "DeploymentId", "DispatchedAt", "FinishedAt",
+            "Generation", "OperationId", "Outcome", "StartedAt"],
             entity.GetProperties().Select(property => property.Name).OrderBy(name => name).ToArray());
         Assert.Contains(entity.GetIndexes(), index => index.IsUnique &&
             index.Properties.Select(p => p.Name).SequenceEqual(
-                ["DeploymentId", "Generation", "ResourceId", "Action", "AttemptNumber"]));
+                ["DeploymentId", "Generation", "OperationId", "AttemptNumber"]));
     }
 
     [Fact]
@@ -58,27 +58,6 @@ public sealed class DurablePlannerGuardTests
         Assert.Throws<ArgumentException>(() => PostgreSqlDurableDeploymentPlanner.ValidateActor(""));
         Assert.Throws<ArgumentException>(() => PostgreSqlDurableDeploymentPlanner.ValidateActor(new string('a', 257)));
         Assert.Throws<ArgumentException>(() => PostgreSqlDurableDeploymentPlanner.ValidateActor("actor\nsecret"));
-    }
-
-    [Fact]
-    public void Fingerprint_is_versioned_deterministic_and_changes_with_exact_input()
-    {
-        var application = ApplicationRecordId.New();
-        var inputs = new DurablePlanningInputs(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
-            ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(1)),
-            ProviderAlias.Create("postgresql.primary"), ProviderInstanceId.New(),
-            ProviderConfigurationRevisionNumber.Create(1), "haby.postgresql.database/v1alpha1");
-        var fingerprint = PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs);
-
-        Assert.StartsWith("v1:", fingerprint);
-        Assert.Equal(67, fingerprint.Length);
-        Assert.Equal(fingerprint, PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs));
-        Assert.NotEqual(fingerprint, PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs with
-        { ConfigurationRevision = ProviderConfigurationRevisionNumber.Create(2) }));
-        Assert.NotEqual(fingerprint, PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs with
-        { ImplementationId = "other/v1" }));
-        Assert.NotEqual(fingerprint, PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs with
-        { Revision = ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(2)) }));
     }
 
     [Fact]

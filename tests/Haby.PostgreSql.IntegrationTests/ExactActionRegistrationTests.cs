@@ -20,8 +20,7 @@ public sealed class ExactActionRegistrationTests
     {
         var expected = PostgreSqlDatabaseCreateAction.RegistrationKey;
         var handler = new Stub(expected);
-        var registry = new DurableActionRegistry([handler], [handler],
-            [new(expected.Admission.ResourceContract, expected.ActionContract)]);
+        var registry = new DurableActionRegistry([handler], [handler]);
         var different = dimension switch
         {
             "resource" => expected with { Admission = expected.Admission with { ResourceContract = ResourceTypeId.Create("sample.queue/v1") } },
@@ -33,13 +32,11 @@ public sealed class ExactActionRegistrationTests
         Assert.Same(handler, registry.Find(expected));
         Assert.Null(registry.Find(different));
         if (dimension != "action") Assert.Null(registry.Find(different.Admission));
-        Assert.Equal("postgresql.database.create/v1alpha1", registry.HistoricalCreate(expected.Admission.ResourceContract)!.Value);
     }
 
     [Theory]
     [InlineData("admission")]
     [InlineData("executor")]
-    [InlineData("mapping")]
     [InlineData("invalid")]
     public void Invalid_or_overlapping_current_registration_fails_Host_construction(string kind)
     {
@@ -47,19 +44,20 @@ public sealed class ExactActionRegistrationTests
         Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.Build(
             ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"], services =>
             {
-                if (kind == "mapping") services.AddSingleton(new DurableCreateActionMapping(key.Admission.ResourceContract, key.ActionContract));
-                else if (kind == "executor") services.AddSingleton<IDurableActionHandler>(new Stub(key));
+                if (kind == "executor") services.AddSingleton<IDurableActionHandler>(new Stub(key));
                 else services.AddSingleton<IDurableActionAdmissionHandler>(new Stub(kind == "invalid"
                     ? key with { Admission = key.Admission with { ImplementationId = null! } }
                     : key));
             }));
     }
 
-    private sealed class Stub(DurableActionExecutionKey key) : IDurableActionHandler
+    private sealed class Stub(DurableActionExecutionKey key) : IDurableActionHandler, IDurableActionAdmissionHandler
     {
         public DurableActionExecutionKey Key => key;
+        public bool Supports(DurableOperationNode node) => true;
+        public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => throw new NotSupportedException();
         public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) => throw new NotSupportedException();
-        public ValueTask<DurableCreateExecutionResult> ExecuteAsync(DurableCreateOperation operation,
-            NormalizedResource resource, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

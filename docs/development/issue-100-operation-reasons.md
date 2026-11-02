@@ -1,5 +1,9 @@
 # Issue #100: Compatible Provider-neutral operation reasons
 
+> Historical delivery record. Issue 104 and ADR-033 replace its development-era
+> operation addressing and compatibility requirements. Current behavior is in
+> [the graph design](104-durable-operation-graph.md).
+
 Issue: <https://github.com/hamstix/haby/issues/100>
 
 This is the first implementation slice of accepted

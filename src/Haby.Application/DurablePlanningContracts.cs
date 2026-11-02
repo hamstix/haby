@@ -10,7 +10,10 @@ public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, Envi
 /// <summary>A Plan is immutable; closure is stored separately from its original record.</summary>
 public sealed record DurablePlan(DeploymentPlanId Id, DeploymentChangeSetId ChangeSetId,
     DurablePlanningInputs Inputs, string Fingerprint, DateTimeOffset CreatedAt,
-    DateTimeOffset ExpiresAt, string ActorId, DateTimeOffset? ClosedAt, string? ClosedByActorId);
+    DateTimeOffset ExpiresAt, string ActorId, DateTimeOffset? ClosedAt, string? ClosedByActorId)
+{
+    public DurableOperationGraph Graph { get; init; } = null!;
+}
 
 public enum DurableChangeSetCreateStatus
 {
@@ -51,7 +54,10 @@ public interface IDurableDeploymentPlanner
 /// <summary>The persisted first desired generation and its exact, non-secret Plan inputs.</summary>
 public sealed record DurableDesiredGeneration(ApplicationDeploymentId DeploymentId,
     DeploymentGeneration Generation, DesiredPresence Presence, DurablePlanningInputs Inputs, DeploymentPlanId PlanId,
-    DeploymentChangeSetId ChangeSetId, DateTimeOffset AcceptedAt, string ActorId);
+    DeploymentChangeSetId ChangeSetId, DateTimeOffset AcceptedAt, string ActorId)
+{
+    public DurableOperationGraph Graph { get; init; } = null!;
+}
 
 public sealed record DurableChangeSetCommit(DeploymentChangeSetId ChangeSetId, DeploymentPlanId PlanId,
     ApplicationDeploymentId DeploymentId, DeploymentGeneration Generation, DateTimeOffset CommittedAt,

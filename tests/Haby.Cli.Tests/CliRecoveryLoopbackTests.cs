@@ -21,29 +21,29 @@ public sealed partial class CliLoopbackTests
         internal static StringWriter? ManagedError;
         public override Task<RecoveryReply> InspectOperationRecovery(OperationRequest request, ServerCallContext context)
         {
-            if (request.ResourceId == "transport") throw new RpcException(new Status(StatusCode.Unavailable, "note-secret-sentinel"));
+            if (request.OperationId == "transport") throw new RpcException(new Status(StatusCode.Unavailable, "note-secret-sentinel"));
             var reply = CliRecoveryTests.Reply(RecoveryStatus.Found);
             reply.Preview.Operation.Key = request.Clone();
             reply.Receipt.Key = request.Clone();
-            if (request.ResourceId == "stale") reply.Preview.UncertainAttemptId = "01a1838d-981a-7913-9e18-b42480d65e12";
-            if (request.ResourceId is "retry" or "uuid-retry")
+            if (request.OperationId == "stale") reply.Preview.UncertainAttemptId = "01a1838d-981a-7913-9e18-b42480d65e12";
+            if (request.OperationId is "retry" or "uuid-retry")
             { reply.Preview.ClearUncertainAttemptId(); reply.Preview.Operation.State = OperationState.Succeeded; }
-            if (request.ResourceId.StartsWith("reason-", StringComparison.Ordinal))
-                reply.Preview.Operation.Reason = (OperationReason)int.Parse(request.ResourceId[7..], System.Globalization.CultureInfo.InvariantCulture);
+            if (request.OperationId.StartsWith("reason-", StringComparison.Ordinal))
+                reply.Preview.Operation.Reason = (OperationReason)int.Parse(request.OperationId[7..], System.Globalization.CultureInfo.InvariantCulture);
             return Task.FromResult(reply);
         }
         public override Task<RecoveryReply> AssignExistingOperation(AssignExistingOperationRequest request, ServerCallContext context)
         {
             Assert.True(request.Acknowledged);
             Assert.Equal("environment", request.EnvironmentRecordId);
-            Assert.Equal(request.Key.ResourceId is "uuid-assignment" or "uuid-retry"
+            Assert.Equal(request.Key.OperationId is "uuid-assignment" or "uuid-retry"
                 ? CanonicalAttempt.ToUpperInvariant() : CanonicalAttempt, request.ExpectedAttemptId);
             Assert.Equal(RecoveryReason.OperatorAcceptedExistingDatabase, request.Reason);
             Assert.Equal("note-secret-sentinel", request.Note);
             // For the managed command prove the summary is visible before the assignment RPC is sent.
             if (ManagedError is { } error) Assert.Contains("example_db", error.ToString());
             Interlocked.Increment(ref Assignments);
-            return Task.FromResult(CliRecoveryTests.Reply(request.Key.ResourceId switch
+            return Task.FromResult(CliRecoveryTests.Reply(request.Key.OperationId switch
             {
                 "absent" => RecoveryStatus.TargetAbsent,
                 "unavailable" => RecoveryStatus.TargetUnavailable,
@@ -74,10 +74,10 @@ public sealed partial class CliLoopbackTests
                     var expected = resource switch { "stale" or "absent" or "unavailable" or "unsupported" => 1, "transport" => 3, _ => 0 };
                     await Run(args, format, expected, resource is not ("stale" or "transport"), summary: resource != "transport");
                 }
-            await Run(["operation", "recovery", "inspect", "deployment", "1", "db", "--action", "create"], "json", 0, false, summary: false);
+            await Run(["operation", "recovery", "inspect", "deployment", "1", "db"], "json", 0, false, summary: false);
             foreach (var format in new[] { "text", "json" })
-                foreach (var number in Enumerable.Range(0, 12))
-                    await Run(["operation", "recovery", "inspect", "deployment", "1", "reason-" + number, "--action", "create"], format, 0, false, summary: false);
+                foreach (var number in new[] { 0, 2, 5, 6, 7, 8, 9, 10, 11 })
+                    await Run(["operation", "recovery", "inspect", "deployment", "1", "reason-" + number], format, 0, false, summary: false);
             var valid = AssignmentArgs("db");
             foreach (var option in new[] { "--acknowledge-assignment", "--note-file", "--expected-attempt-id", "--environment-record-id", "--reason" })
             {
@@ -93,7 +93,7 @@ public sealed partial class CliLoopbackTests
             }
 
             string[] AssignmentArgs(string resource) => ["operation", "recovery", "assign-existing", "deployment", "1", resource,
-                "--action", "create", "--environment-record-id", "environment", "--expected-attempt-id",
+                "--environment-record-id", "environment", "--expected-attempt-id",
                 resource is "uuid-assignment" or "uuid-retry" ? RecoveryRegistry.CanonicalAttempt.ToUpperInvariant() : RecoveryRegistry.CanonicalAttempt,
                 "--acknowledge-assignment", "--reason", "operatorAcceptedExistingDatabase", "--note-file", note];
 

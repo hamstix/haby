@@ -20,35 +20,38 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed partial class OperatorHostIntegrationTests
 {
     [Theory]
-    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable, 1)]
-    [InlineData(DurableCreateOperationReason.SecretUnavailable, 2)]
-    [InlineData(DurableCreateOperationReason.UnsupportedShape, 3)]
-    [InlineData(DurableCreateOperationReason.DatabaseNameInvalid, 4)]
-    [InlineData(DurableCreateOperationReason.Connectivity, 5)]
-    [InlineData(DurableCreateOperationReason.Conflict, 6)]
-    [InlineData(DurableCreateOperationReason.ServerRejected, 7)]
-    [InlineData(DurableCreateOperationReason.UncertainAfterDispatch, 8)]
-    [InlineData(DurableCreateOperationReason.InputInvalid, 9)]
-    [InlineData(DurableCreateOperationReason.InputUnavailable, 10)]
-    [InlineData(DurableCreateOperationReason.HandlerUnavailable, 11)]
+    [InlineData(DurableOperationReason.SecretUnavailable, 2)]
+    [InlineData(DurableOperationReason.Connectivity, 5)]
+    [InlineData(DurableOperationReason.Conflict, 6)]
+    [InlineData(DurableOperationReason.ServerRejected, 7)]
+    [InlineData(DurableOperationReason.UncertainAfterDispatch, 8)]
+    [InlineData(DurableOperationReason.InputInvalid, 9)]
+    [InlineData(DurableOperationReason.InputUnavailable, 10)]
+    [InlineData(DurableOperationReason.HandlerUnavailable, 11)]
     public async Task Retained_reasons_round_trip_through_restarted_Host_operation_and_recovery(
-        DurableCreateOperationReason reason, int wireNumber)
+        DurableOperationReason reason, int wireNumber)
     {
         await using var scenario = await ExecutionScenarioAsync();
         OperationRequest request;
-        await using (var host = await StartAsync(scenario.Connection, scenario.CertificatePath))
+        using var faults = new ExecutionLogs();
+        await using (var host = await StartExecutionLoggedHost(scenario.Connection, scenario.CertificatePath, faults))
         {
             using var channel = Channel(host, scenario.Certificate);
-            request = await CommitExecutionAsync(new ManifestOperator.ManifestOperatorClient(channel), scenario.Database);
+            try { request = await CommitExecutionAsync(new ManifestOperator.ManifestOperatorClient(channel), scenario.Database); }
+            catch (Grpc.Core.RpcException)
+            {
+                // Preserve diagnostic categories and code location, never exception messages/values.
+                throw new InvalidOperationException("Host fault categories: " + faults.SafeFaults);
+            }
             var key = ExecutionKey(request);
-            var journal = host.Services.GetRequiredService<IDurableCreateOperationJournal>();
+            var journal = host.Services.GetRequiredService<IDurableOperationJournal>();
             var at = DateTimeOffset.UtcNow;
-            var attempt = Assert.IsType<DurableCreateBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, at, default));
-            if (reason == DurableCreateOperationReason.UncertainAfterDispatch)
-                Assert.IsType<DurableCreateMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, attempt.AttemptId, at, default));
+            var attempt = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, at, default));
+            if (reason == DurableOperationReason.UncertainAfterDispatch)
+                Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, attempt.AttemptId, at, default));
             Assert.True(await journal.TryFinalizeFailureAsync(key, attempt.AttemptId,
-                reason == DurableCreateOperationReason.UncertainAfterDispatch
-                    ? DurableCreateOperationState.NeedsAttention : DurableCreateOperationState.Failed, reason, at, default));
+                reason == DurableOperationReason.UncertainAfterDispatch
+                    ? DurableOperationState.NeedsAttention : DurableOperationState.Failed, reason, at, default));
         }
         await using (var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath))
         {
@@ -69,9 +72,9 @@ public sealed partial class OperatorHostIntegrationTests
                 string[] spellings = ["providerInputUnavailable", "secretUnavailable", "unsupportedShape", "databaseNameInvalid",
                     "connectivity", "conflict", "serverRejected", "uncertainAfterDispatch", "inputInvalid", "inputUnavailable", "handlerUnavailable"];
                 using var ordinary = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(),
-                    ["operation", "get", request.DeploymentId, "1", "db", "--action", "create"]));
+                    ["operation", "get", request.DeploymentId, "1", "db-create"]));
                 using var inspection = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(),
-                    ["operation", "recovery", "inspect", request.DeploymentId, "1", "db", "--action", "create"]));
+                    ["operation", "recovery", "inspect", request.DeploymentId, "1", "db-create"]));
                 Assert.Equal(spellings[wireNumber - 1], ordinary.RootElement.GetProperty("data"u8).GetProperty("operation"u8).GetProperty("reason"u8).GetString());
                 Assert.Equal(spellings[wireNumber - 1], inspection.RootElement.GetProperty("data"u8).GetProperty("preview"u8).GetProperty("operation"u8).GetProperty("reason"u8).GetString());
             }
@@ -85,10 +88,10 @@ public sealed partial class OperatorHostIntegrationTests
         OperationReply original;
         await using (var host = await StartAsync(scenario.Connection, scenario.CertificatePath))
         {
-            var executor = host.Services.GetRequiredService<IDurableCreateOperationExecutor>();
+            var executor = host.Services.GetRequiredService<IDurableOperationExecutor>();
             using var scope = host.Services.CreateScope();
-            Assert.Same(executor, scope.ServiceProvider.GetRequiredService<IDurableCreateOperationExecutor>());
-            Assert.IsType<ExactDurableCreateOperationExecutor>(executor);
+            Assert.Same(executor, scope.ServiceProvider.GetRequiredService<IDurableOperationExecutor>());
+            Assert.IsType<ExactDurableOperationExecutor>(executor);
             Assert.IsType<PostgreSqlDatabaseCreateTarget>(host.Services.GetRequiredService<IPostgreSqlDatabaseCreateTarget>());
             using var channel = Channel(host, scenario.Certificate);
             var client = new ManifestOperator.ManifestOperatorClient(channel);
@@ -187,21 +190,17 @@ public sealed partial class OperatorHostIntegrationTests
         // Validate exact identity; neither omitted generation nor an implicit Resource is allowed.
         var zero = request.Clone(); zero.Generation = 0; invalid.Add(zero);
         var negative = request.Clone(); negative.Generation = -1; invalid.Add(negative);
-        var empty = request.Clone(); empty.ResourceId = ""; invalid.Add(empty);
-        var latest = request.Clone(); latest.ResourceId = "latest.*"; invalid.Add(latest);
-        var missingAction = request.Clone(); missingAction.Action = OperationAction.Unspecified; invalid.Add(missingAction);
+        var empty = request.Clone(); empty.OperationId = ""; invalid.Add(empty);
+        var latest = request.Clone(); latest.OperationId = "latest.*"; invalid.Add(latest);
         foreach (var bad in invalid)
         {
             Assert.Equal(OperationStatus.InvalidRequest, (await client.ExecuteOperationAsync(bad)).Status);
             Assert.Equal(OperationStatus.InvalidRequest, (await client.GetOperationAsync(bad)).Status);
         }
-        var unsupported = request.Clone(); unsupported.Action = (OperationAction)999;
-        Assert.Equal(OperationStatus.UnsupportedAction, (await client.ExecuteOperationAsync(unsupported)).Status);
-        Assert.Equal(OperationStatus.UnsupportedAction, (await client.GetOperationAsync(unsupported)).Status);
-        unsupported = request.Clone(); unsupported.Generation = 2;
+        var unsupported = request.Clone(); unsupported.Generation = 2;
         Assert.Equal(OperationStatus.UnsupportedShape, (await client.ExecuteOperationAsync(unsupported)).Status);
         Assert.Equal(OperationStatus.UnsupportedShape, (await client.GetOperationAsync(unsupported)).Status);
-        var missing = request.Clone(); missing.ResourceId = "other";
+        var missing = request.Clone(); missing.OperationId = "other";
         Assert.Equal(OperationStatus.OperationNotFound, (await client.ExecuteOperationAsync(missing)).Status);
         Assert.Equal(OperationStatus.OperationNotFound, (await client.GetOperationAsync(missing)).Status);
         missing = request.Clone(); missing.DeploymentId = ApplicationDeploymentId.New().ToString();
@@ -239,10 +238,10 @@ public sealed partial class OperatorHostIntegrationTests
             request = await CommitExecutionAsync(new ManifestOperator.ManifestOperatorClient(channel), scenario.Database);
             // Trusted journal API simulates death after the committed marker before SQL.
             var key = ExecutionKey(request);
-            var journal = host.Services.GetRequiredService<IDurableCreateOperationJournal>();
-            var started = Assert.IsType<DurableCreateBeginAttemptResult.Started>(
+            var journal = host.Services.GetRequiredService<IDurableOperationJournal>();
+            var started = Assert.IsType<DurableBeginAttemptResult.Started>(
                 await journal.TryBeginAttemptAsync(key, DateTimeOffset.UtcNow, default));
-            Assert.IsType<DurableCreateMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(
+            Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(
                 key, started.AttemptId, DateTimeOffset.UtcNow, default));
         }
         await AssertExecutionCatalog(scenario, exists: created, applied: false, dispatched: 1);
@@ -334,16 +333,16 @@ public sealed partial class OperatorHostIntegrationTests
                 using var accepted = await Run("changeset", "commit", changeId, "--plan", plan);
                 deployment = accepted.RootElement.GetProperty("data"u8).GetProperty("commit"u8).GetProperty("deploymentId"u8).GetString()!;
                 await AssertExecutionCatalog(scenario, exists: false, applied: false, dispatched: 0);
-                using var executed = await Run("operation", "execute", deployment, "1", "db", "--action", "create");
+                using var executed = await Run("operation", "execute", deployment, "1", "db-create");
                 Assert.Equal("succeeded", executed.RootElement.GetProperty("outcome"u8).GetString());
                 Assert.DoesNotContain(scenario.Password, executed.RootElement.GetRawText());
             }
             await using (var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath))
             {
-                var args = new[] { "operation", "get", deployment, "1", "db", "--action", "create" };
+                var args = new[] { "operation", "get", deployment, "1", "db-create" };
                 using var before = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(), args));
                 using var retry = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(),
-                    ["operation", "execute", deployment, "1", "db", "--action", "create"]));
+                    ["operation", "execute", deployment, "1", "db-create"]));
                 using var after = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(), args));
                 Assert.Equal(before.RootElement.GetRawText(), after.RootElement.GetRawText());
                 var operation = after.RootElement.GetProperty("data"u8);
@@ -372,12 +371,12 @@ public sealed partial class OperatorHostIntegrationTests
         var committed = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest
         { ChangeSetId = change.ChangeSet.ChangeSetId, PlanId = plan.Plan.PlanId });
         Assert.Equal(CommitStatus.Committed, committed.Status);
-        return new OperationRequest { DeploymentId = committed.Commit.DeploymentId, Generation = 1, ResourceId = "db", Action = OperationAction.Create };
+        return new OperationRequest { DeploymentId = committed.Commit.DeploymentId, Generation = 1, OperationId = "db-create" };
     }
 
-    private static DurableCreateOperationKey ExecutionKey(OperationRequest request) => new(
+    private static DurableOperationKey ExecutionKey(OperationRequest request) => new(
         ApplicationDeploymentId.Parse(request.DeploymentId), DeploymentGeneration.Create(request.Generation),
-        ManifestLocalId.Create(request.ResourceId), DurableOperationAction.Create);
+        OperationId.Create(request.OperationId));
 
     private async Task<ExecutionScenario> ExecutionScenarioAsync()
     {
@@ -461,15 +460,23 @@ public sealed partial class OperatorHostIntegrationTests
     private sealed class ExecutionLogs : ILoggerProvider
     {
         private readonly ConcurrentQueue<string> entries = new();
+        private readonly ConcurrentQueue<Exception> exceptions = new();
         public string Text => string.Join("\n", entries);
-        public ILogger CreateLogger(string categoryName) => new Capture(entries);
+        public string SafeFaults => string.Join(" | ", exceptions.Select(Describe));
+        private static string Describe(Exception error) => error.GetType().Name +
+            (error is Npgsql.PostgresException pg ? " SQLSTATE=" + pg.SqlState : "") + " " + error.StackTrace +
+            (error.InnerException is { } inner ? " -> " + Describe(inner) : "");
+        public ILogger CreateLogger(string categoryName) => new Capture(entries, exceptions);
         public void Dispose() { }
-        private sealed class Capture(ConcurrentQueue<string> entries) : ILogger
+        private sealed class Capture(ConcurrentQueue<string> entries, ConcurrentQueue<Exception> exceptions) : ILogger
         {
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
             public bool IsEnabled(LogLevel level) => true;
-            public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
                 entries.Enqueue(formatter(state, exception) + exception);
+                if (exception is not null) exceptions.Enqueue(exception);
+            }
         }
     }
 

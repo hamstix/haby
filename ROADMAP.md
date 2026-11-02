@@ -581,10 +581,12 @@ admitting role/grant or other new effect kinds.
 the #91 design: explicit single-instance sequential execution, an immutable
 operation graph, shared exact admission across Plan/Check/Commit, per-operation
 dispatch barriers and generation completion only after all required operations
-succeed. Common reasons and exact admission have been delivered; next implement
-graph persistence/execution and aggregate completion using one current model
-under ADR-033 rather than adding a pre-graph compatibility layer.
-Keep the existing one-database admission until those safeguards are complete.
+succeed. Common reasons, exact admission and the persisted operation-graph vertical path
+are implemented. Plans/generations retain frozen typed inputs and dependencies;
+explicit sequential execution and manual recovery share aggregate completion.
+The graph revision requires a fresh catalog under ADR-033. Multi-step effects
+remain test-only; production still admits one database Create.
+Keep the existing one-database production admission; further effects need separate decisions.
 Role/grant ownership, generated-secret lifecycle and confidential configuration
 retrieval still require their own decisions before implementation.
 

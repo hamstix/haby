@@ -97,11 +97,9 @@ public sealed partial class OperatorHostIntegrationTests
         Add(r => r.EnvironmentRecordId = "", RecoveryStatus.InvalidRequest);
         Add(r => r.EnvironmentRecordId = r.EnvironmentRecordId.ToUpperInvariant(), RecoveryStatus.InvalidRequest);
         Add(r => r.Key.DeploymentId = r.Key.DeploymentId.ToUpperInvariant(), RecoveryStatus.InvalidRequest);
-        Add(r => r.Key.ResourceId = "other", RecoveryStatus.OperationNotFound);
+        Add(r => r.Key.OperationId = "other", RecoveryStatus.OperationNotFound);
         Add(r => r.Key.DeploymentId = ApplicationDeploymentId.New().ToString(), RecoveryStatus.OperationNotFound);
         Add(r => r.Key.Generation = 2, RecoveryStatus.UnsupportedRecoveryAction);
-        Add(r => r.Key.Action = (OperationAction)999, RecoveryStatus.UnsupportedRecoveryAction);
-        Add(r => r.Key.Action = OperationAction.Unspecified, RecoveryStatus.InvalidRequest);
         Add(r => r.Key = null, RecoveryStatus.InvalidRequest);
         Add(r => r.Reason = RecoveryReason.Unspecified, RecoveryStatus.InvalidRequest);
         Add(r => r.Reason = (RecoveryReason)999, RecoveryStatus.InvalidRequest);
@@ -163,8 +161,8 @@ public sealed partial class OperatorHostIntegrationTests
         await using var scenario = await ExecutionScenarioAsync();
         var key = await UncertainRecoveryOperation(scenario, created: false);
         var host = OperatorHostApplication.Build(Arguments(scenario.Connection, scenario.CertificatePath), services =>
-            services.AddSingleton<IDurableCreateOperationQuery>(sp => new UnsupportedRecoveryQuery(
-                sp.GetRequiredService<IDurableCreateOperationJournal>())));
+            services.AddSingleton<IDurableOperationQuery>(sp => new UnsupportedRecoveryQuery(
+                sp.GetRequiredService<IDurableOperationJournal>())));
         await using (host)
         {
             await host.StartAsync();
@@ -174,17 +172,23 @@ public sealed partial class OperatorHostIntegrationTests
             var before = await RecoveryCatalog(scenario);
             var preview = await client.InspectOperationRecoveryAsync(key);
             Assert.Equal(RecoveryStatus.UnsupportedRecoveryAction, preview.Status);
-            var raw = new AssignExistingOperationRequest { Key = key, Acknowledged = true,
-                EnvironmentRecordId = scenario.Environment.ToString(), ExpectedAttemptId = Guid.NewGuid().ToString("D"),
-                Reason = RecoveryReason.OperatorAcceptedExistingDatabase, Note = RecoveryNote };
+            var raw = new AssignExistingOperationRequest
+            {
+                Key = key,
+                Acknowledged = true,
+                EnvironmentRecordId = scenario.Environment.ToString(),
+                ExpectedAttemptId = Guid.NewGuid().ToString("D"),
+                Reason = RecoveryReason.OperatorAcceptedExistingDatabase,
+                Note = RecoveryNote
+            };
             Assert.Equal(RecoveryStatus.UnsupportedRecoveryAction, (await client.AssignExistingOperationAsync(raw)).Status);
             Assert.Equal(before, await RecoveryCatalog(scenario));
         }
     }
 
-    private sealed class UnsupportedRecoveryQuery(IDurableCreateOperationJournal journal) : IDurableCreateOperationQuery
+    private sealed class UnsupportedRecoveryQuery(IDurableOperationJournal journal) : IDurableOperationQuery
     {
-        public async ValueTask<DurableCreateOperation?> FindAsync(DurableCreateOperationKey key, CancellationToken cancellationToken) =>
+        public async ValueTask<DurableOperation?> FindAsync(DurableOperationKey key, CancellationToken cancellationToken) =>
             await journal.FindAsync(key, cancellationToken) is { } operation ? operation with { ImplementationId = "unsupported/v1" } : null;
     }
 
@@ -194,8 +198,8 @@ public sealed partial class OperatorHostIntegrationTests
         await using var scenario = await ExecutionScenarioAsync();
         var key = await UncertainRecoveryOperation(scenario, created: false);
         var host = OperatorHostApplication.Build(Arguments(scenario.Connection, scenario.CertificatePath), services =>
-            services.AddSingleton<IDurableCreateOperationQuery>(sp => new OlderRecoveryQuery(
-                sp.GetRequiredService<IDurableCreateOperationJournal>())));
+            services.AddSingleton<IDurableOperationQuery>(sp => new OlderRecoveryQuery(
+                sp.GetRequiredService<IDurableOperationJournal>())));
         await using (host)
         {
             await host.StartAsync();
@@ -209,12 +213,19 @@ public sealed partial class OperatorHostIntegrationTests
         }
     }
 
-    private sealed class OlderRecoveryQuery(IDurableCreateOperationJournal journal) : IDurableCreateOperationQuery
+    private sealed class OlderRecoveryQuery(IDurableOperationJournal journal) : IDurableOperationQuery
     {
-        public async ValueTask<DurableCreateOperation?> FindAsync(DurableCreateOperationKey key, CancellationToken cancellationToken) =>
+        public async ValueTask<DurableOperation?> FindAsync(DurableOperationKey key, CancellationToken cancellationToken) =>
             await journal.FindAsync(key, cancellationToken) is { } operation ? operation with
-            { State = DurableCreateOperationState.Pending, AttemptId = null, AttemptNumber = 0,
-                Reason = null, UpdatedAt = null, DispatchedAt = null, FinalizedAt = null } : null;
+            {
+                State = DurableOperationState.Pending,
+                AttemptId = null,
+                AttemptNumber = 0,
+                Reason = null,
+                UpdatedAt = null,
+                DispatchedAt = null,
+                FinalizedAt = null
+            } : null;
     }
 
     private sealed class UnavailableRecoveryManifest : IManifestRevisionQuery
@@ -316,8 +327,8 @@ public sealed partial class OperatorHostIntegrationTests
                 else await AlterRecoveryLogin(scenario, "NOLOGIN");
                 var preview = await client.InspectOperationRecoveryAsync(key);
                 var request = RecoveryAssignment(preview);
-                await Run(["inspect", key.DeploymentId, "1", "db", "--action", "create"], "json", 0, false);
-                var args = new[] { "assign-existing", key.DeploymentId, "1", "db", "--action", "create",
+                await Run(["inspect", key.DeploymentId, "1", "db-create"], "json", 0, false);
+                var args = new[] { "assign-existing", key.DeploymentId, "1", "db-create",
                     "--environment-record-id", request.EnvironmentRecordId, "--expected-attempt-id", request.ExpectedAttemptId.ToUpperInvariant(),
                     "--reason", "operatorAcceptedExistingDatabase", "--note-file", note, "--acknowledge-assignment" };
                 if (restart == 0) await Run(args[..^1], "json", 2, false);
@@ -341,7 +352,7 @@ public sealed partial class OperatorHostIntegrationTests
                     Assert.Equal(exit, process.ExitCode);
                     var text = await stdout; var error = await stderr;
                     Assert.DoesNotContain(RecoveryNote, text + error); Assert.DoesNotContain(scenario.Password, text + error);
-                    if (summary) { Assert.Contains(restart == 0 ? scenario.Database : "(unavailable)", error); Assert.Contains(request.ExpectedAttemptId, error); }
+                    if (summary) { Assert.Contains(scenario.Database, error); Assert.Contains(request.ExpectedAttemptId, error); }
                     if (exit == 2) Assert.Equal("", text);
                     return text;
                 }
@@ -363,18 +374,21 @@ public sealed partial class OperatorHostIntegrationTests
             await Assert.ThrowsAsync<RpcException>(async () => await client.ExecuteOperationAsync(request));
         else
         {
-            var key = ExecutionKey(request); var journal = host.Services.GetRequiredService<IDurableCreateOperationJournal>();
-            var started = Assert.IsType<DurableCreateBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, DateTimeOffset.UtcNow, default));
-            Assert.IsType<DurableCreateMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, started.AttemptId, DateTimeOffset.UtcNow, default));
+            var key = ExecutionKey(request); var journal = host.Services.GetRequiredService<IDurableOperationJournal>();
+            var started = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, DateTimeOffset.UtcNow, default));
+            Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, started.AttemptId, DateTimeOffset.UtcNow, default));
         }
         return request;
     }
 
     private static AssignExistingOperationRequest RecoveryAssignment(RecoveryReply preview) => new()
     {
-        Key = preview.Preview.Operation.Key.Clone(), EnvironmentRecordId = preview.Preview.Operation.EnvironmentRecordId,
+        Key = preview.Preview.Operation.Key.Clone(),
+        EnvironmentRecordId = preview.Preview.Operation.EnvironmentRecordId,
         ExpectedAttemptId = preview.Preview.HasUncertainAttemptId ? preview.Preview.UncertainAttemptId : preview.Receipt?.AttemptId ?? Guid.NewGuid().ToString("D"),
-        Acknowledged = true, Reason = RecoveryReason.OperatorAcceptedExistingDatabase, Note = RecoveryNote
+        Acknowledged = true,
+        Reason = RecoveryReason.OperatorAcceptedExistingDatabase,
+        Note = RecoveryNote
     };
 
     private static async Task<string> RecoveryCatalog(ExecutionScenario scenario) =>

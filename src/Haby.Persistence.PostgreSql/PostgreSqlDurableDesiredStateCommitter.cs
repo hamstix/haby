@@ -88,10 +88,14 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 ManifestRevisionNumber.Create(change.RevisionNumber)), ProviderAlias.Create(plan.ProviderAlias),
             ProviderInstanceId.Parse(plan.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(plan.ConfigurationRevisionNumber), plan.ImplementationId);
+        DurableOperationGraph graph;
+        try { graph = DurableOperationGraphCodec.Decode(plan.GraphJson); graph.ValidateReferences(inputs); }
+        catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
+        if (!planner.Supports(graph)) return new DurableCommitResult.PlanInputUnavailable();
         if (plan.SnapshotFormatVersion != 1 || plan.EnvironmentRecordId != change.EnvironmentRecordId ||
             plan.ApplicationRecordId != change.ApplicationRecordId || plan.RevisionNumber != change.RevisionNumber ||
             plan.EnvironmentKey != inputs.EnvironmentKey.Value ||
-            plan.Fingerprint != PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs))
+            plan.Fingerprint != DurableOperationGraphCodec.Fingerprint(inputs, graph))
             return new DurableCommitResult.PlanStale();
 
         var manifestRow = await context.Revisions.AsNoTracking().SingleOrDefaultAsync(row =>
@@ -107,7 +111,6 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         var admitted = await planner.AdmitAsync(context, spec, revision, inputs, cancellationToken);
         if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
         if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
-        var resource = spec.Resources.Single();
 
         cancellationToken.ThrowIfCancellationRequested();
         var deploymentId = ApplicationDeploymentId.New();
@@ -138,6 +141,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             ConfigurationRevisionNumber = plan.ConfigurationRevisionNumber,
             ImplementationId = plan.ImplementationId,
             Fingerprint = plan.Fingerprint,
+            GraphJson = plan.GraphJson,
             AcceptedAt = committedAt,
             ActorId = actorId
         });
@@ -151,15 +155,15 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             ActorId = actorId
         };
         context.ChangeSetCommits.Add(commit);
-        context.DurableCreateOperations.Add(new DurableCreateOperationRow
-        {
-            DeploymentId = deploymentGuid,
-            Generation = 1,
-            ResourceId = resource.Key.Value,
-            Action = nameof(DurableOperationAction.Create),
-            State = nameof(DurableCreateOperationState.Pending),
-            CreatedAt = committedAt
-        });
+        foreach (var node in graph.Nodes)
+            context.DurableOperations.Add(new DurableOperationRow
+            {
+                DeploymentId = deploymentGuid,
+                Generation = 1,
+                OperationId = node.Id.Value,
+                State = nameof(DurableOperationState.Pending),
+                CreatedAt = committedAt
+            });
         await context.SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
@@ -196,10 +200,12 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 ManifestRevisionNumber.Create(row.RevisionNumber)), ProviderAlias.Create(row.ProviderAlias),
             ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
-        if (row.Fingerprint != PostgreSqlDurableDeploymentPlanner.Fingerprint(inputs))
+        var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
+        if (row.Fingerprint != DurableOperationGraphCodec.Fingerprint(inputs, graph))
             throw new InvalidDataException("Generation snapshot is inconsistent.");
         return new(deploymentId, generation, DesiredPresence.Present, inputs, DeploymentPlanId.Parse(row.PlanId.ToString()),
-            DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()), row.AcceptedAt, row.ActorId);
+            DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()), row.AcceptedAt, row.ActorId)
+        { Graph = graph };
     }
 
     private static DurableChangeSetCommit ToCommit(ChangeSetCommitRow row) => new(
@@ -213,7 +219,7 @@ public static class DurableDesiredStateCommitterServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDurableDesiredStateCommitter(this IServiceCollection services)
     {
         services.AddPostgreSqlDurableDeploymentPlanner();
-        services.AddPostgreSqlDurableCreateOperationQuery();
+        services.AddPostgreSqlDurableOperationQuery();
         services.TryAddSingleton<IDurableDesiredStateCommitter, PostgreSqlDurableDesiredStateCommitter>();
         return services;
     }
