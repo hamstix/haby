@@ -55,6 +55,11 @@ public sealed class PostgreSqlDurableOperationExecutor(IDurableOperationJournal 
         if (operation.Node.Dependencies.Any(d => !progress.Nodes.Any(n => n.Operation.Key.OperationId == d &&
             n.Operation.State == DurableOperationState.Succeeded))) return new(DurableExecutionOutcome.Blocked, operation);
 
+        // Direct adapter entry is retained solely for the standalone checkpoint path.
+        // Multi-node dispatch must pass the common whole-graph capability barrier.
+        if (!prepared && (progress.Total != 1 || operation.Node.Action != PostgreSqlDatabaseCreateAction.RegistrationKey))
+            return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+
         var attemptId = Guid.Empty;
         switch (await journal.TryBeginAttemptAsync(key, clock.GetUtcNow(), cancellationToken))
         {

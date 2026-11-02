@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\src\Haby.Operator.Host\Haby.Operator.Host.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="..\..\docs\development\examples\106-shared-application-login.json" LogicalName="Haby.PostgreSql.IntegrationTests.pair.json" />
     <EmbeddedResource Include="..\Haby.Manifest.Tests\Corpus\complete.json" LogicalName="Haby.PostgreSql.IntegrationTests.complete.json" />
   </ItemGroup>
 </Project>

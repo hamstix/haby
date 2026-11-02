@@ -100,7 +100,10 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             if (accepted is null || !accepted.Value.Node.OutputReferences.Contains(selector)) return null;
             var producer = consumer with { OperationId = selector.ProducerOperationId };
             var input = await InputAsync(context, producer, cancellationToken);
-            if (input is null) return null;
+            if (input is null || selector.OutputContract != GeneratedCredentialContracts.OutputContract ||
+                selector.OutputKey != GeneratedCredentialContracts.Password ||
+                input.Owner != new ManagedResourceKey(EnvironmentRecordId.Parse(accepted.Value.Generation.EnvironmentRecordId.ToString()),
+                    ApplicationRecordId.Parse(accepted.Value.Generation.ApplicationRecordId.ToString()), accepted.Value.Node.ResourceId)) return null;
             var row = await OutputAsync(context, producer, cancellationToken);
             var output = row is null ? null : GeneratedCredentialOutputCodec.Decode(row.Contract, row.Payload);
             return output is not null && await ConfirmAsync(context, producer, output, cancellationToken) ? output : null;

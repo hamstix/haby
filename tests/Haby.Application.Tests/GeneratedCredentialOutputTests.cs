@@ -70,6 +70,22 @@ public sealed class GeneratedCredentialOutputTests
     }
 
     [Fact]
+    public void Non_secret_evidence_can_cross_Resources_without_weakening_password_ownership()
+    {
+        var database = Producer("database") with
+        {
+            ResourceId = ManifestLocalId.Create("database"),
+            Action = Consumer().Action with { ActionContract = OperationContractId.Create("sample.database.create/v1") },
+            Input = new("sample.database/v1", "{}")
+        };
+        var evidence = new OperationOutputRef(database.Id, "sample.database-output/v1", "database");
+        var consumer = Consumer() with { Dependencies = [database.Id], OutputReferences = [evidence] };
+        Assert.Equal(2, new DurableOperationGraph([database, consumer]).Nodes.Count);
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([Producer(), Consumer() with
+        { ResourceId = ManifestLocalId.Create("other-login") }]));
+    }
+
+    [Fact]
     public void Forged_application_owner_is_refused_against_containing_plan()
     {
         var input = GeneratedCredentialInputCodec.Decode(Producer().Input)!;

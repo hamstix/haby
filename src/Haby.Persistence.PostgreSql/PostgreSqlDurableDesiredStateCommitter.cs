@@ -91,7 +91,6 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         DurableOperationGraph graph;
         try { graph = DurableOperationGraphCodec.Decode(plan.GraphJson); graph.ValidateReferences(inputs); }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
-        if (!planner.Supports(graph)) return new DurableCommitResult.PlanInputUnavailable();
         if (plan.SnapshotFormatVersion != 1 || plan.EnvironmentRecordId != change.EnvironmentRecordId ||
             plan.ApplicationRecordId != change.ApplicationRecordId || plan.RevisionNumber != change.RevisionNumber ||
             plan.EnvironmentKey != inputs.EnvironmentKey.Value ||
@@ -106,11 +105,18 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             manifestRow.NormalizedModelVersion, manifestRow.ApplicationId, manifestRow.SnapshotFormatVersion);
         var spec = declaration.Spec;
         if (!DurableActionAdmission.SupportsPilotShape(spec)) return new DurableCommitResult.UnsupportedShape();
-        if (spec.Resources.Single().Value.ProviderRef.Value != plan.ProviderAlias)
+        if (DurableActionAdmission.SingleAlias(spec)?.Value != plan.ProviderAlias)
             return new DurableCommitResult.PlanStale();
         var admitted = await planner.AdmitAsync(context, spec, revision, inputs, cancellationToken);
         if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
         if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
+
+        try
+        {
+            if (!await planner.ValidateGraphAsync(context, spec, revision, inputs, graph, cancellationToken))
+                return new DurableCommitResult.PlanInputUnavailable();
+        }
+        catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
 
         cancellationToken.ThrowIfCancellationRequested();
         var deploymentId = ApplicationDeploymentId.New();
