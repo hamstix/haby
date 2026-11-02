@@ -36,6 +36,8 @@ Use the solution-level commands documented in [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Architecture constraints
 
+- During active development, follow [ADR-033](docs/adr/0033-development-compatibility-and-catalog-resets.md): prefer one current model; do not retain compatibility solely for superseded alpha catalogs, APIs or histories. Breaking slices may require a fresh catalog, but must preserve current-build runtime safety and never silently reset persistent data.
+
 - Domain and application logic must not depend on ASP.NET Core hosting, EF Core, UI packages or concrete plugins.
 - Prefer source generators and other compile-time generated metadata where supported. Avoid reflection-based discovery, activation, mapping and serialization in Haby-owned code; justify unavoidable reflection and its AOT/trimming impact in the pull request.
 - For production `System.Text.Json` use, including Host and persistence adapters, register DTO roots in a source-generated `JsonSerializerContext` and use its generated type metadata. Do not rely on reflection-based `JsonSerializer` overloads or fallback resolvers.

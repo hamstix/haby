@@ -125,6 +125,13 @@ Maintainers use squash merge to keep the default branch linear. Do not force-pus
 
 ## Documentation and decisions
 
+During active development, [ADR-033](docs/adr/0033-development-compatibility-and-catalog-resets.md)
+allows coordinated breaking schema/API/Provider changes and reset-required
+catalogs. Do not add legacy adapters or historical migration tests solely for
+intermediate alpha builds. Document reset requirements and keep current-build
+restart, retry, recovery and backup/restore guarantees. Never silently reset a
+persistent catalog or assume resetting Haby removes external resources.
+
 User and contributor documentation belongs in Markdown files in the repository. Significant architectural decisions should be captured in `docs/adr/` once that directory is introduced.
 
 Documentation should explain current behavior, not only intended behavior. Planned features belong in [ROADMAP.md](ROADMAP.md).

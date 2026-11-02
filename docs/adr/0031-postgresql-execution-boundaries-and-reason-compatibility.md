@@ -6,6 +6,11 @@
 
 ## Context
 
+[ADR-033](0033-development-compatibility-and-catalog-resets.md) supersedes the
+cross-build legacy-preservation obligations below during active development.
+They describe the original #90 boundary, not a requirement for new slices to
+retain development-era reason/history compatibility. Runtime safety still applies.
+
 [ADR-032](0032-dependent-operation-plans-and-exact-dispatch.md) accepts the
 successor design and its ordered implementation, starting with issue #100.
 The temporary representations below remain compatibility requirements; the

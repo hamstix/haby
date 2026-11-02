@@ -4,6 +4,11 @@
 - Date: 2026-11-02
 - Scope: Issue #91 and the usable alpha pilot
 
+[ADR-033](0033-development-compatibility-and-catalog-resets.md) supersedes
+development-era cross-build preservation requirements. New slices may require
+a fresh catalog and coordinated API/schema changes; retain current-build runtime
+safety, not compatibility layers for discarded alpha models.
+
 ## Context
 
 The single-database rehearsal and ADR-031 refactor provide a working durable
@@ -29,9 +34,10 @@ operations by ApplicationDeployment, generation and deterministic OperationId.
 Retain the owning Resource and exact versioned action contract separately.
 Retry uses the existing operation and retains all attempts.
 
-The graph implementation must explicitly map existing ResourceId + Create keys
-to their corresponding operation. Preserve old rows, references, operator reads
-and recovery history; do not silently reinterpret or re-key them.
+Use the canonical OperationId model for new graph work. Under ADR-033, the graph
+implementation need not preserve ResourceId + Create addressing, old rows or
+earlier operation/recovery response shapes across development builds. It must
+preserve current-build operation identity and history through restart and retry.
 
 ### 3. Immutable planned graph
 
@@ -126,46 +132,39 @@ Reason codes are bounded and value-free. They describe the failure category,
 not retry authorization. Durable state, whether dispatch occurred, and the
 action's policy still determine retry and recovery.
 
-Add the following categories without repurposing existing persisted or wire
-values:
+Use Provider-neutral categories:
 
-| Reason | Meaning | New protobuf number | CLI JSON |
-| --- | --- | --- | --- |
-| InputInvalid | Resolved operation inputs fail the action's execution contract. | 9 | inputInvalid |
-| InputUnavailable | Required pinned input cannot be read, decoded or resolved exactly. | 10 | inputUnavailable |
-| HandlerUnavailable | The exact required handler or its supported contract is unavailable. | 11 | handlerUnavailable |
+| Reason | Meaning |
+| --- | --- |
+| InputInvalid | Resolved operation inputs fail the action's execution contract. |
+| InputUnavailable | Required pinned input cannot be read, decoded or resolved exactly. |
+| HandlerUnavailable | The exact required handler or its supported contract is unavailable. |
 
-Keep SecretUnavailable, Connectivity, Conflict, ServerRejected and
-UncertainAfterDispatch with their existing meanings and representations.
+Keep the meanings of SecretUnavailable, Connectivity, Conflict, ServerRejected
+and UncertainAfterDispatch in the current operation model.
 Connectivity is a pre-dispatch availability category; uncertainty after the
 dispatch barrier must not be downgraded into a safe connectivity retry.
 
-Preserve all historical stored reason strings, protobuf values 0-8 and CLI
-JSON spellings, including DatabaseNameInvalid/value 4/databaseNameInvalid.
-Read and render historical values explicitly without rewriting old rows.
-ProviderInputUnavailable and UnsupportedShape also remain readable as historical
-reasons. Unknown stored codes must fail safely rather than become success or an
-invented default reason.
+ADR-033 removes the requirement to retain development-era stored strings, wire
+numbers or JSON spellings across breaking revisions. Remove obsolete specialized
+reasons and compatibility-only readers/tests when replacing the operation model.
+Keep current-code mappings explicit. Unknown current stored codes must fail
+safely rather than become success or an invented default reason.
 
-For new execution attempts, map the former DatabaseNameInvalid and
-UnsupportedShape conditions to InputInvalid; map formerly broad
-ProviderInputUnavailable conditions to InputUnavailable. Preserve each path's
-existing definitive/transient classification and state transition. Use
+Map invalid action inputs to InputInvalid and unavailable pinned inputs to
+InputUnavailable. Preserve definitive/transient classification and state safety. Use
 HandlerUnavailable only where absence of exact handler support is actually
 known; do not guess it from an arbitrary resolver exception. Exact dispatch
 registration will provide that distinction in the next slice.
 
-Retained legacy reasons in resumable rows must continue to receive the same
-safe retry eligibility as before. No state or attempt-history rewrite is needed.
-Add a migration extending the reason allow-list before writing new values;
-never edit merged migrations. A downgrade with new reason rows must fail
-explicitly rather than delete history or relabel it as a legacy reason.
+Within a current installation, retries retain attempt history and obey the same
+dispatch barrier. Breaking development changes may require a fresh catalog under
+ADR-033 instead of migrating old reasons or maintaining downgrade compatibility.
 
 ### 14. Ordered implementation
 
-1. Add common reasons, explicit historical compatibility, additive persistence
-   support, gRPC/CLI mappings and distinguishing tests under issue #100.
-   Keep one-database admission.
+1. Common reasons were delivered under issue #100. Its development-era
+   compatibility additions do not become permanent obligations under ADR-033.
 2. Replace checkpoint-specific admission with common coordination and exact
    typed registrations, still executing only the database action.
 3. Persist the fixed graph, atomically accept it, execute dependencies

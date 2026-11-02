@@ -9,6 +9,13 @@ distributions can extend without permanent forks remains the longer-term goal.
 
 ## Product boundaries
 
+During active development, [ADR-033](docs/adr/0033-development-compatibility-and-catalog-resets.md)
+allows coordinated breaking model/API/schema changes and explicitly reset-required
+catalogs. Prefer one current model over compatibility for intermediate alpha
+Plans, operations or audit history. Current-build restart, retry, exact inputs,
+recovery, immutability and backup/restore remain required. Define a supported
+compatibility baseline before stable durable production use begins.
+
 ### Haby OSS
 
 Haby OSS owns:
@@ -563,19 +570,20 @@ Kubernetes authentication and a general operator authorization framework are
 not prerequisites for this isolated pilot.
 
 [ADR-031](docs/adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md)
-defines the #90 refactor moving database-specific execution inputs and ports
-into the PostgreSQL adapter without changing behavior or existing stored/wire
-reasons. The legacy DatabaseNameInvalid reason is temporary compatibility debt.
-Issue #91 must define a Provider-neutral reason model and explicit historical
-mapping; implement it before admitting role/grant or other new effect kinds,
-together with dependency and aggregate generation-completion rules.
+records the #90 refactor moving database-specific execution inputs and ports
+into the PostgreSQL adapter. Issue #100 subsequently delivered Provider-neutral
+reasons. ADR-033 now removes the obligation to preserve that development-era
+legacy reason/history compatibility when replacing the operation model.
+Dependency and aggregate generation-completion rules remain required before
+admitting role/grant or other new effect kinds.
 
 [ADR-032](docs/adr/0032-dependent-operation-plans-and-exact-dispatch.md) accepts
 the #91 design: explicit single-instance sequential execution, an immutable
 operation graph, shared exact admission across Plan/Check/Commit, per-operation
 dispatch barriers and generation completion only after all required operations
-succeed. Deliver common reasons and historical compatibility first, exact
-admission second, then graph persistence/execution and aggregate completion.
+succeed. Common reasons and exact admission have been delivered; next implement
+graph persistence/execution and aggregate completion using one current model
+under ADR-033 rather than adding a pre-graph compatibility layer.
 Keep the existing one-database admission until those safeguards are complete.
 Role/grant ownership, generated-secret lifecycle and confidential configuration
 retrieval still require their own decisions before implementation.
@@ -768,6 +776,7 @@ private unauthenticated test endpoint must not be exposed as an operator API.
 - [ADR-030](docs/adr/0030-provider-declarations-and-logical-identity.md): Provider JSON declarations, confirmed logical-identity continuity and exact typed preflight dispatch.
 - [ADR-031](docs/adr/0031-postgresql-execution-boundaries-and-reason-compatibility.md): PostgreSQL-specific execution inputs/ports and mandatory replacement of legacy specialized reasons through compatible generic contracts.
 - [ADR-032](docs/adr/0032-dependent-operation-plans-and-exact-dispatch.md): Exact admission, fixed dependent operation plans, sequential execution, aggregate generation completion and compatible Provider-neutral reasons.
+- [ADR-033](docs/adr/0033-development-compatibility-and-catalog-resets.md): Breaking development changes and explicit catalog resets without carrying intermediate alpha compatibility; current-build runtime safety remains mandatory.
 
 ## Out of scope for the first milestones
 
