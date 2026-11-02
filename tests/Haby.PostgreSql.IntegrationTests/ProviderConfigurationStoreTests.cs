@@ -29,14 +29,14 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
             var secrets = services.GetRequiredService<ISecretStore>();
             environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
             secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(environment, secret, new byte[] { 123, 45, 67 }, default);
+            await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, new byte[] { 123, 45, 67 }, default);
             var store = services.GetRequiredService<IProviderConfigurationStore>();
             instance = await store.CreateInstanceAsync(environment, Configuration(secret), default);
             await store.AddRevisionAsync(environment, instance, Number(1), Configuration(secret), default);
             await store.AddRevisionAsync(environment, instance, Number(2),
                 Configuration(secret, database: "maintenance"), default);
             Assert.Equal(new byte[] { 123, 45, 67 },
-                (await secrets.ResolveAsync(environment, secret, default))!.CopyBytes());
+                (await secrets.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, default))!.CopyBytes());
         }
         var readerName = "provider_reader_" + Guid.NewGuid().ToString("N");
         var readerPassword = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
@@ -78,9 +78,9 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var wrong = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("other"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await secrets.CreateAsync(environment, secret, new byte[] { 1 }, default);
+        await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, new byte[] { 1 }, default);
         var otherSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await secrets.CreateAsync(wrong, otherSecret, new byte[] { 2 }, default);
+        await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(wrong), SecretPurpose.ProviderAdministrator), otherSecret, new byte[] { 2 }, default);
         var store = services.GetRequiredService<IProviderConfigurationStore>();
         var instance = await store.CreateInstanceAsync(environment, Configuration(secret), default);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -189,7 +189,7 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
         var secrets = services.GetRequiredService<ISecretStore>();
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await secrets.CreateAsync(environment, secret, new byte[] { 1 }, default);
+        await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, new byte[] { 1 }, default);
         var store = services.GetRequiredService<IProviderConfigurationStore>();
         var instance = await store.CreateInstanceAsync(environment, Configuration(secret), default);
         await store.AddRevisionAsync(environment, instance, Number(1), Configuration(secret), default);

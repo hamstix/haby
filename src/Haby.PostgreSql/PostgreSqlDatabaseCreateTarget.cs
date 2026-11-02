@@ -94,7 +94,7 @@ public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore r
         SecretMaterial? material;
         try
         {
-            material = await secrets.ResolveAsync(input.Environment, configuration.AdministratorPassword,
+            material = await secrets.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(input.Environment), SecretPurpose.ProviderAdministrator), configuration.AdministratorPassword,
                 cancellationToken);
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)

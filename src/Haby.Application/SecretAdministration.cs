@@ -3,8 +3,8 @@ using Haby.Domain;
 namespace Haby.Application;
 
 public sealed record SecretVersionMetadata(SecretVersionId VersionId, int? Number, DateTimeOffset? CreatedAt);
-public sealed record SecretMetadata(EnvironmentRecordId Environment, SecretId SecretId, string? Name,
-    string Purpose, DateTimeOffset? CreatedAt, IReadOnlyList<SecretVersionMetadata> Versions);
+public sealed record SecretMetadata(EnvironmentRecordId Environment, SecretOwner Owner, SecretId SecretId, string? Name,
+    SecretPurpose Purpose, DateTimeOffset? CreatedAt, IReadOnlyList<SecretVersionMetadata> Versions);
 public enum SecretOutcome
 {
     Created, ExistingEquivalent, InvalidRequest, EnvironmentNotFound, RequestContentConflict,

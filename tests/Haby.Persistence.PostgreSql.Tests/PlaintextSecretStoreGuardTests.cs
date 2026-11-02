@@ -34,7 +34,7 @@ public sealed class PlaintextSecretStoreGuardTests
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await store.AddVersionAsync(environment, null!, [], default));
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
-            await store.CreateAsync(environment, reference, null!, default));
+            await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, null!, default));
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await store.ResolveAsync(null!, reference, default));
     }

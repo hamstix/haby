@@ -5,6 +5,7 @@ using Haby.Application;
 using Haby.Domain;
 using Haby.Operator.Contracts;
 using Haby.Operator.Host;
+using Haby.Persistence.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -21,6 +22,7 @@ public sealed partial class OperatorHostIntegrationTests
         var requestId = Guid.NewGuid().ToString();
         var bytes = new byte[] { 0xef, 0xbb, 0xbf, 65, 13, 10, 10 };
         Haby.Operator.Contracts.SecretMetadata original;
+        SecretRef generatedReference;
         await using (var host = await OperatorHostApplication.BuildMigratedAsync(args))
         {
             await host.StartAsync();
@@ -42,6 +44,17 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.Equal(SecretStatus.Created, first.Status);
             original = first.Secret;
             Assert.Equal(requestId, first.RequestId);
+            var application = ApplicationRecordId.New();
+            await using (var arrange = await host.Services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            {
+                arrange.Applications.Add(new() { Id = Guid.Parse(application.ToString()), ApplicationId = "message-consumer" });
+                await arrange.SaveChangesAsync();
+            }
+            var generated = await host.Services.GetRequiredService<IGeneratedCredentialSlots>().GetOrCreateAsync(
+                new(new(EnvironmentRecordId.Parse(original.EnvironmentRecordId), application, ManifestLocalId.Create("queue-user")),
+                    GeneratedCredentialSlot.ApplicationPassword), GeneratedCredentialSlot.RandomPasswordV1, default);
+            Assert.Equal(GeneratedCredentialOutcome.Created, generated.Outcome);
+            generatedReference = generated.Reference!;
             await host.StopAsync();
         }
         await using (var host = await OperatorHostApplication.BuildMigratedAsync(args))
@@ -55,6 +68,13 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.Equal(original, retry.Secret);
             Assert.Equal(original, (await client.GetSecretAsync(new() { Environment = "pilot", Name = "admin" })).Secret);
             Assert.Equal(original, (await client.GetSecretAsync(new() { Environment = "pilot", SecretId = original.SecretId })).Secret);
+            Assert.Equal(SecretStatus.NotFound, (await client.GetSecretAsync(new()
+            { Environment = "pilot", SecretId = generatedReference.SecretId.ToString() })).Status);
+            var all = await client.ListSecretsAsync(new() { Environment = "pilot" });
+            Assert.Equal(SecretStatus.Listed, all.Status);
+            Assert.Equal(3, all.Items.Count);
+            Assert.All(all.Items, item => Assert.Equal("ProviderAdministrator", item.Purpose));
+            Assert.DoesNotContain(all.Items, item => item.SecretId == generatedReference.SecretId.ToString());
             var page = await client.ListSecretsAsync(new() { Environment = "pilot", PageSize = 1 });
             Assert.Equal(SecretStatus.Listed, page.Status);
             Assert.Equal(original, Assert.Single(page.Items));
@@ -89,6 +109,8 @@ public sealed partial class OperatorHostIntegrationTests
                         var text = await stdout;
                         Assert.Contains(original.SecretId, text);
                         Assert.Contains(original.Versions[0].VersionId, text);
+                        Assert.DoesNotContain(generatedReference.SecretId.ToString(), text);
+                        Assert.DoesNotContain("ApplicationLogin", text);
                         Assert.True(!text.Contains(Convert.ToBase64String(bytes), StringComparison.Ordinal), "Command output must redact protected input.");
                         if (format == "json")
                         {
@@ -99,8 +121,7 @@ public sealed partial class OperatorHostIntegrationTests
                     }
             }
             // Resolve only internally through the configured backend, with an independent factory context.
-            using var material = await host.Services.GetRequiredService<ISecretStore>().ResolveAsync(
-                EnvironmentRecordId.Parse(original.EnvironmentRecordId),
+            using var material = await host.Services.GetRequiredService<ISecretStore>().ResolveAsync(new SecretDefinition(new SecretOwner.Environment(EnvironmentRecordId.Parse(original.EnvironmentRecordId)), SecretPurpose.ProviderAdministrator),
                 new SecretRef(SecretId.Parse(original.SecretId), SecretVersionId.Parse(original.Versions[0].VersionId)), default);
             Assert.NotNull(material);
             Assert.True(material.CopyBytes().AsSpan().SequenceEqual(bytes), "Stored BOM/newline bytes must be exact.");

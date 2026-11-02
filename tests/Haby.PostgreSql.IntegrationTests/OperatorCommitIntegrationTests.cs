@@ -37,7 +37,7 @@ public sealed partial class OperatorHostIntegrationTests
         var secrets = setup.GetRequiredService<ISecretStore>();
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(material), default);
+        await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(material), default);
         var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", providerPort,
             "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
         var providers = setup.GetRequiredService<IProviderConfigurationStore>();
@@ -214,7 +214,7 @@ public sealed partial class OperatorHostIntegrationTests
         var secrets = setup.GetRequiredService<ISecretStore>();
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(material), default);
+        await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(material), default);
         var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", providerPort,
             "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
         var providers = setup.GetRequiredService<IProviderConfigurationStore>();

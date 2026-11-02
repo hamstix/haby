@@ -384,7 +384,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             var secrets = services.GetRequiredService<ISecretStore>();
             environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
             var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(providerPassword), default);
+            await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(providerPassword), default);
             var provider = services.GetRequiredService<IProviderConfigurationStore>();
             var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
                 target.Database!, target.Username!, secret, Implementation);
@@ -405,7 +405,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             Assert.Equal(DurableChangeSetCreateStatus.Created, intent.Status);
             var otherEnvironment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("other"), default);
             var otherSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(otherEnvironment, otherSecret, Encoding.UTF8.GetBytes(providerPassword), default);
+            await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(otherEnvironment), SecretPurpose.ProviderAdministrator), otherSecret, Encoding.UTF8.GetBytes(providerPassword), default);
             var otherConfiguration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
                 target.Database!, target.Username!, otherSecret, Implementation);
             var otherInstance = await provider.CreateInstanceAsync(otherEnvironment, otherConfiguration, default);
@@ -597,7 +597,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
                 .ExecuteNonQueryAsync();
         }
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        await secrets.CreateAsync(environment, secret, Encoding.UTF8.GetBytes(password), default);
+        await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(password), default);
         var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
         { Username = user, Password = password };
         var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,

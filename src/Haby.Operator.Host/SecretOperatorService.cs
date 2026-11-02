@@ -42,7 +42,15 @@ public sealed partial class ManifestOperatorService
     private static Haby.Operator.Contracts.SecretMetadata SecretMetadataOf(Haby.Application.SecretMetadata value)
     {
         var result = new Haby.Operator.Contracts.SecretMetadata
-        { EnvironmentRecordId = value.Environment.ToString(), SecretId = value.SecretId.ToString(), Purpose = value.Purpose };
+        {
+            EnvironmentRecordId = value.Environment.ToString(),
+            SecretId = value.SecretId.ToString(),
+            Purpose = value.Purpose switch
+            {
+                Haby.Domain.SecretPurpose.ProviderAdministrator => "ProviderAdministrator",
+                _ => throw new InvalidOperationException("Unsupported administrative secret purpose.")
+            }
+        };
         if (value.Name is not null) result.Name = value.Name;
         if (value.CreatedAt is { } time) result.CreatedAtUtc = time.ToString("O");
         foreach (var version in value.Versions)

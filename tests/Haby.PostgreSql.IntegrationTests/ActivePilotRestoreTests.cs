@@ -283,7 +283,7 @@ public sealed partial class OperatorHostIntegrationTests
                 ProviderConfigurationRevisionNumber.Create(1), default);
         Assert.NotNull(revision);
         using var material = await services.GetRequiredService<ISecretStore>()
-            .ResolveAsync(scenario.Environment, revision.Configuration.AdministratorPassword, default);
+            .ResolveAsync(new SecretDefinition(new SecretOwner.Environment(scenario.Environment), SecretPurpose.ProviderAdministrator), revision.Configuration.AdministratorPassword, default);
         Assert.NotNull(material);
         var bytes = material.CopyBytes();
         try { Assert.True(bytes.AsSpan().SequenceEqual(Encoding.UTF8.GetBytes(scenario.Password)), "Pinned secret did not survive restore."); }
