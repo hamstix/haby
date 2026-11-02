@@ -6,6 +6,31 @@ namespace Haby.Cli.Tests;
 
 public sealed class CliPlanningPresentationTests
 {
+    [Fact]
+    public void Plan_exposes_operation_identity_ownership_and_dependencies_without_payloads()
+    {
+        var reply = new PlanningReply
+        {
+            Status = PlanningStatus.Planned,
+            Plan = new DurablePlanSummary
+            {
+                Reference = new RevisionReference(),
+                Operations = { new PlannedOperationSummary { OperationId = "db-create", ResourceId = "db",
+                ActionContract = "postgresql.database.create/v1alpha1", Dependencies = { "earlier" } } }
+            }
+        };
+        using var json = new StringWriter(); using var text = new StringWriter();
+        Assert.Equal(0, new CliJsonPresenter(json).PrintPlanning("plan create", reply));
+        Assert.Equal(0, new CliTextPresenter(text).PrintPlanning("plan create", reply));
+        using var document = System.Text.Json.JsonDocument.Parse(json.ToString());
+        var operation = document.RootElement.GetProperty("data").GetProperty("plan").GetProperty("operations")[0];
+        Assert.Equal("db-create", operation.GetProperty("operationId").GetString());
+        Assert.Equal("db", operation.GetProperty("resourceId").GetString());
+        Assert.Equal("earlier", operation.GetProperty("dependencies")[0].GetString());
+        Assert.Contains("db-create", text.ToString());
+        Assert.False(operation.TryGetProperty("input", out _));
+    }
+
     [Theory]
     [InlineData(PlanningStatus.EnvironmentNotFound, "environmentNotFound")]
     [InlineData(PlanningStatus.RevisionNotFound, "revisionNotFound")]

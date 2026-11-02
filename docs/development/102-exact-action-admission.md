@@ -1,5 +1,9 @@
 # Issue 102 implementation design
 
+> Historical delivery record. Issue 104 and ADR-033 replace its development-era
+> operation addressing and compatibility requirements. Current behavior is in
+> [the graph design](104-durable-operation-graph.md).
+
 Base: origin/main e9c8a504b41b9627446c4aeaaa0e6eb77afc4bfc (merged PR #101).
 
 ## Shared admission

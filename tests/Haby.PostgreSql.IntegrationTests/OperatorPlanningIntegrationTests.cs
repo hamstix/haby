@@ -188,7 +188,7 @@ public sealed partial class OperatorHostIntegrationTests
                 .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>()
                 .AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
                 .AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
-                .AddPostgreSqlDurableCreateOperationJournal().AddPostgreSqlDurableCreateOperationExecution()
+                .AddPostgreSqlDurableOperationJournal().AddPostgreSqlDurableOperationExecution()
                 .AddPostgreSqlDurableDeploymentPlanner().BuildServiceProvider();
             var expired = (await past.GetRequiredService<IDurableDeploymentPlanner>().CreatePlanAsync(
                 DeploymentChangeSetId.Parse(change.ChangeSetId), "fixture", default)).Plan!;

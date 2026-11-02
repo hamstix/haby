@@ -86,21 +86,26 @@ public sealed partial class ManifestOperatorService
         TechnicalActorId = value.ActorId
     };
 
-    private static DesiredGenerationSummary Summary(DurableDesiredGeneration value) => new()
+    private static DesiredGenerationSummary Summary(DurableDesiredGeneration value)
     {
-        DeploymentId = value.DeploymentId.ToString(),
-        Generation = value.Generation.Value,
-        DesiredPresence = value.Presence.ToString(),
-        ChangeSetId = value.ChangeSetId.ToString(),
-        PlanId = value.PlanId.ToString(),
-        AcceptedAtUtc = Utc(value.AcceptedAt),
-        TechnicalActorId = value.ActorId,
-        EnvironmentRecordId = value.Inputs.Environment.ToString(),
-        EnvironmentId = value.Inputs.EnvironmentKey.Value,
-        Reference = Reference(value.Inputs.Revision),
-        ProviderAlias = value.Inputs.Alias.Value,
-        ProviderInstanceId = value.Inputs.ProviderInstance.ToString(),
-        ConfigurationRevision = value.Inputs.ConfigurationRevision.Value,
-        ImplementationId = value.Inputs.ImplementationId
-    };
+        var summary = new DesiredGenerationSummary
+        {
+            DeploymentId = value.DeploymentId.ToString(),
+            Generation = value.Generation.Value,
+            DesiredPresence = value.Presence.ToString(),
+            ChangeSetId = value.ChangeSetId.ToString(),
+            PlanId = value.PlanId.ToString(),
+            AcceptedAtUtc = Utc(value.AcceptedAt),
+            TechnicalActorId = value.ActorId,
+            EnvironmentRecordId = value.Inputs.Environment.ToString(),
+            EnvironmentId = value.Inputs.EnvironmentKey.Value,
+            Reference = Reference(value.Inputs.Revision),
+            ProviderAlias = value.Inputs.Alias.Value,
+            ProviderInstanceId = value.Inputs.ProviderInstance.ToString(),
+            ConfigurationRevision = value.Inputs.ConfigurationRevision.Value,
+            ImplementationId = value.Inputs.ImplementationId
+        };
+        summary.Operations.AddRange(OperationSummaries(value.Graph));
+        return summary;
+    }
 }

@@ -6,16 +6,16 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Haby.PostgreSql;
 
 /// <summary>Manual assignment of one uncertain PostgreSQL Create; no SQL Create is reachable here.</summary>
-public sealed class PostgreSqlDatabaseRecovery(IDurableCreateOperationJournal operations,
-    IPostgreSqlDatabaseRecoveryJournal decisions, IManifestRevisionQuery manifests,
-    IPostgreSqlDatabaseCreateTarget target, TimeProvider clock) : IPostgreSqlDatabaseRecovery
+public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operations,
+    IPostgreSqlDatabaseRecoveryJournal decisions,
+    IPostgreSqlDatabaseCreateTarget target, TimeProvider clock, DurableOperationSerialization serialization) : IPostgreSqlDatabaseRecovery
 {
     private static readonly Regex CredentialPattern = new(
         @"(?i)(password|passwd|pwd|secret|token|api[_-]?key|connection[_-]?string)\s*[:=]|postgres(?:ql)?://|-----BEGIN |(?:host|username|user id)\s*=.+;",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
-    private readonly PostgreSqlDurableCreateInputResolver resolver = new(manifests);
+    private readonly PostgreSqlDurableCreateInputResolver resolver = new();
 
-    public async ValueTask<PostgreSqlDatabaseRecoveryPreview?> InspectAsync(DurableCreateOperationKey key,
+    public async ValueTask<PostgreSqlDatabaseRecoveryPreview?> InspectAsync(DurableOperationKey key,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
@@ -23,29 +23,28 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableCreateOperationJournal op
         if (operation is null) return null;
         var shape = await resolver.ResolveAsync(key, operation, cancellationToken);
         Guid? uncertainAttempt = null;
-        if (operation.State == DurableCreateOperationState.NeedsAttention && operation.AttemptId is { } attemptId)
+        if (operation.State == DurableOperationState.NeedsAttention && operation.AttemptId is { } attemptId)
         {
             var attempts = await operations.FindAttemptsAsync(key, cancellationToken);
             if (attempts.Count(attempt => attempt.AttemptId == attemptId &&
                     attempt.AttemptNumber == operation.AttemptNumber && attempt.DispatchedAt is not null &&
-                    attempt.FinishedAt is not null && attempt.Outcome == DurableCreateAttemptOutcome.Uncertain) == 1)
+                    attempt.FinishedAt is not null && attempt.Outcome == DurableAttemptOutcome.Uncertain) == 1)
                 uncertainAttempt = attemptId;
         }
-        // Historical reasons remain an exact view of retained history, including when current
-        // pinned-input resolution would now report the Provider-neutral successor.
         var reason = shape.Reason ?? operation.Reason;
-        if (operation.Reason is DurableCreateOperationReason.ProviderInputUnavailable or
-            DurableCreateOperationReason.UnsupportedShape or DurableCreateOperationReason.DatabaseNameInvalid)
-            reason = operation.Reason;
-        if (operation.State == DurableCreateOperationState.NeedsAttention && uncertainAttempt is null)
-            reason = DurableCreateOperationReason.InputUnavailable;
+        if (operation.State == DurableOperationState.NeedsAttention && uncertainAttempt is null)
+            reason = DurableOperationReason.InputUnavailable;
         return new PostgreSqlDatabaseRecoveryPreview(key, operation.Environment, operation.Application,
             shape.Input?.DatabaseName, operation.ProviderInstance, operation.ConfigurationRevision,
             operation.ImplementationId, uncertainAttempt, operation.State, reason)
         { Snapshot = operation };
     }
 
-    public async ValueTask<PostgreSqlDatabaseAssignmentResult> AssignExistingDatabaseAsync(
+    public ValueTask<PostgreSqlDatabaseAssignmentResult> AssignExistingDatabaseAsync(
+        AssignExistingPostgreSqlDatabase command, CancellationToken cancellationToken) =>
+        serialization.RunAsync(command.Key, () => AssignCoreAsync(command, cancellationToken), cancellationToken);
+
+    private async ValueTask<PostgreSqlDatabaseAssignmentResult> AssignCoreAsync(
         AssignExistingPostgreSqlDatabase command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -62,15 +61,15 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableCreateOperationJournal op
             return new PostgreSqlDatabaseAssignmentResult(PostgreSqlDatabaseAssignmentOutcome.AlreadyAssigned,
                 existing.Receipt);
 
-        if (operation.State != DurableCreateOperationState.NeedsAttention ||
-            operation.Reason != DurableCreateOperationReason.UncertainAfterDispatch ||
+        if (operation.State != DurableOperationState.NeedsAttention ||
+            operation.Reason != DurableOperationReason.UncertainAfterDispatch ||
             operation.AttemptId != command.ExpectedAttemptId || operation.DispatchedAt is null ||
             operation.FinalizedAt is null)
             return Rejected();
         var attempts = await operations.FindAttemptsAsync(command.Key, cancellationToken);
         if (attempts.Count(attempt => attempt.AttemptId == command.ExpectedAttemptId &&
                 attempt.AttemptNumber == operation.AttemptNumber && attempt.DispatchedAt is not null &&
-                attempt.FinishedAt is not null && attempt.Outcome == DurableCreateAttemptOutcome.Uncertain) != 1)
+                attempt.FinishedAt is not null && attempt.Outcome == DurableAttemptOutcome.Uncertain) != 1)
             return Rejected();
 
         var shape = await resolver.ResolveAsync(command.Key, operation, cancellationToken);

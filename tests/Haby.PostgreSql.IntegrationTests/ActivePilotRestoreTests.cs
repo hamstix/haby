@@ -68,16 +68,15 @@ public sealed partial class OperatorHostIntegrationTests
                     {
                         DeploymentId = commit.Commit.DeploymentId,
                         Generation = 1,
-                        ResourceId = "db",
-                        Action = OperationAction.Create
+                        OperationId = "db-create"
                     };
                     if (state is "dispatching" or "attention")
                     {
                         // Simulate process death after the durable barrier, before sending SQL.
-                        var journal = source.Services.GetRequiredService<IDurableCreateOperationJournal>();
-                        var started = Assert.IsType<DurableCreateBeginAttemptResult.Started>(
+                        var journal = source.Services.GetRequiredService<IDurableOperationJournal>();
+                        var started = Assert.IsType<DurableBeginAttemptResult.Started>(
                             await journal.TryBeginAttemptAsync(ExecutionKey(key), DateTimeOffset.UtcNow, default));
-                        Assert.IsType<DurableCreateMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(
+                        Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(
                             ExecutionKey(key), started.AttemptId, DateTimeOffset.UtcNow, default));
                         if (state == "attention")
                             Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
@@ -304,7 +303,7 @@ public sealed partial class OperatorHostIntegrationTests
         Assert.Equal(0L, await ExecutionScalar(connection, "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tableowner <> current_user"));
     }
 
-    private static async Task<SortedDictionary<string, string>> RestoreCatalogDigests(string connection)
+    private static async Task<SortedDictionary<string, string>> RestoreCatalogDigests(string connection, bool assertPilotSet = true)
     {
         // Independent verification context on every call. Catalog inspection is intentionally SQL:
         // it includes every persisted column/table (also protected payloads), with no tracked entities.
@@ -323,7 +322,7 @@ public sealed partial class OperatorHostIntegrationTests
             var content = (string)(await command.ExecuteScalarAsync())!;
             // Only digests can reach assertion diagnostics. Never emit snapshots containing secrets/notes.
             result.Add(table, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))));
-            if (table == "application_deployments")
+            if (table == "application_deployments" && assertPilotSet)
             {
                 await using var applied = new NpgsqlCommand("SELECT count(*) FROM application_deployments WHERE desired_generation = 1 AND applied_generation = 1", db);
                 Assert.Equal(2L, await applied.ExecuteScalarAsync());

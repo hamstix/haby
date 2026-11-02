@@ -21,21 +21,6 @@ public sealed class DurableCreateExecutorTests
         [new ResourceTypeDefinition(PostgreSqlDatabaseContract.Id, DatabaseSchema)],
         [], [], []);
 
-    [Theory]
-    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable, 0)]
-    [InlineData(DurableCreateOperationReason.SecretUnavailable, 1)]
-    [InlineData(DurableCreateOperationReason.UnsupportedShape, 2)]
-    [InlineData(DurableCreateOperationReason.DatabaseNameInvalid, 3)]
-    [InlineData(DurableCreateOperationReason.Connectivity, 4)]
-    [InlineData(DurableCreateOperationReason.Conflict, 5)]
-    [InlineData(DurableCreateOperationReason.ServerRejected, 6)]
-    [InlineData(DurableCreateOperationReason.UncertainAfterDispatch, 7)]
-    [InlineData(DurableCreateOperationReason.InputInvalid, 8)]
-    [InlineData(DurableCreateOperationReason.InputUnavailable, 9)]
-    [InlineData(DurableCreateOperationReason.HandlerUnavailable, 10)]
-    public void Reason_CLR_ordinals_are_append_only(DurableCreateOperationReason reason, int number) =>
-        Assert.Equal(number, (int)reason);
-
     [Fact]
     public async Task Success_commits_the_marker_before_SQL_and_advances_the_applied_generation_once()
     {
@@ -43,12 +28,12 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, result.Outcome);
-        Assert.Equal(DurableCreateOperationState.Succeeded, result.Operation!.State);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(DurableOperationState.Succeeded, result.Operation!.State);
         Assert.Equal(["check", "marker", "create", "confirm", "success-recorded"], journal.Log);
         Assert.True(journal.AppliedGenerationAdvanced);
         var attempt = Assert.Single(journal.Attempts);
-        Assert.Equal(DurableCreateAttemptOutcome.Succeeded, attempt.Outcome);
+        Assert.Equal(DurableAttemptOutcome.Succeeded, attempt.Outcome);
         Assert.NotNull(attempt.DispatchedAt);
     }
 
@@ -60,22 +45,21 @@ public sealed class DurableCreateExecutorTests
 
         var second = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, second.Outcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, second.Outcome);
         Assert.Equal(["check", "marker", "create", "confirm", "success-recorded"], journal.Log);
         Assert.Single(journal.Attempts);
     }
 
     [Theory]
     [InlineData(null)]
-    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable)]
-    [InlineData(DurableCreateOperationReason.InputUnavailable)]
-    [InlineData(DurableCreateOperationReason.HandlerUnavailable)]
-    public async Task Restart_from_dispatching_moves_to_needs_attention_without_SQL(DurableCreateOperationReason? reason)
+    [InlineData(DurableOperationReason.InputUnavailable)]
+    [InlineData(DurableOperationReason.HandlerUnavailable)]
+    public async Task Restart_from_dispatching_moves_to_needs_attention_without_SQL(DurableOperationReason? reason)
     {
         var attemptId = Guid.CreateVersion7();
         var (executor, journal, target, _) = Harness(new Fixture
         {
-            State = DurableCreateOperationState.Dispatching,
+            State = DurableOperationState.Dispatching,
             Reason = reason,
             AttemptId = attemptId,
             AttemptNumber = 1,
@@ -84,12 +68,12 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.NeedsAttention, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.UncertainAfterDispatch, result.Operation!.Reason);
+        Assert.Equal(DurableExecutionOutcome.NeedsAttention, result.Outcome);
+        Assert.Equal(DurableOperationReason.UncertainAfterDispatch, result.Operation!.Reason);
         Assert.Equal(["recover"], journal.Log);
         Assert.Empty(target.Inputs);
         var attempt = Assert.Single(journal.Attempts);
-        Assert.Equal(DurableCreateAttemptOutcome.Uncertain, attempt.Outcome);
+        Assert.Equal(DurableAttemptOutcome.Uncertain, attempt.Outcome);
     }
 
     [Fact]
@@ -99,8 +83,8 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.DispatchUncertain, result.Outcome);
-        Assert.Equal(DurableCreateOperationState.Preparing, result.Operation!.State);
+        Assert.Equal(DurableExecutionOutcome.DispatchUncertain, result.Outcome);
+        Assert.Equal(DurableOperationState.Preparing, result.Operation!.State);
         Assert.DoesNotContain("marker", journal.Log);
         Assert.DoesNotContain("create", journal.Log);
     }
@@ -112,48 +96,16 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.Conflict, result.Operation!.Reason);
+        Assert.Equal(DurableExecutionOutcome.Failed, result.Outcome);
+        Assert.Equal(DurableOperationReason.Conflict, result.Operation!.Reason);
         Assert.False(journal.AppliedGenerationAdvanced);
         Assert.DoesNotContain("create", journal.Log);
-        Assert.Equal(DurableCreateAttemptOutcome.Conflict, Assert.Single(journal.Attempts).Outcome);
+        Assert.Equal(DurableAttemptOutcome.Conflict, Assert.Single(journal.Attempts).Outcome);
     }
 
-    [Fact]
-    public async Task A_second_resource_is_rejected_before_reaching_the_target()
-    {
-        var (executor, journal, target, _) = Harness(new Fixture
-        {
-            Manifest = Prepare("""
-                "resources":{"database":{"type":"postgresql.database/v1alpha1","providerRef":"primary","properties":{"name":"appdb"}},
-                "other":{"type":"postgresql.database/v1alpha1","providerRef":"primary","properties":{"name":"otherdb"}}}
-                """)
-        });
 
-        var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.InputInvalid, result.Operation!.Reason);
-        Assert.Empty(target.Inputs);
-        Assert.DoesNotContain("create", journal.Log);
-    }
 
-    [Fact]
-    public async Task An_invalid_database_name_is_rejected_before_reaching_the_target()
-    {
-        var (executor, journal, target, _) = Harness(new Fixture
-        {
-            Manifest = Prepare("""
-                "resources":{"database":{"type":"postgresql.database/v1alpha1","providerRef":"primary","properties":{"name":"Bad-Db"}}}
-                """)
-        });
-
-        var result = await executor.ExecuteAsync(HarnessKey(), default);
-
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.InputInvalid, result.Operation!.Reason);
-        Assert.Empty(target.Inputs);
-    }
 
     [Fact]
     public async Task Adapter_local_name_validation_maps_to_input_invalid_without_dispatch()
@@ -163,9 +115,9 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.InputInvalid, result.Operation!.Reason);
-        Assert.Equal(DurableCreateAttemptOutcome.FailedBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
+        Assert.Equal(DurableExecutionOutcome.Failed, result.Outcome);
+        Assert.Equal(DurableOperationReason.InputInvalid, result.Operation!.Reason);
+        Assert.Equal(DurableAttemptOutcome.FailedBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
         Assert.False(journal.AppliedGenerationAdvanced);
         Assert.DoesNotContain("marker", journal.Log);
         Assert.DoesNotContain("create", journal.Log);
@@ -179,7 +131,7 @@ public sealed class DurableCreateExecutorTests
         Assert.Equal(adapter, typeof(IPostgreSqlDatabaseCreateTarget).Assembly);
         Assert.Equal(adapter, typeof(PostgreSqlDatabaseAbsenceOutcome).Assembly);
         Assert.Equal(adapter, typeof(PostgreSqlDatabaseCreateDispatchOutcome).Assembly);
-        var application = typeof(IDurableCreateOperationExecutor).Assembly;
+        var application = typeof(IDurableOperationExecutor).Assembly;
         Assert.DoesNotContain(application.GetReferencedAssemblies(), reference => reference.Name == "Haby.PostgreSql");
         Assert.DoesNotContain(application.GetExportedTypes(), type => type.Name is
             "DurableCreateTargetInput" or "IDurableCreateTarget" or "DurableCreateAbsenceOutcome" or
@@ -187,17 +139,15 @@ public sealed class DurableCreateExecutorTests
     }
 
     [Fact]
-    public async Task A_corrupt_pinned_manifest_fails_with_a_bounded_reason_before_dispatch()
+    public async Task Execution_uses_frozen_input_without_reading_the_manifest()
     {
         var (executor, journal, target, _) = Harness(new Fixture { CorruptManifest = true });
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.InputUnavailable, result.Operation!.Reason);
-        Assert.Equal(DurableCreateAttemptOutcome.FailedBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
-        Assert.Empty(target.Inputs);
-        Assert.DoesNotContain("marker", journal.Log);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal("appdb", Assert.Single(target.Inputs.Distinct()).DatabaseName);
+
     }
 
     [Fact]
@@ -208,9 +158,9 @@ public sealed class DurableCreateExecutorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             executor.ExecuteAsync(HarnessKey(), hooks.Token).AsTask());
 
-        Assert.Equal(DurableCreateOperationState.Preparing, journal.Operation.State);
+        Assert.Equal(DurableOperationState.Preparing, journal.Operation.State);
         Assert.DoesNotContain("create", journal.Log);
-        Assert.Equal(DurableCreateAttemptOutcome.CanceledBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
+        Assert.Equal(DurableAttemptOutcome.CanceledBeforeDispatch, Assert.Single(journal.Attempts).Outcome);
     }
 
     [Fact]
@@ -227,14 +177,14 @@ public sealed class DurableCreateExecutorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             executor.ExecuteAsync(HarnessKey(), hooks.Token).AsTask());
 
-        Assert.Equal(DurableCreateOperationState.Preparing, journal.Operation.State);
+        Assert.Equal(DurableOperationState.Preparing, journal.Operation.State);
         Assert.DoesNotContain("marker", journal.Log);
         Assert.Null(Assert.Single(journal.Attempts).Outcome);
 
         var resumed = await executor.ExecuteAsync(HarnessKey(), default);
-        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, resumed.Outcome);
-        Assert.Equal(DurableCreateAttemptOutcome.AbandonedBeforeDispatch, journal.Attempts[0].Outcome);
-        Assert.Equal(DurableCreateAttemptOutcome.Succeeded, journal.Attempts[1].Outcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, resumed.Outcome);
+        Assert.Equal(DurableAttemptOutcome.AbandonedBeforeDispatch, journal.Attempts[0].Outcome);
+        Assert.Equal(DurableAttemptOutcome.Succeeded, journal.Attempts[1].Outcome);
     }
 
     [Fact]
@@ -250,8 +200,8 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), hooks.Token);
 
-        Assert.Equal(DurableCreateExecutionOutcome.NeedsAttention, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.UncertainAfterDispatch, result.Operation!.Reason);
+        Assert.Equal(DurableExecutionOutcome.NeedsAttention, result.Outcome);
+        Assert.Equal(DurableOperationReason.UncertainAfterDispatch, result.Operation!.Reason);
         Assert.DoesNotContain("create", journal.Log);
         Assert.DoesNotContain("success-recorded", journal.Log);
     }
@@ -264,8 +214,8 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.NeedsAttention, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.UncertainAfterDispatch, result.Operation!.Reason);
+        Assert.Equal(DurableExecutionOutcome.NeedsAttention, result.Outcome);
+        Assert.Equal(DurableOperationReason.UncertainAfterDispatch, result.Operation!.Reason);
         Assert.Equal(1, journal.Log.Count(entry => entry == "create"));
         Assert.False(journal.AppliedGenerationAdvanced);
     }
@@ -278,8 +228,8 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, result.Outcome);
-        Assert.Equal(DurableCreateOperationReason.Conflict, result.Operation!.Reason);
+        Assert.Equal(DurableExecutionOutcome.Failed, result.Outcome);
+        Assert.Equal(DurableOperationReason.Conflict, result.Operation!.Reason);
         Assert.False(journal.AppliedGenerationAdvanced);
     }
 
@@ -291,7 +241,7 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.NeedsAttention, result.Outcome);
+        Assert.Equal(DurableExecutionOutcome.NeedsAttention, result.Outcome);
         Assert.DoesNotContain("success-recorded", journal.Log);
         Assert.False(journal.AppliedGenerationAdvanced);
     }
@@ -303,8 +253,8 @@ public sealed class DurableCreateExecutorTests
 
         var result = await executor.ExecuteAsync(HarnessKey(), default);
 
-        Assert.Equal(DurableCreateExecutionOutcome.DispatchUncertain, result.Outcome);
-        Assert.Equal(DurableCreateOperationState.Dispatching, journal.Operation.State);
+        Assert.Equal(DurableExecutionOutcome.DispatchUncertain, result.Outcome);
+        Assert.Equal(DurableOperationState.Dispatching, journal.Operation.State);
         Assert.False(journal.AppliedGenerationAdvanced);
     }
 
@@ -312,19 +262,19 @@ public sealed class DurableCreateExecutorTests
     public async Task Terminal_operations_are_idempotent_and_send_no_SQL()
     {
         var (failed, failedJournal, failedTarget, _) = Harness(new Fixture
-        { State = DurableCreateOperationState.Failed, Reason = DurableCreateOperationReason.Conflict });
+        { State = DurableOperationState.Failed, Reason = DurableOperationReason.Conflict });
         var failedResult = await failed.ExecuteAsync(HarnessKey(), default);
-        Assert.Equal(DurableCreateExecutionOutcome.Failed, failedResult.Outcome);
+        Assert.Equal(DurableExecutionOutcome.Failed, failedResult.Outcome);
         Assert.Empty(failedTarget.Inputs);
         Assert.Empty(failedJournal.Log);
 
         var (attention, _, attentionTarget, _) = Harness(new Fixture
         {
-            State = DurableCreateOperationState.NeedsAttention,
-            Reason = DurableCreateOperationReason.UncertainAfterDispatch
+            State = DurableOperationState.NeedsAttention,
+            Reason = DurableOperationReason.UncertainAfterDispatch
         });
         var attentionResult = await attention.ExecuteAsync(HarnessKey(), default);
-        Assert.Equal(DurableCreateExecutionOutcome.NeedsAttention, attentionResult.Outcome);
+        Assert.Equal(DurableExecutionOutcome.NeedsAttention, attentionResult.Outcome);
         Assert.Empty(attentionTarget.Inputs);
     }
 
@@ -336,8 +286,8 @@ public sealed class DurableCreateExecutorTests
         journal.SeedUncertain(attemptId);
         var decisions = new FakeRecoveryDecisions();
         var recovery = new PostgreSqlDatabaseRecovery(journal, decisions,
-            new FakeManifests(Prepare(OneResource), false), target,
-            new FixedClock(DateTimeOffset.UnixEpoch));
+            target,
+            new FixedClock(DateTimeOffset.UnixEpoch), new DurableOperationSerialization());
         var preview = await recovery.InspectAsync(journal.Operation.Key, default);
         Assert.Equal("appdb", preview!.DatabaseName);
         Assert.Equal(attemptId, preview.UncertainAttemptId);
@@ -360,19 +310,19 @@ public sealed class DurableCreateExecutorTests
     }
 
     [Theory]
-    [InlineData(DurableCreateOperationState.Pending)]
-    [InlineData(DurableCreateOperationState.Preparing)]
-    [InlineData(DurableCreateOperationState.Dispatching)]
-    [InlineData(DurableCreateOperationState.Failed)]
-    [InlineData(DurableCreateOperationState.Succeeded)]
+    [InlineData(DurableOperationState.Pending)]
+    [InlineData(DurableOperationState.Preparing)]
+    [InlineData(DurableOperationState.Dispatching)]
+    [InlineData(DurableOperationState.Failed)]
+    [InlineData(DurableOperationState.Succeeded)]
     public async Task Manual_recovery_rejects_non_uncertain_states_before_provider_access(
-        DurableCreateOperationState state)
+        DurableOperationState state)
     {
         var (_, journal, target, _) = Harness(new Fixture { State = state });
         var decisions = new FakeRecoveryDecisions();
         var recovery = new PostgreSqlDatabaseRecovery(journal, decisions,
-            new FakeManifests(Prepare(OneResource), false), target,
-            new FixedClock(DateTimeOffset.UnixEpoch));
+            target,
+            new FixedClock(DateTimeOffset.UnixEpoch), new DurableOperationSerialization());
         var command = new AssignExistingPostgreSqlDatabase(journal.Operation.Key,
             journal.Operation.Environment, Guid.CreateVersion7(), true,
             PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "checked", "tester");
@@ -382,40 +332,25 @@ public sealed class DurableCreateExecutorTests
         Assert.Equal(0, decisions.AssignCalls);
     }
 
-    [Theory]
-    [InlineData(DurableCreateOperationReason.ProviderInputUnavailable)]
-    [InlineData(DurableCreateOperationReason.UnsupportedShape)]
-    [InlineData(DurableCreateOperationReason.DatabaseNameInvalid)]
-    public async Task Historical_recovery_reason_is_preserved_when_pinned_inputs_cannot_be_read(DurableCreateOperationReason reason)
-    {
-        var (_, journal, target, _) = Harness(new Fixture { State = DurableCreateOperationState.Failed, Reason = reason });
-        var recovery = new PostgreSqlDatabaseRecovery(journal, new FakeRecoveryDecisions(),
-            new FakeManifests(Prepare(OneResource), true), target, new FixedClock(DateTimeOffset.UnixEpoch));
-        var preview = await recovery.InspectAsync(journal.Operation.Key, default);
-        Assert.Equal(reason, preview!.Reason);
-        Assert.Null(preview.DatabaseName);
-        Assert.Empty(target.Inputs);
-    }
-
     [Fact]
-    public async Task Corrupt_pinned_manifest_rejects_recovery_without_provider_access()
+    public async Task Recovery_uses_frozen_input_without_reading_the_manifest()
     {
         var (_, journal, target, _) = Harness();
         var attemptId = Guid.CreateVersion7();
         journal.SeedUncertain(attemptId);
         var decisions = new FakeRecoveryDecisions();
         var recovery = new PostgreSqlDatabaseRecovery(journal, decisions,
-            new FakeManifests(Prepare(OneResource), true), target,
-            new FixedClock(DateTimeOffset.UnixEpoch));
+            target,
+            new FixedClock(DateTimeOffset.UnixEpoch), new DurableOperationSerialization());
         var preview = await recovery.InspectAsync(journal.Operation.Key, default);
-        Assert.Null(preview!.DatabaseName);
-        Assert.Equal(DurableCreateOperationReason.InputUnavailable, preview.Reason);
+        Assert.Equal("appdb", preview!.DatabaseName);
+        Assert.Equal(DurableOperationReason.UncertainAfterDispatch, preview.Reason);
         var command = new AssignExistingPostgreSqlDatabase(journal.Operation.Key,
             journal.Operation.Environment, attemptId, true,
             PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "checked", "tester");
-        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable,
+        Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.DatabaseAbsent,
             (await recovery.AssignExistingDatabaseAsync(command, default)).Outcome);
-        Assert.Empty(target.Inputs);
+        Assert.Single(target.Inputs);
         Assert.Equal(0, decisions.AssignCalls);
     }
 
@@ -442,7 +377,7 @@ public sealed class DurableCreateExecutorTests
         try
         {
             Assert.False(second.IsCompleted);
-            Assert.Equal(DurableCreateOperationState.Dispatching, journal.Operation.State);
+            Assert.Equal(DurableOperationState.Dispatching, journal.Operation.State);
             Assert.Single(journal.Attempts);
             Assert.False(journal.AppliedGenerationAdvanced);
             Assert.DoesNotContain("create", journal.Log);
@@ -453,12 +388,12 @@ public sealed class DurableCreateExecutorTests
             await Task.WhenAll(first, second).WaitAsync(timeout.Token);
         }
 
-        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await first).Outcome);
-        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await second).Outcome);
-        Assert.Equal(DurableCreateOperationState.Succeeded, journal.Operation.State);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await first).Outcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await second).Outcome);
+        Assert.Equal(DurableOperationState.Succeeded, journal.Operation.State);
         Assert.True(journal.AppliedGenerationAdvanced);
         Assert.Equal(1, journal.Log.Count(entry => entry == "create"));
-        Assert.Equal(DurableCreateAttemptOutcome.Succeeded, Assert.Single(journal.Attempts).Outcome);
+        Assert.Equal(DurableAttemptOutcome.Succeeded, Assert.Single(journal.Attempts).Outcome);
     }
 
     [Fact]
@@ -484,9 +419,9 @@ public sealed class DurableCreateExecutorTests
     [Fact]
     public void Registration_supplies_the_null_hooks_and_the_pilot_execution_chain()
     {
-        var services = new ServiceCollection().AddPostgreSqlDurableCreateOperationExecution();
-        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IDurableCreateOperationExecutor) &&
-            descriptor.ImplementationType == typeof(ExactDurableCreateOperationExecutor));
+        var services = new ServiceCollection().AddPostgreSqlDurableOperationExecution();
+        Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IDurableOperationExecutor) &&
+            descriptor.ImplementationFactory is not null);
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IDurableCreateDispatchFaultHooks) &&
             descriptor.ImplementationType == typeof(NullDurableCreateDispatchFaultHooks));
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IPostgreSqlDatabaseCreateTarget) &&
@@ -503,19 +438,19 @@ public sealed class DurableCreateExecutorTests
         {
             BeforeMarker = async token => { entered.SetResult(); await release.Task.WaitAsync(token); }
         }, serialization);
-        var common = new ExactDurableCreateOperationExecutor(journal, null!, null!,
-            new DurableActionRegistry([], [], []), serialization, TimeProvider.System);
+        var common = new ExactDurableOperationExecutor(journal,
+            new DurableActionRegistry([], []), serialization, TimeProvider.System);
         var key = journal.Operation.Key;
         var executing = adapter.ExecuteAsync(key, default).AsTask();
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var missing = common.ExecuteAsync(key, default).AsTask();
         var observing = common.ObserveAsync(key, default).AsTask();
         Assert.False(missing.IsCompleted);
-        Assert.Equal(DurableCreateOperationState.Preparing,
+        Assert.Equal(DurableOperationState.Preparing,
             (await observing.WaitAsync(TimeSpan.FromSeconds(5)))!.Operation.State);
         release.SetResult();
-        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await executing).Outcome);
-        Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await missing).Outcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await executing).Outcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await missing).Outcome);
         Assert.Single(journal.Attempts);
         Assert.Equal(2, target.Inputs.Count);
     }
@@ -525,29 +460,37 @@ public sealed class DurableCreateExecutorTests
         "resources":{"database":{"type":"postgresql.database/v1alpha1","providerRef":"primary","properties":{"name":"appdb"}}}
         """;
 
-    private static DurableCreateOperationKey HarnessKey() => new(ApplicationDeploymentId.New(),
-        DeploymentGeneration.Create(1), ManifestLocalId.Create("database"), DurableOperationAction.Create);
+    private static DurableOperationKey HarnessKey() => new(ApplicationDeploymentId.New(),
+        DeploymentGeneration.Create(1), OperationId.Create("database-create"));
 
-    private static (PostgreSqlDurableCreateOperationExecutor Executor, FakeJournal Journal, FakeTarget Target,
+    private static (PostgreSqlDurableOperationExecutor Executor, FakeJournal Journal, FakeTarget Target,
         TestHooks Hooks) Harness(Fixture? fixture = null, DurableOperationSerialization? serialization = null)
     {
         fixture ??= new Fixture();
         var attemptId = fixture.AttemptId;
         var journal = new FakeJournal(
-            new DurableCreateOperation(HarnessKey(), fixture.State, EnvironmentRecordId.New(),
+            new DurableOperation(HarnessKey(), fixture.State, EnvironmentRecordId.New(),
                 ApplicationRecordId.New(),
                 ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)),
                 fixture.ProviderInstance, ProviderConfigurationRevisionNumber.Create(7),
                 "haby.postgresql.database/v1alpha1", DateTimeOffset.UnixEpoch, null, fixture.Reason,
                 attemptId, fixture.AttemptNumber,
-                fixture.State == DurableCreateOperationState.Dispatching ? DateTimeOffset.UnixEpoch : null, null))
+                fixture.State == DurableOperationState.Dispatching ? DateTimeOffset.UnixEpoch : null, null))
         {
             ThrowOnMarkerCommit = fixture.ThrowOnMarkerCommit,
             ThrowOnRecordSuccess = fixture.ThrowOnRecordSuccess
         };
         if (fixture.OpenAttempt)
-            journal.Attempts.Add(new DurableCreateOperationAttempt(attemptId!.Value, 1,
+            journal.Attempts.Add(new DurableOperationAttempt(attemptId!.Value, 1,
                 DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, null, null));
+        var input = new DurableActionInputReferences(journal.Operation.Environment, journal.Operation.ProviderInstance,
+            journal.Operation.ConfigurationRevision, journal.Operation.ImplementationId);
+        var spec = (fixture.Manifest ?? Prepare(OneResource)).Declaration.Spec;
+        var resource = spec.Resources.FirstOrDefault();
+        var node = new DurableOperationNode(journal.Operation.Key.OperationId, ManifestLocalId.Create("database"),
+            PostgreSqlDatabaseCreateAction.RegistrationKey, input,
+            new(PostgreSqlDatabaseCreateAction.Format, "{\"DatabaseName\":\"appdb\"}"), []);
+        journal.SetNode(node);
         var hooks = new TestHooks();
         hooks.BeforeMarker = fixture.BeforeMarker;
         hooks.AfterMarker = fixture.AfterMarker;
@@ -558,9 +501,9 @@ public sealed class DurableCreateExecutorTests
             Dispatch = fixture.Dispatch,
             CancelOnCheck = fixture.CancelDuringCheck ? (Action?)hooks.Cancel : null
         };
-        var executor = new PostgreSqlDurableCreateOperationExecutor(journal,
-            new FakeManifests(fixture.Manifest ?? Prepare(OneResource), fixture.CorruptManifest), target, hooks,
-            new FixedClock(DateTimeOffset.UnixEpoch), serialization);
+        var executor = new PostgreSqlDurableOperationExecutor(journal,
+            target, hooks,
+            new FixedClock(DateTimeOffset.UnixEpoch), serialization ?? new DurableOperationSerialization());
         return (executor, journal, target, hooks);
     }
 
@@ -581,8 +524,8 @@ public sealed class DurableCreateExecutorTests
 
     private sealed class Fixture
     {
-        public DurableCreateOperationState State { get; init; } = DurableCreateOperationState.Pending;
-        public DurableCreateOperationReason? Reason { get; init; }
+        public DurableOperationState State { get; init; } = DurableOperationState.Pending;
+        public DurableOperationReason? Reason { get; init; }
         public Guid? AttemptId { get; init; }
         public long AttemptNumber { get; init; }
         public bool OpenAttempt { get; init; }
@@ -607,107 +550,110 @@ public sealed class DurableCreateExecutorTests
                 : new(revision);
     }
 
-    private sealed class FakeJournal(DurableCreateOperation operation) : IDurableCreateOperationJournal
+    private sealed class FakeJournal(DurableOperation operation) : IDurableOperationJournal
     {
+        public ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken cancellationToken) =>
+            ValueTask.FromResult<DurableGenerationProgress?>(new(deployment, generation, 1, null, [new(Operation, [])]));
+        public void SetNode(DurableOperationNode node) => Operation = Operation with { Node = node };
         public List<string> Log { get; } = [];
-        public List<DurableCreateOperationAttempt> Attempts { get; } = [];
+        public List<DurableOperationAttempt> Attempts { get; } = [];
         public bool ThrowOnMarkerCommit { get; init; }
         public bool ThrowOnRecordSuccess { get; init; }
         public bool AppliedGenerationAdvanced { get; private set; }
-        public DurableCreateOperation Operation { get; private set; } = operation;
+        public DurableOperation Operation { get; private set; } = operation;
 
         public void SeedUncertain(Guid attemptId)
         {
             Operation = Operation with
             {
-                State = DurableCreateOperationState.NeedsAttention,
-                Reason = DurableCreateOperationReason.UncertainAfterDispatch,
+                State = DurableOperationState.NeedsAttention,
+                Reason = DurableOperationReason.UncertainAfterDispatch,
                 AttemptId = attemptId,
                 AttemptNumber = 1,
                 DispatchedAt = DateTimeOffset.UnixEpoch,
                 FinalizedAt = DateTimeOffset.UnixEpoch
             };
-            Attempts.Add(new DurableCreateOperationAttempt(attemptId, 1, DateTimeOffset.UnixEpoch,
-                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, DurableCreateAttemptOutcome.Uncertain));
+            Attempts.Add(new DurableOperationAttempt(attemptId, 1, DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, DurableAttemptOutcome.Uncertain));
         }
 
-        public ValueTask<DurableCreateOperation?> FindAsync(DurableCreateOperationKey key,
+        public ValueTask<DurableOperation?> FindAsync(DurableOperationKey key,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new ValueTask<DurableCreateOperation?>(Operation);
+            return new ValueTask<DurableOperation?>(Operation);
         }
 
-        public ValueTask<IReadOnlyList<DurableCreateOperationAttempt>> FindAttemptsAsync(
-            DurableCreateOperationKey key, CancellationToken cancellationToken)
+        public ValueTask<IReadOnlyList<DurableOperationAttempt>> FindAttemptsAsync(
+            DurableOperationKey key, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new ValueTask<IReadOnlyList<DurableCreateOperationAttempt>>(Attempts);
+            return new ValueTask<IReadOnlyList<DurableOperationAttempt>>(Attempts);
         }
 
-        public ValueTask<DurableCreateBeginAttemptResult> TryBeginAttemptAsync(DurableCreateOperationKey key,
+        public ValueTask<DurableBeginAttemptResult> TryBeginAttemptAsync(DurableOperationKey key,
             DateTimeOffset at, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Operation.State is not (DurableCreateOperationState.Pending or DurableCreateOperationState.Preparing))
-                return new ValueTask<DurableCreateBeginAttemptResult>(new DurableCreateBeginAttemptResult.Terminal(Operation));
+            if (Operation.State is not (DurableOperationState.Pending or DurableOperationState.Preparing))
+                return new ValueTask<DurableBeginAttemptResult>(new DurableBeginAttemptResult.Terminal(Operation));
             var attemptId = Guid.CreateVersion7();
             for (var index = 0; index < Attempts.Count; index++)
                 if (Attempts[index].FinishedAt is null)
                     Attempts[index] = Attempts[index] with
-                    { FinishedAt = at, Outcome = DurableCreateAttemptOutcome.AbandonedBeforeDispatch };
+                    { FinishedAt = at, Outcome = DurableAttemptOutcome.AbandonedBeforeDispatch };
             var number = Operation.AttemptNumber + 1;
             Operation = Operation with
             {
-                State = DurableCreateOperationState.Preparing,
+                State = DurableOperationState.Preparing,
                 AttemptId = attemptId,
                 AttemptNumber = number,
                 Reason = null,
                 UpdatedAt = at
             };
-            Attempts.Add(new DurableCreateOperationAttempt(attemptId, number, at, null, null, null));
-            return new ValueTask<DurableCreateBeginAttemptResult>(
-                new DurableCreateBeginAttemptResult.Started(Operation, attemptId, number));
+            Attempts.Add(new DurableOperationAttempt(attemptId, number, at, null, null, null));
+            return new ValueTask<DurableBeginAttemptResult>(
+                new DurableBeginAttemptResult.Started(Operation, attemptId, number));
         }
 
-        public ValueTask<DurableCreateMarkerResult> TryCommitDispatchMarkerAsync(DurableCreateOperationKey key,
+        public ValueTask<DurableMarkerResult> TryCommitDispatchMarkerAsync(DurableOperationKey key,
             Guid attemptId, DateTimeOffset at, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (ThrowOnMarkerCommit) throw new InvalidOperationException("The marker commit result is uncertain.");
-            if (Operation.State != DurableCreateOperationState.Preparing || Operation.AttemptId != attemptId)
-                return new ValueTask<DurableCreateMarkerResult>(new DurableCreateMarkerResult.Rejected(Operation));
+            if (Operation.State != DurableOperationState.Preparing || Operation.AttemptId != attemptId)
+                return new ValueTask<DurableMarkerResult>(new DurableMarkerResult.Rejected(Operation));
             Operation = Operation with
             {
-                State = DurableCreateOperationState.Dispatching,
+                State = DurableOperationState.Dispatching,
                 DispatchedAt = at,
                 UpdatedAt = at
             };
             CloseAttempt(attemptId, at, dispatched: true);
             Log.Add("marker");
-            return new ValueTask<DurableCreateMarkerResult>(new DurableCreateMarkerResult.Committed());
+            return new ValueTask<DurableMarkerResult>(new DurableMarkerResult.Committed());
         }
 
-        public ValueTask<bool> TryCloseAttemptBeforeDispatchAsync(DurableCreateOperationKey key, Guid attemptId,
-            DurableCreateAttemptOutcome outcome, DurableCreateOperationReason? reason, DateTimeOffset at,
+        public ValueTask<bool> TryCloseAttemptBeforeDispatchAsync(DurableOperationKey key, Guid attemptId,
+            DurableAttemptOutcome outcome, DurableOperationReason? reason, DateTimeOffset at,
             CancellationToken cancellationToken)
         {
             if (cancellationToken.IsCancellationRequested) return new ValueTask<bool>(false);
-            if (Operation.State != DurableCreateOperationState.Preparing || Operation.AttemptId != attemptId)
+            if (Operation.State != DurableOperationState.Preparing || Operation.AttemptId != attemptId)
                 return new ValueTask<bool>(false);
             Operation = Operation with { Reason = reason, UpdatedAt = at };
             CloseAttempt(attemptId, at, outcome: outcome);
             return new ValueTask<bool>(true);
         }
 
-        public ValueTask<bool> TryFinalizeFailureAsync(DurableCreateOperationKey key, Guid attemptId,
-            DurableCreateOperationState terminal, DurableCreateOperationReason reason, DateTimeOffset at,
+        public ValueTask<bool> TryFinalizeFailureAsync(DurableOperationKey key, Guid attemptId,
+            DurableOperationState terminal, DurableOperationReason reason, DateTimeOffset at,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (Operation.AttemptId != attemptId ||
-                Operation.State is not (DurableCreateOperationState.Preparing or
-                    DurableCreateOperationState.Dispatching))
+                Operation.State is not (DurableOperationState.Preparing or
+                    DurableOperationState.Dispatching))
                 return new ValueTask<bool>(false);
             Operation = Operation with
             {
@@ -716,53 +662,53 @@ public sealed class DurableCreateExecutorTests
                 FinalizedAt = at,
                 UpdatedAt = at
             };
-            CloseAttempt(attemptId, at, outcome: terminal == DurableCreateOperationState.NeedsAttention
-                ? DurableCreateAttemptOutcome.Uncertain
+            CloseAttempt(attemptId, at, outcome: terminal == DurableOperationState.NeedsAttention
+                ? DurableAttemptOutcome.Uncertain
                 : reason switch
                 {
-                    DurableCreateOperationReason.Conflict => DurableCreateAttemptOutcome.Conflict,
-                    DurableCreateOperationReason.ServerRejected => DurableCreateAttemptOutcome.ServerRejected,
-                    _ => DurableCreateAttemptOutcome.FailedBeforeDispatch
+                    DurableOperationReason.Conflict => DurableAttemptOutcome.Conflict,
+                    DurableOperationReason.ServerRejected => DurableAttemptOutcome.ServerRejected,
+                    _ => DurableAttemptOutcome.FailedBeforeDispatch
                 });
             return new ValueTask<bool>(true);
         }
 
-        public ValueTask<bool> TryRecoverDispatchingAsync(DurableCreateOperationKey key, DateTimeOffset at,
+        public ValueTask<bool> TryRecoverDispatchingAsync(DurableOperationKey key, DateTimeOffset at,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Operation.State != DurableCreateOperationState.Dispatching) return new ValueTask<bool>(false);
+            if (Operation.State != DurableOperationState.Dispatching) return new ValueTask<bool>(false);
             Operation = Operation with
             {
-                State = DurableCreateOperationState.NeedsAttention,
-                Reason = DurableCreateOperationReason.UncertainAfterDispatch,
+                State = DurableOperationState.NeedsAttention,
+                Reason = DurableOperationReason.UncertainAfterDispatch,
                 FinalizedAt = at,
                 UpdatedAt = at
             };
             for (var index = 0; index < Attempts.Count; index++)
                 if (Attempts[index].FinishedAt is null)
                     Attempts[index] = Attempts[index] with
-                    { FinishedAt = at, Outcome = DurableCreateAttemptOutcome.Uncertain };
+                    { FinishedAt = at, Outcome = DurableAttemptOutcome.Uncertain };
             Log.Add("recover");
             return new ValueTask<bool>(true);
         }
 
-        public ValueTask<bool> TryRecordSuccessAsync(DurableCreateOperationKey key, Guid attemptId, DateTimeOffset at,
+        public ValueTask<bool> TryRecordSuccessAsync(DurableOperationKey key, Guid attemptId, DateTimeOffset at,
             CancellationToken cancellationToken)
         {
             if (cancellationToken.IsCancellationRequested) throw new OperationCanceledException(cancellationToken);
             if (ThrowOnRecordSuccess) throw new InvalidOperationException("Terminal persistence failed.");
-            if (Operation.State != DurableCreateOperationState.Dispatching || Operation.AttemptId != attemptId)
+            if (Operation.State != DurableOperationState.Dispatching || Operation.AttemptId != attemptId)
                 return new ValueTask<bool>(false);
-            Operation = Operation with { State = DurableCreateOperationState.Succeeded, FinalizedAt = at, UpdatedAt = at };
-            CloseAttempt(attemptId, at, outcome: DurableCreateAttemptOutcome.Succeeded);
+            Operation = Operation with { State = DurableOperationState.Succeeded, FinalizedAt = at, UpdatedAt = at };
+            CloseAttempt(attemptId, at, outcome: DurableAttemptOutcome.Succeeded);
             AppliedGenerationAdvanced = true;
             Log.Add("success-recorded");
             return new ValueTask<bool>(true);
         }
 
         private void CloseAttempt(Guid attemptId, DateTimeOffset at, bool dispatched = false,
-            DurableCreateAttemptOutcome? outcome = null)
+            DurableAttemptOutcome? outcome = null)
         {
             for (var index = 0; index < Attempts.Count; index++)
                 if (Attempts[index].AttemptId == attemptId)
@@ -778,7 +724,7 @@ public sealed class DurableCreateExecutorTests
     private sealed class FakeRecoveryDecisions : IPostgreSqlDatabaseRecoveryJournal
     {
         public int AssignCalls { get; private set; }
-        public ValueTask<PostgreSqlDatabaseRecoveryAudit?> FindDecisionAsync(DurableCreateOperationKey key,
+        public ValueTask<PostgreSqlDatabaseRecoveryAudit?> FindDecisionAsync(DurableOperationKey key,
             Guid attemptId, CancellationToken cancellationToken) => new((PostgreSqlDatabaseRecoveryAudit?)null);
         public ValueTask<PostgreSqlDatabaseAssignmentResult> TryAssignAsync(
             AssignExistingPostgreSqlDatabase command, DateTimeOffset at, CancellationToken cancellationToken)
@@ -786,7 +732,7 @@ public sealed class DurableCreateExecutorTests
             AssignCalls++;
             return new(new PostgreSqlDatabaseAssignmentResult(PostgreSqlDatabaseAssignmentOutcome.Assigned,
                 new PostgreSqlDatabaseRecoveryReceipt(Guid.CreateVersion7(), command.Key,
-                    command.ExpectedAttemptId, command.Reason, command.TechnicalActor, at)));
+                    command.ExpectedAttemptId, command.Reason, command.TechnicalActor, at, 1)));
         }
     }
 

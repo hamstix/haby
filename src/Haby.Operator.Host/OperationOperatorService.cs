@@ -18,13 +18,15 @@ public sealed partial class ManifestOperatorService
         {
             Status = result.Outcome switch
             {
-                DurableCreateExecutionOutcome.HandlerUnavailable => OperationStatus.HandlerUnavailable,
-                DurableCreateExecutionOutcome.Succeeded => OperationStatus.Succeeded,
-                DurableCreateExecutionOutcome.Failed => OperationStatus.Failed,
-                DurableCreateExecutionOutcome.RetryableFailure => OperationStatus.RetryableFailure,
-                DurableCreateExecutionOutcome.NeedsAttention => OperationStatus.NeedsAttention,
-                DurableCreateExecutionOutcome.OperationNotFound => OperationStatus.OperationNotFound,
-                DurableCreateExecutionOutcome.DispatchUncertain => OperationStatus.DispatchUncertain,
+                DurableExecutionOutcome.Blocked => OperationStatus.Blocked,
+                DurableExecutionOutcome.InputUnavailable => OperationStatus.InputUnavailable,
+                DurableExecutionOutcome.HandlerUnavailable => OperationStatus.HandlerUnavailable,
+                DurableExecutionOutcome.Succeeded => OperationStatus.Succeeded,
+                DurableExecutionOutcome.Failed => OperationStatus.Failed,
+                DurableExecutionOutcome.RetryableFailure => OperationStatus.RetryableFailure,
+                DurableExecutionOutcome.NeedsAttention => OperationStatus.NeedsAttention,
+                DurableExecutionOutcome.OperationNotFound => OperationStatus.OperationNotFound,
+                DurableExecutionOutcome.DispatchUncertain => OperationStatus.DispatchUncertain,
                 _ => throw new InvalidOperationException("Unknown execution outcome.")
             },
             Operation = result.Operation is { } operation ? Summary(operation) : null
@@ -49,13 +51,13 @@ public sealed partial class ManifestOperatorService
                 Outcome = attempt.Outcome switch
                 {
                     null => OperationAttemptOutcome.Unspecified,
-                    DurableCreateAttemptOutcome.Succeeded => OperationAttemptOutcome.Succeeded,
-                    DurableCreateAttemptOutcome.Conflict => OperationAttemptOutcome.Conflict,
-                    DurableCreateAttemptOutcome.ServerRejected => OperationAttemptOutcome.ServerRejected,
-                    DurableCreateAttemptOutcome.Uncertain => OperationAttemptOutcome.Uncertain,
-                    DurableCreateAttemptOutcome.CanceledBeforeDispatch => OperationAttemptOutcome.CanceledBeforeDispatch,
-                    DurableCreateAttemptOutcome.AbandonedBeforeDispatch => OperationAttemptOutcome.AbandonedBeforeDispatch,
-                    DurableCreateAttemptOutcome.FailedBeforeDispatch => OperationAttemptOutcome.FailedBeforeDispatch,
+                    DurableAttemptOutcome.Succeeded => OperationAttemptOutcome.Succeeded,
+                    DurableAttemptOutcome.Conflict => OperationAttemptOutcome.Conflict,
+                    DurableAttemptOutcome.ServerRejected => OperationAttemptOutcome.ServerRejected,
+                    DurableAttemptOutcome.Uncertain => OperationAttemptOutcome.Uncertain,
+                    DurableAttemptOutcome.CanceledBeforeDispatch => OperationAttemptOutcome.CanceledBeforeDispatch,
+                    DurableAttemptOutcome.AbandonedBeforeDispatch => OperationAttemptOutcome.AbandonedBeforeDispatch,
+                    DurableAttemptOutcome.FailedBeforeDispatch => OperationAttemptOutcome.FailedBeforeDispatch,
                     _ => throw new InvalidOperationException("Unknown attempt outcome.")
                 }
             };
@@ -79,23 +81,20 @@ public sealed partial class ManifestOperatorService
         }
     }
 
-    private static OperationStatus OperationKey(OperationRequest request, out DurableCreateOperationKey? key)
+    private static OperationStatus OperationKey(OperationRequest request, out DurableOperationKey? key)
     {
         key = null;
         try
         {
-            key = new DurableCreateOperationKey(ApplicationDeploymentId.Parse(request.DeploymentId),
-                DeploymentGeneration.Create(request.Generation), ManifestLocalId.Create(request.ResourceId),
-                DurableOperationAction.Create);
+            key = new DurableOperationKey(ApplicationDeploymentId.Parse(request.DeploymentId),
+                DeploymentGeneration.Create(request.Generation), OperationId.Create(request.OperationId));
         }
         catch (ArgumentException) { return OperationStatus.InvalidRequest; }
-        if (request.Action == OperationAction.Unspecified) return OperationStatus.InvalidRequest;
-        if (request.Action != OperationAction.Create) return OperationStatus.UnsupportedAction;
         if (request.Generation != 1) return OperationStatus.UnsupportedShape;
         return OperationStatus.Unspecified;
     }
 
-    private static DurableOperationSummary Summary(DurableCreateOperation value)
+    private static DurableOperationSummary Summary(DurableOperation value)
     {
         var summary = new DurableOperationSummary
         {
@@ -103,35 +102,33 @@ public sealed partial class ManifestOperatorService
             {
                 DeploymentId = value.Key.DeploymentId.ToString(),
                 Generation = value.Key.Generation.Value,
-                ResourceId = value.Key.ResourceId.Value,
-                Action = OperationAction.Create
+                OperationId = value.Key.OperationId.Value
             },
             State = value.State switch
             {
-                DurableCreateOperationState.Pending => OperationState.Pending,
-                DurableCreateOperationState.Preparing => OperationState.Preparing,
-                DurableCreateOperationState.Dispatching => OperationState.Dispatching,
-                DurableCreateOperationState.Succeeded => OperationState.Succeeded,
-                DurableCreateOperationState.Failed => OperationState.Failed,
-                DurableCreateOperationState.NeedsAttention => OperationState.NeedsAttention,
+                DurableOperationState.Pending => OperationState.Pending,
+                DurableOperationState.Preparing => OperationState.Preparing,
+                DurableOperationState.Dispatching => OperationState.Dispatching,
+                DurableOperationState.Succeeded => OperationState.Succeeded,
+                DurableOperationState.Failed => OperationState.Failed,
+                DurableOperationState.NeedsAttention => OperationState.NeedsAttention,
                 _ => throw new InvalidOperationException("Unknown operation state.")
             },
             Reason = value.Reason switch
             {
                 null => OperationReason.Unspecified,
-                DurableCreateOperationReason.InputInvalid => OperationReason.InputInvalid,
-                DurableCreateOperationReason.InputUnavailable => OperationReason.InputUnavailable,
-                DurableCreateOperationReason.HandlerUnavailable => OperationReason.HandlerUnavailable,
-                DurableCreateOperationReason.ProviderInputUnavailable => OperationReason.ProviderInputUnavailable,
-                DurableCreateOperationReason.SecretUnavailable => OperationReason.SecretUnavailable,
-                DurableCreateOperationReason.UnsupportedShape => OperationReason.UnsupportedShape,
-                DurableCreateOperationReason.DatabaseNameInvalid => OperationReason.DatabaseNameInvalid,
-                DurableCreateOperationReason.Connectivity => OperationReason.Connectivity,
-                DurableCreateOperationReason.Conflict => OperationReason.Conflict,
-                DurableCreateOperationReason.ServerRejected => OperationReason.ServerRejected,
-                DurableCreateOperationReason.UncertainAfterDispatch => OperationReason.UncertainAfterDispatch,
+                DurableOperationReason.InputInvalid => OperationReason.InputInvalid,
+                DurableOperationReason.InputUnavailable => OperationReason.InputUnavailable,
+                DurableOperationReason.HandlerUnavailable => OperationReason.HandlerUnavailable,
+                DurableOperationReason.SecretUnavailable => OperationReason.SecretUnavailable,
+                DurableOperationReason.Connectivity => OperationReason.Connectivity,
+                DurableOperationReason.Conflict => OperationReason.Conflict,
+                DurableOperationReason.ServerRejected => OperationReason.ServerRejected,
+                DurableOperationReason.UncertainAfterDispatch => OperationReason.UncertainAfterDispatch,
                 _ => throw new InvalidOperationException("Unknown operation reason.")
             },
+            ResourceId = value.Node.ResourceId.Value,
+            ActionContract = value.Node.Action.ActionContract.Value,
             EnvironmentRecordId = value.Environment.ToString(),
             ApplicationRecordId = value.Application.ToString(),
             Reference = Reference(value.Revision),

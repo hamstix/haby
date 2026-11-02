@@ -7,7 +7,7 @@ internal sealed record CliCommit(string ChangeSetId, string PlanId, string Deplo
 internal sealed record CliDesiredGeneration(string DeploymentId, long Generation, string DesiredPresence,
     string ChangeSetId, string PlanId, string AcceptedAtUtc, string TechnicalActorId,
     string EnvironmentRecordId, string EnvironmentId, CliReference Reference, string ProviderAlias,
-    string ProviderInstanceId, long ConfigurationRevision, string ImplementationId);
+    string ProviderInstanceId, long ConfigurationRevision, string ImplementationId, CliPlannedOperation[] Operations);
 internal sealed record CliCommitData(string StateMeaning, CliCommit? Commit,
     CliDesiredGeneration? DesiredGeneration, long? ActualGeneration);
 
@@ -49,7 +49,7 @@ internal static class CommitPresentation
             g.DesiredPresence == "Present" ? "present" : throw new InvalidDataException("Unsupported desired presence."),
             g.ChangeSetId, g.PlanId, g.AcceptedAtUtc, g.TechnicalActorId, g.EnvironmentRecordId, g.EnvironmentId,
             g.Reference is { } r ? new(r.ApplicationRecordId, r.RevisionNumber) : throw new InvalidDataException("Missing revision."),
-            g.ProviderAlias, g.ProviderInstanceId, g.ConfigurationRevision, g.ImplementationId),
+            g.ProviderAlias, g.ProviderInstanceId, g.ConfigurationRevision, g.ImplementationId, PlanningPresentation.Operations(g.Operations)),
         reply.HasActualGeneration ? reply.ActualGeneration : null);
 }
 
@@ -84,6 +84,8 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"ChangeSet: {g.ChangeSetId}; original Plan: {g.PlanId}");
             _output.WriteLine($"Environment: {g.EnvironmentId}; record: {g.EnvironmentRecordId}");
             _output.WriteLine($"Revision: {g.Reference.ApplicationRecordId} {g.Reference.RevisionNumber}");
+            foreach (var node in g.Operations)
+                _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}");
             _output.WriteLine($"Provider: {g.ProviderAlias} -> {g.ProviderInstanceId} revision {g.ConfigurationRevision}; implementation: {g.ImplementationId}");
             _output.WriteLine($"Accepted UTC: {g.AcceptedAtUtc}; technical actor: {g.TechnicalActorId}");
             _output.WriteLine("This immutable desired snapshot does not confirm applied infrastructure.");

@@ -177,10 +177,24 @@ public sealed partial class ManifestOperatorService
             ExpiresAtUtc = Utc(value.ExpiresAt),
             TechnicalActorId = value.ActorId
         };
+        result.Operations.AddRange(OperationSummaries(value.Graph));
         if (value.ClosedAt is { } closed) result.ClosedAtUtc = Utc(closed);
         if (value.ClosedByActorId is { } actor) result.ClosedByTechnicalActorId = actor;
         return result;
     }
+
+    private static IEnumerable<PlannedOperationSummary> OperationSummaries(DurableOperationGraph graph) =>
+        graph.Nodes.Select(node =>
+        {
+            var summary = new PlannedOperationSummary
+            {
+                OperationId = node.Id.Value,
+                ResourceId = node.ResourceId.Value,
+                ActionContract = node.Action.ActionContract.Value
+            };
+            summary.Dependencies.AddRange(node.Dependencies.Select(d => d.Value));
+            return summary;
+        });
 
     private static string Utc(DateTimeOffset value) => value.ToUniversalTime().ToString("O",
         System.Globalization.CultureInfo.InvariantCulture);

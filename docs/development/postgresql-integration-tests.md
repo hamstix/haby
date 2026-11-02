@@ -249,24 +249,26 @@ versus transient classification, cancellation and dispatch ordering are unchange
 HandlerUnavailable is a bounded request refusal from exact action dispatch, not a
 persisted reason inferred from resolver failures. Missing Pending/Preparing support
 leaves the journal and attempts unchanged. Terminal histories remain readable and
-Dispatching still becomes NeedsAttention without Provider calls. The historical
-ResourceId + Create representation maps explicitly to the adapter-owned
-`postgresql.database.create/v1alpha1` contract. Plan, Check and atomic Commit share
+Dispatching still becomes NeedsAttention without Provider calls. The frozen graph node pins the adapter-owned `postgresql.database.create/v1alpha1` contract. Plan, Check and atomic Commit share
 exact admission and adapter-owned validation; production still registers only the
 database action. See the [implementation design](102-exact-action-admission.md) for
 keys, ownership and the typed test-only queue boundary.
 
-The boundary tests check adapter ownership and the absence of an Application
-reference to the concrete adapter. The disposable PostgreSQL suite checks
-legacy and new reason strings through
-fresh-context history, restart, Host wire mapping and recovery reads. Upgrade
-retains legacy strings and resumable ProviderInputUnavailable attempts. New
-InputUnavailable failures still resume only before dispatch. Unknown stored
-codes fail with a bounded error. Fresh migration and upgrade tests verify the
-reason constraint; downgrade with new-code rows must reject atomically while
-retaining rows, attempts, migration history and the current constraint. Downgrade
-without new-code rows remains possible. CLI and published Native AOT loopback
-tests check all numbers 0-11 in operation and recovery text/JSON, including
-historical value `4` / `databaseNameInvalid`.
-The existing dispatch, cancellation, uncertainty, pinned-input, recovery, restart
-and dump/restore suites continue to exercise the same execution behavior.
+The graph revision replaces the earlier ResourceId + Create/reason compatibility
+rehearsals with current-model checks under ADR-033. See
+[issue 104 design](104-durable-operation-graph.md). `ExactActionAdmissionTests`
+uses a typed counting queue action with three mandatory steps for one Resource
+through actual Plan -> Check -> Commit -> execution, including ordinal dependencies,
+stop-all, explicit resume, cancellation, failure, missing/restored support,
+post-marker restart and uncertainty, direct-call refusal and concurrent calls.
+Independent contexts verify partial/final AppliedGeneration, acceptance rollback
+and atomic finalization rollback. Production still emits only database Create.
+
+`GraphRecoveryRestoreTests` resolves an uncertain real PostgreSQL database node
+while its test sibling is incomplete. The immutable receipt records no achieved
+AppliedGeneration; replay performs no external check. Real pg_dump/pg_restore
+preserves that partial graph and all protected history before the sibling completes
+and advances the generation once without changing the decision. The normal
+one-database Host/generated RPC/published Native AOT CLI scenarios remain gates.
+Fresh-schema/model checks replace superseded upgrade/downgrade matrices. Startup
+refuses unsupported catalogs safely and never resets persistent data.

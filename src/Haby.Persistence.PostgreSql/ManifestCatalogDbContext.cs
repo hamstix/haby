@@ -23,9 +23,9 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
     internal DbSet<ApplicationDeploymentRow> ApplicationDeployments => Set<ApplicationDeploymentRow>();
     internal DbSet<DeploymentGenerationRow> DeploymentGenerations => Set<DeploymentGenerationRow>();
     internal DbSet<ChangeSetCommitRow> ChangeSetCommits => Set<ChangeSetCommitRow>();
-    internal DbSet<DurableCreateOperationRow> DurableCreateOperations => Set<DurableCreateOperationRow>();
-    internal DbSet<DurableCreateOperationAttemptRow> DurableCreateOperationAttempts =>
-        Set<DurableCreateOperationAttemptRow>();
+    internal DbSet<DurableOperationRow> DurableOperations => Set<DurableOperationRow>();
+    internal DbSet<DurableOperationAttemptRow> DurableOperationAttempts =>
+        Set<DurableOperationAttemptRow>();
     internal DbSet<PostgreSqlDatabaseRecoveryDecisionRow> PostgreSqlDatabaseRecoveryDecisions =>
         Set<PostgreSqlDatabaseRecoveryDecisionRow>();
 
@@ -253,6 +253,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.ConfigurationRevisionNumber).HasColumnName("configuration_revision_number");
             entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.SnapshotFormatVersion).HasColumnName("snapshot_format_version");
+            entity.Property(row => row.GraphJson).HasColumnName("graph_json").IsRequired();
             entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.ExpiresAt).HasColumnName("expires_at");
@@ -304,6 +305,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
             entity.Property(row => row.ConfigurationRevisionNumber).HasColumnName("configuration_revision_number");
             entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.GraphJson).HasColumnName("graph_json").IsRequired();
             entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
             entity.Property(row => row.AcceptedAt).HasColumnName("accepted_at");
             entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
@@ -332,14 +334,13 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.HasOne<DeploymentGenerationRow>().WithOne().HasForeignKey<ChangeSetCommitRow>(row => new { row.DeploymentId, row.Generation })
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        modelBuilder.Entity<DurableCreateOperationRow>(entity =>
+        modelBuilder.Entity<DurableOperationRow>(entity =>
         {
             entity.ToTable("durable_create_operations", table =>
             {
-                table.HasCheckConstraint("CK_durable_create_operations_action", "action = 'Create'");
                 table.HasCheckConstraint("CK_durable_create_operations_state",
                     "state IN ('Pending', 'Preparing', 'Dispatching', 'Succeeded', 'Failed', 'NeedsAttention')");
-                table.HasCheckConstraint("CK_durable_create_operations_resource_id", "length(resource_id) > 0");
+                table.HasCheckConstraint("CK_durable_create_operations_resource_id", "length(operation_id) > 0");
                 table.HasCheckConstraint("CK_durable_create_operations_attempt",
                     "attempt_number >= 0 AND (attempt_number = 0) = (current_attempt_id IS NULL)");
                 table.HasCheckConstraint("CK_durable_create_operations_dispatch",
@@ -347,17 +348,16 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                 table.HasCheckConstraint("CK_durable_create_operations_final",
                     "(state IN ('Succeeded', 'Failed', 'NeedsAttention')) = (finalized_at IS NOT NULL)");
                 table.HasCheckConstraint("CK_durable_create_operations_reason",
-                    "reason_code IS NULL OR reason_code IN ('ProviderInputUnavailable', 'SecretUnavailable', " +
-                    "'UnsupportedShape', 'DatabaseNameInvalid', 'Connectivity', 'Conflict', 'ServerRejected', " +
+                    "reason_code IS NULL OR reason_code IN ('SecretUnavailable', " +
+                    "'Connectivity', 'Conflict', 'ServerRejected', " +
                     "'UncertainAfterDispatch', 'InputInvalid', 'InputUnavailable', 'HandlerUnavailable')");
                 table.HasCheckConstraint("CK_durable_create_operations_needs_attention",
                     "reason_code IS DISTINCT FROM 'UncertainAfterDispatch' OR state = 'NeedsAttention'");
             });
-            entity.HasKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action });
+            entity.HasKey(row => new { row.DeploymentId, row.Generation, row.OperationId });
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
             entity.Property(row => row.Generation).HasColumnName("generation");
-            entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
-            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
+            entity.Property(row => row.OperationId).HasColumnName("operation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.State).HasColumnName("state").HasMaxLength(32).IsRequired();
             entity.Property(row => row.ReasonCode).HasColumnName("reason_code").HasMaxLength(32);
             entity.Property(row => row.CurrentAttemptId).HasColumnName("current_attempt_id");
@@ -366,14 +366,13 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
             entity.Property(row => row.DispatchedAt).HasColumnName("dispatched_at");
             entity.Property(row => row.FinalizedAt).HasColumnName("finalized_at");
-            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action, row.State })
+            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.OperationId, row.State })
                 .IsUnique();
             entity.HasIndex(row => new
             {
                 row.DeploymentId,
                 row.Generation,
-                row.ResourceId,
-                row.Action,
+                row.OperationId,
                 row.CurrentAttemptId,
                 row.State
             }).IsUnique();
@@ -381,11 +380,10 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                 .HasForeignKey(row => new { row.DeploymentId, row.Generation })
                 .OnDelete(DeleteBehavior.Restrict);
         });
-        modelBuilder.Entity<DurableCreateOperationAttemptRow>(entity =>
+        modelBuilder.Entity<DurableOperationAttemptRow>(entity =>
         {
             entity.ToTable("durable_create_operation_attempts", table =>
             {
-                table.HasCheckConstraint("CK_durable_create_operation_attempts_action", "action = 'Create'");
                 table.HasCheckConstraint("CK_durable_create_operation_attempts_number", "attempt_number > 0");
                 table.HasCheckConstraint("CK_durable_create_operation_attempts_outcome",
                     "outcome IS NULL OR outcome IN ('Succeeded', 'Conflict', 'ServerRejected', 'Uncertain', " +
@@ -399,8 +397,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.AttemptId).HasColumnName("attempt_id");
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
             entity.Property(row => row.Generation).HasColumnName("generation");
-            entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
-            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
+            entity.Property(row => row.OperationId).HasColumnName("operation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.AttemptNumber).HasColumnName("attempt_number");
             entity.Property(row => row.StartedAt).HasColumnName("started_at");
             entity.Property(row => row.DispatchedAt).HasColumnName("dispatched_at");
@@ -410,23 +407,21 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             {
                 row.DeploymentId,
                 row.Generation,
-                row.ResourceId,
-                row.Action,
+                row.OperationId,
                 row.AttemptNumber
             }).IsUnique();
-            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action });
+            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.OperationId });
             entity.HasIndex(row => new
             {
                 row.AttemptId,
                 row.DeploymentId,
                 row.Generation,
-                row.ResourceId,
-                row.Action,
+                row.OperationId,
                 row.AttemptNumber,
                 row.Outcome
             }).IsUnique();
-            entity.HasOne<DurableCreateOperationRow>().WithMany()
-                .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action })
+            entity.HasOne<DurableOperationRow>().WithMany()
+                .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.OperationId })
                 .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<PostgreSqlDatabaseRecoveryDecisionRow>(entity =>
@@ -441,7 +436,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
                 table.HasCheckConstraint("CK_postgresql_recovery_actor",
                     "length(btrim(technical_actor)) > 0 AND length(technical_actor) <= 256");
                 table.HasCheckConstraint("CK_postgresql_recovery_committed_state",
-                    "operation_state = 'Succeeded' AND applied_generation = generation");
+                    "operation_state = 'Succeeded' AND (applied_generation IS NULL OR applied_generation = generation)");
                 table.HasCheckConstraint("CK_postgresql_recovery_uncertain_attempt",
                     "attempt_outcome = 'Uncertain'");
             });
@@ -449,8 +444,7 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
             entity.Property(row => row.Generation).HasColumnName("generation");
-            entity.Property(row => row.ResourceId).HasColumnName("resource_id").HasMaxLength(128).IsRequired();
-            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16).IsRequired();
+            entity.Property(row => row.OperationId).HasColumnName("operation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.AttemptId).HasColumnName("attempt_id");
             entity.Property(row => row.AttemptNumber).HasColumnName("attempt_number");
             entity.Property(row => row.AttemptOutcome).HasColumnName("attempt_outcome")
@@ -462,14 +456,13 @@ public sealed class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbC
             entity.Property(row => row.DecidedAt).HasColumnName("decided_at");
             entity.Property(row => row.OperationState).HasColumnName("operation_state")
                 .HasMaxLength(32).HasDefaultValue("Succeeded").IsRequired();
-            entity.Property(row => row.AppliedGeneration).HasColumnName("applied_generation")
-                .HasDefaultValue(1L);
-            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action }).IsUnique();
+            entity.Property(row => row.AppliedGeneration).HasColumnName("applied_generation");
+            entity.HasIndex(row => new { row.DeploymentId, row.Generation, row.OperationId }).IsUnique();
             entity.HasIndex(row => row.AttemptId).IsUnique();
-            entity.HasOne<DurableCreateOperationRow>().WithMany()
-                .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.ResourceId, row.Action })
+            entity.HasOne<DurableOperationRow>().WithMany()
+                .HasForeignKey(row => new { row.DeploymentId, row.Generation, row.OperationId })
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<DurableCreateOperationAttemptRow>().WithMany()
+            entity.HasOne<DurableOperationAttemptRow>().WithMany()
                 .HasForeignKey(row => row.AttemptId).OnDelete(DeleteBehavior.Restrict);
         });
     }
@@ -500,6 +493,7 @@ internal sealed class DurablePlanRow
     public required string ImplementationId { get; set; }
     public int SnapshotFormatVersion { get; set; }
     public required string Fingerprint { get; set; }
+    public string GraphJson { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public required string ActorId { get; set; }
@@ -538,6 +532,7 @@ internal sealed class DeploymentGenerationRow
     public long ConfigurationRevisionNumber { get; set; }
     public required string ImplementationId { get; set; }
     public required string Fingerprint { get; set; }
+    public string GraphJson { get; set; } = null!;
     public DateTimeOffset AcceptedAt { get; set; }
     public required string ActorId { get; set; }
 }
@@ -552,12 +547,11 @@ internal sealed class ChangeSetCommitRow
     public required string ActorId { get; set; }
 }
 
-internal sealed class DurableCreateOperationRow
+internal sealed class DurableOperationRow
 {
     public Guid DeploymentId { get; set; }
     public long Generation { get; set; }
-    public required string ResourceId { get; set; }
-    public required string Action { get; set; }
+    public required string OperationId { get; set; }
     public required string State { get; set; }
     public string? ReasonCode { get; set; }
     public Guid? CurrentAttemptId { get; set; }
@@ -568,13 +562,12 @@ internal sealed class DurableCreateOperationRow
     public DateTimeOffset? FinalizedAt { get; set; }
 }
 
-internal sealed class DurableCreateOperationAttemptRow
+internal sealed class DurableOperationAttemptRow
 {
     public Guid AttemptId { get; set; }
     public Guid DeploymentId { get; set; }
     public long Generation { get; set; }
-    public required string ResourceId { get; set; }
-    public required string Action { get; set; }
+    public required string OperationId { get; set; }
     public long AttemptNumber { get; set; }
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset? DispatchedAt { get; set; }
@@ -587,8 +580,7 @@ internal sealed class PostgreSqlDatabaseRecoveryDecisionRow
     public Guid Id { get; set; }
     public Guid DeploymentId { get; set; }
     public long Generation { get; set; }
-    public required string ResourceId { get; set; }
-    public required string Action { get; set; }
+    public required string OperationId { get; set; }
     public Guid AttemptId { get; set; }
     public long AttemptNumber { get; set; }
     public required string AttemptOutcome { get; set; }
@@ -598,7 +590,7 @@ internal sealed class PostgreSqlDatabaseRecoveryDecisionRow
     public bool Acknowledged { get; set; }
     public DateTimeOffset DecidedAt { get; set; }
     public required string OperationState { get; set; }
-    public long AppliedGeneration { get; set; }
+    public long? AppliedGeneration { get; set; }
 }
 
 internal sealed class EnvironmentRow

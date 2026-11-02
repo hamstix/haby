@@ -128,7 +128,7 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.Single(await check.ProviderConfigurationRevisions.AsNoTracking().ToArrayAsync());
             Assert.Empty(await check.ProviderAliases.AsNoTracking().ToArrayAsync());
             Assert.Empty(await check.DurablePlans.AsNoTracking().ToArrayAsync());
-            Assert.Empty(await check.DurableCreateOperations.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await check.DurableOperations.AsNoTracking().ToArrayAsync());
             await host.StopAsync();
         }
         // Missing support is not a startup or metadata failure, and cannot substitute an adapter.

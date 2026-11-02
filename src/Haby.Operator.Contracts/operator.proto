@@ -218,6 +218,12 @@ message DurableChangeSetSummary {
   string created_at_utc = 5;
   string technical_actor_id = 6;
 }
+message PlannedOperationSummary {
+  string operation_id = 1;
+  string resource_id = 2;
+  string action_contract = 3;
+  repeated string dependencies = 4;
+}
 message DurablePlanSummary {
   string plan_id = 1;
   string change_set_id = 2;
@@ -235,6 +241,7 @@ message DurablePlanSummary {
   optional string closed_at_utc = 14;
   optional string closed_by_technical_actor_id = 15;
   PlanDescription intended_work = 16;
+  repeated PlannedOperationSummary operations = 17;
 }
 // Immutable intended work only: no Provider preflight, absence check or execution guarantee.
 enum PlanDescriptionStatus {
@@ -314,6 +321,7 @@ message DesiredGenerationSummary {
   string provider_instance_id = 12;
   int64 configuration_revision = 13;
   string implementation_id = 14;
+  repeated PlannedOperationSummary operations = 15;
 }
 message CommitReply {
   CommitStatus status = 1;
@@ -326,8 +334,7 @@ message CommitReply {
 message OperationRequest {
   string deployment_id = 1;
   int64 generation = 2;
-  string resource_id = 3;
-  OperationAction action = 4;
+  string operation_id = 3;
 }
 
 // Recovery selects no Provider. The server uses the operation's immutable contract and implementation.
@@ -363,6 +370,7 @@ message RecoveryReceipt {
   RecoveryReason reason = 4;
   string technical_actor = 5;
   string decided_at_utc = 6;
+  optional int64 applied_generation_at_decision = 7;
 }
 message RecoveryPreview {
   DurableOperationSummary operation = 1;
@@ -374,10 +382,6 @@ message RecoveryReply {
   RecoveryStatus status = 1;
   RecoveryPreview preview = 2;
   RecoveryReceipt receipt = 3;
-}
-enum OperationAction {
-  OPERATION_ACTION_UNSPECIFIED = 0;
-  OPERATION_ACTION_CREATE = 1;
 }
 enum OperationStatus {
   OPERATION_STATUS_UNSPECIFIED = 0;
@@ -392,6 +396,8 @@ enum OperationStatus {
   OPERATION_STATUS_UNSUPPORTED_ACTION = 9;
   OPERATION_STATUS_UNSUPPORTED_SHAPE = 10;
   OPERATION_STATUS_HANDLER_UNAVAILABLE = 11;
+  OPERATION_STATUS_BLOCKED = 12;
+  OPERATION_STATUS_INPUT_UNAVAILABLE = 13;
 }
 enum OperationState {
   OPERATION_STATE_UNSPECIFIED = 0;
@@ -404,10 +410,7 @@ enum OperationState {
 }
 enum OperationReason {
   OPERATION_REASON_UNSPECIFIED = 0;
-  OPERATION_REASON_PROVIDER_INPUT_UNAVAILABLE = 1;
   OPERATION_REASON_SECRET_UNAVAILABLE = 2;
-  OPERATION_REASON_UNSUPPORTED_SHAPE = 3;
-  OPERATION_REASON_DATABASE_NAME_INVALID = 4;
   OPERATION_REASON_CONNECTIVITY = 5;
   OPERATION_REASON_CONFLICT = 6;
   OPERATION_REASON_SERVER_REJECTED = 7;
@@ -427,6 +430,8 @@ enum OperationAttemptOutcome {
   OPERATION_ATTEMPT_OUTCOME_FAILED_BEFORE_DISPATCH = 7;
 }
 message DurableOperationSummary {
+  string resource_id = 18;
+  string action_contract = 19;
   OperationRequest key = 1;
   OperationState state = 2;
   OperationReason reason = 3;

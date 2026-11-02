@@ -20,14 +20,13 @@ public sealed partial class CliLoopbackTests
         {
             Interlocked.Increment(ref Executions);
             Assert.Equal("deployment", request.DeploymentId); Assert.Equal(1, request.Generation);
-            Assert.Equal(OperationAction.Create, request.Action);
-            if (request.ResourceId == "cancel")
+            if (request.OperationId == "cancel")
             {
                 await Task.Delay(Timeout.Infinite, context.CancellationToken);
             }
-            if (request.ResourceId == "transport")
+            if (request.OperationId == "transport")
                 throw new RpcException(new Status(StatusCode.Unavailable, "secret-transport-sentinel"));
-            return request.ResourceId switch
+            return request.OperationId switch
             {
                 "no-handler" => CliOperationTests.Snapshot(OperationStatus.HandlerUnavailable, OperationState.Pending),
                 "success" => CliOperationTests.Snapshot(OperationStatus.Succeeded, OperationState.Succeeded),
@@ -41,12 +40,11 @@ public sealed partial class CliLoopbackTests
         public override Task<OperationReply> GetOperation(OperationRequest request, ServerCallContext context)
         {
             Assert.Equal("deployment", request.DeploymentId); Assert.Equal(1, request.Generation);
-            Assert.True(request.ResourceId == "db" || request.ResourceId.StartsWith("reason-", StringComparison.Ordinal));
-            Assert.Equal(OperationAction.Create, request.Action);
+            Assert.True(request.OperationId == "db" || request.OperationId.StartsWith("reason-", StringComparison.Ordinal));
             var reply = CliOperationTests.Snapshot(OperationStatus.Found,
-                request.ResourceId == "db" ? OperationState.Dispatching : OperationState.Failed);
-            if (request.ResourceId.StartsWith("reason-", StringComparison.Ordinal))
-                reply.Operation.Reason = (OperationReason)int.Parse(request.ResourceId[7..], System.Globalization.CultureInfo.InvariantCulture);
+                request.OperationId == "db" ? OperationState.Dispatching : OperationState.Failed);
+            if (request.OperationId.StartsWith("reason-", StringComparison.Ordinal))
+                reply.Operation.Reason = (OperationReason)int.Parse(request.OperationId[7..], System.Globalization.CultureInfo.InvariantCulture);
             return Task.FromResult(reply);
         }
     }
@@ -72,11 +70,11 @@ public sealed partial class CliLoopbackTests
                 ("execute", "attention", "needsAttention", 1), ("execute", "uncertain", "dispatchUncertain", 1),
                 ("execute", "missing", "operationNotFound", 1), ("execute", "transport", "", 3)
             };
-            cases = [.. cases, .. Enumerable.Range(0, 12).Select(n => ("get", "reason-" + n, "found", 0))];
+            cases = [.. cases, .. new[] { 0, 2, 5, 6, 7, 8, 9, 10, 11 }.Select(n => ("get", "reason-" + n, "found", 0))];
             foreach (var (verb, resource, outcome, exit) in cases)
                 foreach (var format in new[] { "text", "json" })
                 {
-                    var args = new[] { "operation", verb, "deployment", "1", resource, "--action", "create", "--config", config, "-o", format };
+                    var args = new[] { "operation", verb, "deployment", "1", resource, "--config", config, "-o", format };
                     using var output = new StringWriter(); using var error = new StringWriter();
                     var cli = new CliApplication(new FixedEndpoint(endpoint), new GrpcRegistryClientFactory(), output, error);
                     var callsBefore = OperationRegistry.Executions;
@@ -120,7 +118,7 @@ public sealed partial class CliLoopbackTests
             using var canceledOutput = new StringWriter(); using var canceledError = new StringWriter();
             using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
             var canceledCli = new CliApplication(new FixedEndpoint(endpoint), new GrpcRegistryClientFactory(), canceledOutput, canceledError);
-            Assert.Equal(3, await canceledCli.RunAsync(["operation", "execute", "deployment", "1", "cancel", "--action", "create", "--config", config], cancellation.Token));
+            Assert.Equal(3, await canceledCli.RunAsync(["operation", "execute", "deployment", "1", "cancel", "--config", config], cancellation.Token));
             Assert.Equal("", canceledOutput.ToString());
         }
         finally { File.Delete(config); await host.StopAsync(); }

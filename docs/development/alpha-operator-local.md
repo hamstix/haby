@@ -1,5 +1,14 @@
 # Local alpha operator workflow
 
+The operation-graph revision requires a **fresh catalog** under ADR-033. Startup
+refuses pre-graph or unknown catalog schemas and never resets data. Stop the old
+Host, retain a backup for inspection with its original build, and explicitly
+initialize a separately named empty catalog before running this build. Do not
+reuse a pre-graph catalog or infer that this deletes/owns external databases or
+roles. Decide separately how previous test resources are handled. Current-build
+restart and backup/restore retain graph, inputs, attempts and recovery decisions.
+See [the graph design](104-durable-operation-graph.md).
+
 The operator host and `habyctl` are an internal alpha interface for a single
 Haby instance. The host listens only on IPv4 loopback with HTTP/2. TLS is
 enabled by default and can be explicitly disabled for local debugging. It
@@ -555,14 +564,14 @@ still uses the trusted application APIs above. Execution resolves
 the accepted exact Provider revision and its exact SecretVersion, even after an
 alias switch. Unavailable pinned inputs cannot select a substitute.
 
-After successful desired-state commit, identify the exact local Resource from
-the accepted manifest (`db` in this example). Both commands require all four
-identity fields; neither guesses a Resource nor selects a latest generation:
+After successful desired-state commit, read the exact OperationId from the
+Plan or desired-generation `operations` metadata (`db-create` for Resource `db`
+in this example). Commands require deployment, generation and OperationId:
 
 ```powershell
-& $cli operation get $deploymentId 1 db --action create --config .\config.yaml -o json
-& $cli operation execute $deploymentId 1 db --action create --config .\config.yaml -o json
-& $cli operation get $deploymentId 1 db --action create --config .\config.yaml
+& $cli operation get $deploymentId 1 db-create --config .\config.yaml -o json
+& $cli operation execute $deploymentId 1 db-create --config .\config.yaml -o json
+& $cli operation get $deploymentId 1 db-create --config .\config.yaml
 ```
 
 A context selects the registry. Since these commands use a complete persisted
@@ -571,10 +580,12 @@ no context is selected. Context Environment metadata does not reassign the
 operation. Do not supply a password, connection string, Provider override or
 actor; there are no such command arguments or request fields.
 
-`ExecuteOperation` delegates to the singleton `IDurableCreateOperationExecutor`.
-Only a previously committed generation `1`, exact Resource and `Create` are
-supported. Malformed/missing identity returns `invalidRequest`, an unknown action
-returns `unsupportedAction`, a later generation returns `unsupportedShape`, and
+`ExecuteOperation` delegates to the singleton `IDurableOperationExecutor`.
+Address a previously committed generation `1` by its exact `OperationId` from
+Plan/generation `operations` metadata. For Resource `db`, production plans emit
+`db-create` with action contract `postgresql.database.create/v1alpha1`.
+Malformed/missing identity returns `invalidRequest`, a later generation returns
+`unsupportedShape`, and
 an absent operation returns `operationNotFound`. The adapter creates no journal
 rows or execution decisions. Import, planning, commit and Host startup never
 execute work. `GetOperation` calls the executor's existing read-only observation
@@ -594,7 +605,7 @@ all typed execution rejections return exit `1`:
 
 | Execute outcome | Meaning and next step |
 | --- | --- |
-| `succeeded` | Confirmed CREATE and independent existence check were recorded with AppliedGeneration advancement. A repeated execute sends no second CREATE and preserves history. |
+| `succeeded` | Confirmed CREATE and independent existence check were recorded. AppliedGeneration advances only after all required nodes succeed. A repeated execute sends no second CREATE and preserves history. |
 | `failed` | Definitive failure, including `conflict` on an existing database. No adoption or AppliedGeneration advancement. |
 | `retryableFailure` | Exact dependency, secret or connectivity unavailable before dispatch. Inspect the bounded reason, restore the same pinned input and explicitly execute the same key again. |
 | `needsAttention` | Uncertain external effect; repeated execute cannot send CREATE or claim success. Separate manual recovery is required. |
@@ -605,7 +616,7 @@ rollback and are never retried automatically by the CLI. Inspect with `operation
 get` after an interrupted request. A persisted `Dispatching` marker becomes
 `NeedsAttention` only on explicit execution, without sending SQL, even if a
 matching database exists. Neither its presence nor its absence authorizes a
-blind retry, adoption or success claim. Only confirmed success advances
+blind retry, adoption or success claim. Only aggregate confirmed success advances
 AppliedGeneration; desired-generation history is unchanged by execution.
 
 Manual assignment is available through the explicit recovery workflow below.
@@ -624,7 +635,7 @@ anything. If a previous process died in `Dispatching`, the existing explicit
 again afterwards. An ordinary definitive `conflict` is ineligible for assignment.
 
 ```powershell
-& $cli operation recovery inspect $deploymentId 1 db --action create --config .\config.yaml -o json
+& $cli operation recovery inspect $deploymentId 1 db-create --config .\config.yaml -o json
 ```
 
 Record the exact `preview.operation.environmentRecordId` and
@@ -645,7 +656,7 @@ echoed in text/JSON, stderr, validation errors or ordinary reads. A trailing
 newline is a control character and is rejected; save the note without it.
 
 ```powershell
-& $cli operation recovery assign-existing $deploymentId 1 db --action create `
+& $cli operation recovery assign-existing $deploymentId 1 db-create `
     --environment-record-id $environmentRecordId --expected-attempt-id $uncertainAttemptId `
     --acknowledge-assignment --reason operatorAcceptedExistingDatabase `
     --note-file .\recovery-note.txt --config .\config.yaml -o json
@@ -668,7 +679,8 @@ implementation, Resource contract and action. Only PostgreSQL database Create
 is registered initially. It never follows the current alias or defaults an
 unsupported operation to PostgreSQL. The adapter delegates to
 `IPostgreSqlDatabaseRecovery`; the existing atomic transaction records one
-immutable decision and advances `Succeeded`/`AppliedGeneration` together.
+immutable node-resolution decision and records `Succeeded`. `AppliedGeneration`
+advances in that transaction only when every mandatory sibling has succeeded.
 The original uncertain attempt remains retained.
 
 | Recovery outcome | Meaning |
@@ -687,7 +699,10 @@ same complete assignment command with the original Environment and attempt.
 A successful retry reaches application idempotency and returns the original
 receipt, including after restart, without a new Provider existence check.
 The receipt has the decision/operation/attempt identities, controlled reason,
-server-owned technical actor and timestamp; it contains no free-text note.
+server-owned technical actor and timestamp. Its optional
+`appliedGenerationAtDecision` is actual aggregate state at decision time, not a
+promise that the target generation completed. It remains unchanged if siblings
+finish later. The receipt contains no free-text note.
 That actor attributes activity to the permitted Host, not to an authenticated
 human. Network isolation and the operator-controlled console remain required.
 No automatic adoption, reset/delete or retry-after-uncertainty policy is added.

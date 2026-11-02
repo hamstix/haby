@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class ExactActionAdmissionTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     private static readonly ResourceTypeId QueueContract = ResourceTypeId.Create("sample.queue/v1");
     private static readonly OperationContractId QueueCreate = OperationContractId.Create("sample.queue.create/v1");
@@ -75,13 +75,13 @@ public sealed class ExactActionAdmissionTests(PostgreSqlFixture fixture) : IClas
             Assert.Equal(plan.Inputs, (await restored.GetRequiredService<IDurableDesiredStateCommitter>()
                 .FindGenerationAsync(committed.DeploymentId, committed.Generation, default))!.Inputs);
         }
-        var operation = new DurableCreateOperationKey(committed.DeploymentId, committed.Generation,
-            ManifestLocalId.Create("jobs"), DurableOperationAction.Create);
+        var operation = new DurableOperationKey(committed.DeploymentId, committed.Generation,
+            OperationId.Create("jobs" + "-create"));
         await using (var missing = Services(connection, boundary, installed: false))
         {
-            var executor = missing.GetRequiredService<IDurableCreateOperationExecutor>();
+            var executor = missing.GetRequiredService<IDurableOperationExecutor>();
             var before = await executor.ObserveAsync(operation, default);
-            Assert.Equal(DurableCreateExecutionOutcome.HandlerUnavailable, (await executor.ExecuteAsync(operation, default)).Outcome);
+            Assert.Equal(DurableExecutionOutcome.HandlerUnavailable, (await executor.ExecuteAsync(operation, default)).Outcome);
             var after = await executor.ObserveAsync(operation, default);
             Assert.Equal(before!.Operation, after!.Operation);
             Assert.Empty(after.Attempts);
@@ -89,18 +89,17 @@ public sealed class ExactActionAdmissionTests(PostgreSqlFixture fixture) : IClas
         }
         await using (var restored = Services(connection, boundary))
         {
-            var executor = restored.GetRequiredService<IDurableCreateOperationExecutor>();
+            var executor = restored.GetRequiredService<IDurableOperationExecutor>();
             var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => executor.ExecuteAsync(operation, default).AsTask()));
-            Assert.All(results, result => Assert.Equal(DurableCreateExecutionOutcome.Succeeded, result.Outcome));
+            Assert.All(results, result => Assert.Equal(DurableExecutionOutcome.Succeeded, result.Outcome));
             Assert.Equal(1, boundary.Calls);
             Assert.Equal("jobs", boundary.Input!.QueueName);
-            Assert.Equal(plan.Inputs.ProviderInstance, boundary.Input.ProviderInstance);
         }
         // Terminal history needs neither a handler nor a configuration reader.
         await using (var missing = Services(connection, boundary, installed: false, codec: false))
         {
-            var executor = missing.GetRequiredService<IDurableCreateOperationExecutor>();
-            Assert.Equal(DurableCreateExecutionOutcome.Succeeded, (await executor.ExecuteAsync(operation, default)).Outcome);
+            var executor = missing.GetRequiredService<IDurableOperationExecutor>();
+            Assert.Equal(DurableExecutionOutcome.Succeeded, (await executor.ExecuteAsync(operation, default)).Outcome);
             Assert.Single((await executor.ObserveAsync(operation, default))!.Attempts);
         }
         await using var verify = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
@@ -115,10 +114,11 @@ public sealed class ExactActionAdmissionTests(PostgreSqlFixture fixture) : IClas
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore().AddSingleton<IProviderRevisionPreflight, AcceptPreflight>()
             .AddPostgreSqlProviderAliasStore().AddPostgreSqlDurableDesiredStateCommitter()
-            .AddPostgreSqlDurableCreateOperationJournal().AddSingleton(boundary)
-            .AddSingleton(new DurableCreateActionMapping(QueueContract, QueueCreate))
+            .AddPostgreSqlDurableOperationJournal().AddSingleton(boundary)
             .AddSingleton<DurableOperationSerialization>()
-            .AddSingleton<IDurableCreateOperationExecutor, ExactDurableCreateOperationExecutor>();
+            .AddSingleton<ExactDurableOperationExecutor>()
+            .AddSingleton<IDurableOperationExecutor>(p => p.GetRequiredService<ExactDurableOperationExecutor>())
+            .AddSingleton<DurableGenerationRunner>();
         if (codec) services.AddSingleton<IProviderConfigurationCodec, SampleConfigurationCodec>();
         if (installed) services.AddSingleton<QueueAction>()
             .AddSingleton<IDurableActionAdmissionHandler>(p => p.GetRequiredService<QueueAction>())
@@ -137,36 +137,87 @@ public sealed class ExactActionAdmissionTests(PostgreSqlFixture fixture) : IClas
             CancellationToken cancellationToken) => ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.Ready));
     }
 
-    private sealed record QueueCreateInput(string QueueName, ProviderInstanceId ProviderInstance,
-        ProviderConfigurationRevisionNumber Revision);
+    public sealed record QueueCreateInput(string QueueName, int Units = 1);
     private sealed class QueueBoundary
     {
+        public bool Graph;
+        public string PlannedName = "jobs";
+        public string Format = "sample.queue-create/v1";
+        public string? Mode;
+        public string StopId = "20-dependent";
+        public CancellationTokenSource? Cancellation;
+        public Func<CancellationToken, Task>? Pause;
+        public List<string> Effects = [];
         public int Calls;
         public QueueCreateInput? Input;
         public void Create(QueueCreateInput input) { Input = input; Interlocked.Increment(ref Calls); }
     }
-    private sealed class QueueAction(IDurableCreateOperationJournal journal, IProviderConfigurationStore configurations,
+    private sealed class QueueAction(IDurableOperationJournal journal, IProviderConfigurationStore configurations,
         QueueBoundary boundary) : DurableActionHandler<QueueCreateInput>
     {
+        public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
+        {
+            var single = PrepareNode(OperationId.Create(resourceId.Value + "-create"), resourceId, resource, inputs);
+            if (!boundary.Graph) return [single];
+            DurableOperationNode Step(string id, int units, params string[] dependencies) => single with
+            {
+                Id = OperationId.Create(id),
+                Input = new(InputFormat, System.Text.Json.JsonSerializer.Serialize(new QueueCreateInput(boundary.PlannedName, units), InputTypeInfo)),
+                Dependencies = dependencies.Select(OperationId.Create).ToArray()
+            };
+            // Deliberately non-canonical declaration order; all three steps own the same Resource.
+            return [Step("30-independent", 3), Step("20-dependent", 2, "10-first"), Step("10-first", 1)];
+        }
+        public override string InputFormat => boundary.Format;
+        public override System.Text.Json.Serialization.Metadata.JsonTypeInfo<QueueCreateInput> InputTypeInfo => QueueJsonContext.Default.QueueCreateInput;
         public override DurableActionExecutionKey Key => ExactActionAdmissionTests.Key;
         public override QueueCreateInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
             resource.Type == QueueContract && resource.Properties.Members.Count == 1 &&
             resource.Properties.Members.TryGetValue("queueName", out var value) && value is ConfigurationString name && name.Value == "jobs"
-                ? new(name.Value, inputs.ProviderInstance, inputs.ConfigurationRevision) : null;
-        public override async ValueTask<DurableCreateExecutionResult> ExecuteTypedAsync(DurableCreateOperation operation,
+                ? new(name.Value) : null;
+        public override async ValueTask<DurableExecutionResult> ExecuteTypedAsync(DurableOperation operation,
             QueueCreateInput? input, CancellationToken cancellationToken)
         {
             Assert.NotNull(input);
             var configuration = await configurations.FindRevisionAsync<SampleConfiguration>(operation.Environment,
-                input.ProviderInstance, input.Revision, cancellationToken);
+                operation.ProviderInstance, operation.ConfigurationRevision, cancellationToken);
             Assert.Equal("queue-broker", configuration!.Configuration.Target);
-            var attempt = Assert.IsType<DurableCreateBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(operation.Key,
+            var attempt = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(operation.Key,
                 DateTimeOffset.UtcNow, cancellationToken));
-            Assert.IsType<DurableCreateMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(operation.Key,
+            if (operation.Key.OperationId.Value == boundary.StopId)
+            {
+                if (boundary.Pause is { } pause) await pause(cancellationToken);
+                if (boundary.Mode is "retry" or "cancel")
+                {
+                    if (boundary.Mode == "cancel") boundary.Cancellation!.Cancel();
+                    await journal.TryCloseAttemptBeforeDispatchAsync(operation.Key, attempt.AttemptId,
+                        boundary.Mode == "retry" ? DurableAttemptOutcome.FailedBeforeDispatch : DurableAttemptOutcome.CanceledBeforeDispatch,
+                        boundary.Mode == "retry" ? DurableOperationReason.Connectivity : null, DateTimeOffset.UtcNow, default);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return new(DurableExecutionOutcome.RetryableFailure, await journal.FindAsync(operation.Key, default));
+                }
+                if (boundary.Mode == "failure")
+                {
+                    await journal.TryFinalizeFailureAsync(operation.Key, attempt.AttemptId, DurableOperationState.Failed,
+                        DurableOperationReason.InputInvalid, DateTimeOffset.UtcNow, default);
+                    return new(DurableExecutionOutcome.Failed, await journal.FindAsync(operation.Key, default));
+                }
+            }
+            Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(operation.Key,
                 attempt.AttemptId, DateTimeOffset.UtcNow, cancellationToken));
+            if (operation.Key.OperationId.Value == boundary.StopId && boundary.Mode == "crash") throw new IOException("Test-only process death.");
             boundary.Create(input);
+            boundary.Effects.Add(operation.Key.OperationId.Value + ":" + input.QueueName + ":" + input.Units);
+            if (operation.Key.OperationId.Value == boundary.StopId && boundary.Mode == "uncertain")
+            {
+                await journal.TryFinalizeFailureAsync(operation.Key, attempt.AttemptId, DurableOperationState.NeedsAttention,
+                    DurableOperationReason.UncertainAfterDispatch, DateTimeOffset.UtcNow, default);
+                return new(DurableExecutionOutcome.NeedsAttention, await journal.FindAsync(operation.Key, default));
+            }
             Assert.True(await journal.TryRecordSuccessAsync(operation.Key, attempt.AttemptId, DateTimeOffset.UtcNow, cancellationToken));
-            return new(DurableCreateExecutionOutcome.Succeeded, await journal.FindAsync(operation.Key, cancellationToken));
+            return new(DurableExecutionOutcome.Succeeded, await journal.FindAsync(operation.Key, cancellationToken));
         }
     }
+    [System.Text.Json.Serialization.JsonSerializable(typeof(QueueCreateInput))]
+    internal partial class QueueJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
 }

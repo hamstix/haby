@@ -34,10 +34,7 @@ public sealed class CliRecoveryTests
     }
 
     [Theory]
-    [InlineData(1, "providerInputUnavailable")]
     [InlineData(2, "secretUnavailable")]
-    [InlineData(3, "unsupportedShape")]
-    [InlineData(4, "databaseNameInvalid")]
     [InlineData(5, "connectivity")]
     [InlineData(6, "conflict")]
     [InlineData(7, "serverRejected")]
@@ -45,7 +42,7 @@ public sealed class CliRecoveryTests
     [InlineData(9, "inputInvalid")]
     [InlineData(10, "inputUnavailable")]
     [InlineData(11, "handlerUnavailable")]
-    public void Reasons_preserve_wire_numbers_and_exact_json_spelling(int number, string spelling)
+    public void Current_reasons_have_explicit_text_and_json_mapping(int number, string spelling)
     {
         var reply = Reply(RecoveryStatus.Found);
         reply.Preview.Operation.State = OperationState.Failed;

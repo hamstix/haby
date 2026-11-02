@@ -34,33 +34,20 @@ public sealed partial class ManifestOperatorService
         }, context);
     }
 
-    internal static DurableOperationSummary RecoveryOperationSummary(DurableCreateOperation operation) => Summary(operation);
+    internal static DurableOperationSummary RecoveryOperationSummary(DurableOperation operation) => Summary(operation);
 }
 
 /// <summary>Explicit compile-time dispatch for the alpha surface; no alias resolution or Provider fallback.</summary>
-public sealed class OperationRecoveryAdapter(IDurableCreateOperationQuery operations,
-    IManifestRevisionQuery manifests, PostgreSqlOperationRecoveryAdapter postgreSql)
+public sealed class OperationRecoveryAdapter(IDurableOperationQuery operations,
+    PostgreSqlOperationRecoveryAdapter postgreSql)
 {
-    public async ValueTask<RecoveryReply> RecoverAsync(DurableCreateOperationKey key,
+    public async ValueTask<RecoveryReply> RecoverAsync(DurableOperationKey key,
         AssignExistingOperationRequest? assignment, CancellationToken cancellationToken)
     {
         var operation = await operations.FindAsync(key, cancellationToken);
         if (operation is null) return new() { Status = RecoveryStatus.OperationNotFound };
-        if (key.Action != DurableOperationAction.Create ||
+        if (operation.Node.Action != PostgreSqlDatabaseCreateAction.RegistrationKey ||
             operation.ImplementationId != PostgreSqlDatabaseCheckpointCapability.ImplementationId)
-            return new() { Status = RecoveryStatus.UnsupportedRecoveryAction };
-        // An immutable recovery receipt already establishes this adapter's contract for the key.
-        // Preserve application idempotency even if the pinned manifest is now unavailable.
-        if (await postgreSql.HasReceiptAsync(operation, cancellationToken))
-            return assignment is null ? await postgreSql.InspectAsync(operation, cancellationToken)
-                : await postgreSql.AssignAsync(key, assignment, cancellationToken);
-        ManifestRevision? revision;
-        try { revision = await manifests.FindAsync(operation.Revision, cancellationToken); }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception) { return new() { Status = RecoveryStatus.TargetUnavailable }; }
-        if (revision is null) return new() { Status = RecoveryStatus.TargetUnavailable };
-        if (!revision.Declaration.Spec.Resources.TryGetValue(key.ResourceId, out var resource) ||
-            resource.Type != PostgreSqlDatabaseContract.Id)
             return new() { Status = RecoveryStatus.UnsupportedRecoveryAction };
         return assignment is null
             ? await postgreSql.InspectAsync(operation, cancellationToken)
@@ -72,11 +59,11 @@ public sealed class OperationRecoveryAdapter(IDurableCreateOperationQuery operat
 public sealed class PostgreSqlOperationRecoveryAdapter(IPostgreSqlDatabaseRecovery recovery,
     IPostgreSqlDatabaseRecoveryJournal decisions)
 {
-    public async ValueTask<bool> HasReceiptAsync(DurableCreateOperation operation, CancellationToken cancellationToken) =>
-        operation.State == DurableCreateOperationState.Succeeded && operation.AttemptId is { } attempt &&
+    public async ValueTask<bool> HasReceiptAsync(DurableOperation operation, CancellationToken cancellationToken) =>
+        operation.State == DurableOperationState.Succeeded && operation.AttemptId is { } attempt &&
         await decisions.FindDecisionAsync(operation.Key, attempt, cancellationToken) is not null;
 
-    public async ValueTask<RecoveryReply> InspectAsync(DurableCreateOperation operation, CancellationToken cancellationToken)
+    public async ValueTask<RecoveryReply> InspectAsync(DurableOperation operation, CancellationToken cancellationToken)
     {
         var preview = await recovery.InspectAsync(operation.Key, cancellationToken);
         if (preview is null) return new() { Status = RecoveryStatus.OperationNotFound };
@@ -98,7 +85,7 @@ public sealed class PostgreSqlOperationRecoveryAdapter(IPostgreSqlDatabaseRecove
         return reply;
     }
 
-    public async ValueTask<RecoveryReply> AssignAsync(DurableCreateOperationKey key,
+    public async ValueTask<RecoveryReply> AssignAsync(DurableOperationKey key,
         AssignExistingOperationRequest request, CancellationToken cancellationToken)
     {
         if (request.Reason != RecoveryReason.OperatorAcceptedExistingDatabase ||
@@ -123,19 +110,23 @@ public sealed class PostgreSqlOperationRecoveryAdapter(IPostgreSqlDatabaseRecove
         };
     }
 
-    private static RecoveryReceipt Receipt(PostgreSqlDatabaseRecoveryReceipt receipt) => new()
+    private static RecoveryReceipt Receipt(PostgreSqlDatabaseRecoveryReceipt receipt)
     {
-        DecisionId = receipt.DecisionId.ToString("D"),
-        Key = new OperationRequest
+        var result = new RecoveryReceipt
         {
-            DeploymentId = receipt.Key.DeploymentId.ToString(),
-            Generation = receipt.Key.Generation.Value,
-            ResourceId = receipt.Key.ResourceId.Value,
-            Action = OperationAction.Create
-        },
-        AttemptId = receipt.AttemptId.ToString("D"),
-        Reason = RecoveryReason.OperatorAcceptedExistingDatabase,
-        TechnicalActor = receipt.TechnicalActor,
-        DecidedAtUtc = receipt.DecidedAt.ToUniversalTime().ToString("O")
-    };
+            DecisionId = receipt.DecisionId.ToString("D"),
+            Key = new OperationRequest
+            {
+                DeploymentId = receipt.Key.DeploymentId.ToString(),
+                Generation = receipt.Key.Generation.Value,
+                OperationId = receipt.Key.OperationId.Value
+            },
+            AttemptId = receipt.AttemptId.ToString("D"),
+            Reason = RecoveryReason.OperatorAcceptedExistingDatabase,
+            TechnicalActor = receipt.TechnicalActor,
+            DecidedAtUtc = receipt.DecidedAt.ToUniversalTime().ToString("O")
+        };
+        if (receipt.AppliedGenerationAtDecision is { } applied) result.AppliedGenerationAtDecision = applied;
+        return result;
+    }
 }

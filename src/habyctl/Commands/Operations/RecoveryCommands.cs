@@ -14,12 +14,11 @@ internal static class RecoveryCommands
         {
             var deployment = new Argument<string>("deployment-id");
             var generation = new Argument<long>("generation");
-            var resource = new Argument<string>("resource-id");
-            var action = new Option<string>("--action") { Required = true, Description = "Exact action (create)." };
+            var resource = new Argument<string>("operation-id");
             var command = new Command(assign ? "assign-existing" : "inspect", assign
                 ? "Accept provenance responsibility for one exact attempt. Never dispatches Create."
                 : "Read the safe target, uncertainty and receipt without changing state.")
-                { deployment, generation, resource, action };
+                { deployment, generation, resource };
             var environment = new Option<string>("--environment-record-id") { Required = true };
             var attempt = new Option<string>("--expected-attempt-id") { Required = true };
             var acknowledgment = new Option<bool>("--acknowledge-assignment")
@@ -44,13 +43,11 @@ internal static class RecoveryCommands
             }
             command.SetAction((parse, token) =>
             {
-                if (parse.GetRequiredValue(action) != "create") return Task.FromResult(context.InvalidOperationAction());
                 var key = new OperationRequest
                 {
                     DeploymentId = parse.GetRequiredValue(deployment),
                     Generation = parse.GetRequiredValue(generation),
-                    ResourceId = parse.GetRequiredValue(resource),
-                    Action = OperationAction.Create
+                    OperationId = parse.GetRequiredValue(resource)
                 };
                 if (assign && (!parse.GetValue(acknowledgment) || parse.GetRequiredValue(reason) != "operatorAcceptedExistingDatabase"))
                     return Task.FromResult(context.InvalidRecoveryInput());

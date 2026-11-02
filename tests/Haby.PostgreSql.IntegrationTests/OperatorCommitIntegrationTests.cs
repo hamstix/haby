@@ -79,8 +79,8 @@ public sealed partial class OperatorHostIntegrationTests
             {
                 Assert.NotNull(host.Services.GetService<ISecretStore>());
                 Assert.IsType<ExactProviderRevisionPreflight>(host.Services.GetRequiredService<IProviderRevisionPreflight>());
-                Assert.Same(host.Services.GetRequiredService<IDurableCreateOperationExecutor>(),
-                    host.Services.GetRequiredService<IDurableCreateOperationExecutor>());
+                Assert.Same(host.Services.GetRequiredService<IDurableOperationExecutor>(),
+                    host.Services.GetRequiredService<IDurableOperationExecutor>());
                 using var channel = Channel(host, certificate);
                 var client = new ManifestOperator.ManifestOperatorClient(channel);
                 var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(Envelope("durable-commit")) });
@@ -120,7 +120,7 @@ public sealed partial class OperatorHostIntegrationTests
                     .AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>()
                     .AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
                     .AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
-                    .AddPostgreSqlDurableCreateOperationJournal().AddPostgreSqlDurableCreateOperationExecution()
+                    .AddPostgreSqlDurableOperationJournal().AddPostgreSqlDurableOperationExecution()
                     .AddPostgreSqlDurableDeploymentPlanner().BuildServiceProvider())
                 {
                     var expired = (await past.GetRequiredService<IDurableDeploymentPlanner>().CreatePlanAsync(

@@ -7,7 +7,8 @@ internal sealed record CliChangeSet(string ChangeSetId, string EnvironmentRecord
 internal sealed record CliPlan(string PlanId, string ChangeSetId, string EnvironmentRecordId, string EnvironmentId,
     CliReference Reference, string ProviderAlias, string ProviderInstanceId, long ConfigurationRevision,
     string ImplementationId, string Fingerprint, string CreatedAtUtc, string ExpiresAtUtc,
-    string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork);
+    string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork, CliPlannedOperation[] Operations);
+internal sealed record CliPlannedOperation(string OperationId, string ResourceId, string ActionContract, string[] Dependencies);
 internal sealed record CliPlanDescription(string Status, CliIntendedAction? Action);
 internal sealed record CliIntendedAction(string Kind, string ResourceId, string ResourceType,
     CliIntendedActionTarget Target);
@@ -62,11 +63,14 @@ internal static class PlanningPresentation
             plan.ProviderAlias, plan.ProviderInstanceId, plan.ConfigurationRevision, plan.ImplementationId,
             plan.Fingerprint, plan.CreatedAtUtc, plan.ExpiresAtUtc, plan.TechnicalActorId,
             plan.HasClosedAtUtc ? plan.ClosedAtUtc : null,
-            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork)));
+            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations)));
+
+    internal static CliPlannedOperation[] Operations(IEnumerable<PlannedOperationSummary> operations) =>
+        operations.Select(n => new CliPlannedOperation(n.OperationId, n.ResourceId, n.ActionContract, n.Dependencies.ToArray())).ToArray();
 
     private static CliPlanDescription Description(PlanDescription? description)
     {
-        // An older server has no description. Unknown enum values must fail closed.
+        // Missing or unknown review metadata must not fabricate intended work.
         if (description is null) return new("unavailable", null);
         var status = description.Status switch
         {
@@ -123,6 +127,8 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"Plan: {plan.PlanId}; ChangeSet: {plan.ChangeSetId}");
             _output.WriteLine($"Environment: {plan.EnvironmentId}; record: {plan.EnvironmentRecordId}");
             _output.WriteLine($"Revision: {plan.Reference.ApplicationRecordId} {plan.Reference.RevisionNumber}");
+            foreach (var node in plan.Operations)
+                _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}");
             _output.WriteLine($"Provider: {plan.ProviderAlias} -> {plan.ProviderInstanceId} revision {plan.ConfigurationRevision}; implementation: {plan.ImplementationId}");
             _output.WriteLine("Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.");
             if (plan.IntendedWork.Action is { } action)

@@ -33,8 +33,6 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
         await using (var services = Services(connection))
         {
             var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
-            await using (var context = await factory.CreateDbContextAsync())
-                await context.GetService<IMigrator>().MigrateAsync("20261026113715_AddProviderConfigurationRevisions");
             await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
             var secretStore = services.GetRequiredService<ISecretStore>();
             environment = await secretStore.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);

@@ -82,7 +82,7 @@ existence is checked independently after the restored Host stops.
 1. Prepare the disposable installation using
    [local operator setup](alpha-operator-local.md), including the explicit
    Plaintext SecretStore choice and its access restrictions. Record safe exact
-   revision, ChangeSet, Plan, deployment/generation, Resource/action, Provider
+   revision, ChangeSet, Plan, deployment/generation, OperationId and owning Resource/action contract, Provider
    instance/configuration and receipt identities. Keep confidential explanations
    in protected audit storage. Never edit catalog rows to manufacture history.
    Crash windows are test-only hooks, not operator commands.
@@ -107,8 +107,8 @@ existence is checked independently after the restored Host stops.
    & $cli plan get $planId --config .\restored-config.yaml -o json
    & $cli changeset commit get $changeId --config .\restored-config.yaml -o json
    & $cli deployment generation get $deploymentId 1 --config .\restored-config.yaml -o json
-   & $cli operation get $deploymentId 1 db --action create --config .\restored-config.yaml -o json
-   & $cli operation recovery inspect $deploymentId 1 db --action create --config .\restored-config.yaml -o json
+   & $cli operation get $deploymentId 1 db-create --config .\restored-config.yaml -o json
+   & $cli operation recovery inspect $deploymentId 1 db-create --config .\restored-config.yaml -o json
    ```
 
    Compare exact safe historical content, not only row counts. `plan get` also
@@ -167,3 +167,16 @@ snapshots or secret-bearing logs as artifacts. Retain only safe identities,
 pass/fail evidence and bounded reasons. Encrypted storage would additionally
 require independently retained external key material; this test proves only the
 currently implemented Plaintext mode.
+
+## Partial graph and recovery receipt rehearsal
+
+The current graph model requires a fresh catalog; pre-graph backups need their
+original build for inspection. Current-build backup/restore remains supported.
+`Manual_node_resolution_receipt_and_partial_graph_survive_dump_restore_then_sibling_completes_aggregate`
+adds a real uncertain database Create and one test-only typed sibling for the
+same Resource. Assignment resolves the database node with AppliedGeneration
+unset. The dump retains exact graph/inputs/dependencies, partial success, attempts
+and the immutable recovery decision. A restored TLS Host starts, inspects and
+replays assignment with zero Provider calls. The sibling then completes the
+generation once; receipt replay still returns the original incomplete-at-decision
+aggregate state. No additional production effect is enabled.

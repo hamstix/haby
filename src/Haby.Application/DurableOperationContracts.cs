@@ -2,18 +2,16 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
-/// <summary>The exact identity of one pilot Resource action in an accepted generation.</summary>
-public enum DurableOperationAction { Create }
-
-public sealed record DurableCreateOperationKey(ApplicationDeploymentId DeploymentId,
-    DeploymentGeneration Generation, ManifestLocalId ResourceId, DurableOperationAction Action);
+/// <summary>The exact identity of a step within an accepted generation.</summary>
+public sealed record DurableOperationKey(ApplicationDeploymentId DeploymentId,
+    DeploymentGeneration Generation, OperationId OperationId);
 
 /// <summary>
 /// One durable pilot operation state. After a restart only <see cref="Pending"/> and
 /// <see cref="Preparing"/> may resume; <see cref="Dispatching"/> must move to
 /// <see cref="NeedsAttention"/> without sending SQL, as defined by ADR-025.
 /// </summary>
-public enum DurableCreateOperationState
+public enum DurableOperationState
 {
     Pending,
     Preparing,
@@ -24,37 +22,14 @@ public enum DurableCreateOperationState
 }
 
 /// <summary>A bounded, value-free reason code. It never carries driver text, configuration or secret material.</summary>
-public enum DurableCreateOperationReason
+public enum DurableOperationReason
 {
-    /// <summary>Legacy pinned-input reason retained for history and safe pre-dispatch resume; new attempts use InputUnavailable.</summary>
-    ProviderInputUnavailable,
-    /// <summary>The exact pinned SecretRef could not be resolved.</summary>
-    SecretUnavailable,
-    /// <summary>Legacy shape rejection retained for history; new attempts use InputInvalid.</summary>
-    UnsupportedShape,
-    /// <summary>
-    /// Legacy PostgreSQL database-name validation reason retained for stored history and wire compatibility.
-    /// New attempts use InputInvalid under ADR-032.
-    /// </summary>
-    DatabaseNameInvalid,
-    /// <summary>The pinned target could not be reached or admitted the connection before dispatch.</summary>
-    Connectivity,
-    /// <summary>The target state conflicts with the requested operation, before dispatch or in a definitive response.</summary>
-    Conflict,
-    /// <summary>The target server definitively rejected the dispatched operation.</summary>
-    ServerRejected,
-    /// <summary>The post-dispatch outcome is uncertain; only manual recovery may resolve it.</summary>
-    UncertainAfterDispatch,
-    /// <summary>Resolved operation inputs fail the action's execution contract.</summary>
-    InputInvalid,
-    /// <summary>Required pinned input cannot be read, decoded or resolved exactly.</summary>
-    InputUnavailable,
-    /// <summary>The exact required handler or its supported contract is positively known to be unavailable.</summary>
-    HandlerUnavailable
+    SecretUnavailable, Connectivity, Conflict, ServerRejected, UncertainAfterDispatch,
+    InputInvalid, InputUnavailable, HandlerUnavailable
 }
 
 /// <summary>A bounded, value-free outcome retained on one separately attributable attempt row.</summary>
-public enum DurableCreateAttemptOutcome
+public enum DurableAttemptOutcome
 {
     Succeeded,
     Conflict,
@@ -69,45 +44,48 @@ public enum DurableCreateAttemptOutcome
 /// Non-secret operation intent and durable state. Provider inputs come from the immutable
 /// generation and are never re-resolved from the current Provider alias.
 /// </summary>
-public sealed record DurableCreateOperation(DurableCreateOperationKey Key,
-    DurableCreateOperationState State, EnvironmentRecordId Environment, ApplicationRecordId Application,
+public sealed record DurableOperation(DurableOperationKey Key,
+    DurableOperationState State, EnvironmentRecordId Environment, ApplicationRecordId Application,
     ManifestRevisionRef Revision, ProviderInstanceId ProviderInstance,
     ProviderConfigurationRevisionNumber ConfigurationRevision, string ImplementationId,
-    DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, DurableCreateOperationReason? Reason,
-    Guid? AttemptId, long AttemptNumber, DateTimeOffset? DispatchedAt, DateTimeOffset? FinalizedAt);
+    DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt, DurableOperationReason? Reason,
+    Guid? AttemptId, long AttemptNumber, DateTimeOffset? DispatchedAt, DateTimeOffset? FinalizedAt)
+{
+    public DurableOperationNode Node { get; init; } = null!;
+}
 
 /// <summary>One separately retained execution attempt. It is append-only history for the operation.</summary>
-public sealed record DurableCreateOperationAttempt(Guid AttemptId, long AttemptNumber, DateTimeOffset StartedAt,
-    DateTimeOffset? DispatchedAt, DateTimeOffset? FinishedAt, DurableCreateAttemptOutcome? Outcome);
+public sealed record DurableOperationAttempt(Guid AttemptId, long AttemptNumber, DateTimeOffset StartedAt,
+    DateTimeOffset? DispatchedAt, DateTimeOffset? FinishedAt, DurableAttemptOutcome? Outcome);
 
 /// <summary>The complete read model: the operation and every retained attempt.</summary>
-public sealed record DurableCreateOperationView(DurableCreateOperation Operation,
-    IReadOnlyList<DurableCreateOperationAttempt> Attempts)
+public sealed record DurableOperationView(DurableOperation Operation,
+    IReadOnlyList<DurableOperationAttempt> Attempts)
 {
-    public DurableCreateOperationView(DurableCreateOperation operation) : this(operation,
-        Array.Empty<DurableCreateOperationAttempt>())
+    public DurableOperationView(DurableOperation operation) : this(operation,
+        Array.Empty<DurableOperationAttempt>())
     { }
 }
 
 /// <summary>The result of durably starting (or resuming) one execution attempt.</summary>
-public abstract record DurableCreateBeginAttemptResult
+public abstract record DurableBeginAttemptResult
 {
-    private DurableCreateBeginAttemptResult() { }
-    public sealed record Started(DurableCreateOperation Operation, Guid AttemptId, long AttemptNumber)
-        : DurableCreateBeginAttemptResult;
-    public sealed record NotFound : DurableCreateBeginAttemptResult;
-    public sealed record Terminal(DurableCreateOperation Operation) : DurableCreateBeginAttemptResult;
+    private DurableBeginAttemptResult() { }
+    public sealed record Started(DurableOperation Operation, Guid AttemptId, long AttemptNumber)
+        : DurableBeginAttemptResult;
+    public sealed record NotFound : DurableBeginAttemptResult;
+    public sealed record Terminal(DurableOperation Operation) : DurableBeginAttemptResult;
 }
 
 /// <summary>
 /// The result of committing the unique-attempt dispatch marker. An exception instead of a
 /// result means the commit outcome is uncertain: SQL must not be sent and the attempt is abandoned.
 /// </summary>
-public abstract record DurableCreateMarkerResult
+public abstract record DurableMarkerResult
 {
-    private DurableCreateMarkerResult() { }
-    public sealed record Committed : DurableCreateMarkerResult;
-    public sealed record Rejected(DurableCreateOperation Operation) : DurableCreateMarkerResult;
+    private DurableMarkerResult() { }
+    public sealed record Committed : DurableMarkerResult;
+    public sealed record Rejected(DurableOperation Operation) : DurableMarkerResult;
 }
 
 /// <summary>
@@ -115,51 +93,53 @@ public abstract record DurableCreateMarkerResult
 /// guard; only the separate, audited PostgreSQL recovery path may change
 /// <c>NeedsAttention</c> to <c>Succeeded</c>. Attempts are never erased.
 /// </summary>
-public interface IDurableCreateOperationJournal
+public interface IDurableOperationJournal
 {
-    ValueTask<DurableCreateOperation?> FindAsync(DurableCreateOperationKey key, CancellationToken cancellationToken);
-    ValueTask<IReadOnlyList<DurableCreateOperationAttempt>> FindAttemptsAsync(DurableCreateOperationKey key,
+    ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment,
+        DeploymentGeneration generation, CancellationToken cancellationToken);
+    ValueTask<DurableOperation?> FindAsync(DurableOperationKey key, CancellationToken cancellationToken);
+    ValueTask<IReadOnlyList<DurableOperationAttempt>> FindAttemptsAsync(DurableOperationKey key,
         CancellationToken cancellationToken);
 
     /// <summary>Starts a new attempt from <c>Pending</c> or safely resumes an interrupted <c>Preparing</c> attempt.</summary>
-    ValueTask<DurableCreateBeginAttemptResult> TryBeginAttemptAsync(DurableCreateOperationKey key, DateTimeOffset at,
+    ValueTask<DurableBeginAttemptResult> TryBeginAttemptAsync(DurableOperationKey key, DateTimeOffset at,
         CancellationToken cancellationToken);
 
     /// <summary>Commits the <c>Dispatching</c> marker. Only a confirmed commit authorizes sending SQL.</summary>
-    ValueTask<DurableCreateMarkerResult> TryCommitDispatchMarkerAsync(DurableCreateOperationKey key, Guid attemptId,
+    ValueTask<DurableMarkerResult> TryCommitDispatchMarkerAsync(DurableOperationKey key, Guid attemptId,
         DateTimeOffset at, CancellationToken cancellationToken);
 
     /// <summary>Closes one still-<c>Preparing</c> attempt while retaining a bounded retryable reason.</summary>
-    ValueTask<bool> TryCloseAttemptBeforeDispatchAsync(DurableCreateOperationKey key, Guid attemptId,
-        DurableCreateAttemptOutcome outcome, DurableCreateOperationReason? reason, DateTimeOffset at,
+    ValueTask<bool> TryCloseAttemptBeforeDispatchAsync(DurableOperationKey key, Guid attemptId,
+        DurableAttemptOutcome outcome, DurableOperationReason? reason, DateTimeOffset at,
         CancellationToken cancellationToken);
 
     /// <summary>Records a definitive pre-dispatch failure or a post-dispatch uncertain outcome.</summary>
-    ValueTask<bool> TryFinalizeFailureAsync(DurableCreateOperationKey key, Guid attemptId,
-        DurableCreateOperationState terminal, DurableCreateOperationReason reason, DateTimeOffset at,
+    ValueTask<bool> TryFinalizeFailureAsync(DurableOperationKey key, Guid attemptId,
+        DurableOperationState terminal, DurableOperationReason reason, DateTimeOffset at,
         CancellationToken cancellationToken);
 
     /// <summary>Recovery: a durably committed <c>Dispatching</c> marker becomes <c>NeedsAttention</c> without SQL.</summary>
-    ValueTask<bool> TryRecoverDispatchingAsync(DurableCreateOperationKey key, DateTimeOffset at,
+    ValueTask<bool> TryRecoverDispatchingAsync(DurableOperationKey key, DateTimeOffset at,
         CancellationToken cancellationToken);
 
     /// <summary>
     /// Atomically records <c>Succeeded</c> and advances the deployment's applied generation.
     /// A rejected guard must leave the recoverable pre-terminal state, never a false applied generation.
     /// </summary>
-    ValueTask<bool> TryRecordSuccessAsync(DurableCreateOperationKey key, Guid attemptId, DateTimeOffset at,
+    ValueTask<bool> TryRecordSuccessAsync(DurableOperationKey key, Guid attemptId, DateTimeOffset at,
         CancellationToken cancellationToken);
 }
 
 /// <summary>Read-only pilot operation query; it never resolves a current Provider alias.</summary>
-public interface IDurableCreateOperationQuery
+public interface IDurableOperationQuery
 {
-    ValueTask<DurableCreateOperation?> FindAsync(DurableCreateOperationKey key,
+    ValueTask<DurableOperation?> FindAsync(DurableOperationKey key,
         CancellationToken cancellationToken);
 }
 
 /// <summary>The bounded, value-free outcome of one execution request.</summary>
-public enum DurableCreateExecutionOutcome
+public enum DurableExecutionOutcome
 {
     Succeeded,
     Failed,
@@ -170,25 +150,27 @@ public enum DurableCreateExecutionOutcome
     /// <summary>The dispatch marker commit result was uncertain; no SQL was sent and the state remains recoverable.</summary>
     DispatchUncertain,
     /// <summary>The exact handler is unavailable; persisted state and attempts are unchanged.</summary>
-    HandlerUnavailable
+    HandlerUnavailable,
+    Blocked,
+    InputUnavailable
 }
 
-public sealed record DurableCreateExecutionResult(DurableCreateExecutionOutcome Outcome,
-    DurableCreateOperation? Operation)
+public sealed record DurableExecutionResult(DurableExecutionOutcome Outcome,
+    DurableOperation? Operation)
 {
-    public static DurableCreateExecutionResult NotFound() =>
-        new(DurableCreateExecutionOutcome.OperationNotFound, null);
+    public static DurableExecutionResult NotFound() =>
+        new(DurableExecutionOutcome.OperationNotFound, null);
 }
 
 /// <summary>
-/// The internal single-instance execution boundary for one exact <see cref="DurableCreateOperationKey"/>.
+/// The internal single-instance execution boundary for one exact <see cref="DurableOperationKey"/>.
 /// The operator adapters delegate here; SQL is never dispatched before a committed marker.
 /// </summary>
-public interface IDurableCreateOperationExecutor
+public interface IDurableOperationExecutor
 {
-    ValueTask<DurableCreateExecutionResult> ExecuteAsync(DurableCreateOperationKey key,
+    ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperationKey key,
         CancellationToken cancellationToken);
-    ValueTask<DurableCreateOperationView?> ObserveAsync(DurableCreateOperationKey key,
+    ValueTask<DurableOperationView?> ObserveAsync(DurableOperationKey key,
         CancellationToken cancellationToken);
 }
 
