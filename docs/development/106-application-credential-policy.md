@@ -1,241 +1,193 @@
-# Issue 106: application credential policy proposal
+# Issue 106: accepted application credential policy
 
-Status: design evidence for **Proposed** [ADR-034](../adr/0034-application-credentials-and-postgresql-role-policy.md).
-No Resource/action/output below is implemented or authorized by this document.
-Base: `43cd89ebdf67d30d3f70a64dea1b94dc3d0a5e18`, after merged PR #105.
-Readiness is for maintainer policy decisions, not runtime readiness.
+Status: accepted policy under [ADR-034](../adr/0034-application-credentials-and-postgresql-role-policy.md).
+The maintainer selected database-owner/v1 and deferred new role/access recovery.
+Contracts below require implementation; the documentation does not claim they exist.
+Inspected implementation base: 43cd89ebdf67d30d3f70a64dea1b94dc3d0a5e18.
 
-## Current source inventory
+## Source inventory
 
-Paths refer to that exact base; symbols are search anchors, not historical API promises.
-
-| Source | Observed boundary / required change |
+| Source | Current boundary |
 | --- | --- |
-| [SecretStore.cs](../../src/Haby.Application/SecretStore.cs), `ISecretStore.CreateAsync` | Environment, reference and bytes only; lacks typed owner/purpose and generated-slot get-or-create. |
-| [PostgreSqlPlaintextSecretStore.cs](../../src/Haby.Persistence.PostgreSql/PostgreSqlPlaintextSecretStore.cs), `CreateAsync` | Writes Owner=Environment, Purpose=ProviderAdministrator. Keeps payload separate and records protection format. |
-| [PostgreSqlAdministrativeSecretCatalog.cs](../../src/Haby.Persistence.PostgreSql/PostgreSqlAdministrativeSecretCatalog.cs), `CreateAsync` | Named administrative ownership/receipts; not a generated application slot. |
-| [ApplicationManifest.cs](../../src/Haby.Manifest/ApplicationManifest.cs), `ResourceDeclaration`, `BindingDeclaration` | Explicit properties/options extension boundaries; no implicit generated password fields. |
-| [PostgreSqlDatabaseContract.cs](../../src/Haby.Manifest/PostgreSqlDatabaseContract.cs) | Closed `postgresql.database/v1alpha1` properties contain only name. |
-| [PostgreSqlDatabaseCreateAction.cs](../../src/Haby.PostgreSql/PostgreSqlDatabaseCreateAction.cs) | Frozen database-name input, exact registration and database Create only. |
-| [DurableOperationGraph.cs](../../src/Haby.Application/DurableOperationGraph.cs) | Canonical graph v1, dependencies and pinned references; no operation-output addressing. |
-| [DurableActionAdmission.cs](../../src/Haby.Application/DurableActionAdmission.cs) | Provider-neutral exact admission/execution keys and typed codecs. |
-| [PostgreSqlProviderConfiguration.cs](../../src/Haby.PostgreSql/PostgreSqlProviderConfiguration.cs) | Adapter-owned connection settings and exact administrator SecretRef. |
-| [PostgreSqlDurableOperationExecutor.cs](../../src/Haby.PostgreSql/PostgreSqlDurableOperationExecutor.cs) | Preparing/Dispatching barrier, independent database verification and no restarted dispatch replay. |
-| [PostgreSqlDatabaseGateway.cs](../../src/Haby.PostgreSql/PostgreSqlDatabaseGateway.cs), `CreateDatabaseAsync` | Standalone quoted CREATE DATABASE; no explicit OWNER, so executing administrator owns it. |
-| [DurableGenerationRunner.cs](../../src/Haby.Application/DurableGenerationRunner.cs) | Explicit sequential passes, dependency checks, stop/resume. |
-| [DurableAggregateCompletion.cs](../../src/Haby.Persistence.PostgreSql/DurableAggregateCompletion.cs), `TryAdvanceAsync` | Locks deployment and checks every required node before AppliedGeneration. |
-| [PostgreSqlDatabaseRecoveryJournal.cs](../../src/Haby.Persistence.PostgreSql/PostgreSqlDatabaseRecoveryJournal.cs) | Existing specialized database recovery is not role/password recovery. |
-| [104-durable-operation-graph.md](104-durable-operation-graph.md) | Delivered graph evidence and current-model boundary. |
+| [SecretStore.cs](../../src/Haby.Application/SecretStore.cs) | CreateAsync lacks typed owner/purpose and generated-slot get-or-create. |
+| [PostgreSqlPlaintextSecretStore.cs](../../src/Haby.Persistence.PostgreSql/PostgreSqlPlaintextSecretStore.cs) | Assigns Environment/ProviderAdministrator metadata; application generation needs explicit typed metadata. |
+| [PostgreSqlAdministrativeSecretCatalog.cs](../../src/Haby.Persistence.PostgreSql/PostgreSqlAdministrativeSecretCatalog.cs) | Named administrative creation/receipts remain a distinct producer. |
+| [DurableOperationGraph.cs](../../src/Haby.Application/DurableOperationGraph.cs) | Frozen nodes/dependencies and inputs; typed future-output references need implementation. |
+| [DurableActionAdmission.cs](../../src/Haby.Application/DurableActionAdmission.cs) | Exact Provider-neutral planning/execution keys and typed codecs. |
+| [PostgreSqlDatabaseCreateAction.cs](../../src/Haby.PostgreSql/PostgreSqlDatabaseCreateAction.cs) | Database Create only; no application-login policy yet. |
+| [DurableAggregateCompletion.cs](../../src/Haby.Persistence.PostgreSql/DurableAggregateCompletion.cs) | Transactional all-required-nodes completion. |
+| [PostgreSqlDatabaseRecoveryJournal.cs](../../src/Haby.Persistence.PostgreSql/PostgreSqlDatabaseRecoveryJournal.cs) | Specialized database-create recovery; do not extend it to new actions by analogy. |
 
-## Concrete manifest and exact proposed contracts
+## Concrete manifest and exact contracts
 
-The [manifest example](examples/106-shared-application-login.json) uses the current
-`haby.dev/v1alpha1` envelope and existing binding target syntax. Its new login
-Resource is deliberately unsupported on the inspected build: import/planning
-must not pretend that registering these words in documentation enables execution.
-The example declares one database and one login shared by api and worker, both
-Application-owned, with retain lifecycle. No generated material/reference exists
-in the portable source manifest. No configuration document or delivery endpoint
-is needed to test this ownership/consumption example.
+The [example](examples/106-shared-application-login.json) declares one database
+and one login shared through bindings by api and worker. It uses
+database-owner/v1. Import/planning support must be implemented before the example
+is executable; core/extension metadata alone does not enable effects.
 
-Closed typed contract definitions proposed for approval:
-
-| Contract | Exact fields and constraints |
+| Contract | Accepted fields and constraints |
 | --- | --- |
-| `postgresql.database/v1alpha1` | Existing properties `{name: string}`; `[a-z][a-z0-9_]{0,62}`. Existing shape is unchanged. |
-| `postgresql.application-login/v1alpha1` | Properties `{databaseRef: ManifestLocalId, schema: string, privilegePolicy: string}`. All required; schema follows database-name syntax but cannot start `pg_` or equal `public`/`information_schema`; policy is exactly `schema-migrator/v1`. No unknown fields/password/userName. |
-| Login binding options `postgresql.application-login.binding/v1alpha1` | Exactly `{}`. Resource selects privileges; a Component cannot broaden them. Both example bindings consume the same login outputs. |
-| Database binding options | Existing database-only shape is not expanded by the example. |
-| Database output `postgresql.database-output/v1alpha1` | `{databaseName: string, databaseOid: uint32}` from successful exact database action, output key `database`; OID is internal evidence. |
-| Login output `postgresql.application-login-output/v1alpha1` | `{host: string, port: integer, databaseName: string, schema: string, userName: string, password: SecretRef}`. Host/port come from pinned typed Provider configuration; password is exactly `(SecretId, SecretVersionId)`, never text or latest. Output key `connection`; publish only after all login nodes succeed. |
-| Internal `haby.generated-credential/v1` | `{reference: SecretRef}`, output key `password`; write-once, scoped to producer node. |
-| Internal role evidence `postgresql.role-evidence/v1` | `{roleName: string, roleOid: uint32}`; key `role`. Scope includes the node's exact ProviderInstance/configuration, never a cluster-global OID claim. |
+| postgresql.database/v1alpha1 | Existing properties {name}; database-name syntax remains [a-z][a-z0-9_]{0,62}. |
+| postgresql.application-login/v1alpha1 | Required {databaseRef: ManifestLocalId, schema: string, privilegePolicy: string}. Same-Application databaseRef; schema follows database-name syntax and cannot start pg_ or equal public/information_schema; policy is exactly database-owner/v1. No unknown fields, password or userName. |
+| Login binding options | Exactly {}; bindings do not independently choose credentials or broaden the declared policy. |
+| postgresql.database-output/v1alpha1 | {databaseName: string, databaseOid: uint32}, key database; output from the exact confirmed database action. OID is consistency evidence, not ownership proof. |
+| postgresql.application-login-output/v1alpha1 | {host, port, databaseName, schema, userName, password: SecretRef}, key connection; publish only after all mandatory login work succeeds. Connection settings come from pinned typed configuration; password is an exact SecretId/SecretVersionId pair. |
+| haby.generated-credential/v1 | {reference: SecretRef}, key password; producer output, never plaintext. |
+| postgresql.role-evidence/v1 | {roleName: string, roleOid: uint32}, key role; normal success consistency evidence, not an implemented manual recovery capability. |
 
-`databaseRef` is an adapter-declared same-Application Resource dependency, not a
-Component binding or free-form string lookup at execution. Require exactly one
-referenced database, one login for it and the same Provider alias/resolved exact
-Provider configuration/implementation for both Resources in this pilot. Reject
-cross-Application references, ambiguous/multiple login policies, schema sharing,
-Provider mismatch, unsupported options and unknown versions before acceptance.
-This extends the current one-Resource admission limit for this exact pair only.
+The PostgreSQL pilot adapter requires exactly one declared database/login pair
+and the same Provider alias and exact resolved Provider configuration/implementation.
+Reject cross-Application references, additional policies, mismatched Providers
+and unsupported options. Two Components consume the same login Resource.
+Workload provisioning and confidential document delivery are outside these slices.
 
-Common code owns typed identities, dependency/output addressing and secret-store
-contracts. The PostgreSQL adapter owns dependency extraction from these properties,
-SQL, role names, input DTOs and privilege checks. Register exact Resource +
-`postgresql/v1` + `haby.postgresql.connection/v1` + implementation + action keys;
-no prefix dispatch, reflection discovery or generic host/password columns.
+This pair is an adapter policy, not a common Application admission shape.
+Generated slots, owner/purpose, SecretRefs and operation outputs must work for
+credential-bearing Resources without any database. A future RabbitMQ user action
+reuses those contracts and emits its own dependencies/permissions rather than
+the PostgreSQL five-step graph. PostgreSQL naming, database-owner/SCRAM and SQL
+rules must not enter the shared secret/output contracts.
+
+The current one-Provider Plan input is a known limitation, not proof of combined
+PostgreSQL/RabbitMQ support. Resource/node-specific exact Provider resolutions
+and dependency validation are prerequisites for admitting that combined case.
+The pair-admission design must account for this boundary; use a distinct typed
+non-database credential action as evidence before claiming the seam is neutral.
+
+The common model owns typed identities, outputs and secret contracts.
+The adapter owns dependency extraction, PostgreSQL DTOs, names, SQL and privilege
+checks. Keep exact Resource/kind/configuration/implementation/action dispatch;
+no reflection, prefix dispatch, database fields in common tables or direct CLI SQL.
 
 ## Operation dependencies and outcomes
 
-All rows are mandatory. Each includes the existing pinned input references.
-Here `db` and `app-login` are stable ResourceLocalIds; owner/slot means ADR-034's
-typed tuple, not a display name. All displayed payloads are closed typed DTOs.
-Exact input codecs are `haby.postgresql.database-create/v1`,
-`haby.postgresql.database-restrict/v1`, `haby.generated-slot/v1`,
-`haby.postgresql.application-login-create/v1` and
-`haby.postgresql.application-login-configure-access/v1`, respectively.
-Unknown versions/fields fail closed; output codecs use their exact output contract IDs.
+All five nodes are mandatory and use pinned references. The stable slot name is
+application-password; generationProfile is random-password/v1.
 
-| OperationId / exact action contract | Frozen non-secret input | Depends on | Effect, durable output and success evidence |
+| OperationId / action | Frozen non-secret input | Dependencies | Effect and success evidence |
 | --- | --- | --- | --- |
-| `db-create` / `postgresql.database.create/v1alpha1` | `{databaseName}` | none | Existing standalone CREATE; confirmed response and independent existence read. Proposed output publication additionally records databaseName and observed OID with success. Database ownership still needs confirmation before following actions. |
-| `db-restrict` / `postgresql.database.restrict/v1alpha1` | `{databaseName, databaseSource: OperationOutputRef, expectedOwnerUserName}` | `db-create` | Confirm assigned database/provenance and administrator ownership; one transaction revokes all PUBLIC database privileges and PUBLIC USAGE/CREATE on public schema. Independent owner/ACL read confirms. No unrelated database touched. |
-| `app-login-material` / `haby.secret.ensure-generated/v1` | `{owner, slotId, generationProfile}` | `db-restrict` | Local atomic same-slot get-or-create; publish exact generated-credential/password output with node success. No Provider call. |
-| `app-login-create` / `postgresql.application-login.create/v1alpha1` | `{owner, databaseName, databaseSource: OperationOutputRef, roleName, passwordSource: OperationOutputRef}` | `db-create`, `db-restrict`, `app-login-material` | One transaction CREATE ROLE with exact password and fixed flags, plus CONNECT on this database. No memberships granted to login. Confirm COMMIT, independently inspect flags/memberships/OID and authenticate as exact login/database using the stored version; publish role evidence with success. |
-| `app-login-grants` / `postgresql.application-login.configure-access/v1alpha1` | `{databaseName, databaseSource: OperationOutputRef, schema, policy, roleSource: OperationOutputRef, passwordSource: OperationOutputRef}` | `db-create`, `db-restrict`, `app-login-create`, `app-login-material` | Require same owned role OID and exact password. One transaction creates administrator-owned schema, grants login USAGE/CREATE, applies creator defaults and database-local search_path. Confirm COMMIT plus independent catalog checks and authenticated read-only session; publish final typed Resource output with node success. |
+| db-create / postgresql.database.create/v1alpha1 | databaseName | none | Existing standalone Create under Provider administration; confirmed response and independent existence/OID read. |
+| db-restrict / postgresql.database.restrict/v1alpha1 | databaseName, databaseSource, expectedOwnerUserName | db-create | Verify exact new database, restrict PUBLIC database/public-schema ACLs in one external transaction, confirm commit and owner/ACL evidence. |
+| app-login-material / haby.secret.ensure-generated/v1 | owner, slotId, generationProfile | db-restrict | Local same-slot get-or-create; publish exact output with node success/attempt closure. No Provider call. |
+| app-login-create / postgresql.application-login.create/v1alpha1 | owner, databaseName, databaseSource, roleName, passwordSource | db-create, db-restrict, app-login-material | Transactional role/password creation with fixed flags and CONNECT; confirm commit, role attributes and exact-password authentication; publish role consistency evidence. |
+| app-login-access / postgresql.application-login.configure-access/v1alpha1 | databaseName, databaseSource, schema, policy, roleSource, passwordSource | db-create, db-restrict, app-login-create, app-login-material | One external transaction transfers database ownership to the application login and configures application-owned schema, defaults/search_path. Confirm commit and independent ownership/access evidence; publish final connection output. |
 
-`expectedOwnerUserName` is resolved from the pinned configuration at Plan time;
-the adapter validates it against that exact revision at execution. No Provider
-payload is copied into common fields. The derived roleName and owner key are
-frozen before acceptance. Material input needs no SecretRef yet: consumers freeze
-`OperationOutputRef(app-login-material, haby.generated-credential/v1, password)`.
-The roleSource selects `app-login-create`, `postgresql.role-evidence/v1`, `role`.
-Every databaseSource selects `db-create`, `postgresql.database-output/v1alpha1`,
-`database`; require the same observed OID before each subsequent mutation. OIDs
-are consistency evidence, not ownership proof against privileged external changes.
-Dependencies and output selectors are both fingerprinted and validated before
-Commit. The slot association supplies the durable exact reference at runtime;
-outputs never amend the graph or the accepted generation snapshot.
+Input codecs remain exact versioned identifiers owned by the action implementation:
+haby.postgresql.database-create/v1, haby.postgresql.database-restrict/v1,
+haby.generated-slot/v1, haby.postgresql.application-login-create/v1 and
+haby.postgresql.application-login-configure-access/v1. Unknown formats/fields
+fail safely. Typed output selectors are frozen in the graph:
+databaseSource selects db-create/database; passwordSource selects
+app-login-material/password; roleSource selects app-login-create/role, each with
+its exact output contract. Validate matching producer, generation, owner, Provider
+references and dependency edges. No current alias or latest SecretVersion lookup.
 
-The local operation uses the login Resource's exact admission context, not a
-separate remote Provider. It must validate the referenced Application/Environment
-ownership and serialize all slot writes transactionally even with direct calls.
-Repeated material execution after output-finalization rollback reuses the winner.
-Slot commit precedes role/password dispatch. Ordinary progress/CLI results expose
-safe IDs, references and reasons only; no password, verifier, connection string,
-hash of material or raw driver detail. Internal outputs contain exact SecretRefs,
-not a copy of the payload. Missing handlers/output codecs fail closed while safe
-metadata/history reads remain available.
-
-| Interruption/outcome | Allowed next behavior |
-| --- | --- |
-| Before local slot commit | Roll back; explicit retry may create one winning slot. |
-| Lost slot response / output publication rollback | Read same slot; return/publish the exact original SecretRef; only scoped material resolution reads its original bytes. If material unavailable, refuse. |
-| External preparation cannot resolve pinned input, output or material | Close attempt before dispatch with safe category; restore exact input before explicit retry. Invalid immutable input/name collision is definitive. |
-| Durable marker commit not acknowledged | Send no external SQL. Read journal; if Dispatching survived, NeedsAttention. |
-| Server rejects statement and transaction rollback is confirmed | Record definitive Conflict/ServerRejected; no auto-retry/adoption. Failure to confirm rollback is uncertain. CREATE DATABASE keeps its current standalone rejection policy. |
-| Lost COMMIT, timeout, cancellation after marker, verification failure or Haby success write lost | NeedsAttention, even when external state looks complete. No mutating redispatch. |
-| Restart after some successful nodes | Keep attempts/outputs; never repeat successful nodes. Stop pass at unresolved failure/uncertainty, including ready siblings. |
-| Manual resolution of one node | Immutable consent/evidence receipt and node transition; aggregate completion checks all siblings. Replay never rechecks PostgreSQL. |
-
-For restrict recovery, recheck exact database provenance/owner and both database
-and public-schema ACLs. For role recovery, recheck provenance, OID, fixed flags,
-memberships, CONNECT and exact-password login. For grants recovery, additionally
-check schema ownership/ACL, creator default ACL and search_path. A disposable
-acceptance test executes permitted/denied DDL/DML; production verification/recovery
-does not create probe objects. Use fresh non-pooled password sessions and
-`current_user`, `session_user`, `current_database()` checks; verify SCRAM HBA and
-a wrong-password rejection so trust/peer/certificate routes cannot fake evidence.
-Evidence gathering cannot reserve the external target against an administrator;
-operator consent requires a controlled no-concurrent-change window. Persist safe
-fact categories, identities and actor/time, never password/verifier content.
+Publish output, producer success and attempt closure atomically. Local material
+may already be committed when output publication fails: retry resolves the same
+slot/reference. It never rotates. External nodes retain the existing durable
+Dispatching barrier and aggregate completion. Observe external OIDs only as
+consistency evidence; privileged external changes are not authenticated by OIDs.
 
 ## Privileges and primary evidence
 
-Checked against PostgreSQL **17** documentation on 2026-11-02, matching the
-repository's `postgres:17.6-alpine` disposable fixture. These are documentation
-and static-source findings, not experiments run for this PR.
+Policy is based on PostgreSQL 17, matching the current disposable fixture.
+These references establish semantics; implementation needs real tests.
 
-| Topic / primary source | Design implication |
-| --- | --- |
-| [CREATE DATABASE, Description and Notes](https://www.postgresql.org/docs/17/sql-createdatabase.html) | Default owner is executing role; CREATE DATABASE cannot run in a transaction block. Database ACLs are not copied from its template. Restrict is a separate effect with an unavoidable bootstrap window. |
-| [Privileges, ownership and default PUBLIC grants](https://www.postgresql.org/docs/17/ddl-priv.html) | Ownership conveys alter/drop authority, while database CONNECT/TEMP and routine EXECUTE default to PUBLIC. Login flags alone cannot establish cluster isolation. |
-| [Schemas, sections 5.10.3-5.10.4](https://www.postgresql.org/docs/17/ddl-schemas.html) and [CREATE SCHEMA](https://www.postgresql.org/docs/17/sql-createschema.html) | Schema USAGE and CREATE differ; schema owner need not own contained objects. public defaults vary with database history. Check/revoke explicitly; never trust app schema in administrator search_path. |
-| [ALTER DEFAULT PRIVILEGES, Description](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html) | Only future objects of the creating current role are affected; defaults do not inherit from role memberships. Per-schema revokes cannot remove global PUBLIC defaults. Application routine/type default revokes are database-wide for this creator. |
-| [CREATE ROLE, parameters and Notes](https://www.postgresql.org/docs/17/sql-createrole.html) and [GRANT](https://www.postgresql.org/docs/17/sql-grant.html) | Roles are cluster-scoped; flags, membership and object grants are separate. Supply fixed negative flags and check memberships. No implicit database ownership or extension permission follows. |
-| [Protocol message flow, simple queries and transaction status](https://www.postgresql.org/docs/17/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY) and [COMMIT](https://www.postgresql.org/docs/17/sql-commit.html) | Transaction-capable role/schema/grant DDL may be grouped under explicit BEGIN/COMMIT. Statement CommandComplete alone does not prove transaction commit; lost external COMMIT cannot be reconciled atomically with the Haby journal. Disposable rollback/commit-loss tests remain required. |
-| [Password authentication](https://www.postgresql.org/docs/17/auth-password.html) and [client password encryption](https://www.postgresql.org/docs/17/libpq-misc.html#LIBPQ-PQENCRYPTPASSWORDCONN) | Require password-authenticated probe route. Use client-generated SCRAM verifier to avoid cleartext DDL; verifier transport/logging is still confidential and needs the proposed narrow ADR-026 exception. The C API documents semantics, not a selected .NET dependency. |
+- [CREATE DATABASE](https://www.postgresql.org/docs/17/sql-createdatabase.html):
+  initial owner defaults to executing role; creation cannot be grouped into
+  the later external transaction.
+- [Privileges](https://www.postgresql.org/docs/17/ddl-priv.html):
+  ownership provides ALTER/DROP authority; database and contained-object
+  ownership are different; PUBLIC defaults require explicit consideration.
+- [Schemas](https://www.postgresql.org/docs/17/ddl-schemas.html):
+  application schema ownership and pg_database_owner/public behavior must be
+  explicit; administrator SQL must not trust an application-writable search_path.
+- [ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/17/sql-alterdefaultprivileges.html):
+  defaults apply to the creating role's future objects. Per-schema revokes
+  cannot remove globally granted PUBLIC defaults.
+- [CREATE ROLE](https://www.postgresql.org/docs/17/sql-createrole.html):
+  role attributes and memberships are separate from database ownership.
+- [COMMIT](https://www.postgresql.org/docs/17/sql-commit.html):
+  external transaction completion is not atomic with the Haby journal.
+- [Password authentication](https://www.postgresql.org/docs/17/auth-password.html)
+  and [client password preparation](https://www.postgresql.org/docs/17/libpq-misc.html#LIBPQ-PQENCRYPTPASSWORDCONN):
+  verify actual password authentication; client-generated SCRAM avoids original
+  cleartext in password DDL but the verifier remains confidential.
 
-Recommended `schema-migrator/v1` matrix after **all** nodes succeed:
+| Action/object after all nodes succeed | Application login | Provider |
+| --- | --- | --- |
+| Own database | Owner, CONNECT and owner administration; may alter/drop its dedicated database | Retains administration; SUPERUSER supported for the pilot |
+| Schemas and own tables/indexes/sequences | May create schemas, own/manage them and its own objects, run migrations and DML | Can administer using configured privileges |
+| public schema | pg_database_owner ownership on PostgreSQL 17; PUBLIC USAGE/CREATE revoked; owner capabilities remain | Explicitly verifies/configures ownership and ACLs |
+| Administrator/template-created contained objects | Not automatically their owner; no blanket reassignment or grants | Keeps their original ownership; unsupported migration paths fail clearly |
+| CREATE ROLE/DATABASE, replication, bypass RLS | Denied by fixed negative cluster flags; no administrative memberships | Uses preconfigured authority, no automatic elevation |
+| Hardened other Haby database B | CONNECT denied in the configured policy absent later owner/admin changes | As operator-authorized |
+| Unrelated database with PUBLIC privileges | May remain connectable; not a cluster-wide isolation promise | Unrelated ACLs unchanged |
 
-| Action/object | Generated application login | PUBLIC / another application login | Provider administrator |
-| --- | --- | --- | --- |
-| Authenticate / CONNECT to own managed database | Yes, exact stored password, explicit CONNECT | No database CONNECT after restriction, absent separate explicit grants | Owner access |
-| CONNECT to separately hardened Haby database B | No | Only B's expressly authorized login | As authorized by operator |
-| CONNECT to unrelated default database | Possibly via PUBLIC; no guarantee of denial | Possibly | Not modified by these actions |
-| Database ownership, DROP/ALTER DATABASE, CREATE SCHEMA, TEMP tables | No; no ownership, database CREATE or TEMP | No grant from this policy | Database owner handles administration |
-| Application schema | USAGE/CREATE; no schema ownership/drop | No USAGE/CREATE | Owns schema |
-| public schema creation/access | No USAGE/CREATE after restriction | No USAGE/CREATE from PUBLIC | Retained administration |
-| App-created current/future tables | Owner: DML, REFERENCES/TRIGGER, ALTER/DROP and grant authority | No default table grants; app owner could deliberately grant | According to actual admin authority |
-| App-created current/future sequences | Owner: usage/read/update/alter/drop | No default sequence grants | According to actual admin authority |
-| App-created routines/types | Owner use; future PUBLIC EXECUTE/USAGE defaults revoked | No app-schema USAGE; no new PUBLIC defaults | According to actual admin authority |
-| Administrator-created tables/sequences in app schema | No automatic access; unsupported creator path | No new grants | Creator owns them; separate grants would be required |
-| CREATE ROLE/DATABASE, replication, bypass RLS, superuser actions | Denied; no memberships/elevation | No grants from this policy | Only operator-prepared privileges |
+A database owner can deliberately change its database ACLs and grant access.
+Isolation tests describe the configured state, not confinement of a hostile owner.
+The login can also change its own password; drift never causes automatic reset.
+Provider SUPERUSER is allowed, and restricted Provider support is deferred.
+No registration/adoption of existing resources is enabled by these decisions.
 
-An application login can change its own password under PostgreSQL role rules.
-Stable stored material is not a promise against external drift: a mismatch stops
-verification/recovery and never triggers a reset. See [ALTER ROLE, Description](https://www.postgresql.org/docs/17/sql-alterrole.html).
+## Uncertainty and deferred recovery
 
-The administrator must already be allowed to create databases/roles, administer
-their ACLs, configure the new role and its defaults, and inspect required evidence.
-CREATEDB/preflight success alone proves none of the other capabilities. Fail
-before dispatch where capability can be determined; otherwise report confirmed
-rejection/uncertainty honestly. This policy never grants administrator elevation.
-Disposable tests may use their isolated container superuser. No promise that
-non-superuser role administration implies unrestricted access to app-owned data.
-Extensions requiring database CREATE/superuser and migrations outside the chosen
-schema are unsupported. No global changes to template databases or HBA are made.
+For new restrict/login/ownership/access effects, a lost commit/rollback,
+post-marker cancellation, failed success verification or Haby finalization failure
+leaves NeedsAttention. Known rejection requires confirmed rollback. No restarted
+dispatch, automatic adoption, repair, password reset or ownership transfer.
+Existing database-create manual recovery remains exact-action-specific.
+
+New role/access recovery implementation is deferred. Do not add verify-and-assign
+commands, provenance attestations or repair workflows in these slices.
+Inspection preserves uncertainty and partial progress; no success is fabricated.
+Any future resolution needs separate approval. Operators explicitly manage
+disposable test cleanup outside Haby; catalog reset is not external rollback.
+
+SCRAM password DDL has a narrowly approved ADR-026 verifier-only exception.
+Choose/review the managed implementation and prove interoperability/redaction
+before enabling it. Validate client logs and supported configured server logging.
+Do not claim universal detection of external logging, hide verifier visibility
+from privileged administrators, or silently disable server-wide audit policy.
 
 ## Ordered implementation slices
 
-Start only after corresponding ADR-034 choices become Accepted. Each slice stays
-off the production admission path until its complete prerequisites are delivered.
-Use separate arrange/act/assert DbContexts for persisted tests and a fresh
-disposable PostgreSQL instance; never a developer/customer database.
+1. **Typed metadata and stable generated slots, no Provider calls.**
+   Implement Resource/administrative owner/purpose and atomic get-or-create.
+   Prove concurrency, unchanged ref/value on retry/restart, profile conflict,
+   missing-payload refusal, rollback, lost-response resolution and current-build
+   pg_dump/pg_restore. No renderer or confidential API is needed.
+2. **Typed outputs and pair admission.**
+   Add output selectors/write-once persistence and the supported pair/bindings.
+   Prove missing/wrong/cross-generation output refusal, publication rollback,
+   same-slot reuse and unchanged graph fingerprint. Keep external actions gated.
+   Keep pair rules adapter-owned and specify typed exact resolutions by Resource
+   or node; a credential-bearing non-database fake must not need a database input.
+   Do not claim combined multi-Provider admission while a single global selection
+   remains its only persisted planning input.
+3. **Restrict new database.**
+   Add exact target checks, transactional PUBLIC ACL changes and independent
+   verification. Test unchanged unrelated ACLs, rollback and uncertain-stop.
+   Do not add new recovery. Preserve existing database-create recovery.
+4. **Create login with exact persisted password.**
+   Add fixed attributes, SCRAM verifier transport, role/CONNECT transaction,
+   name-collision refusal and password authentication checks. Prove rollback,
+   no secret/verifier leakage in supported logs, and NeedsAttention/no replay
+   after ambiguous commit. No password overwrite or role adoption.
+5. **Database ownership/access and real application operations.**
+   Transfer ownership, configure explicit schemas/defaults/search_path and enable
+   the complete supported graph. Use the actual generated login with EF Core:
+   create schema and migration history, tables, indexes and sequences; apply a
+   second structural migration and DML. Independently verify owner/flags, deny
+   cluster privileges and CONNECT to managed B, and demonstrate that unrelated
+   PUBLIC CONNECT may remain. Do not preserve the previous CREATE SCHEMA/TEMP/
+   DROP-own-database denial expectations. Current-build retry/restart/restore
+   retain exact material and skip success; uncertain new actions stay blocked.
+6. **Later decisions.**
+   Confidential Configuration rendering/API delivery remains separate. New
+   role/access recovery, schema-migrator, restricted Provider administration,
+   registration of existing resources, rotation and deprovisioning are deferred.
 
-1. **Typed secret metadata and stable generated slots, no Provider calls.**
-   Replace hardcoded producer metadata with typed owner/purpose; retain explicit
-   administrative behavior. Persist unique slots and atomic get-or-create. Prove
-   concurrent callers converge on one reference/value, distinct owners isolate,
-   conflicting profile refuses, missing payload never regenerates, rollback leaves
-   no partial Secret, and commit-response loss/restart returns the exact winner.
-   Include current-build pg_dump/pg_restore of slot/material. No confidential API,
-   renderer or external role is needed for this first slice.
-2. **Typed durable output references and pair admission.** Add closed input/output
-   definitions, graph validation and write-once output persistence; test through
-   real Plan/Check/Commit with typed fake effects. Prove changed fingerprint on
-   selector change, missing/wrong/cross-generation output refusal, output-finalize
-   rollback, unchanged graph bytes on restart and same-slot reuse. Validate sample
-   parsing and two bindings consume one Resource, not two generated slots. Reject
-   unsupported multi-database/provider combinations. Keep external actions gated.
-3. **Restrict new database action.** Add exact ownership checks, transaction,
-   marker, verification and consented recovery. Disposable tests prove PUBLIC ACL
-   removal only on this database, unrelated ACL digest unchanged, rollback, crash
-   before send/after commit, no uncertain redispatch and incomplete aggregate.
-   Retain existing database conflict/manual recovery behavior.
-4. **Role creation with exact password, narrowly approved DDL transport.** Use
-   the generated slot/output and fixed flags; transaction includes CONNECT only
-   on owned database. Prove role/password/grant rollback together, deterministic
-   name collision never changes pre-existing password, lost COMMIT/success write
-   stays NeedsAttention, wrong-password route fails, and affirmative consent plus
-   provenance/authentication resolves only the exact node. Capture client logs,
-   diagnostics and configured server logs to prove no cleartext/verifier leakage.
-   Prove approved managed SCRAM construction against real PostgreSQL before use.
-5. **Schema/grants and complete real generated-role path.** Deliver defaults,
-   search_path, independent evidence and specialized recovery. Enable only the
-   complete supported graph. In disposable PostgreSQL, import the concrete pair,
-   Plan/Check/Commit/execute through Host and API-only published Native AOT CLI;
-   a test-only authorized secret consumer opens a fresh connection with the exact
-   generated version, checks identity, creates/alters/drops its own table, inserts,
-   selects/updates/deletes rows and uses an identity sequence. It creates a second
-   future table/sequence and routine/type to prove creator/default rules. Check
-   failure of CREATE ROLE/DATABASE/SCHEMA, TEMP, public-schema writes, schema drop,
-   admin-object access and CONNECT to hardened database B. Demonstrate separately
-   that an unrelated database with PUBLIC CONNECT may remain connectable.
-   Restart/retry preserves exact refs and skips successes; recover one node with
-   a required sibling incomplete and AppliedGeneration stays unset. Backup/restore
-   partial state using pg_dump/pg_restore; read/receipt replay has zero Provider
-   effects, explicit resume completes remaining nodes without credential rotation.
-6. **Separately approve confidential configuration delivery.** Only then define
-   document selection/scope, permitted consumer, transport and audited just-in-time
-   materialization. A future pure renderer may project the typed login output to
-   a SecretReference-bearing tree under ADR-017. No unrestricted secret API, generic
-   reveal or plaintext revision storage follows from this proposal. The full
-   ROADMAP usable-alpha exit still requires this separately approved client path.
-
-For each coding slice run its focused tests, applicable solution restore/build/
-test/format and disposable PostgreSQL checks; use Native AOT gates when transport
-changes. Document explicit fresh-catalog requirements under ADR-033, not legacy
-adapters, numeric aliases or old-alpha migration tests. This documentation PR
-changes no schema, code, tests, dependencies or infrastructure and runs no
-PostgreSQL experiments. Its checks are links, JSON syntax, CRLF, scope and diff.
+Run each slice's focused and applicable solution/PostgreSQL/format/diff gates;
+Native AOT where transport changes. ADR-033 permits explicit fresh catalogs,
+not alpha compatibility bridges. No implementation is delivered by this docs PR.

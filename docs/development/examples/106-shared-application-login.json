@@ -19,7 +19,7 @@
         "properties": {
           "databaseRef": "db",
           "schema": "app",
-          "privilegePolicy": "schema-migrator/v1"
+          "privilegePolicy": "database-owner/v1"
         },
         "lifecycle": { "deletionPolicy": "retain" }
       }

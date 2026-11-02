@@ -1,249 +1,254 @@
-# ADR-034: Generated application credentials and PostgreSQL role policy
+# ADR-034: Generated application credentials and PostgreSQL database-owner policy
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-02
 - Scope: Issue [#106](https://github.com/hamstix/haby/issues/106), usable alpha pilot
 - Inspected base: `43cd89ebdf67d30d3f70a64dea1b94dc3d0a5e18` (merged PR #105)
 
-## Context and existing guarantees
+## Context
 
-Production currently emits only PostgreSQL database Create. The persisted graph
-has frozen typed inputs and dependencies, but no typed operation-output store.
-`ISecretStore.CreateAsync` has no owner/purpose argument; both plaintext creation
-and named administrative bootstrap write Environment/ProviderAdministrator metadata.
-Neither is an application-credential producer. See the exact
-[source inventory and contract proposal](../development/106-application-credential-policy.md).
+The maintainer accepted the decision packet with `database-owner/v1` replacing
+the proposed `schema-migrator/v1`, and deferred new role/access recovery.
+The existing graph supports exact frozen inputs and durable execution, but
+generated slots and typed outputs remain implementation work.
+See the [contracts and implementation slices](../development/106-application-credential-policy.md).
 
-Already accepted requirements remain binding:
+Accepted ADR-006/009/017/024/025/026/029/030/032/033 continue to apply: secrets
+remain separate from rendered content, references pin exact versions, ownership
+is explicit, graph/attempt/audit invariants hold, SQL workflow stays in C# and
+development-era compatibility is not required. This ADR permits the specified
+effects through scoped implementation slices; it does not claim they exist.
 
-- [ADR-006](0006-secret-storage-and-encryption.md): immutable exact SecretRefs,
-  separate material, scoped resolution and approved protection modes.
-- [ADR-009](0009-application-manifest-domain-model.md) and
-  [ADR-017](0017-structured-configuration-trees-and-document-projections.md):
-  Application-owned Resources, shared bindings and typed secret placeholders.
-- [ADR-024](0024-provider-instance-configuration-revisions.md),
-  [ADR-029](0029-named-administrative-secret-bootstrap.md) and
-  [ADR-030](0030-provider-declarations-and-logical-identity.md): pinned Provider
-  inputs; administrative names/receipts do not define generated-secret ownership.
-- [ADR-025](0025-pilot-durable-postgresql-create-recovery.md) and
-  [ADR-032](0032-dependent-operation-plans-and-exact-dispatch.md): durable external
-  dispatch barriers, immutable graph, sequential explicit execution, per-node
-  attempts and atomic aggregate completion. Database manual assignment does not
-  authorize role assignment.
-- [ADR-026](0026-postgresql-persistence-and-server-side-sql-policy.md): C# workflow,
-  declarative constraints and narrow adapter SQL.
-- [ADR-033](0033-development-compatibility-and-catalog-resets.md): one current
-  model; explicit fresh-catalog requirements are allowed, silent resets are not.
+## Decision
 
-Everything below is a recommendation requiring maintainer acceptance. This PR
-does not authorize implementation or claim the proposed contracts exist.
+### Provider-neutral boundary
 
-## Proposed decisions
+Stable Resource ownership, generated credential slots, typed secret metadata,
+atomic get-or-create, exact SecretRefs, typed operation outputs, dependency
+execution, uncertainty and aggregate completion are common Haby contracts.
+They must not require a database Resource, database name/schema, PostgreSQL
+role, SQL transaction, database-owner policy or PostgreSQL password verifier.
 
-### 1. Stable ownership and atomic generated slots
+The database/login pair, database-owner/v1, PostgreSQL role-name policy,
+PUBLIC/schema privileges, SQL/SCRAM transport and database recovery are specific
+to the PostgreSQL adapter. Its five-node graph is one concrete plan, not a
+mandatory common provisioning sequence. External naming and password transport
+belong to each action contract; do not apply PostgreSQL rules to RabbitMQ.
 
-Define `ManagedResourceKey(EnvironmentRecordId, ApplicationRecordId, ResourceLocalId)`.
-The first two fields are persisted internal UUIDs; the last is the stable manifest
-declaration ID, not displayName. Changing that ID is replacement, not rename.
-Database and login Resources are logically owned by their Application in that
-Environment. The login Resource owns its generated credential, independently of
-Components, Bindings, Plans, attempts, generations and Provider revision numbers.
+A future RabbitMQ adapter can reuse generated material and output references
+with a graph such as ensure material -> create user -> configure access, without
+creating a database. That trace defines an extension boundary, not implemented
+RabbitMQ support or an approved RabbitMQ permission/recovery policy.
 
-Define `GeneratedCredentialSlot(ManagedResourceKey, SlotId)` with exact SlotId
-`application-password/v1`. Do not expose it as an operator secret name. The
-slot's typed metadata is owner = ManagedResourceKey, purpose = ApplicationLogin,
-sensitivity = Credential, contentType = application/octet-stream, policy = Managed.
-Administrative bootstrap explicitly supplies its existing typed Environment owner
-and ProviderAdministrator purpose through the revised storage boundary.
+Current durable planning still has one exact Provider selection and one-Resource
+admission. Extending admission for the PostgreSQL pair must keep Resource-specific
+validation in the adapter rather than replace the common gate with a mandatory
+PostgreSQL pair. Before admitting an Application that combines independent
+Providers, represent exact resolutions per Resource/node explicitly and validate
+cross-Resource dependencies. Do not force RabbitMQ onto a database-shaped input,
+single global PostgreSQL selection or a different Application just to evade this
+limitation. Test the selected generic seams with a typed credential-bearing
+non-database action; adding a second production Provider remains separate work.
 
-An internal cancellation-aware `GetOrCreateGenerated(slot, generationProfile)`
-returns Created/Existing with one exact SecretRef, or InvalidOwner,
-ProfileConflict, MaterialUnavailable, StorageUnavailable. Profile
-`random-password/v1` means 32 cryptographically random bytes encoded as unpadded
-base64url ASCII (43 bytes); no caller-supplied password or implicit rotation.
+### 1. Stable owners and generated slots
 
-Use a unique owner/slot constraint and one catalog transaction for Secret,
-initial SecretVersion, protected payload, immutable slot association and creation
-audit. Concurrent losers roll back their candidate and read the committed winner;
-they never replace it. An ambiguous commit is resolved by rereading the same slot,
-not by assigning another identity. A winner whose material is missing is an error,
-not permission to regenerate. Validate owner, Environment, profile and exact
-version association on every use. No external call is permitted until material
-and its slot reference have committed and been read back successfully.
+Use `ManagedResourceKey(EnvironmentRecordId, ApplicationRecordId, ResourceLocalId)`.
+The first two identities are internal persisted UUIDs. ResourceLocalId is a stable
+declaration identity, not displayName; changing it is replacement, not rename.
+The login Resource owns its application credential. Components share it through
+bindings rather than receive separately generated passwords.
 
-Keep failed/unused material and its exact reference with the owner and audit.
-No automatic deletion, regeneration, password reset or retry-driven versioning.
-Future cleanup/rotation/replacement needs another decision. Current-build backup
-and restore include slots, payloads, outputs, journals and audits together.
-Keep the selected approved storage mode; Plaintext remains supported with its
-database/backup reader exposure. No encrypted backend is added here.
+Use `GeneratedCredentialSlot(ManagedResourceKey, SlotId)`, with stable SlotId
+`application-password`. Algorithm/profile version belongs in
+`generationProfile = random-password/v1`, not the slot identity.
+Typed metadata records Resource ownership, ApplicationLogin purpose, Credential
+sensitivity, application/octet-stream content type and Managed ownership policy.
+Administrative creation explicitly supplies Environment/ProviderAdministrator
+metadata through the revised storage boundary.
 
-### 2. Immutable graph with write-once typed outputs
+The internal cancellation-aware get-or-create returns Created/Existing with one
+exact SecretRef, or a bounded invalid-owner/profile/material/storage refusal.
+The initial profile generates 32 cryptographically random bytes and stores their
+unpadded base64url ASCII representation (43 bytes). Profile mismatch on an
+existing slot is ProfileConflict, never another slot or implicit rotation.
 
-Freeze a typed `OperationOutputRef(producerOperationId, outputContract, outputKey)`
-in consumer inputs. Its deployment and generation are implicit in the containing
-accepted graph, never inferred from the current deployment. This is a reference
-to future evidence, not a mutable SecretRef slot in Plan JSON.
+Uniqueness plus one catalog transaction covers Secret, initial SecretVersion,
+protected payload, immutable slot association and creation audit. Concurrent
+losers discard candidates and read the committed winner. Resolve ambiguous
+commit by rereading the same slot, not generating another accepted identity.
+A missing winner payload is an error, not permission to regenerate.
+Validate scope, owner, profile and exact version on use. Commit and confirm
+material/reference before external role/password work.
 
-Add a write-once result association keyed by deployment + generation + producer
-OperationId + output contract + key. The local material node publishes exactly
-`GeneratedCredentialOutput(SecretRef)` under `haby.generated-credential/v1`, key
-`password`. Publish that output, node success and attempt closure in one catalog
-transaction after resolving the stable slot. If that transaction fails, replay
-reads the same slot and publishes the same reference. It never generates again.
+Retain failed/unused material with its owner and audit. No automatic deletion,
+reset, retry-driven versioning or cleanup. Replacement/rotation needs a later
+decision. Keep the existing approved storage mode, including Plaintext with its
+catalog/backup-reader exposure. Current-build restore includes slots and material.
 
-Check/Commit validate output types, producer existence and dependency edges;
-execution requires producer success, exact output presence, owner/Environment
-integrity and the pinned SecretVersion. Missing or corrupt output fails closed.
-No graph amendment, alias lookup, manifest replanning, latest-version resolution,
-plaintext result or mutable JSON substitution is allowed. The graph fingerprint
-stays constant. Slot association and operation output have different scopes:
-future generations reuse the slot and publish their own exact output association;
-this does not authorize generation updates currently refused by the pilot.
+### 2. Frozen typed output references
 
-Use the existing exact PostgreSQL admission keys for this Resource's local node;
-the node delegates to a Provider-neutral secret service without network work.
-Do not invent a secret Provider or put PostgreSQL fields in shared storage/CLI.
-Typed input/output codecs use generated JSON metadata. Output references and
-write-once associations are new model work, not capabilities proven by PR #105.
+Consumers freeze `OperationOutputRef(producerOperationId, outputContract, outputKey)`.
+Deployment and generation are those of the containing accepted graph.
+A write-once association is keyed by deployment + generation + producer operation
++ output contract + key. The material node publishes
+`GeneratedCredentialOutput(SecretRef)` under `haby.generated-credential/v1`,
+key `password`.
 
-### 3. PostgreSQL ownership and minimal privilege policy
+Publish output, producer success and attempt closure atomically after resolving
+the stable slot. Publication retry reads the same slot/reference. Validate
+producer, output type and dependency at Check/Commit. Consumption requires
+producer success, exact output, correct owner/Environment and pinned version.
+No mutable graph placeholder, latest lookup, plaintext output or replan.
+Future generations may publish their own output association for the same slot;
+generation updates remain outside the pilot.
 
-Recommend `schema-migrator/v1`: one application login, one new database and one
-explicit application schema. PostgreSQL database and schema owner remain the
-pinned Provider administrator; the login owns only objects it creates in that
-schema. PostgreSQL roles have no object-owner field; Haby records logical role
-ownership, confirmed external OID and originating attempt separately.
+Use typed generated codecs and common output/secret abstractions.
+The Resource's local material action may share its exact Provider admission key
+but delegates to a Provider-neutral service without network work. Do not invent
+a secret Provider or add PostgreSQL fields to common persistence/CLI.
 
-The login has LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION,
-NOBYPASSRLS, NOINHERIT and no membership in another role. Give CONNECT to its
-database, USAGE/CREATE on the application schema, no database CREATE or TEMPORARY.
-It can migrate and perform DML on its own current and future tables/sequences;
-it cannot manage administrator-created objects without separately planned grants.
-No blanket grant on all current/future administrator objects is proposed.
+### 3. First-pilot profile: database-owner/v1
 
-Runtime-only would grant schema USAGE, table SELECT/INSERT/UPDATE/DELETE and
-sequence USAGE, with no schema CREATE or ownership. It requires a separate
-migration identity plus creator-specific default grants for future objects.
-Defer that extra identity for the pilot. The recommended login can drop its own
-objects and grant access to them; this is not a runtime least-privilege identity.
-Two Components sharing it intentionally share that authority.
+One generated application login owns its dedicated database. Two Components may
+share that identity intentionally. The login has LOGIN, NOSUPERUSER, NOCREATEDB,
+NOCREATEROLE, NOREPLICATION, NOBYPASSRLS and no granted administrative memberships.
+Do not give cluster-level powers merely because it owns one database.
 
-Harden only the newly created database: revoke PUBLIC database privileges and
-PUBLIC USAGE/CREATE on public schema before creating the login; create the
-application schema without PUBLIC access. For application-created routines/types,
-revoke PUBLIC EXECUTE/USAGE in that creator's database-wide default privileges
-(not only per-schema). Existing/future application tables and sequences need no
-extra self-grant. No other object creators are supported by this policy.
-Set the role's database-local search_path to the application schema, with
-pg_catalog searched implicitly first. Administrative SQL uses qualified names
-and does not trust an application-writable search_path.
+Provider creates the database initially under administrative ownership, creates
+the application role and transfers database ownership in the final configuration
+step. Provider must retain administrative capability. A SUPERUSER Provider is
+supported for initial deployment; support for a restricted administrative account
+is deferred and is not a pilot acceptance condition. Never grant Provider
+elevation automatically.
 
-Isolation means role A cannot connect to separately hardened Haby database B,
-and cannot access B's data. It does not mean role A cannot connect to every
-unrelated cluster database: default PUBLIC CONNECT/TEMP and explicit grants may
-allow that. Do not modify unrelated databases. CREATE DATABASE cannot be grouped
-atomically with its ACL restriction; there is an initial PUBLIC window. Require
-an operator-prepared isolated target with no untrusted clients during bootstrap.
-Stronger cluster-wide isolation/HBA changes are a separate operator policy.
-See the [privilege matrix and PostgreSQL sources](../development/106-application-credential-policy.md#privileges-and-primary-evidence).
+Make schema/object ownership explicit:
+- The configured application schema is created with the application login as
+  owner; its application-created objects are owned by that login.
+- On the PostgreSQL 17 pilot, public schema ownership follows pg_database_owner;
+  verify that ownership and remove PUBLIC access as specified below.
+- Database ownership does not transfer ownership of pre-existing tables, schemas
+  or other objects. Administrator/template-created objects are not silently
+  reassigned, and blanket access to unrelated objects is not inferred.
+- The application can create schemas and manage its own objects. Database-owner
+  authority includes potentially destructive operations on its database; do not
+  describe this profile as a runtime least-privilege account.
 
-Derive the external role name as `haby_a_` plus lowercase SHA-256 hex truncated
-to 48 characters over the canonical owner tuple (UTF-8 JSON array of lowercase
-UUID strings and ResourceLocalId, no whitespace). Persist the resulting name
-and uniqueness reservation per ProviderInstance. Collisions, existing names or
-unmanaged databases/schemas fail; never adopt, pick a random suffix or overwrite
-an existing password. Provider transfer/replacement and Resource ID reuse remain
-unsupported until an explicit lifecycle policy exists. No additional owner role,
-cluster-wide grants or application elevation is introduced.
+The restricted schema-migrator profile, separate migration identities and
+general privilege-policy selection are deferred. Only database-owner/v1 is
+implemented for this pilot.
 
-### 4. Transactions, dispatch and action-specific recovery
+### 4. ACLs, isolation and naming
 
-Use five mandatory graph nodes: database Create, restrict database, ensure local
-material, create login, configure schema/grants. Their exact inputs, outputs,
-ordering and evidence are in the [operation table](../development/106-application-credential-policy.md#operation-dependencies-and-outcomes).
-Role creation plus initial password and CONNECT grant use one external transaction.
-Schema creation, remaining grants/defaults/search_path use another. Neither is
-atomic with Haby's journal. COMMIT acknowledgement and independent verification
-are required before recording success; cancellation/lost COMMIT/finalization
-failure leaves uncertainty even if every external statement was transactional.
+Harden only the new Haby database: remove PUBLIC database privileges and PUBLIC
+USAGE/CREATE on public, and do not grant PUBLIC access to the application schema.
+Set creator defaults for the application role to remove future PUBLIC routine
+EXECUTE/type USAGE at database-wide scope. Defaults affect that creator's future
+objects, not every existing object. Use the application schema as database-local
+search_path; administrator SQL uses qualified names and an independently safe
+search_path.
 
-Before each external transaction, validate pinned inputs and expected ownership,
-then confirm the durable Dispatching marker before sending mutating SQL. Definitive
-rejection requires a known server rejection and confirmed transaction rollback;
-an unacknowledged rollback or commit is uncertain. Restarted Dispatching becomes
-NeedsAttention without redispatch. Local material work instead uses catalog
-atomicity and same-slot replay; it has no external dispatch uncertainty.
+Database ownership itself authorizes owner operations; the application may later
+alter ACLs, grant access or create objects. Isolation assertions describe the
+state Haby configured, not protection against a database owner deliberately
+changing its own access policy.
 
-Recommend verify-and-assign only for uncertain role/grant work. Recovery requires
-explicit consent, trusted actor, exact attempt/Provider/owner/SecretRef, external
-OID and independently checked role attributes, memberships, database/schema owner
-and ACL/default/search_path evidence. For role recovery require fresh SCRAM
-authentication with the exact stored password, identity/database queries and a
-negative wrong-password control under a verified password-authentication route.
-That proves credential usability, not ownership: an operator must also attest
-provenance from a controlled change window or independently retained external
-audit. A matching name, comment, OID or successful login alone is insufficient.
+Verify that login A cannot connect to separately hardened managed database B.
+Unrelated databases may allow PUBLIC CONNECT/TEMP; do not modify them or promise
+cluster-wide isolation. CREATE DATABASE and subsequent ACL restriction have an
+initial window; the pilot requires an isolated target without untrusted clients
+during bootstrap. Stronger cluster/HBA policy is separate.
 
-Failed authentication, absent role, inconsistent privileges or unavailable
-provenance leaves NeedsAttention. Do not reset a password, adopt a role or issue
-CREATE again. Alternative: an explicitly consented repair/retry workflow could
-recover more cases but needs absent-effect/exclusive-access proof and a separate
-reviewed policy; it is not recommended for this slice. Password rotation and
-standalone ALTER ROLE PASSWORD are not admitted actions.
+Derive roleName as haby_a_ plus 48 lowercase SHA-256 hex characters over canonical
+UTF-8 JSON of the stable owner tuple (lowercase UUIDs and ResourceLocalId).
+Persist name and uniqueness reservation per ProviderInstance. A collision or an
+unmanaged existing role/database/schema is a conflict. Never choose a random
+replacement name or overwrite an existing password.
 
-Recovery performs read-only evidence gathering outside the catalog transaction,
-then conditionally appends one immutable decision and resolves the exact node.
-Receipt replay performs no external calls. Failed/stale consent leaves state
-unchanged. Partial successes and recovery never advance AppliedGeneration until
-all mandatory nodes succeed through the existing aggregate completion helper.
-No external compensation or implicit cleanup follows failure.
+Registering/adopting already-existing databases/roles is separate future work.
+No automatic recreation, password change or ownership transfer is authorized
+for such resources. Provider transfer and Resource identity reuse also require
+a later lifecycle decision.
 
-### 5. Password transport requires an explicit narrow exception
+### 5. Five mandatory operations
 
-PostgreSQL password DDL accepts a password string, not a normal bind parameter.
-Recommend client-side SCRAM verifier construction and transmission of only that
-verifier in dedicated adapter DDL, never the cleartext password. Verifiers are
-still confidential: suppress command/parameter/activity tracing in Haby, bound
-driver diagnostics and validate server logging exposure in disposable tests.
-Privileged server activity readers may observe the verifier; the Provider
-server/admin is inside the credential trust boundary. Do not claim that client
-log suppression hides SQL from the server. Refuse unsupported logging exposure
-rather than silently changing server-wide audit settings.
+Use the following sequential dependencies; exact contracts and payloads are in
+the [operation table](../development/106-application-credential-policy.md#operation-dependencies-and-outcomes):
 
-This requires explicit maintainer approval of a narrow exception to ADR-026's
-ban on secret interpolation for the safely quoted SCRAM verifier only; it does
-not allow interpolated cleartext, arbitrary SQL or a stored procedure. No native
-libpq dependency is selected. The coding slice must choose a reviewed managed
-implementation and demonstrate verifier interoperability and redaction before
-enabling the action. Rejecting this exception blocks password DDL, not the first
-secret-store slice. See PostgreSQL's [client password guidance](https://www.postgresql.org/docs/17/libpq-misc.html#LIBPQ-PQENCRYPTPASSWORDCONN).
+1. Create the new database under Provider administration.
+2. Restrict PUBLIC access in that database.
+3. Ensure local generated material and publish its exact reference.
+4. Create the fixed-attribute login with its initial password and CONNECT access.
+5. Transfer database ownership, configure the application-owned schema,
+   creator defaults and search_path, and verify the completed profile.
 
-## Maintainer decision packet and delivery
+The final external transaction includes ownership/access changes so rollback
+does not leave a partially acknowledged configuration. Confirm external commit
+and verify ownership/attributes/ACLs before recording node success. Explicitly
+verify the application's actual role/database and permitted operations.
+Frozen output references connect the steps; secret material is never copied
+into the Plan. No AppliedGeneration until all mandatory work succeeds.
 
-All five choices above remain unapproved. Recommended answers and costs:
+### 6. Uncertainty is retained; new recovery is deferred
 
-1. **Stable Resource slot with atomic get-or-create and retained orphans.**
-   Keeps retry/restart material exact; retains unused credentials until cleanup
-   has a policy. Reject Plan/attempt-scoped material and administrative names.
-2. **Frozen typed output references plus write-once output rows.** Keeps Plan
-   immutable; requires a new current graph/result model and retention checks.
-3. **Schema-migrator with administrator-owned database/schema and bounded
-   isolation.** Gives one usable migration identity; accepts object-owner power
-   and the isolated-bootstrap requirement. Runtime-only costs a second identity.
-4. **Manual evidence-based verify-and-assign; no automatic repair/reset.**
-   Avoids password overwrite/adoption; some interrupted work remains blocked
-   until a separately approved repair or disposable-environment cleanup.
-5. **Narrow SCRAM-verifier DDL exception.** Avoids cleartext password SQL;
-   requires confidential verifier handling and managed-client proof. Without
-   approval, implement only non-external slices.
+Role and access DDL can use external PostgreSQL transactions, but their commit
+is not atomic with Haby's journal. Before mutating SQL confirm the durable
+Dispatching marker. A known server rejection with confirmed rollback is definitive;
+unacknowledged commit/rollback, cancellation after the marker, verification failure
+or lost Haby success persistence is uncertain.
 
-After the selected decisions become Accepted, start with typed owner/purpose and
-atomic generated-slot storage only. Follow the ordered
-[coding slices and observable scenarios](../development/106-application-credential-policy.md#ordered-implementation-slices).
-They end in a real generated-role login. Confidential Configuration rendering/API
-delivery needs separate approval and is not a prerequisite for credential-store
-tests. No Kubernetes, HA, Vault, general rotation, deprovisioning, plugin framework,
-obsolete alpha readers or historical upgrade matrix belongs in these slices.
-Any breaking implementation must declare fresh-catalog requirements and preserve
-current-build immutability, redaction, restart/retry, audit and backup/restore.
+Uncertain new restrict/login/ownership/access operations remain NeedsAttention.
+No automatic redispatch, password reset, name-based adoption, compensation or
+cleanup. Restart and observation must preserve this state without external
+effects. Safe pre-dispatch retries and successful-node no-repeat still apply.
+
+Do not implement new verify-and-assign/repair/retry recovery commands, OID evidence
+frameworks or provenance workflows for these new actions in the first pilot.
+Existing ADR-025 database-create recovery remains available for its exact action.
+It does not imply recovery support for other nodes. Missing new recovery is an
+explicit pilot limitation: an operator must stop and await a separately approved
+resolution or explicitly manage disposable test resources outside this workflow.
+
+Any later new recovery requires action-specific evidence, exact attempt and
+material, explicit operator consent and immutable audit; database-style existence
+alone is insufficient. Deferral is not permission to mark uncertain work successful.
+
+### 7. Narrow SCRAM-verifier DDL exception
+
+Use client-generated SCRAM verifier transport for dedicated password DDL so the
+original cleartext password is not interpolated into SQL. Approve the ADR-026
+exception solely for the confidential verifier with validated format and safe
+quoting. This permits neither arbitrary secret interpolation nor stored workflow.
+
+Treat verifier as confidential in commands, diagnostics, tracing and logs.
+The PostgreSQL server/admin remains within the credential trust boundary;
+client-side suppression cannot hide a command from a privileged server reader.
+Document supported logging configuration and validate captured client/configured
+server logs. Do not claim universal detection of external logging systems or
+silently change server-wide auditing.
+
+The coding slice must select/review a managed implementation and prove real
+PostgreSQL interoperability, correct/wrong-password behavior and redaction before
+enabling password DDL. No native dependency or particular package is selected.
+A failure of these implementation gates blocks external password work, not the
+initial generated-slot slice.
+
+## Required evidence and delivery
+
+Validate database-owner/v1 through real EF Core migrations using the generated
+login: create schema and migration history, tables, indexes and sequences;
+apply a later migration changing structure; perform DML. Verify owner identity
+and supported ALTER/DROP/CREATE operations within its own database. Do not retain
+the former denial of CREATE SCHEMA or owner powers from schema-migrator.
+
+Also verify denied cluster-level role/database creation and access to separately
+hardened database B; ownership of the database must not be treated as ownership
+of administrator-created contained objects. Correct attributes, existing-name
+conflict, unchanged unrelated ACLs, deterministic name/ref, no uncertain replay,
+partial aggregate state, restart and current-build restore are mandatory tests.
+
+Implement [ordered narrow slices](../development/106-application-credential-policy.md#ordered-implementation-slices),
+starting with typed secret metadata and atomic generated slots without Provider
+calls. New action recovery is deferred. Confidential rendering/API delivery,
+Kubernetes, HA, Vault, general rotation and existing-resource registration remain
+separate work. ADR-033 allows explicit fresh catalogs and one current model;
+current-build immutability, audit and safety continue to apply.
