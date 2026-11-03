@@ -273,12 +273,15 @@ post-marker restart and uncertainty, direct-call refusal and concurrent calls.
 Independent contexts verify partial/final AppliedGeneration, acceptance rollback
 and atomic finalization rollback. Production still emits only database Create.
 
-`GraphRecoveryRestoreTests` resolves an uncertain real PostgreSQL database node
-while its test sibling is incomplete. The immutable receipt records no achieved
-AppliedGeneration; replay performs no external check. Real pg_dump/pg_restore
-preserves that partial graph and all protected history before the sibling completes
-and advances the generation once without changing the decision. The normal
-one-database Host/generated RPC/published Native AOT CLI scenarios remain gates.
+`GraphRecoveryRestoreTests` retains an uncertain real PostgreSQL database node
+with an incomplete test sibling through real pg_dump/pg_restore. Manual assignment
+refuses the multi-node graph before and after restore; no receipt, output, sibling
+effect or aggregate completion is manufactured. Existing standalone Host/generated
+RPC/published Native AOT CLI recovery scenarios retain immutable receipts and the
+original Uncertain attempt without database output. `OperatorPairRecoveryTests`
+uses the real production five-node Host and a real CREATE with lost confirmation
+to prove inspection offers no assignment, direct assignment and transactional
+journal calls refuse, and state/attempt/output/audit remain unchanged after restart.
 Fresh-schema/model checks replace superseded upgrade/downgrade matrices. Startup
 refuses unsupported catalogs safely and never resets persistent data.
 

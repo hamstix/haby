@@ -43,6 +43,16 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                 WHERE deployment_id = {deployment} AND generation = {generation}
                   AND operation_id = {resource} FOR UPDATE
                 """).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+            // Revalidate the standalone boundary inside the decision transaction, including
+            // for direct trusted callers. Never turn one node of a larger graph into a
+            // no-output success. Concrete PostgreSQL eligibility remains adapter-owned.
+            var accepted = await context.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(row =>
+                row.DeploymentId == deployment && row.Generation == generation, cancellationToken);
+            if (accepted is null || DurableOperationGraphCodec.Decode(accepted.GraphJson).Nodes is not [var only] ||
+                only.Id != key.OperationId || only.Dependencies.Count != 0 || only.OutputReferences.Count != 0 ||
+                await context.DurableOperations.CountAsync(row => row.DeploymentId == deployment &&
+                    row.Generation == generation, cancellationToken) != 1)
+                return Rejected();
             var existing = await DecisionQuery(context, key, command.ExpectedAttemptId)
                 .SingleOrDefaultAsync(cancellationToken);
             if (existing is not null)

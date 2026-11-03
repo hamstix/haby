@@ -50,8 +50,8 @@ reset does not remove or establish ownership of any external database or role.
 
 Validate pure graph invariants, typed counting effects over actual persisted
 Plan/Check/Commit, deterministic stop/resume, direct/concurrent calls, restart,
-barriers, partial/final success, transactional rollback, specialized recovery with
-siblings and immutable receipts. Use separate arrange/act/assert DbContexts and
+barriers, partial/final success, transactional rollback, standalone-only specialized recovery with immutable receipts and refusal for
+multi-node graphs. Use separate arrange/act/assert DbContexts and
 real disposable PostgreSQL, including pg_dump/pg_restore of partial state. Run
 focused, full solution, PostgreSQL, formatting, diff and published Native AOT gates.
 

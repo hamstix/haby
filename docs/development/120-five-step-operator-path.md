@@ -236,7 +236,9 @@ Failed/NeedsAttention/DispatchUncertain or unavailable pinned input. Do not rese
 passwords, repair ownership, delete catalog rows or replay uncertain work.
 There is no recovery for restrict/login/access. Existing database-create manual
 assignment is standalone-only, retains the Uncertain attempt and publishes no
-database output; it cannot unblock the pair. Any further resolution needs a
+database output; it cannot unblock the pair. Inspection and assignment validate the immutable
+accepted singleton graph; the decision transaction revalidates that boundary,
+including for trusted direct callers. Any further resolution needs a
 separately accepted action-specific decision.
 
 Record build SHA, CLI RID, unique disposable identities, safe Plan/commit/operation
