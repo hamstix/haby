@@ -37,6 +37,12 @@ is executable; core/extension metadata alone does not enable effects.
 
 The PostgreSQL pilot adapter requires exactly one declared database/login pair
 and the same Provider alias and exact resolved Provider configuration/implementation.
+Ownership is selected by the login's database-owner/v1 privilegePolicy, not a
+reverse reference on the database or a separate isOwner flag. At most one login
+per database Resource may request ownership; the full pilot requires exactly one.
+Plan, Check and Commit enforce this adapter-owned invariant. Multiple Components
+may share that login. Non-owning profiles/multiple-login support and later owner
+replacement remain deferred under ADR-034.
 Reject cross-Application references, additional policies, mismatched Providers
 and unsupported options. Two Components consume the same login Resource.
 Workload provisioning and confidential document delivery are outside these slices.

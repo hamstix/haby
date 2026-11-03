@@ -124,6 +124,33 @@ share that identity intentionally. The login has LOGIN, NOSUPERUSER, NOCREATEDB,
 NOCREATEROLE, NOREPLICATION, NOBYPASSRLS and no granted administrative memberships.
 Do not give cluster-level powers merely because it owns one database.
 
+#### Explicit single-owner policy
+
+Ownership intent is expressed only by the login Resource's
+`properties.privilegePolicy = database-owner/v1` together with its `databaseRef`.
+The database has no reverse owner reference, and the login has no separate
+`isOwner` flag. Do not infer ownership from declaration order, operation order,
+Component bindings or the role that happens to be encountered first.
+
+For each database Resource in the effective Application graph, at most one login
+may request database-owner/v1. The supported full pilot requires exactly one
+such login and one database. Standalone database creation without a login keeps
+the initial administrative owner. Multiple Components may bind the same owner
+login without declaring additional roles or owners.
+
+The PostgreSQL adapter must reject competing ownership requests during Plan and
+revalidate the same rule at Check and atomic Commit, before external effects.
+The current one-pair admission may reject the broader shape first, but adding
+multiple-login support must retain the independent single-owner invariant.
+Other non-owning profiles and multiple-login admission remain deferred; this
+clarification introduces neither a runtime profile nor multiple-role support.
+
+Changing an existing database's selected owner is a separate future lifecycle
+scenario. Do not treat a new login or a profile change as permission to transfer
+an existing managed database between identities. Initial ownership transfer of
+the newly created dedicated database remains the approved final pilot step.
+Owning the database never implies owning all existing contained objects.
+
 Provider creates the database initially under administrative ownership, creates
 the application role and transfers database ownership in the final configuration
 step. Provider must retain administrative capability. A SUPERUSER Provider is

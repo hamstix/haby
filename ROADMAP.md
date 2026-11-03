@@ -612,7 +612,10 @@ The new evidence baseline requires a fresh catalog under ADR-033.
 [Issue #116](docs/development/116-postgresql-application-login.md) adds opt-in
 application-login creation with stable adapter-owned role reservations, the exact
 saved generated password, managed SCRAM transport and atomic role evidence.
-Final ownership/access and production pair activation remain gated.
+Final ownership/access and production pair activation remain gated. Ownership
+is selected only by the login's database-owner/v1 privilegePolicy: at most one
+owner login per database, exactly one in the full pilot, validated at Plan, Check
+and Commit. No reverse database owner reference or separate isOwner flag is added.
 
 Deliver this goal in narrow vertical slices. Finish operation/recovery restore
 rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize
