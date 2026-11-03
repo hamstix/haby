@@ -1,5 +1,10 @@
 # PostgreSQL checkpoint integration tests
 
+The [issue #118 ownership/access evidence](118-postgresql-owner-access.md) adds
+complete real five-node execution, actual EF application migrations as the
+generated login, rollback/uncertainty and full graph/material dump/restore tests.
+Production Host pair activation remains a following slice.
+
 This guide records the test-runtime contract for the PostgreSQL checkpoint. See
 [ADR-022](../adr/0022-postgresql-database-checkpoint-execution.md) for the
 Resource and execution semantics.

@@ -6,11 +6,11 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.PostgreSql;
 
-/// <summary>Opt-in login effect; no final-access handler or production pair activation.</summary>
+/// <summary>Opt-in login effect. Full graphs require explicit final-target composition; Host remains unchanged.</summary>
 public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
     IGeneratedCredentialOperations generated, IProviderConfigurationStore providers, PostgreSqlProviderConfigurationCodec codec,
     IProviderResourceReservations names, PostgreSqlApplicationLoginTarget target, IPostgreSqlLoginFaultHooks hooks,
-    TimeProvider clock) : IDurableActionHandler
+    TimeProvider clock, PostgreSqlApplicationAccessTarget? access = null) : IDurableActionHandler
 {
     public const string Format = "haby.postgresql.application-login-create/v1";
     public const string RoleReservationNamespace = "postgresql.role";
@@ -47,11 +47,11 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
         {
             var accepted = await outputs.FindAcceptedAsync(key, cancellationToken);
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
-            if (accepted.Graph.Nodes.Count != 4) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+            if (accepted.Graph.Nodes.Count != 4 && (accepted.Graph.Nodes.Count != 5 || access is null)) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
                 accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
-            if (input is null || configuration is null || !PostgreSqlPairExecution.IsPrefix(accepted, codec.Encode(configuration)))
+            if (input is null || configuration is null || !PostgreSqlPairExecution.IsSupported(accepted, codec.Encode(configuration)))
                 return new(DurableExecutionOutcome.InputUnavailable, operation);
             var progress = await journal.ProgressAsync(key.DeploymentId, key.Generation, cancellationToken);
             if (progress is null || accepted.Node.Dependencies.Any(d => !progress.Nodes.Any(n => n.Operation.Key.OperationId == d &&

@@ -162,8 +162,12 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using (var services = Services(scenario.Connection))
         {
             var store = services.GetRequiredService<IProviderResourceReservations>();
+            Assert.False(await store.ContainsAsync(other, default));
             Assert.True(await store.TryReserveAsync(original, default));
             Assert.True(await store.TryReserveAsync(other, default));
+            Assert.True(await store.ContainsAsync(other, default));
+            Assert.False(await store.ContainsAsync(other with { Value = "replacement" }, default));
+            Assert.False(await store.ContainsAsync(other with { ResourceLocalId = ManifestLocalId.Create("another-owner") }, default));
             Assert.True(await store.TryReserveAsync(other, default));
             Assert.False(await store.TryReserveAsync(other with { Value = "replacement" }, default));
             Assert.False(await store.TryReserveAsync(other with { ResourceLocalId = ManifestLocalId.Create("another-owner") }, default));

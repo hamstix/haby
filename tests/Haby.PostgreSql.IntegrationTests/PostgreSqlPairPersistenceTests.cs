@@ -219,6 +219,30 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
     }
 
     [Fact]
+    public async Task Plan_Check_and_atomic_Commit_reject_competing_database_owner_requests_without_effects()
+    {
+        var setup = await Prepare();
+        await using (var arrange = new NpgsqlConnection(setup.Connection))
+        {
+            await arrange.OpenAsync();
+            await new NpgsqlCommand("""
+                SET session_replication_role = replica;
+                UPDATE manifest_revisions SET snapshot = jsonb_set(snapshot::jsonb, '{spec,resources,other-login}',
+                    snapshot::jsonb #> '{spec,resources,app-login}')::text
+                """, arrange).ExecuteNonQueryAsync();
+        }
+        await using (var act = Services(setup.Connection))
+        {
+            var planner = act.GetRequiredService<IDurableDeploymentPlanner>();
+            Assert.Equal(DurablePlanStatus.UnsupportedShape, (await planner.CreatePlanAsync(setup.Change.Id, "tester", default)).Status);
+            Assert.Equal(DurablePlanCurrentStatus.PlanInputUnavailable, await planner.CheckPlanAsync(setup.Plan.Id, default));
+            Assert.IsType<DurableCommitResult.UnsupportedShape>(await act.GetRequiredService<IDurableDesiredStateCommitter>()
+                .CommitAsync(setup.Change.Id, setup.Plan.Id, "tester", default));
+        }
+        await AssertNoEffects(setup.Connection, setup.Policy);
+    }
+
+    [Fact]
     public async Task Actual_Host_registers_login_metadata_but_only_standalone_database_admission_and_executor()
     {
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);

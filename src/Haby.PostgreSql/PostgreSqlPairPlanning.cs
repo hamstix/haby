@@ -48,14 +48,16 @@ public static class PostgreSqlApplicationLoginContract
             var value = JsonSerializer.Deserialize(json, PostgreSqlPairJsonContext.Default.PostgreSqlApplicationLoginProperties);
             if (value is null) return null;
             _ = ManifestLocalId.Create(value.DatabaseRef);
-            if (value.Schema is null || !System.Text.RegularExpressions.Regex.IsMatch(value.Schema, @"\A[a-z][a-z0-9_]{0,62}\z",
-                    System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking) ||
-                value.Schema.StartsWith("pg_", StringComparison.Ordinal) || value.Schema is "public" or "information_schema" ||
-                value.PrivilegePolicy != Policy) return null;
+            if (!ValidSchema(value.Schema) || value.PrivilegePolicy != Policy) return null;
             return value;
         }
         catch (Exception e) when (e is ArgumentException or JsonException) { return null; }
     }
+
+    internal static bool ValidSchema(string? schema) => schema is not null &&
+        System.Text.RegularExpressions.Regex.IsMatch(schema, @"\A[a-z][a-z0-9_]{0,62}\z",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking) &&
+        !schema.StartsWith("pg_", StringComparison.Ordinal) && schema is not ("public" or "information_schema");
 }
 
 public sealed record PostgreSqlApplicationLoginProperties(string DatabaseRef, string Schema, string PrivilegePolicy);
@@ -86,11 +88,23 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         TryPair(spec, inputs, configuration) is not null && spec.Resources.TryGetValue(resource, out var declared) &&
         declared.Type == Key.Admission.ResourceContract;
 
+    // A semantic invariant independent of one-pair admission and declaration order.
+    internal static bool HasSingleOwner(NormalizedManifestSpec spec)
+    {
+        var owners = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var login in spec.Resources.Values.Where(r => r.Type == PostgreSqlApplicationLoginContract.Id))
+        {
+            var properties = PostgreSqlApplicationLoginContract.Parse(login.Properties);
+            if (properties is null || !owners.Add(properties.DatabaseRef)) return false;
+        }
+        return true;
+    }
+
     private sealed record Pair(ManifestLocalId Database, ManifestLocalId Login, string Name,
         PostgreSqlApplicationLoginProperties Properties, string Administrator);
     private static Pair? TryPair(NormalizedManifestSpec spec, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
     {
-        if (spec.Resources.Count != 2 || spec.Exports.Count != 0 || spec.Parameters.Count != 0 ||
+        if (!HasSingleOwner(spec) || spec.Resources.Count != 2 || spec.Exports.Count != 0 || spec.Parameters.Count != 0 ||
             configuration.ProviderKindId != Provider.ProviderKind || configuration.ShapeId != Provider.ConfigurationContract ||
             configuration.ImplementationId != Provider.ImplementationId || inputs.ImplementationId != Provider.ImplementationId ||
             configuration.PayloadFormatVersion != 1 || spec.Resources.Values.Any(r => r.ProviderRef != inputs.Alias)) return null;

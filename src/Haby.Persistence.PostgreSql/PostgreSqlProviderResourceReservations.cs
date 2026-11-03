@@ -10,6 +10,17 @@ namespace Haby.Persistence.PostgreSql;
 public sealed class PostgreSqlProviderResourceReservations(IDbContextFactory<ManifestCatalogDbContext> contexts)
     : IProviderResourceReservations
 {
+    public async ValueTask<bool> ContainsAsync(ProviderResourceReservation reservation, CancellationToken cancellationToken)
+    {
+        var provider = Guid.Parse(reservation.ProviderInstanceId.ToString());
+        var environment = Guid.Parse(reservation.EnvironmentRecordId.ToString());
+        var application = Guid.Parse(reservation.ApplicationRecordId.ToString());
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        return await context.ProviderResourceReservations.AsNoTracking().AnyAsync(r => r.ProviderInstanceId == provider &&
+            r.EnvironmentRecordId == environment && r.ApplicationRecordId == application && r.ResourceLocalId == reservation.ResourceLocalId.Value &&
+            r.Namespace == reservation.Namespace && r.Value == reservation.Value, cancellationToken);
+    }
+
     public async ValueTask<bool> TryReserveAsync(ProviderResourceReservation reservation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(reservation);

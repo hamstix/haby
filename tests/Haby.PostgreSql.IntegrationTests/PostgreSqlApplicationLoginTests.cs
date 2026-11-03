@@ -39,7 +39,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
             new DurableOperationGraph(spec.Resources.SelectMany(r => new Prefix(r.Value.Type).Plan(spec, r.Key, inputs, configuration))).Equals(graph);
     }
-    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false)
+    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null)
     {
         var services = new ServiceCollection().AddSingleton(TimeProvider.System)
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore()
@@ -56,6 +56,8 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         services.AddSingleton<IDurableActionHandler>(p => new GeneratedCredentialAction(PostgreSqlApplicationLoginAction.RegistrationKey.Admission,
             p.GetRequiredService<IDurableOperationJournal>(), p.GetRequiredService<IGeneratedCredentialSlots>(), p.GetRequiredService<IGeneratedCredentialOperations>(), TimeProvider.System));
         if (fault is not null) services.AddSingleton(fault);
+        if (access) services.AddPostgreSqlApplicationAccess();
+        if (accessFault is not null) services.AddSingleton(accessFault);
         return services.BuildServiceProvider();
     }
     private static ManifestCatalogDbContext Context(string connection) => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
@@ -233,7 +235,9 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
             SELECT json_build_array(d.datdba,
               (SELECT json_agg(json_build_array(nspname, nspowner, nspacl) ORDER BY nspname) FROM pg_catalog.pg_namespace),
               (SELECT json_agg(json_build_array(defaclrole, defaclnamespace, defaclobjtype, defaclacl)
-                ORDER BY defaclrole, defaclnamespace, defaclobjtype) FROM pg_catalog.pg_default_acl))::text
+                ORDER BY defaclrole, defaclnamespace, defaclobjtype) FROM pg_catalog.pg_default_acl),
+              (SELECT json_agg(json_build_array(setrole, setdatabase, setconfig) ORDER BY setrole)
+                FROM pg_catalog.pg_db_role_setting WHERE setdatabase = d.oid))::text
             FROM pg_catalog.pg_database d WHERE datname = pg_catalog.current_database()
             """, connection);
         return (string)(await command.ExecuteScalarAsync())!;
