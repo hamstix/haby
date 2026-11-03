@@ -1,5 +1,9 @@
 # PostgreSQL checkpoint integration tests
 
+Subsequent [issue #120 activation](120-five-step-operator-path.md) enables the full
+production Host/operator path. Earlier-slice production-gate statements below
+describe their implementation baseline.
+
 The [issue #118 ownership/access evidence](118-postgresql-owner-access.md) adds
 complete real five-node execution, actual EF application migrations as the
 generated login, rollback/uncertainty and full graph/material dump/restore tests.

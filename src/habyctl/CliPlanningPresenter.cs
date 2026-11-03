@@ -134,7 +134,7 @@ internal sealed partial class CliTextPresenter
             if (plan.IntendedWork.Action is { } action)
                 _output.WriteLine($"Intended action: Create; Resource: {action.ResourceId}; type: {action.ResourceType}; target: {action.Target.Name}");
             else
-                _output.WriteLine($"Intended action unavailable: {plan.IntendedWork.Status}");
+                _output.WriteLine($"Single-action detail unavailable: {plan.IntendedWork.Status}. Review the operation graph above.");
             _output.WriteLine($"Fingerprint: {plan.Fingerprint}");
             _output.WriteLine($"Created UTC: {plan.CreatedAtUtc}; expires UTC: {plan.ExpiresAtUtc}; technical actor: {plan.TechnicalActorId}");
             if (plan.ClosedAtUtc is not null)

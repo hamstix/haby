@@ -1,5 +1,9 @@
 # PostgreSQL initial ownership and application access
 
+Subsequent [issue #120 activation](120-five-step-operator-path.md) enables the full
+production Host/operator path. Earlier-slice production-gate statements below
+describe their implementation baseline.
+
 Issue #118 completes ADR-034's five real actions in explicitly opted-in test
 composition. Production Host registrations remain unchanged: standalone database
 Create only. Pair activation and the native CLI/operator rehearsal remain the

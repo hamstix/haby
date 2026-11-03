@@ -105,7 +105,7 @@ public sealed class CliPlanningPresentationTests
         var plan = document.RootElement.GetProperty("data"u8).GetProperty("plan"u8);
         Assert.Equal("exact-plan", plan.GetProperty("planId"u8).GetString());
         Assert.Equal(expected, plan.GetProperty("intendedWork"u8).GetProperty("status"u8).GetString());
-        Assert.Contains("Intended action unavailable: " + expected, text.ToString());
+        Assert.Contains("Single-action detail unavailable: " + expected, text.ToString());
         Assert.DoesNotContain("target:", text.ToString());
     }
 

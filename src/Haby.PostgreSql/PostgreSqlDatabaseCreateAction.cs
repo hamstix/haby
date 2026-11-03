@@ -9,8 +9,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.PostgreSql;
 
-/// <summary>Pure planning of the current frozen database action.</summary>
-public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>
+/// <summary>One exact database admission, explicitly composing standalone and pair planning.</summary>
+public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer
 {
     public override DurableActionExecutionKey Key => PostgreSqlDatabaseCreateAction.RegistrationKey;
     public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
@@ -22,6 +22,20 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
         return [new(OperationId.Create(resourceId.Value + "-create"), resourceId, Key, references,
             new(PostgreSqlDatabaseCreateAction.Format, JsonSerializer.Serialize(input, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), [])];
     }
+
+    private readonly PostgreSqlPairResourceAdmission pair = new(PostgreSqlDatabaseContract.Id);
+    private static bool Standalone(NormalizedManifestSpec spec) => CheckpointDatabaseShape.IsSupported(spec);
+    public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
+        PreparedProviderConfiguration configuration) => Standalone(spec)
+            ? spec.Resources.ContainsKey(resource) && Validate(spec.Resources[resource], inputs)
+            : pair.Validate(spec, resource, inputs, configuration);
+    public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => Standalone(spec)
+            ? Plan(resource, spec.Resources[resource], inputs) : pair.Plan(spec, resource, inputs, configuration);
+    public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
+        PreparedProviderConfiguration configuration, DurableOperationGraph graph) => Standalone(spec)
+            ? new DurableOperationGraph(Plan(resource, spec.Resources[resource], inputs)).Equals(graph)
+            : pair.ValidateGraph(spec, resource, inputs, configuration, graph);
 }
 
 public sealed class PostgreSqlDatabaseCreateAction(PostgreSqlDurableOperationExecutor executor)
@@ -31,6 +45,7 @@ public sealed class PostgreSqlDatabaseCreateAction(PostgreSqlDurableOperationExe
     public static DurableActionExecutionKey RegistrationKey { get; } = new(
         new(PostgreSqlDatabaseContract.Id, new("postgresql/v1", "haby.postgresql.connection/v1",
             PostgreSqlDatabaseCheckpointCapability.ImplementationId)), Contract);
+    public override bool RequiresExternalOutput => true;
     public override DurableActionExecutionKey Key => RegistrationKey;
 
     public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) =>

@@ -1,5 +1,9 @@
 # PostgreSQL application login creation
 
+Subsequent [issue #120 activation](120-five-step-operator-path.md) enables the full
+production Host/operator path. Earlier-slice production-gate statements below
+describe their implementation baseline.
+
 Subsequent [issue #118](118-postgresql-owner-access.md) implements the final real
 ownership/access action and complete five-node test composition. Production Host
 pair activation remains deferred. The scope below records the earlier #116 slice.

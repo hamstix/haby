@@ -26,7 +26,7 @@ public sealed partial class ManifestOperatorService
             // Reread PostgreSQL timestamp precision so first response and retry are identical.
             var saved = await committer.FindCommitAsync(change, context.CancellationToken)
                 ?? throw new InvalidOperationException("Committed desired state was not found.");
-            return new CommitReply { Status = CommitStatus.Committed, Commit = Summary(saved) };
+            return await CommitSnapshotAsync(saved, CommitStatus.Committed, context.CancellationToken);
         }
         var reply = CommitResult(result switch
         {
@@ -55,7 +55,16 @@ public sealed partial class ManifestOperatorService
         catch (ArgumentException) { return CommitResult(CommitStatus.InvalidRequest); }
         var saved = await committer.FindCommitAsync(id, context.CancellationToken);
         return saved is null ? CommitResult(CommitStatus.CommitNotFound)
-            : new CommitReply { Status = CommitStatus.Found, Commit = Summary(saved) };
+            : await CommitSnapshotAsync(saved, CommitStatus.Found, context.CancellationToken);
+    }
+
+    private async Task<CommitReply> CommitSnapshotAsync(DurableChangeSetCommit saved, CommitStatus status,
+        CancellationToken cancellationToken)
+    {
+        // Project the exact accepted graph, never current aliases or a newly calculated Plan.
+        var generation = await committer.FindGenerationAsync(saved.DeploymentId, saved.Generation, cancellationToken)
+            ?? throw new InvalidOperationException("Committed desired generation was not found.");
+        return new CommitReply { Status = status, Commit = Summary(saved), DesiredGeneration = Summary(generation) };
     }
 
     public override async Task<CommitReply> GetGeneration(GenerationRequest request, ServerCallContext context)

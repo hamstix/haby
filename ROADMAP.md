@@ -584,9 +584,11 @@ dispatch barriers and generation completion only after all required operations
 succeed. Common reasons, exact admission and the persisted operation-graph vertical path
 are implemented. Plans/generations retain frozen typed inputs and dependencies;
 explicit sequential execution and manual recovery share aggregate completion.
-The graph revision requires a fresh catalog under ADR-033. Multi-step effects
-remain test-only; production still admits one database Create.
-Keep the existing one-database production admission; further effects need separate decisions.
+The graph revision requires a fresh catalog under ADR-033.
+[Issue #120](docs/development/120-five-step-operator-path.md) activates the five
+real ADR-034 actions in production Host composition alongside standalone database
+Create, with generated-client/published-native-CLI disposable rehearsal. Each
+operation remains explicit; missing mandatory support blocks the whole graph.
 Confidential configuration retrieval still requires its own decision before
 implementation; the accepted credential and ownership policy follows below.
 

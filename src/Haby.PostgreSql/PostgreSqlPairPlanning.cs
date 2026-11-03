@@ -72,7 +72,7 @@ public sealed record OperationOutputRefDocument(string ProducerOperationId, stri
     public OperationOutputRef ToReference() => new(OperationId.Create(ProducerOperationId), OutputContract, OutputKey);
 }
 
-/// <summary>Opt-in planning-only PostgreSQL registration. Production does not compose these registrations.
+/// <summary>Pure PostgreSQL pair admission. The Host composes its database half with standalone admission.
 /// It owns exactly the nodes of its declared Resource; no executor or success placeholder is provided.</summary>
 public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer
 {

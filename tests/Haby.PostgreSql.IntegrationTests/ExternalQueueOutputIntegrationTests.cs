@@ -50,6 +50,7 @@ public sealed partial class ExactActionAdmissionTests
         IProviderConfigurationStore configurations, QueueBoundary boundary)
         : DurableActionHandler<QueueCreateInput>, IDurableResourcePlanComposer
     {
+        public override bool RequiresExternalOutput => true;
         public override DurableActionExecutionKey Key => ExactActionAdmissionTests.Key;
         public override string InputFormat => "sample.queue-create/v1";
         public override JsonTypeInfo<QueueCreateInput> InputTypeInfo => QueueJsonContext.Default.QueueCreateInput;
@@ -226,16 +227,20 @@ public sealed partial class ExactActionAdmissionTests
         for (var restart = 0; restart < 2; restart++)
         {
             await using var act = Services(scenario.Connection, boundary);
-            var executor = act.GetRequiredService<IDurableOperationExecutor>();
-            Assert.Equal(DurableExecutionOutcome.NeedsAttention, (await executor.ExecuteAsync(producer, default)).Outcome);
-            Assert.Equal(DurableExecutionOutcome.Blocked, (await executor.ExecuteAsync(producer with { OperationId = QueueEvidenceConsumerId }, default)).Outcome);
+            if (registrations == 2)
+                Assert.Throws<InvalidOperationException>(() => act.GetRequiredService<IDurableOperationExecutor>());
+            else
+            {
+                var executor = act.GetRequiredService<IDurableOperationExecutor>();
+                Assert.Equal(DurableExecutionOutcome.HandlerUnavailable, (await executor.ExecuteAsync(producer, default)).Outcome);
+                Assert.Equal(DurableExecutionOutcome.Blocked, (await executor.ExecuteAsync(producer with { OperationId = QueueEvidenceConsumerId }, default)).Outcome);
+            }
         }
-        Assert.Equal(1, boundary.Calls); Assert.Equal(["create:accepted-1"], boundary.Effects);
+        Assert.Equal(0, boundary.Calls); Assert.Empty(boundary.Effects);
         await using var verify = OutputContext(scenario.Connection);
         Assert.Empty(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await verify.DurableOperationAttempts.AsNoTracking().ToArrayAsync());
         Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
-        var attempt = await verify.DurableOperationAttempts.AsNoTracking().SingleAsync();
-        Assert.Equal("Uncertain", attempt.Outcome); Assert.NotNull(attempt.DispatchedAt); Assert.NotNull(attempt.FinishedAt);
     }
 
     [Theory]
@@ -250,8 +255,13 @@ public sealed partial class ExactActionAdmissionTests
             Assert.Equal(DurableExecutionOutcome.Succeeded, (await publish.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(producer, default)).Outcome);
         boundary.OutputContractRegistrations = registrations;
         await using (var act = Services(scenario.Connection, boundary))
-            Assert.Equal(DurableExecutionOutcome.InputUnavailable, (await act.GetRequiredService<IDurableOperationExecutor>()
-                .ExecuteAsync(producer with { OperationId = QueueEvidenceConsumerId }, default)).Outcome);
+        {
+            if (registrations == 2)
+                Assert.Throws<InvalidOperationException>(() => act.GetRequiredService<IDurableOperationExecutor>());
+            else
+                Assert.Equal(DurableExecutionOutcome.HandlerUnavailable, (await act.GetRequiredService<IDurableOperationExecutor>()
+                    .ExecuteAsync(producer with { OperationId = QueueEvidenceConsumerId }, default)).Outcome);
+        }
         Assert.Equal(["create:accepted-1"], boundary.Effects);
         await using var verify = OutputContext(scenario.Connection);
         Assert.Equal(1, await verify.OperationOutputs.CountAsync());

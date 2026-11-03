@@ -1,5 +1,10 @@
 # Local alpha operator workflow
 
+The production Host now also admits the complete five-step database/login pair.
+Use the [executable five-step rehearsal](120-five-step-operator-path.md) for
+bootstrap, shared-login import, graph review, explicit execution and restart.
+The standalone database examples below remain supported.
+
 The operation-graph revision requires a **fresh catalog** under ADR-033. Startup
 refuses pre-graph or unknown catalog schemas and never resets data. Stop the old
 Host, retain a backup for inspection with its original build, and explicitly
@@ -17,10 +22,11 @@ or remote exposure. Its protobuf contract may change before M4. It validates,
 imports, reads immutable manifest revisions and previews one supported database
 Resource against hypothetical request metadata. It also creates and reads durable
 ChangeSets and Plans, checks exact planning inputs, closes Plans and explicitly
-commits desired state with Pending work. Explicit operation execution can create that
-one database through the existing durable executor. Explicit manual recovery can
-assign an existing target after uncertainty. Secret generation and configuration
-delivery remain unavailable through this API.
+commits desired state with Pending work. Explicit operation execution supports
+standalone database creation or the accepted five-step database/login pair.
+Manual assignment after uncertainty remains standalone database-create only.
+Application material generation is an explicit internal graph action; secret
+reveal and confidential configuration delivery remain unavailable.
 
 The CLI accepts `--help` at the root and at every command level without an
 endpoint. Command results go to standard output; syntax, local-file and

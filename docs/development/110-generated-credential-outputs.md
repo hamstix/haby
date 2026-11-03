@@ -1,5 +1,9 @@
 # Generated credential outputs and local operation completion
 
+Subsequent [issue #120 activation](120-five-step-operator-path.md) enables the full
+production Host/operator path. Earlier-slice production-gate statements below
+describe their implementation baseline.
+
 Subsequent [issue #114](114-postgresql-restrict.md) adds confirmed database output
 and opt-in PUBLIC restriction, with a new fresh-catalog baseline. The full pair
 remains unavailable in production. The scope below records this earlier slice.

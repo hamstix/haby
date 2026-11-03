@@ -41,6 +41,8 @@ public interface IDurableResourcePlanComposer
 
 public interface IDurableActionHandler
 {
+    /// <summary>Execution requires exactly one registered atomic external-output validator for this producer.</summary>
+    bool RequiresExternalOutput => false;
     DurableActionExecutionKey Key { get; }
     ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation,
         CancellationToken cancellationToken);
@@ -59,6 +61,7 @@ public abstract class DurableActionAdmissionHandler<TInput> : IDurableActionAdmi
 
 public abstract class DurableActionHandler<TInput> : DurableActionAdmissionHandler<TInput>, IDurableActionHandler where TInput : class
 {
+    public virtual bool RequiresExternalOutput => false;
     public abstract string InputFormat { get; }
     public abstract JsonTypeInfo<TInput> InputTypeInfo { get; }
     protected DurableOperationNode PrepareNode(OperationId id, ManifestLocalId resourceId,
@@ -91,10 +94,15 @@ public sealed class DurableActionRegistry
 {
     private readonly Dictionary<DurableActionAdmissionKey, IDurableActionAdmissionHandler> admissions = [];
     private readonly Dictionary<DurableActionExecutionKey, IDurableActionHandler> handlers = [];
+    private readonly HashSet<DurableActionExecutionKey> outputProducers;
 
     public DurableActionRegistry(IEnumerable<IDurableActionAdmissionHandler> registrations,
-        IEnumerable<IDurableActionHandler> executors)
+        IEnumerable<IDurableActionHandler> executors, IEnumerable<IExternalOperationOutputContract>? outputs = null)
     {
+        var contracts = (outputs ?? []).ToArray();
+        if (contracts.GroupBy(c => c.Producer).Any(g => g.Count() != 1))
+            throw new InvalidOperationException("External output registration is ambiguous.");
+        outputProducers = contracts.Select(c => c.Producer).ToHashSet();
         foreach (var handler in registrations)
         {
             var key = handler.Key;
@@ -113,7 +121,7 @@ public sealed class DurableActionRegistry
 
     public IDurableActionAdmissionHandler? Find(DurableActionAdmissionKey key) => admissions.GetValueOrDefault(key);
     public IDurableActionHandler? Find(DurableActionExecutionKey key) =>
-        handlers.GetValueOrDefault(key);
+        handlers.TryGetValue(key, out var handler) && (!handler.RequiresExternalOutput || outputProducers.Contains(key)) ? handler : null;
 
 }
 
