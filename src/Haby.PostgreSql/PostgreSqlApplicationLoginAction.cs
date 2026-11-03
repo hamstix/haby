@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.PostgreSql;
 
-/// <summary>Opt-in login effect. Full graphs require explicit final-target composition; Host remains unchanged.</summary>
+/// <summary>Exact login effect. Full graphs require final-target composition.</summary>
 public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
     IGeneratedCredentialOperations generated, IProviderConfigurationStore providers, PostgreSqlProviderConfigurationCodec codec,
     IProviderResourceReservations names, PostgreSqlApplicationLoginTarget target, IPostgreSqlLoginFaultHooks hooks,
@@ -17,6 +17,7 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
     public static DurableActionExecutionKey RegistrationKey { get; } = new(
         PostgreSqlDatabaseCreateAction.RegistrationKey.Admission with { ResourceContract = PostgreSqlApplicationLoginContract.Id },
         OperationContractId.Create("postgresql.application-login.create/v1alpha1"));
+    public bool RequiresExternalOutput => true;
     public DurableActionExecutionKey Key => RegistrationKey;
     public bool Supports(DurableOperationNode node) => Decode(node) is not null;
     internal static PostgreSqlLoginCreateInput? Decode(DurableOperationNode node)

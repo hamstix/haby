@@ -263,7 +263,7 @@ public sealed partial class PostgreSqlRestrictTests(PostgreSqlFixture fixture) :
     }
 
     [Fact]
-    public async Task Manual_assignment_has_no_output_and_cannot_authorize_restrict_after_restart()
+    public async Task Manual_assignment_refuses_dependent_graph_and_preserves_uncertainty_after_restart()
     {
         var scenario = await Prepare(); Guid attempt;
         await using (var arrange = Services(scenario.Connection))
@@ -285,15 +285,15 @@ public sealed partial class PostgreSqlRestrictTests(PostgreSqlFixture fixture) :
             var command = new AssignExistingPostgreSqlDatabase(scenario.Create, operation.Environment, attempt, true,
                 PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, "Explicit fixture assignment", "tester");
             var assigned = await act.GetRequiredService<IPostgreSqlDatabaseRecovery>().AssignExistingDatabaseAsync(command, default);
-            Assert.Equal(iteration == 0 ? PostgreSqlDatabaseAssignmentOutcome.Assigned : PostgreSqlDatabaseAssignmentOutcome.AlreadyAssigned, assigned.Outcome);
-            Assert.Equal(DurableExecutionOutcome.Succeeded, (await act.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(scenario.Create, default)).Outcome);
-            Assert.Equal(DurableExecutionOutcome.InputUnavailable, (await act.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(scenario.Restrict, default)).Outcome);
+            Assert.Equal(PostgreSqlDatabaseAssignmentOutcome.Rejected, assigned.Outcome);
+            Assert.Equal(DurableExecutionOutcome.NeedsAttention, (await act.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(scenario.Create, default)).Outcome);
+            Assert.Equal(DurableExecutionOutcome.Blocked, (await act.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(scenario.Restrict, default)).Outcome);
         }
         Assert.Equal(before, await Policy(scenario.Database));
         await using var verify = Context(scenario.Connection);
         Assert.Empty(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
         Assert.Equal("Uncertain", (await verify.DurableOperationAttempts.AsNoTracking().SingleAsync()).Outcome);
-        Assert.Single(await verify.PostgreSqlDatabaseRecoveryDecisions.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await verify.PostgreSqlDatabaseRecoveryDecisions.AsNoTracking().ToArrayAsync());
         Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
     }
 }

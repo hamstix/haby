@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.PostgreSql;
 
-/// <summary>Opt-in final owner/access effect. Production Host composition is unchanged.</summary>
+/// <summary>Exact final owner/access effect for the accepted pair.</summary>
 public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
     IGeneratedCredentialOperations generated, IProviderConfigurationStore providers, PostgreSqlProviderConfigurationCodec codec,
     PostgreSqlApplicationAccessTarget target, IPostgreSqlAccessFaultHooks hooks,
@@ -16,6 +16,7 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
     public static DurableActionExecutionKey RegistrationKey { get; } = new(
         PostgreSqlDatabaseCreateAction.RegistrationKey.Admission with { ResourceContract = PostgreSqlApplicationLoginContract.Id },
         OperationContractId.Create("postgresql.application-login.configure-access/v1alpha1"));
+    public bool RequiresExternalOutput => true;
     public DurableActionExecutionKey Key => RegistrationKey;
     public bool Supports(DurableOperationNode node) => Decode(node) is not null;
     internal static PostgreSqlLoginAccessInput? Decode(DurableOperationNode node)
@@ -162,7 +163,7 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
 
 public static class PostgreSqlApplicationAccessServices
 {
-    /// <summary>Explicit final real effect/output registration; does not change production Host admission.</summary>
+    /// <summary>Explicit final real effect and output registration.</summary>
     public static IServiceCollection AddPostgreSqlApplicationAccess(this IServiceCollection services)
     {
         services.TryAddSingleton<IPostgreSqlAccessFaultHooks, NullPostgreSqlAccessFaultHooks>();

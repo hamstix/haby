@@ -72,13 +72,12 @@ public sealed partial class OperatorHostIntegrationTests
     }
 
     [Fact]
-    public async Task Manual_node_resolution_receipt_and_partial_graph_survive_dump_restore_then_sibling_completes_aggregate()
+    public async Task Multi_node_recovery_refusal_and_uncertainty_survive_dump_restore_without_replay()
     {
         await using var scenario = await ExecutionScenarioAsync();
         var boundary = new SiblingBoundary();
         OperationRequest request;
         AssignExistingOperationRequest assignment;
-        RecoveryReceipt receipt;
         await using (var source = await GraphHost(scenario, boundary, crash: true))
         {
             using var channel = Channel(source, scenario.Certificate);
@@ -93,15 +92,17 @@ public sealed partial class OperatorHostIntegrationTests
             var progress = await source.Services.GetRequiredService<DurableGenerationRunner>().ProgressAsync(
                 ExecutionKey(request).DeploymentId, DeploymentGeneration.Create(1), default);
             Assert.Equal(0, progress!.Completed); Assert.Null(progress.AppliedGeneration);
-            assignment = RecoveryAssignment(await client.InspectOperationRecoveryAsync(request));
+            var preview = await client.InspectOperationRecoveryAsync(request);
+            Assert.False(preview.Preview.HasUncertainAttemptId);
+            var operation = await client.GetOperationAsync(request);
+            assignment = RecoveryAssignment(preview);
+            assignment.ExpectedAttemptId = Assert.Single(operation.Attempts).AttemptId;
             var assigned = await client.AssignExistingOperationAsync(assignment);
-            Assert.Equal(RecoveryStatus.Assigned, assigned.Status);
-            receipt = assigned.Receipt.Clone();
-            Assert.False(receipt.HasAppliedGenerationAtDecision);
-            Assert.Equal(request, receipt.Key);
+            Assert.Equal(RecoveryStatus.Rejected, assigned.Status);
+            Assert.Null(assigned.Receipt);
             var partial = await source.Services.GetRequiredService<DurableGenerationRunner>().ProgressAsync(
                 ExecutionKey(request).DeploymentId, DeploymentGeneration.Create(1), default);
-            Assert.Equal(1, partial!.Completed); Assert.Equal(2, partial.Total); Assert.Null(partial.AppliedGeneration);
+            Assert.Equal(0, partial!.Completed); Assert.Equal(2, partial.Total); Assert.Null(partial.AppliedGeneration);
             Assert.Equal(0, boundary.Effects);
         }
         var before = await RestoreCatalogDigests(scenario.Connection, false);
@@ -121,21 +122,21 @@ public sealed partial class OperatorHostIntegrationTests
             var client = new ManifestOperator.ManifestOperatorClient(channel);
             var runner = fresh.Services.GetRequiredService<DurableGenerationRunner>();
             var key = ExecutionKey(request);
-            Assert.Equal(1, (await runner.ProgressAsync(key.DeploymentId, key.Generation, default))!.Completed);
-            Assert.Equal(receipt, (await client.InspectOperationRecoveryAsync(request)).Receipt);
+            Assert.Equal(0, (await runner.ProgressAsync(key.DeploymentId, key.Generation, default))!.Completed);
+            Assert.Null((await client.InspectOperationRecoveryAsync(request)).Receipt);
             var replay = await client.AssignExistingOperationAsync(assignment);
-            Assert.Equal(RecoveryStatus.AlreadyAssigned, replay.Status); Assert.Equal(receipt, replay.Receipt);
+            Assert.Equal(RecoveryStatus.Rejected, replay.Status); Assert.Null(replay.Receipt);
             Assert.Equal(before, await RestoreCatalogDigests(restored, false));
             Assert.Equal(0, trap.Calls); Assert.Equal(0, boundary.Effects);
             var completed = await runner.RunAsync(key.DeploymentId, key.Generation, default);
-            Assert.Equal(2, completed.Progress!.Completed); Assert.Equal(1, completed.Progress.AppliedGeneration);
-            Assert.Equal(1, boundary.Effects); Assert.Equal(0, trap.Calls);
-            Assert.Equal(receipt, (await client.AssignExistingOperationAsync(assignment)).Receipt);
+            Assert.Equal(DurableExecutionOutcome.NeedsAttention, completed.StopOutcome);
+            Assert.Equal(0, completed.Progress!.Completed); Assert.Null(completed.Progress.AppliedGeneration);
+            Assert.Equal(0, boundary.Effects); Assert.Equal(0, trap.Calls);
+            Assert.Equal(RecoveryStatus.Rejected, (await client.AssignExistingOperationAsync(assignment)).Status);
+            Assert.Equal(before, await RestoreCatalogDigests(restored, false));
             await using var verify = await fresh.Services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-            var decision = await verify.PostgreSqlDatabaseRecoveryDecisions.AsNoTracking().SingleAsync();
-            Assert.Null(decision.AppliedGeneration);
-            Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
-            Assert.Equal(2, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).ConcurrencyToken);
+            Assert.Empty(await verify.PostgreSqlDatabaseRecoveryDecisions.AsNoTracking().ToArrayAsync());
+            Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
         }
         finally { await fixture.RunClientUtilityAsync("rm", "-rf", directory); }
     }

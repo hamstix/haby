@@ -243,12 +243,12 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
     }
 
     [Fact]
-    public async Task Actual_Host_registers_login_metadata_but_only_standalone_database_admission_and_executor()
+    public async Task Actual_Host_registers_login_metadata_and_complete_production_composition()
     {
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);
         var catalog = host.Services.GetRequiredService<ManifestContractCatalog>();
         Assert.IsType<ValidateApplicationManifestResult.Valid>(ValidateApplicationManifest.Execute(PostgreSqlPairPlanningTests.Bytes(PostgreSqlPairPlanningTests.Example()), catalog));
-        Assert.IsType<PostgreSqlDatabaseCreateAdmission>(Assert.Single(host.Services.GetServices<IDurableActionAdmissionHandler>()));
-        Assert.IsType<PostgreSqlDatabaseCreateAction>(Assert.Single(host.Services.GetServices<IDurableActionHandler>()));
+        Assert.Equal(2, host.Services.GetServices<IDurableActionAdmissionHandler>().Count());
+        Assert.Equal(5, host.Services.GetServices<IDurableActionHandler>().Count());
     }
 }

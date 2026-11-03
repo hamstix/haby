@@ -1,5 +1,9 @@
 # Confirmed database evidence and PUBLIC restriction
 
+Subsequent [issue #120 activation](120-five-step-operator-path.md) enables the full
+production Host/operator path. Earlier-slice production-gate statements below
+describe their implementation baseline.
+
 Subsequent [issue #116](116-postgresql-application-login.md) adds opt-in login
 creation and extends the private real-effect fixture to the exact four-step
 prefix. Production pair activation remains gated. The scope below records #114.

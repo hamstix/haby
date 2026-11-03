@@ -22,6 +22,8 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operatio
         var operation = await operations.FindAsync(key, cancellationToken);
         if (operation is null) return null;
         var shape = await resolver.ResolveAsync(key, operation, cancellationToken);
+        if (!await IsStandaloneAsync(operation, cancellationToken))
+            shape = (null, DurableOperationReason.InputUnavailable, false);
         Guid? uncertainAttempt = null;
         if (shape.Input is not null && operation.State == DurableOperationState.NeedsAttention && operation.AttemptId is { } attemptId)
         {
@@ -52,6 +54,7 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operatio
         var operation = await operations.FindAsync(command.Key, cancellationToken);
         if (operation is null || operation.Environment != command.Environment)
             return Rejected();
+        if (!await IsStandaloneAsync(operation, cancellationToken)) return Rejected();
 
         var shape = await resolver.ResolveAsync(command.Key, operation, cancellationToken);
         if (shape.Input is null) return Rejected();
@@ -85,6 +88,16 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operatio
             return new(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable, null);
 
         return await decisions.TryAssignAsync(command, clock.GetUtcNow(), cancellationToken);
+    }
+
+    private async ValueTask<bool> IsStandaloneAsync(DurableOperation operation, CancellationToken cancellationToken)
+    {
+        // Progress reads the immutable accepted graph, not the current manifest or alias.
+        // No-output manual assignment cannot satisfy a dependent evidence consumer.
+        var progress = await operations.ProgressAsync(operation.Key.DeploymentId, operation.Key.Generation, cancellationToken);
+        return progress?.Nodes is [var only] && only.Operation.Key == operation.Key &&
+            only.Operation.Node.Action == PostgreSqlDatabaseCreateAction.RegistrationKey &&
+            only.Operation.Node.Dependencies.Count == 0 && only.Operation.Node.OutputReferences.Count == 0;
     }
 
     private static PostgreSqlDatabaseAssignmentResult Rejected() =>

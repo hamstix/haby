@@ -84,6 +84,18 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlProviderConfigurationStore();
         builder.Services.AddPostgreSqlDurableOperationJournal();
         builder.Services.AddPostgreSqlDurableOperationExecution();
+        // One database admission explicitly composes standalone and pair shapes; no duplicate key.
+        builder.Services.AddSingleton<IDurableActionAdmissionHandler>(
+            new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id));
+        builder.Services.AddSingleton<IGeneratedCredentialOperations, PostgreSqlGeneratedCredentialOperations>();
+        builder.Services.AddSingleton<IDurableActionHandler>(p => new GeneratedCredentialAction(
+            PostgreSqlApplicationLoginAction.RegistrationKey.Admission,
+            p.GetRequiredService<IDurableOperationJournal>(), p.GetRequiredService<IGeneratedCredentialSlots>(),
+            p.GetRequiredService<IGeneratedCredentialOperations>(), p.GetRequiredService<TimeProvider>()));
+        builder.Services.AddPostgreSqlDatabaseRestrict();
+        builder.Services.AddPostgreSqlProviderResourceReservations();
+        builder.Services.AddPostgreSqlApplicationLogin();
+        builder.Services.AddPostgreSqlApplicationAccess();
         builder.Services.AddPostgreSqlDatabaseRecoveryJournal();
         builder.Services.AddPostgreSqlDatabaseRecovery();
         builder.Services.AddSingleton<PostgreSqlOperationRecoveryAdapter>();
