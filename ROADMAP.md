@@ -527,6 +527,15 @@ PostgreSQL configuration from Haby and connect using its own application role.
 The database-only path above remains a checkpoint, not completion of this goal.
 Keep the single-instance, isolated-environment and internal alpha API boundaries.
 
+[ADR-036](docs/adr/0036-configuration-rendering-profiles-and-deferred-formatting.md)
+accepts the rendering track: immutable unresolved document revisions, typed
+deferred connection-string formatting, consumer Binding.options and minimal
+exact-revision Configuration Profiles. Start with static JSON/projections and
+redacted preview; Liquid/YAML/text execution, broad profile composition/rollouts
+and confidential retrieval follow their explicit implementation/security gates.
+Provider-specific option schemas remain adapter-owned. Profiles never silently
+change accepted generations, and delivery is not the unauthenticated operator API.
+
 Required end-to-end path:
 
 1. Accept and plan an Application manifest against prepared Environment and

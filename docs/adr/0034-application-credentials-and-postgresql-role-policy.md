@@ -273,6 +273,12 @@ initial generated-slot slice.
 
 ## Required evidence and delivery
 
+[ADR-036](0036-configuration-rendering-profiles-and-deferred-formatting.md)
+defines the next rendering boundary: exact confirmed outputs, minimal profiles,
+consumer Binding.options and unresolved typed confidential formatting.
+Connection-string materialization requires separately authorized delivery;
+this ownership policy does not authorize a plaintext configuration endpoint.
+
 Validate database-owner/v1 through real EF Core migrations using the generated
 login: create schema and migration history, tables, indexes and sequences;
 apply a later migration changing structure; perform DML. Verify owner identity

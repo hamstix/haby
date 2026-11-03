@@ -188,6 +188,12 @@ requires them.
 
 ### Binding options describe consumption, not Resource desire
 
+[ADR-036](0036-configuration-rendering-profiles-and-deferred-formatting.md)
+accepts typed consumer options and exact profile defaults for rendering.
+Provider-specific names, bounds, units and security policy require explicit
+adapter documentation; effective values cannot substitute output-derived
+identities/secrets or change Resource provisioning.
+
 A Binding may contain an `options` extension value for consumer-specific input:
 
 ```json

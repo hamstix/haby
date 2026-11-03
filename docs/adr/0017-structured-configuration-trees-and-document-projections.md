@@ -21,6 +21,12 @@ their storage or execution now.
 
 ## Decision
 
+[ADR-036](0036-configuration-rendering-profiles-and-deferred-formatting.md)
+extends the tree with typed DeferredValue nodes produced by pure renderers and
+materialized only at authorized delivery. It also accepts minimal reusable
+Configuration Profiles and typed consumer options for the first rendering track.
+The scalar-only Liquid and raw-text restrictions below remain unchanged.
+
 ### ConfigurationValue is an immutable format-neutral tree
 
 Accepted structured content uses Haby-owned domain types rather than
@@ -109,7 +115,8 @@ A Configuration renderer is distinct from structured template evaluation. It
 performs a pure transformation of typed Resource outputs and renderer inputs and
 returns a `ConfigurationFragment` containing one `ConfigurationValue`.
 
-A fragment may be an Object, Array, scalar or SecretReference. A renderer:
+A fragment may be an Object, Array, scalar, SecretReference or a typed
+DeferredValue under ADR-036. A renderer:
 
 - does not emit serialized JSON or YAML;
 - does not select a Configuration document or insertion path;
