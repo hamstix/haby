@@ -160,7 +160,9 @@ during bootstrap. Stronger cluster/HBA policy is separate.
 
 Derive roleName as haby_a_ plus 48 lowercase SHA-256 hex characters over canonical
 UTF-8 JSON of the stable owner tuple (lowercase UUIDs and ResourceLocalId).
-Persist name and uniqueness reservation per ProviderInstance. A collision or an
+Persist name and uniqueness reservation per ProviderInstance through the shared
+Provider-neutral model in [ADR-035](0035-provider-neutral-persistence-and-name-reservations.md),
+not a PostgreSQL-specific table or column. A collision or an
 unmanaged existing role/database/schema is a conflict. Never choose a random
 replacement name or overwrite an existing password.
 

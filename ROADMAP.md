@@ -590,6 +590,10 @@ Keep the existing one-database production admission; further effects need separa
 Confidential configuration retrieval still requires its own decision before
 implementation; the accepted credential and ownership policy follows below.
 
+[ADR-035](docs/adr/0035-provider-neutral-persistence-and-name-reservations.md)
+requires shared Provider-neutral storage and generic reservation fields; adapters
+own naming and effect semantics, not separate Provider-specific catalog tables.
+
 [ADR-034](docs/adr/0034-application-credentials-and-postgresql-role-policy.md)
 accepts Provider-neutral generated slots and typed outputs plus the PostgreSQL
 database-owner/v1 pilot policy. Implement typed secret ownership and atomic

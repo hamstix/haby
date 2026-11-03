@@ -94,6 +94,10 @@ Haby must not silently substitute another implementation.
 
 ### Provider-neutral persistence and typed configuration payloads
 
+[ADR-035](0035-provider-neutral-persistence-and-name-reservations.md) extends
+this rule to Provider effect state and shared name reservations: adapter-owned
+semantics do not authorize Provider-specific catalog tables or columns.
+
 The persisted ProviderInstance and ProviderConfigurationRevision envelopes are
 Provider-neutral. The instance records its identity, Environment, opaque
 versioned Provider kind and logical identity metadata. The revision records its
