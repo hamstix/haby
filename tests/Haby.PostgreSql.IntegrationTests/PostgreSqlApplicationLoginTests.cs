@@ -6,7 +6,6 @@ using Haby.Domain;
 using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
-using Haby.PostgreSql.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,7 +49,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
             .AddPostgreSqlDurableDesiredStateCommitter().AddPostgreSqlDurableOperationJournal()
             .AddPostgreSqlDurableOperationExecution().AddPostgreSqlDatabaseRecoveryJournal().AddPostgreSqlDatabaseRecovery()
             .AddSingleton<IGeneratedCredentialOperations, PostgreSqlGeneratedCredentialOperations>()
-            .AddPostgreSqlDatabaseRestrict().AddPostgreSqlLoginCatalog(connection).AddPostgreSqlApplicationLogin();
+            .AddPostgreSqlDatabaseRestrict().AddPostgreSqlProviderResourceReservations().AddPostgreSqlApplicationLogin();
         services.RemoveAll<IDurableActionAdmissionHandler>();
         foreach (var contract in new[] { PostgreSqlDatabaseContract.Id, PostgreSqlApplicationLoginContract.Id })
             services.AddSingleton<IDurableActionAdmissionHandler>(full ? new PostgreSqlPairResourceAdmission(contract) : new Prefix(contract));
@@ -73,7 +72,6 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         var name = "login_target_" + Guid.NewGuid().ToString("N");
         await using var services = Services(connection, full: full);
         await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-        await services.GetRequiredService<PostgreSqlLoginCatalogInitializer>().MigrateAsync();
         var secrets = services.GetRequiredService<ISecretStore>();
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
@@ -183,12 +181,13 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
     }
 
     [Fact]
-    public async Task Exact_saved_password_authenticates_fixed_role_with_CONNECT_and_atomic_evidence_without_ownership_changes()
+    public async Task Four_step_test_prefix_authenticates_saved_password_without_completing_database_owner_policy()
     {
         var scenario = await Prepare(); var unrelated = await UnrelatedPolicy();
         Assert.False(await Exists(scenario.Role));
         await Ready(scenario); var reference = await Password(scenario); var bytes = await Material(scenario, reference);
         var before = await Policy(scenario.Database);
+        var ownershipAndObjects = await OwnershipAndObjects(scenario.Database);
         try
         {
             Assert.Equal(DurableExecutionOutcome.Succeeded, (await Execute(scenario, "app-login-create")).Outcome);
@@ -207,6 +206,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
                 Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
             }
             Assert.Equal(unrelated, await UnrelatedPolicy());
+            Assert.Equal(ownershipAndObjects, await OwnershipAndObjects(scenario.Database));
             // CONNECT is the only intended database ACL difference. Check schema/owner/object state independently.
             await using (var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = scenario.Database }.ConnectionString))
             {
@@ -220,6 +220,23 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
             await using var final = Context(scenario.Connection); Assert.Equal(4, await final.DurableOperationAttempts.CountAsync());
         }
         finally { Array.Clear(bytes); }
+    }
+
+    private async Task<string> OwnershipAndObjects(string database)
+    {
+        await using var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
+        { Database = database, Pooling = false }.ConnectionString);
+        await connection.OpenAsync();
+        // Read every schema owner/ACL and creator-default row, not just the absence of
+        // one expected application schema. The database CONNECT ACL is intentionally separate.
+        await using var command = new NpgsqlCommand("""
+            SELECT json_build_array(d.datdba,
+              (SELECT json_agg(json_build_array(nspname, nspowner, nspacl) ORDER BY nspname) FROM pg_catalog.pg_namespace),
+              (SELECT json_agg(json_build_array(defaclrole, defaclnamespace, defaclobjtype, defaclacl)
+                ORDER BY defaclrole, defaclnamespace, defaclobjtype) FROM pg_catalog.pg_default_acl))::text
+            FROM pg_catalog.pg_database d WHERE datname = pg_catalog.current_database()
+            """, connection);
+        return (string)(await command.ExecuteScalarAsync())!;
     }
 
     private sealed class Fault(string mode, CancellationTokenSource? cancellation = null) : IPostgreSqlLoginFaultHooks
@@ -291,5 +308,9 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         Assert.Empty(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
         Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
         Assert.False(await Exists(scenario.Role));
+        await using var admin = new NpgsqlConnection(fixture.ConnectionString); await admin.OpenAsync();
+        await using var absence = new NpgsqlCommand("SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = $1)", admin);
+        absence.Parameters.AddWithValue(scenario.Database);
+        Assert.True(await absence.ExecuteScalarAsync() is true);
     }
 }

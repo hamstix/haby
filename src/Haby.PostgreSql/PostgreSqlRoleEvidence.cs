@@ -1,17 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Haby.Application;
-using Haby.Domain;
 
 namespace Haby.PostgreSql;
 
 public sealed record PostgreSqlRoleEvidence(string RoleName, uint RoleOid);
-
-/// <summary>Adapter-owned stable reservation; acceptance never grants external permissions.</summary>
-public interface IPostgreSqlRoleNames
-{
-    ValueTask<bool> ReserveAsync(ProviderInstanceId provider, ManagedResourceKey owner, CancellationToken token);
-}
 
 public sealed class PostgreSqlRoleEvidenceContract : IExternalOperationOutputContract
 {

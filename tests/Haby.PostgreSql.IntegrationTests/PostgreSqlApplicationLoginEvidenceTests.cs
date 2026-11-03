@@ -6,7 +6,6 @@ using Haby.Application;
 using Haby.Domain;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
-using Haby.PostgreSql.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -18,6 +17,10 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class PostgreSqlApplicationLoginTests
 {
+    private static ProviderResourceReservation Reservation(ProviderInstanceId provider, ManagedResourceKey owner) =>
+        new(provider, owner.EnvironmentRecordId, owner.ApplicationRecordId, owner.ResourceLocalId,
+            PostgreSqlApplicationLoginAction.RoleReservationNamespace, PostgreSqlPairResourceAdmission.RoleName(owner));
+
     private static async Task Sql(string connection, string sql)
     {
         await using var session = new NpgsqlConnection(connection); await session.OpenAsync();
@@ -130,17 +133,87 @@ public sealed partial class PostgreSqlApplicationLoginTests
         async Task<bool> Reserve(ProviderInstanceId provider, ManagedResourceKey owner)
         {
             await using var services = Services(scenario.Connection);
-            return await services.GetRequiredService<IPostgreSqlRoleNames>().ReserveAsync(provider, owner, default);
+            return await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(Reservation(provider, owner), default);
         }
         var provider = scenario.Plan.Inputs.ProviderInstance;
         var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Reserve(provider, scenario.Owner)));
         Assert.All(results, Assert.True);
-        Assert.True(await Reserve(ProviderInstanceId.New(), scenario.Owner));
+        await using (var services = Services(scenario.Connection))
+        {
+            var providers = services.GetRequiredService<IProviderConfigurationStore>();
+            var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(scenario.Plan.Inputs.Environment,
+                provider, scenario.Plan.Inputs.ConfigurationRevision, default))!.Configuration;
+            var other = await providers.CreateInstanceAsync(scenario.Plan.Inputs.Environment, configuration, default);
+            Assert.True(await Reserve(other, scenario.Owner));
+        }
         // Simulate a hash-name collision using privileged fixture corruption, without adding a
         // production name override/random generator. The retained association cannot be reassigned.
-        await Sql(scenario.Connection, "UPDATE postgresql_role_names SET \"Resource\" = 'other-login'");
+        await Sql(scenario.Connection, "UPDATE provider_resource_reservations SET resource_local_id = 'other-login'");
         Assert.False(await Reserve(provider, scenario.Owner));
         Assert.False(await Exists(scenario.Role));
+    }
+
+    [Fact]
+    public async Task Shared_reservations_treat_different_adapter_namespaces_and_values_as_opaque()
+    {
+        var scenario = await Prepare();
+        var original = Reservation(scenario.Plan.Inputs.ProviderInstance, scenario.Owner);
+        var other = original with { Namespace = "sample.queue-user", Value = "opaque/Case-sensitive identity: 42" };
+        await using (var services = Services(scenario.Connection))
+        {
+            var store = services.GetRequiredService<IProviderResourceReservations>();
+            Assert.True(await store.TryReserveAsync(original, default));
+            Assert.True(await store.TryReserveAsync(other, default));
+            Assert.True(await store.TryReserveAsync(other, default));
+            Assert.False(await store.TryReserveAsync(other with { Value = "replacement" }, default));
+            Assert.False(await store.TryReserveAsync(other with { ResourceLocalId = ManifestLocalId.Create("another-owner") }, default));
+            Assert.True(await store.TryReserveAsync(other with { Namespace = "sample.Queue-user" }, default));
+        }
+        await using var verify = Context(scenario.Connection);
+        var saved = await verify.ProviderResourceReservations.AsNoTracking().ToArrayAsync();
+        Assert.Equal(3, saved.Length);
+        Assert.Equal(other.Value, Assert.Single(saved, r => r.Namespace == other.Namespace).Value);
+        Assert.False(await Exists(scenario.Role));
+    }
+
+    [Fact]
+    public async Task Shared_reservation_unique_constraint_and_EF_immutability_preserve_the_winner()
+    {
+        var scenario = await Prepare();
+        var original = Reservation(scenario.Plan.Inputs.ProviderInstance, scenario.Owner) with
+        { Namespace = "sample.queue-user", Value = "opaque-value" };
+        async Task<bool> Reserve(ProviderResourceReservation input)
+        {
+            await using var services = Services(scenario.Connection);
+            return await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(input, default);
+        }
+        var competitor = original with { ResourceLocalId = ManifestLocalId.Create("another-owner") };
+        var race = await Task.WhenAll(Reserve(original), Reserve(competitor));
+        Assert.Single(race, accepted => accepted);
+        await using (var act = Context(scenario.Connection))
+        {
+            var row = await act.ProviderResourceReservations.AsNoTracking().SingleAsync();
+            act.ProviderResourceReservations.Add(new()
+            {
+                ProviderInstanceId = row.ProviderInstanceId, EnvironmentRecordId = row.EnvironmentRecordId,
+                ApplicationRecordId = row.ApplicationRecordId, ResourceLocalId = "third-owner", Namespace = row.Namespace, Value = row.Value
+            });
+            var error = await Assert.ThrowsAsync<DbUpdateException>(() => act.SaveChangesAsync());
+            Assert.True(error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation });
+        }
+        await using (var act = Context(scenario.Connection))
+        {
+            var row = await act.ProviderResourceReservations.SingleAsync();
+            row.Value = "replacement";
+            await Assert.ThrowsAsync<InvalidOperationException>(() => act.SaveChangesAsync());
+        }
+        await using (var act = Context(scenario.Connection))
+        {
+            act.ProviderResourceReservations.Remove(await act.ProviderResourceReservations.SingleAsync());
+            await Assert.ThrowsAsync<InvalidOperationException>(() => act.SaveChangesAsync());
+        }
+        await using var verify = Context(scenario.Connection);
+        Assert.Equal(original.Value, (await verify.ProviderResourceReservations.AsNoTracking().SingleAsync()).Value);
     }
 
     [Theory]
@@ -152,6 +225,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var reference = await Password(scenario); var bytes = await Material(scenario, reference);
         try
         {
+            var opaque = Reservation(scenario.Plan.Inputs.ProviderInstance, scenario.Owner) with
+            { Namespace = "sample.queue-user", Value = "independent-opaque-identity" };
+            await using (var services = Services(scenario.Connection))
+                Assert.True(await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(opaque, default));
             var expected = uncertain ? DurableExecutionOutcome.NeedsAttention : DurableExecutionOutcome.Succeeded;
             Assert.Equal(expected, (await Execute(scenario, "app-login-create", uncertain ? new Fault("commit") : null)).Outcome);
             var restoredConnection = await Database("login_restore_"); var dump = "/tmp/login-" + Guid.NewGuid().ToString("N") + ".dump";
@@ -163,8 +240,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 await using (var services = Services(restored.Connection))
                 {
                     await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-                    await services.GetRequiredService<PostgreSqlLoginCatalogInitializer>().MigrateAsync();
-                    Assert.True(await services.GetRequiredService<IPostgreSqlRoleNames>().ReserveAsync(restored.Plan.Inputs.ProviderInstance, restored.Owner, default));
+                    Assert.True(await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(Reservation(restored.Plan.Inputs.ProviderInstance, restored.Owner), default));
+                    Assert.True(await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(opaque, default));
                 }
                 Assert.Equal(expected, (await Execute(restored, "app-login-create", new Fault("trap"))).Outcome);
                 Assert.Equal(reference, await Password(restored));

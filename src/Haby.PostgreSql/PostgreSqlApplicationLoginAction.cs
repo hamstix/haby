@@ -9,10 +9,11 @@ namespace Haby.PostgreSql;
 /// <summary>Opt-in login effect; no final-access handler or production pair activation.</summary>
 public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
     IGeneratedCredentialOperations generated, IProviderConfigurationStore providers, PostgreSqlProviderConfigurationCodec codec,
-    IPostgreSqlRoleNames names, PostgreSqlApplicationLoginTarget target, IPostgreSqlLoginFaultHooks hooks,
+    IProviderResourceReservations names, PostgreSqlApplicationLoginTarget target, IPostgreSqlLoginFaultHooks hooks,
     TimeProvider clock) : IDurableActionHandler
 {
     public const string Format = "haby.postgresql.application-login-create/v1";
+    public const string RoleReservationNamespace = "postgresql.role";
     public static DurableActionExecutionKey RegistrationKey { get; } = new(
         PostgreSqlDatabaseCreateAction.RegistrationKey.Admission with { ResourceContract = PostgreSqlApplicationLoginContract.Id },
         OperationContractId.Create("postgresql.application-login.create/v1alpha1"));
@@ -74,7 +75,8 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
         try
         {
             // Local acceptance is durable independently of attempts and external permissions.
-            if (!await names.ReserveAsync(resolved.Provider.ProviderInstance, resolved.Owner, cancellationToken))
+            if (!await names.TryReserveAsync(new(resolved.Provider.ProviderInstance, resolved.Owner.EnvironmentRecordId,
+                resolved.Owner.ApplicationRecordId, resolved.Owner.ResourceLocalId, RoleReservationNamespace, resolved.RoleName), cancellationToken))
             {
                 await journal.TryFinalizeFailureAsync(key, attempt, DurableOperationState.Failed, DurableOperationReason.Conflict, clock.GetUtcNow(), cancellationToken);
                 return await ObserveAsync(key);

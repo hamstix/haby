@@ -37,32 +37,52 @@ payload all remain required. The target separately resolves that exact SecretRef
 with Resource/ApplicationLogin scope. Temporary byte buffers and SecretMaterial
 are cleared/disposed. Retained generated material is never regenerated or rotated.
 
-## Adapter-owned reservations and catalog
+## Provider-neutral reservations and catalog
 
-`Haby.PostgreSql.Persistence` owns a separate EF model in the same catalog database.
-Common persistence, generated secret identities and generic output envelopes have
-no role-name fields or PostgreSQL reservation policy. The adapter's
-`postgresql_role_names` table stores the exact ProviderInstance, stable owner and
-canonical deterministic name from #112. Its owner key and unique Provider/name
-index arbitrate concurrent acceptance. Same-owner acceptance rereads the committed
-winner after a collision or lost response. Another owner cannot acquire its name.
-Reservations are immutable through the EF write boundary and retained on failure;
-direct privileged SQL corruption remains outside that boundary.
+The common `IProviderResourceReservations` API accepts a typed
+`ProviderResourceReservation` with exactly these fields:
+`ProviderInstanceId`, `EnvironmentRecordId`, `ApplicationRecordId`,
+`ResourceLocalId`, `Namespace` and `Value`. `provider_resource_reservations`
+is part of the common catalog EF model in `Haby.Persistence.PostgreSql`, the
+PostgreSQL storage backend shared by all adapters. It is not a PostgreSQL Provider
+store. No separate adapter database context, migration history or role table exists.
 
-`AddPostgreSqlLoginCatalog(connection)` and explicit
-`PostgreSqlLoginCatalogInitializer.MigrateAsync` initialize the adapter model.
-The migration `AddPostgreSqlRoleNames` uses its own
-`__PostgreSqlLoginMigrations` history. It adds only adapter tables; the main catalog
-model/migration baseline is unchanged. Initialize the main catalog first. No
-startup reset, backfill, lifecycle reuse, cleanup or automatic external permission
-change occurs. Existing unsupported main catalogs still require explicit fresh
-initialization under ADR-033. Resetting either catalog does not remove external
-roles/databases; a surviving external role remains a conflict.
+Namespace and Value are opaque, non-secret strings to common code. The API and
+model do not know PostgreSQL roles, databases, queue users or naming algorithms.
+The PostgreSQL login adapter computes the accepted canonical name from #112 and
+passes it as Value under its stable namespace `postgresql.role`. Different
+adapters use the same API and table with their own namespaces and opaque values.
+This is one narrow immutable association, not a generic workflow/plugin framework,
+EAV redesign or arbitrary JSON catalog. Existing common entities retain their
+typed fields and adapter configuration remains adapter-interpreted.
 
-Dump/restore must include the entire catalog database, including the adapter table
-and migration history. Current-build tests restore actual pg_dump archives into
-empty disposable databases and retain the same reservation, graph, password ref,
-material, outputs and successful/uncertain attempts without redispatch.
+The owner key is (ProviderInstanceId, EnvironmentRecordId, ApplicationRecordId,
+ResourceLocalId, Namespace). The unique external key is (ProviderInstanceId,
+Namespace, Value). Identical repeat acceptance converges on the retained value;
+a different value for that owner/namespace or an identity held by another owner
+is a conflict, never reassignment. Namespace and Value comparisons are ordinal
+and case-sensitive; common code applies storage bounds, not adapter validation.
+Foreign keys retain the actual Provider/Environment and Application identities.
+The internal caller remains responsible for authorization and binding the owner
+to its committed Resource. Acceptance never changes external permissions.
+
+Unique constraints arbitrate races. A lost write response is resolved through a
+fresh read of the exact owner association or competing unique key. EF write guards
+refuse reservation modification/deletion. Direct privileged SQL corruption is
+outside that boundary. Failed/unused reservations and generated material remain
+retained; lifecycle reuse and cleanup are deferred.
+
+The common `AddProviderResourceReservations` migration creates only this generic
+table and its constraints. The rejected draft-only `AddPostgreSqlRoleNames`
+migrations and separate project have been removed. This revision requires an
+explicitly initialized fresh catalog under ADR-033: the normal initializer rejects
+earlier migration sets and never resets, drops, backfills or adopts them. No
+compatibility bridge for the discarded draft schema is provided. Resetting Haby
+never removes external roles/databases; an existing external role remains a conflict.
+
+Full-database pg_dump/pg_restore retains reservations alongside the graph, secret
+material/refs, outputs and successful/uncertain attempts. The restore tests also
+retain an independent opaque namespace/value through the same common store.
 
 ## Managed SCRAM implementation and redistribution gate
 

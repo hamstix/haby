@@ -83,6 +83,7 @@ For tests that exercise persisted EF Core behavior, use separate `DbContext` ins
 ## Code and architecture expectations
 
 - Keep domain and application logic independent from hosting, persistence, UI and plugin implementations.
+- Do not introduce Provider-specific tables, columns, enums or branches in shared APIs or the catalog model. Shared entities use typed generic fields; adapters own specific configuration and its interpretation. Opaque reservation namespaces/values use the common persistence boundary. Do not redesign the catalog as EAV or arbitrary JSON to hide Provider-specific structure.
 - Prefer explicit contracts and dependency injection over global state or runtime service location.
 - Preserve cancellation tokens through I/O and long-running operations.
 - Provisioning operations must be designed for idempotency and safe retries.

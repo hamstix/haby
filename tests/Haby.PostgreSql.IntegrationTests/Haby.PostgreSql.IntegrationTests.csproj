@@ -27,7 +27,6 @@
     <ProjectReference Include="..\..\src\Haby.PostgreSql\Haby.PostgreSql.csproj" />
     <ProjectReference Include="..\..\src\Haby.Persistence.PostgreSql\Haby.Persistence.PostgreSql.csproj" />
     <ProjectReference Include="..\..\src\Haby.Operator.Host\Haby.Operator.Host.csproj" />
-    <ProjectReference Include="..\..\src\Haby.PostgreSql.Persistence\Haby.PostgreSql.Persistence.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\..\docs\development\examples\106-shared-application-login.json" LogicalName="Haby.PostgreSql.IntegrationTests.pair.json" />
