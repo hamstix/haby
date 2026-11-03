@@ -9,7 +9,7 @@ namespace Haby.PostgreSql;
 /// <summary>Opt-in exact restrict effect. Production pair admission remains unavailable.</summary>
 public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
     IProviderConfigurationStore providers, PostgreSqlDatabaseRestrictTarget target, IPostgreSqlRestrictFaultHooks hooks,
-    TimeProvider clock) : IDurableActionHandler
+    TimeProvider clock, PostgreSqlProviderConfigurationCodec codec) : IDurableActionHandler
 {
     public const string Format = "haby.postgresql.database-restrict/v1";
     public static DurableActionExecutionKey RegistrationKey { get; } = new(PostgreSqlDatabaseCreateAction.RegistrationKey.Admission,
@@ -40,15 +40,16 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
         {
             var accepted = await outputs.FindAcceptedAsync(key, cancellationToken);
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
-            // The only executable opt-in fixture is create -> restrict. No direct-handler bypass
-            // may partially execute the five-node pair while login/access handlers are missing.
-            if (accepted.Graph.Nodes.Count != 2) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+            // Only the existing two-step fixture or the exact four-step internal prefix.
+            // A direct-handler call cannot partially execute the five-node pair.
+            if (accepted.Graph.Nodes.Count is not (2 or 4)) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
-            if (input is null || !ValidGraph(accepted, input)) return new(DurableExecutionOutcome.InputUnavailable, operation);
+            if (input is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
                 accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
             if (configuration is null || configuration.ImplementationId != accepted.Inputs.ImplementationId ||
-                configuration.AdministratorUserName != input.ExpectedOwnerUserName) return new(DurableExecutionOutcome.InputUnavailable, operation);
+                configuration.AdministratorUserName != input.ExpectedOwnerUserName ||
+                !(accepted.Graph.Nodes.Count == 2 ? ValidGraph(accepted, input) : PostgreSqlPairExecution.IsPrefix(accepted, codec.Encode(configuration)))) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var output = await outputs.ConsumeAsync(key, input.DatabaseSource.ToReference(), cancellationToken);
             var evidence = output is null ? null : PostgreSqlDatabaseOutputContract.Decode(output);
             if (evidence is null || evidence.DatabaseName != input.DatabaseName) return new(DurableExecutionOutcome.InputUnavailable, operation);

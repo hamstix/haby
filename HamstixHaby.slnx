@@ -15,6 +15,7 @@
     <Project Path="src/Haby.Operator.Contracts/Haby.Operator.Contracts.csproj" />
     <Project Path="src/Haby.Operator.Host/Haby.Operator.Host.csproj" />
     <Project Path="src/Haby.Persistence.PostgreSql/Haby.Persistence.PostgreSql.csproj" />
+    <Project Path="src/Haby.PostgreSql.Persistence/Haby.PostgreSql.Persistence.csproj" />
     <Project Path="src/Haby.PostgreSql/Haby.PostgreSql.csproj" />
     <Project Path="src/habyctl/habyctl.csproj" />
   </Folder>

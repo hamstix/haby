@@ -86,6 +86,23 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed (exit {process.ExitCode}). Output withheld because catalog utilities may expose protected data.");
     }
+
+    internal async Task<string> ReadServerLogsAsync()
+    {
+        if (_container is not null)
+        {
+            var logs = await _container.GetLogsAsync();
+            return logs.Stdout + logs.Stderr;
+        }
+        var start = new ProcessStartInfo("wslc") { RedirectStandardError = true, RedirectStandardOutput = true };
+        start.ArgumentList.Add("logs"); start.ArgumentList.Add(_externalContainer!);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Log reader unavailable.");
+        var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var result = await stdout + await stderr;
+        if (process.ExitCode != 0) throw new InvalidOperationException("Server log capture failed; output withheld.");
+        return result;
+    }
 }
 
 public sealed class PostgreSqlIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>

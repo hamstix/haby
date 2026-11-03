@@ -1,5 +1,9 @@
 # Confirmed database evidence and PUBLIC restriction
 
+Subsequent [issue #116](116-postgresql-application-login.md) adds opt-in login
+creation and extends the private real-effect fixture to the exact four-step
+prefix. Production pair activation remains gated. The scope below records #114.
+
 Issue #114 implements the next external-effect slice under ADR-025/026/032/033/034.
 The production Host still admits and executes only standalone database Create.
 The complete five-node database/login pair remains unavailable: common execution

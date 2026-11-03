@@ -605,6 +605,10 @@ before any partial effect.
 database name/OID evidence and adds opt-in transactional PUBLIC restriction.
 The full pair remains gated; uncertain restrict has no recovery or redispatch.
 The new evidence baseline requires a fresh catalog under ADR-033.
+[Issue #116](docs/development/116-postgresql-application-login.md) adds opt-in
+application-login creation with stable adapter-owned role reservations, the exact
+saved generated password, managed SCRAM transport and atomic role evidence.
+Final ownership/access and production pair activation remain gated.
 
 Deliver this goal in narrow vertical slices. Finish operation/recovery restore
 rehearsal, expose a meaningful Plan summary and operator bootstrap, then prioritize
