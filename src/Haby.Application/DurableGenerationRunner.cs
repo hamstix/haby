@@ -51,7 +51,7 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
             if (next is null) return new(progress, StopOutcome: DurableExecutionOutcome.Blocked);
             var result = await executor.ExecuteCoreAsync(next.Operation.Key, cancellationToken);
             if (result.Outcome != DurableExecutionOutcome.Succeeded)
-                return new(await ProgressAsync(deployment, generation, CancellationToken.None), next.Operation.Key.OperationId, result.Outcome);
+                return new(await ProgressAsync(deployment, generation, CancellationToken.None), next.Operation.Key.OperationId, result.Outcome, cancellationToken.IsCancellationRequested);
         }
     }
 }

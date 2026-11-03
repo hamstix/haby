@@ -36,6 +36,7 @@ internal interface IRegistryClient : IDisposable
     Task<OperationReply> GetOperationAsync(OperationRequest request, CancellationToken cancellationToken);
     Task<CommitReply> CommitDesiredStateAsync(CommitDesiredStateRequest request, CancellationToken cancellationToken);
     Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken);
+    Task<GenerationExecutionReply> ExecuteGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
     Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> CreateChangeSetAsync(CreateChangeSetRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> GetChangeSetAsync(ChangeSetRequest request, CancellationToken cancellationToken);
@@ -110,6 +111,9 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
 
     public async Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
         await _client.GetCommitAsync(request, cancellationToken: cancellationToken);
+
+    public async Task<GenerationExecutionReply> ExecuteGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) =>
+        await _client.ExecuteGenerationAsync(request, cancellationToken: cancellationToken);
 
     public async Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) =>
         await _client.GetGenerationAsync(request, cancellationToken: cancellationToken);

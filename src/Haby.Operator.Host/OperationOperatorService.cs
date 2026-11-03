@@ -16,19 +16,7 @@ public sealed partial class ManifestOperatorService
         var result = await OperationCall(() => executor.ExecuteAsync(key!, context.CancellationToken), context);
         return new OperationReply
         {
-            Status = result.Outcome switch
-            {
-                DurableExecutionOutcome.Blocked => OperationStatus.Blocked,
-                DurableExecutionOutcome.InputUnavailable => OperationStatus.InputUnavailable,
-                DurableExecutionOutcome.HandlerUnavailable => OperationStatus.HandlerUnavailable,
-                DurableExecutionOutcome.Succeeded => OperationStatus.Succeeded,
-                DurableExecutionOutcome.Failed => OperationStatus.Failed,
-                DurableExecutionOutcome.RetryableFailure => OperationStatus.RetryableFailure,
-                DurableExecutionOutcome.NeedsAttention => OperationStatus.NeedsAttention,
-                DurableExecutionOutcome.OperationNotFound => OperationStatus.OperationNotFound,
-                DurableExecutionOutcome.DispatchUncertain => OperationStatus.DispatchUncertain,
-                _ => throw new InvalidOperationException("Unknown execution outcome.")
-            },
+            Status = ExecutionStatus(result.Outcome),
             Operation = result.Operation is { } operation ? Summary(operation) : null
         };
     }
@@ -48,18 +36,7 @@ public sealed partial class ManifestOperatorService
                 AttemptId = attempt.AttemptId.ToString("D"),
                 AttemptNumber = attempt.AttemptNumber,
                 StartedAtUtc = Utc(attempt.StartedAt),
-                Outcome = attempt.Outcome switch
-                {
-                    null => OperationAttemptOutcome.Unspecified,
-                    DurableAttemptOutcome.Succeeded => OperationAttemptOutcome.Succeeded,
-                    DurableAttemptOutcome.Conflict => OperationAttemptOutcome.Conflict,
-                    DurableAttemptOutcome.ServerRejected => OperationAttemptOutcome.ServerRejected,
-                    DurableAttemptOutcome.Uncertain => OperationAttemptOutcome.Uncertain,
-                    DurableAttemptOutcome.CanceledBeforeDispatch => OperationAttemptOutcome.CanceledBeforeDispatch,
-                    DurableAttemptOutcome.AbandonedBeforeDispatch => OperationAttemptOutcome.AbandonedBeforeDispatch,
-                    DurableAttemptOutcome.FailedBeforeDispatch => OperationAttemptOutcome.FailedBeforeDispatch,
-                    _ => throw new InvalidOperationException("Unknown attempt outcome.")
-                }
+                Outcome = attempt.Outcome is { } outcome ? AttemptOutcome(outcome) : OperationAttemptOutcome.Unspecified
             };
             if (attempt.DispatchedAt is { } dispatched) item.DispatchedAtUtc = Utc(dispatched);
             if (attempt.FinishedAt is { } finished) item.FinishedAtUtc = Utc(finished);
@@ -67,6 +44,32 @@ public sealed partial class ManifestOperatorService
         }
         return reply;
     }
+
+    private static OperationAttemptOutcome AttemptOutcome(DurableAttemptOutcome outcome) => outcome switch
+    {
+        DurableAttemptOutcome.Succeeded => OperationAttemptOutcome.Succeeded,
+        DurableAttemptOutcome.Conflict => OperationAttemptOutcome.Conflict,
+        DurableAttemptOutcome.ServerRejected => OperationAttemptOutcome.ServerRejected,
+        DurableAttemptOutcome.Uncertain => OperationAttemptOutcome.Uncertain,
+        DurableAttemptOutcome.CanceledBeforeDispatch => OperationAttemptOutcome.CanceledBeforeDispatch,
+        DurableAttemptOutcome.AbandonedBeforeDispatch => OperationAttemptOutcome.AbandonedBeforeDispatch,
+        DurableAttemptOutcome.FailedBeforeDispatch => OperationAttemptOutcome.FailedBeforeDispatch,
+        _ => throw new InvalidOperationException("Unknown attempt outcome.")
+    };
+
+    private static OperationStatus ExecutionStatus(DurableExecutionOutcome outcome) => outcome switch
+    {
+        DurableExecutionOutcome.Blocked => OperationStatus.Blocked,
+        DurableExecutionOutcome.InputUnavailable => OperationStatus.InputUnavailable,
+        DurableExecutionOutcome.HandlerUnavailable => OperationStatus.HandlerUnavailable,
+        DurableExecutionOutcome.Succeeded => OperationStatus.Succeeded,
+        DurableExecutionOutcome.Failed => OperationStatus.Failed,
+        DurableExecutionOutcome.RetryableFailure => OperationStatus.RetryableFailure,
+        DurableExecutionOutcome.NeedsAttention => OperationStatus.NeedsAttention,
+        DurableExecutionOutcome.OperationNotFound => OperationStatus.OperationNotFound,
+        DurableExecutionOutcome.DispatchUncertain => OperationStatus.DispatchUncertain,
+        _ => throw new InvalidOperationException("Unknown execution outcome.")
+    };
 
     private static async ValueTask<T> OperationCall<T>(Func<ValueTask<T>> call, ServerCallContext context)
     {

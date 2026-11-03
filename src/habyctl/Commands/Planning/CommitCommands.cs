@@ -36,6 +36,13 @@ internal static class CommitCommands
             context.PrintCommit("deployment generation get", await client.GetGenerationAsync(new GenerationRequest
             { DeploymentId = parse.GetRequiredValue(id), Generation = parse.GetRequiredValue(number) }, ct)), token));
         generation.Subcommands.Add(get);
+        var executeId = new Argument<string>("deployment-id");
+        var executeNumber = new Argument<long>("generation");
+        var execute = new Command("execute", "Execute one committed generation. Inspect after a lost or canceled response before any explicit repeat.")
+            { executeId, executeNumber };
+        execute.SetAction((parse, token) => context.ExecuteGenerationAsync(new GenerationRequest
+        { DeploymentId = parse.GetRequiredValue(executeId), Generation = parse.GetRequiredValue(executeNumber) }, token));
+        generation.Subcommands.Add(execute);
         group.Subcommands.Add(generation);
         return group;
     }

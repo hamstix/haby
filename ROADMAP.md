@@ -589,6 +589,9 @@ The graph revision requires a fresh catalog under ADR-033.
 real ADR-034 actions in production Host composition alongside standalone database
 Create, with generated-client/published-native-CLI disposable rehearsal. Each
 operation remains explicit; missing mandatory support blocks the whole graph.
+[Issue #122](docs/development/122-generation-execute.md) adds one explicit generation
+execution RPC/CLI command over the real server runner and read-only persisted
+progress. Separate Plan/Commit and per-node diagnostic control remain available.
 Confidential configuration retrieval still requires its own decision before
 implementation; the accepted credential and ownership policy follows below.
 

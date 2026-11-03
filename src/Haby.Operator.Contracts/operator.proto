@@ -31,6 +31,7 @@ service ManifestOperator {
   rpc CommitDesiredState(CommitDesiredStateRequest) returns (CommitReply);
   rpc GetCommit(ChangeSetRequest) returns (CommitReply);
   rpc GetGeneration(GenerationRequest) returns (CommitReply);
+  rpc ExecuteGeneration(GenerationRequest) returns (GenerationExecutionReply);
   // Explicit execution only; GetOperation never dispatches or recovers.
   rpc ExecuteOperation(OperationRequest) returns (OperationReply);
   rpc GetOperation(OperationRequest) returns (OperationReply);
@@ -328,6 +329,7 @@ message CommitReply {
   DurableCommitSummary commit = 2;
   DesiredGenerationSummary desired_generation = 3;
   optional int64 actual_generation = 4;
+  GenerationProgress progress = 5;
 }
 
 // Exact provider-neutral identity. No credentials, overrides, actor, or implicit latest generation.
@@ -564,4 +566,42 @@ message ProviderAccessReply {
   ProviderAccessStatus status = 1;
   optional ProviderPreflightStatus preflight = 2;
   ProviderAliasMetadata binding = 3;
+}
+
+// Persisted metadata only. No action inputs, output payloads or material.
+message GenerationNodeProgress {
+  DurableOperationSummary operation = 1;
+  repeated string blocking_dependencies = 2;
+  optional OperationAttemptOutcome last_attempt_outcome = 3;
+}
+message GenerationProgress {
+  string deployment_id = 1;
+  int64 generation = 2;
+  int64 desired_generation = 3;
+  optional int64 applied_generation = 4;
+  int32 completed = 5;
+  int32 total = 6;
+  repeated GenerationNodeProgress nodes = 7;
+  optional string stopped_operation_id = 8;
+}
+enum GenerationExecutionStatus {
+  GENERATION_EXECUTION_STATUS_UNSPECIFIED = 0;
+  GENERATION_EXECUTION_STATUS_SUCCEEDED = 1;
+  GENERATION_EXECUTION_STATUS_INVALID_REQUEST = 2;
+  GENERATION_EXECUTION_STATUS_UNSUPPORTED_GENERATION = 3;
+  GENERATION_EXECUTION_STATUS_NOT_FOUND = 4;
+  GENERATION_EXECUTION_STATUS_BLOCKED = 5;
+  GENERATION_EXECUTION_STATUS_FAILED = 6;
+  GENERATION_EXECUTION_STATUS_RETRYABLE_FAILURE = 7;
+  GENERATION_EXECUTION_STATUS_NEEDS_ATTENTION = 8;
+  GENERATION_EXECUTION_STATUS_DISPATCH_UNCERTAIN = 9;
+  GENERATION_EXECUTION_STATUS_INPUT_UNAVAILABLE = 10;
+  GENERATION_EXECUTION_STATUS_HANDLER_UNAVAILABLE = 11;
+  GENERATION_EXECUTION_STATUS_CANCELED = 12;
+}
+message GenerationExecutionReply {
+  GenerationExecutionStatus status = 1;
+  GenerationProgress progress = 2;
+  optional string stopped_operation_id = 3;
+  optional OperationStatus stop_outcome = 4;
 }
