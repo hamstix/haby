@@ -117,6 +117,15 @@ external rollback and uncertain boundaries, exact selectors and attempts,
 catalog atomicity, checked alias switching and the standalone recovery exception.
 Persisted arrange/act/assert use independent contexts.
 
+`ExternalQueueOutputIntegrationTests` also exercises the new external-output
+boundary with the existing typed sample queue adapter through real
+Plan/Check/Commit, common exact dispatch and catalog storage. Its generated queue
+receipt codec has no database fields. Tests check mandatory publication rather
+than ordinary journal success, exact dependent consumption, write-once output,
+attempt/aggregate state and restart retention. Missing or ambiguous output
+registrations cannot acknowledge publication or dispatch the consumer. Queue
+effects are counted test boundaries, not an implemented production broker.
+
 Deferred: login/SCRAM, ownership/application schema/default privileges/search_path,
 final connection output, complete pair production activation, new recovery,
 restricted-admin support, confidential delivery, rotation/deletion, multi-Provider
