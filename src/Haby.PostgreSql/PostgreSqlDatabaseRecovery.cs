@@ -23,7 +23,7 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operatio
         if (operation is null) return null;
         var shape = await resolver.ResolveAsync(key, operation, cancellationToken);
         Guid? uncertainAttempt = null;
-        if (operation.State == DurableOperationState.NeedsAttention && operation.AttemptId is { } attemptId)
+        if (shape.Input is not null && operation.State == DurableOperationState.NeedsAttention && operation.AttemptId is { } attemptId)
         {
             var attempts = await operations.FindAttemptsAsync(key, cancellationToken);
             if (attempts.Count(attempt => attempt.AttemptId == attemptId &&
@@ -53,6 +53,9 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operatio
         if (operation is null || operation.Environment != command.Environment)
             return Rejected();
 
+        var shape = await resolver.ResolveAsync(command.Key, operation, cancellationToken);
+        if (shape.Input is null) return Rejected();
+
         // A lost response is a read of the original immutable decision. It must not recheck the
         // external database: its present condition could have changed since the accepted decision.
         var existing = await decisions.FindDecisionAsync(command.Key, command.ExpectedAttemptId,
@@ -72,8 +75,6 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operatio
                 attempt.FinishedAt is not null && attempt.Outcome == DurableAttemptOutcome.Uncertain) != 1)
             return Rejected();
 
-        var shape = await resolver.ResolveAsync(command.Key, operation, cancellationToken);
-        if (shape.Input is null) return new(PostgreSqlDatabaseAssignmentOutcome.TargetUnavailable, null);
         PostgreSqlDatabaseAbsenceOutcome absence;
         try { absence = await target.CheckDatabaseAbsentAsync(shape.Input, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

@@ -127,7 +127,16 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
                 p.GetRequiredService<IGeneratedCredentialOperations>(), p.GetRequiredService<TimeProvider>()));
         }
         if (codec) services.AddSingleton<IProviderConfigurationCodec, SampleConfigurationCodec>();
-        if (installed) services.AddSingleton<QueueAction>()
+        if (installed && boundary.ExternalEvidence)
+        {
+            services.AddSingleton<QueueEvidenceProducer>()
+                .AddSingleton<IDurableActionAdmissionHandler>(p => p.GetRequiredService<QueueEvidenceProducer>())
+                .AddSingleton<IDurableActionHandler>(p => p.GetRequiredService<QueueEvidenceProducer>())
+                .AddSingleton<IDurableActionHandler, QueueEvidenceConsumer>();
+            for (var i = 0; i < boundary.OutputContractRegistrations; i++)
+                services.AddSingleton<IExternalOperationOutputContract, QueueEvidenceContract>();
+        }
+        else if (installed) services.AddSingleton<QueueAction>()
             .AddSingleton<IDurableActionAdmissionHandler>(p => p.GetRequiredService<QueueAction>())
             .AddSingleton<IDurableActionHandler>(p => p.GetRequiredService<QueueAction>());
         return services.BuildServiceProvider();
@@ -149,6 +158,8 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
     {
         public bool Graph;
         public bool Generated;
+        public bool ExternalEvidence;
+        public int OutputContractRegistrations = 1;
         public string PlannedName = "jobs";
         public string Format = "sample.queue-create/v1";
         public string? Mode;

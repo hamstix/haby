@@ -503,7 +503,7 @@ public sealed class DurableCreateExecutorTests
         };
         var executor = new PostgreSqlDurableOperationExecutor(journal,
             target, hooks,
-            new FixedClock(DateTimeOffset.UnixEpoch), serialization ?? new DurableOperationSerialization());
+            new FixedClock(DateTimeOffset.UnixEpoch), serialization ?? new DurableOperationSerialization(), new TestOutputs(journal));
         return (executor, journal, target, hooks);
     }
 
@@ -736,8 +736,22 @@ public sealed class DurableCreateExecutorTests
         }
     }
 
+    private sealed class TestOutputs(FakeJournal journal) : IExternalOperationOutputs
+    {
+        public ValueTask<AcceptedOperation?> FindAcceptedAsync(DurableOperationKey key, CancellationToken token) => throw new NotSupportedException();
+        public ValueTask<ExternalOperationOutput?> ConsumeAsync(DurableOperationKey key, OperationOutputRef selector, CancellationToken token) => throw new NotSupportedException();
+        public ValueTask<bool> CompleteAsync(DurableOperationKey key, Guid attempt, ExternalOperationOutput output, DateTimeOffset at, CancellationToken token)
+        {
+            Assert.NotNull(PostgreSqlDatabaseOutputContract.Decode(output));
+            return journal.TryRecordSuccessAsync(key, attempt, at, token);
+        }
+    }
+
     private sealed class FakeTarget(List<string> log) : IPostgreSqlDatabaseCreateTarget
     {
+        public async ValueTask<PostgreSqlDatabaseOutput?> ReadDatabaseEvidenceAsync(PostgreSqlDatabaseCreateInput input, CancellationToken token) =>
+            await CheckDatabaseAbsentAsync(input, token) == PostgreSqlDatabaseAbsenceOutcome.Present ? new(input.DatabaseName, 42) : null;
+
         public List<PostgreSqlDatabaseCreateInput> Inputs { get; } = [];
         public PostgreSqlDatabaseAbsenceOutcome Absence { get; init; } = PostgreSqlDatabaseAbsenceOutcome.Absent;
         public PostgreSqlDatabaseAbsenceOutcome Confirm { get; init; } = PostgreSqlDatabaseAbsenceOutcome.Present;

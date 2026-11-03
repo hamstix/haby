@@ -133,6 +133,7 @@ public sealed class DurableExecutionTests(PostgreSqlFixture fixture) : IClassFix
             "SELECT applied_generation FROM application_deployments"));
         Assert.Equal(["Uncertain"], await ScalarsAsync(prepared.Connection,
             "SELECT outcome FROM durable_create_operation_attempts"));
+        Assert.Equal(0L, await ScalarLongAsync(prepared.Connection, "SELECT count(*) FROM operation_outputs"));
         Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
             "SELECT count(*) FROM postgresql_database_recovery_decisions"));
         await using (var restarted = Services(prepared.Connection, prepared.Time))
@@ -147,6 +148,8 @@ public sealed class DurableExecutionTests(PostgreSqlFixture fixture) : IClassFix
             Assert.Equal("operator note", audit!.Note);
             Assert.True(audit.Acknowledged);
             Assert.Equal(nameof(PostgreSqlDatabaseRecoveryAudit), audit.ToString());
+            Assert.Equal(DurableExecutionOutcome.Succeeded, (await ExecuteAsync(restarted, prepared.Key, default)).Outcome);
+            Assert.Equal(0L, await ScalarLongAsync(prepared.Connection, "SELECT count(*) FROM operation_outputs"));
         }
         Assert.Equal(1L, await ScalarLongAsync(prepared.Connection,
             "SELECT count(*) FROM postgresql_database_recovery_decisions"));

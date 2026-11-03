@@ -15,7 +15,7 @@ namespace Haby.PostgreSql;
 /// </summary>
 public sealed class PostgreSqlDurableOperationExecutor(IDurableOperationJournal journal,
     IPostgreSqlDatabaseCreateTarget target, IDurableCreateDispatchFaultHooks hooks,
-    TimeProvider clock, DurableOperationSerialization serialization) : IDurableOperationExecutor
+    TimeProvider clock, DurableOperationSerialization serialization, IExternalOperationOutputs outputs) : IDurableOperationExecutor
 {
     private readonly PostgreSqlDurableCreateInputResolver resolver = new();
 
@@ -159,17 +159,17 @@ public sealed class PostgreSqlDurableOperationExecutor(IDurableOperationJournal 
             case PostgreSqlDatabaseCreateDispatchOutcome.Created:
                 {
                     // Succeeded requires the confirmed Create response and an independent existence read.
-                    PostgreSqlDatabaseAbsenceOutcome confirmed;
+                    PostgreSqlDatabaseOutput? confirmed;
                     try
                     {
-                        confirmed = await target.CheckDatabaseAbsentAsync(input, cancellationToken);
+                        confirmed = await target.ReadDatabaseEvidenceAsync(input, cancellationToken);
                     }
                     catch (Exception)
                     {
                         return await FinalizeUncertainAsync(key, attemptId, cancellationToken);
                     }
 
-                    if (confirmed != PostgreSqlDatabaseAbsenceOutcome.Present)
+                    if (confirmed is null || confirmed.DatabaseName != input.DatabaseName || confirmed.DatabaseOid == 0)
                         return await FinalizeUncertainAsync(key, attemptId, cancellationToken);
 
                     // The crash window after external success but before terminal persistence must leave
@@ -179,7 +179,7 @@ public sealed class PostgreSqlDurableOperationExecutor(IDurableOperationJournal 
                     bool recorded;
                     try
                     {
-                        recorded = await journal.TryRecordSuccessAsync(key, attemptId, clock.GetUtcNow(),
+                        recorded = await outputs.CompleteAsync(key, attemptId, PostgreSqlDatabaseOutputContract.Encode(confirmed), clock.GetUtcNow(),
                             CancellationToken.None);
                     }
                     catch (OperationCanceledException)

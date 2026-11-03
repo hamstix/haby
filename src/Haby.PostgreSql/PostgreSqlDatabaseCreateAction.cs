@@ -67,6 +67,7 @@ public static class DurableActionServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDatabaseCreateAction(this IServiceCollection services)
     {
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDurableActionAdmissionHandler, PostgreSqlDatabaseCreateAdmission>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IExternalOperationOutputContract, PostgreSqlDatabaseOutputContract>());
         services.TryAddSingleton<DurableActionRegistry>();
         services.TryAddSingleton<DurableActionAdmission>();
         services.TryAddSingleton<DurableOperationSerialization>();

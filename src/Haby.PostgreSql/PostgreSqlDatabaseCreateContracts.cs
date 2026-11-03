@@ -39,6 +39,8 @@ public enum PostgreSqlDatabaseCreateDispatchOutcome
 /// </summary>
 public interface IPostgreSqlDatabaseCreateTarget
 {
+    ValueTask<PostgreSqlDatabaseOutput?> ReadDatabaseEvidenceAsync(PostgreSqlDatabaseCreateInput input,
+        CancellationToken cancellationToken);
     ValueTask<PostgreSqlDatabaseAbsenceOutcome> CheckDatabaseAbsentAsync(PostgreSqlDatabaseCreateInput input,
         CancellationToken cancellationToken);
     ValueTask<PostgreSqlDatabaseCreateDispatchOutcome> DispatchCreateAsync(PostgreSqlDatabaseCreateInput input,

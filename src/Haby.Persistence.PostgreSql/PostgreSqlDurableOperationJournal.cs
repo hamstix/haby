@@ -12,7 +12,8 @@ namespace Haby.Persistence.PostgreSql;
 /// rows are changed only by the separate audited recovery path; retained attempts are never
 /// rewritten and reads never consult the Provider alias.
 /// </summary>
-public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<ManifestCatalogDbContext> contexts)
+public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<ManifestCatalogDbContext> contexts,
+    IEnumerable<IExternalOperationOutputContract> outputContracts)
     : IDurableOperationJournal, IDurableOperationQuery
 {
     public async ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment,
@@ -263,7 +264,8 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
     {
         ArgumentNullException.ThrowIfNull(key);
         var local = await FindAsync(key, cancellationToken);
-        if (local is not null && GeneratedCredentialContracts.IsProducer(local.Node))
+        if (local is not null && (GeneratedCredentialContracts.IsProducer(local.Node) ||
+            outputContracts.Any(c => c.Producer == local.Node.Action)))
             return false;
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
@@ -409,6 +411,7 @@ public static class DurableOperationJournalServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlDurableOperationJournal(this IServiceCollection services)
     {
         services.TryAddSingleton<PostgreSqlDurableOperationJournal>();
+        services.TryAddSingleton<IExternalOperationOutputs, PostgreSqlExternalOperationOutputs>();
         services.TryAddSingleton<IDurableOperationJournal>(provider =>
             provider.GetRequiredService<PostgreSqlDurableOperationJournal>());
         services.TryAddSingleton<IDurableOperationQuery>(provider =>

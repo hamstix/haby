@@ -126,6 +126,8 @@ public sealed partial class OperatorHostIntegrationTests
     private sealed class NoActionTarget : IPostgreSqlDatabaseCreateTarget
     {
         public int Calls;
+        public ValueTask<PostgreSqlDatabaseOutput?> ReadDatabaseEvidenceAsync(PostgreSqlDatabaseCreateInput input, CancellationToken cancellationToken)
+        { throw new InvalidOperationException("Unexpected evidence read."); }
         public ValueTask<PostgreSqlDatabaseAbsenceOutcome> CheckDatabaseAbsentAsync(PostgreSqlDatabaseCreateInput input,
             CancellationToken cancellationToken)
         { Interlocked.Increment(ref Calls); throw new InvalidOperationException(); }
