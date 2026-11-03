@@ -29,6 +29,16 @@ execution, uncertainty and aggregate completion are common Haby contracts.
 They must not require a database Resource, database name/schema, PostgreSQL
 role, SQL transaction, database-owner policy or PostgreSQL password verifier.
 
+The #116 implementation clarification requires one shared reservation persistence
+model with ProviderInstanceId, EnvironmentRecordId, ApplicationRecordId,
+ResourceLocalId, Namespace and Value. Common API/EF code treats Namespace/Value
+as opaque and preserves owner and Provider-scoped uniqueness. Adapters compute
+and validate external identities; no Provider-specific table, column, enum or
+conditional branch is introduced. This narrow common association does not
+introduce a general reservation workflow, EAV catalog or arbitrary JSON model.
+Other catalog entities and the existing specialized checkpoint are not rewritten
+by this clarification.
+
 The database/login pair, database-owner/v1, PostgreSQL role-name policy,
 PUBLIC/schema privileges, SQL/SCRAM transport and database recovery are specific
 to the PostgreSQL adapter. Its five-node graph is one concrete plan, not a

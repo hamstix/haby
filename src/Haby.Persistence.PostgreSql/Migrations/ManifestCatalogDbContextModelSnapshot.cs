@@ -985,6 +985,48 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("provider_instances", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderResourceReservationRow", b =>
+                {
+                    b.Property<Guid>("ProviderInstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_instance_id");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<Guid>("ApplicationRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
+
+                    b.Property<string>("ResourceLocalId")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("resource_local_id");
+
+                    b.Property<string>("Namespace")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("namespace")
+                        .UseCollation("C");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("value")
+                        .UseCollation("C");
+
+                    b.HasKey("ProviderInstanceId", "EnvironmentRecordId", "ApplicationRecordId", "ResourceLocalId", "Namespace");
+
+                    b.HasIndex("ApplicationRecordId");
+
+                    b.HasIndex("ProviderInstanceId", "Namespace", "Value")
+                        .IsUnique();
+
+                    b.ToTable("provider_resource_reservations", (string)null);
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderRevisionSecretRefRow", b =>
                 {
                     b.Property<Guid>("ProviderInstanceId")
@@ -1453,6 +1495,22 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
                         .WithMany()
                         .HasForeignKey("EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderResourceReservationRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
+                        .WithMany()
+                        .HasForeignKey("ApplicationRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ProviderInstanceRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderInstanceId", "EnvironmentRecordId")
+                        .HasPrincipalKey("Id", "EnvironmentRecordId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
