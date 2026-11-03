@@ -195,8 +195,12 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var row = await act.ProviderResourceReservations.AsNoTracking().SingleAsync();
             act.ProviderResourceReservations.Add(new()
             {
-                ProviderInstanceId = row.ProviderInstanceId, EnvironmentRecordId = row.EnvironmentRecordId,
-                ApplicationRecordId = row.ApplicationRecordId, ResourceLocalId = "third-owner", Namespace = row.Namespace, Value = row.Value
+                ProviderInstanceId = row.ProviderInstanceId,
+                EnvironmentRecordId = row.EnvironmentRecordId,
+                ApplicationRecordId = row.ApplicationRecordId,
+                ResourceLocalId = "third-owner",
+                Namespace = row.Namespace,
+                Value = row.Value
             });
             var error = await Assert.ThrowsAsync<DbUpdateException>(() => act.SaveChangesAsync());
             Assert.True(error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation });
