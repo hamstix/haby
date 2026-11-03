@@ -9,7 +9,7 @@ internal sealed record CliDesiredGeneration(string DeploymentId, long Generation
     string EnvironmentRecordId, string EnvironmentId, CliReference Reference, string ProviderAlias,
     string ProviderInstanceId, long ConfigurationRevision, string ImplementationId, CliPlannedOperation[] Operations);
 internal sealed record CliCommitData(string StateMeaning, CliCommit? Commit,
-    CliDesiredGeneration? DesiredGeneration, long? ActualGeneration);
+    CliDesiredGeneration? DesiredGeneration, long? ActualGeneration, CliGenerationProgress? Progress);
 
 internal static class CommitPresentation
 {
@@ -50,7 +50,7 @@ internal static class CommitPresentation
             g.ChangeSetId, g.PlanId, g.AcceptedAtUtc, g.TechnicalActorId, g.EnvironmentRecordId, g.EnvironmentId,
             g.Reference is { } r ? new(r.ApplicationRecordId, r.RevisionNumber) : throw new InvalidDataException("Missing revision."),
             g.ProviderAlias, g.ProviderInstanceId, g.ConfigurationRevision, g.ImplementationId, PlanningPresentation.Operations(g.Operations)),
-        reply.HasActualGeneration ? reply.ActualGeneration : null);
+        reply.HasActualGeneration ? reply.ActualGeneration : null, GenerationPresentation.Progress(reply.Progress));
 }
 
 internal sealed partial class CliJsonPresenter
@@ -90,6 +90,7 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"Accepted UTC: {g.AcceptedAtUtc}; technical actor: {g.TechnicalActorId}");
             _output.WriteLine("This immutable desired snapshot does not confirm applied infrastructure.");
         }
+        PrintProgress(data.Progress);
         if (data.ActualGeneration is { } actual) _output.WriteLine($"Actual desired generation: {actual}");
         return exit;
     }

@@ -21,11 +21,16 @@ public sealed partial class OperatorHostIntegrationTests
     // The successful rehearsal never replaces production services. The other cases only remove
     // capabilities or inject the existing internal post-commit fault around real access SQL.
     [Theory]
-    [InlineData("success")]
-    [InlineData("uncertain")]
-    [InlineData("missing-handler")]
-    [InlineData("missing-output")]
-    public async Task Five_step_operator_path_uses_real_production_Host_and_published_native_client(string mode)
+    [InlineData("success", false)]
+    [InlineData("success", true)]
+    [InlineData("retry", true)]
+    [InlineData("uncertain", false)]
+    [InlineData("uncertain", true)]
+    [InlineData("missing-handler", false)]
+    [InlineData("missing-handler", true)]
+    [InlineData("missing-output", false)]
+    [InlineData("missing-output", true)]
+    public async Task Five_step_operator_path_uses_real_production_Host_and_published_native_client(string mode, bool generationExecution)
     {
         var connection = await NewDatabaseAsync();
         var target = "operator_pair_" + Guid.NewGuid().ToString("N");
@@ -119,9 +124,15 @@ public sealed partial class OperatorHostIntegrationTests
                     commit = (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Commit;
                 }
                 Assert.Equal(5, plan.Operations.Count);
+                var beforeProgress = await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
+                Assert.Equal(0, beforeProgress.Progress.Completed);
+                Assert.Equal(5, beforeProgress.Progress.Total);
+                Assert.False(beforeProgress.Progress.HasAppliedGeneration);
+                Assert.All(beforeProgress.Progress.Nodes, n => Assert.False(n.HasLastAttemptOutcome));
                 Assert.Equal(plan.Operations, (await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 })).DesiredGeneration.Operations);
                 Assert.Null(plan.IntendedWork.Action); // The single-action detail is not a pair description.
                 Assert.Equal(Haby.Operator.Contracts.PlanDescriptionStatus.UnsupportedShape, plan.IntendedWork.Status);
+                var immutable = await PairSnapshot(connection);
                 await AssertPairCatalog(connection, 0, 0, 0, 0, applied: false);
                 await AssertPairExternalAbsent(target, role);
                 foreach (var node in plan.Operations.Where(n => n.Dependencies.Count > 0))
@@ -129,20 +140,30 @@ public sealed partial class OperatorHostIntegrationTests
                     var request = PairRequest(commit, node.OperationId);
                     Assert.Equal(OperationStatus.Blocked, (await client.ExecuteOperationAsync(request)).Status);
                     Assert.Empty((await client.GetOperationAsync(request)).Attempts);
-                    if (native.Available) await native.Run(OperationArgs("execute", request), expectedExit: 1, outcome: "blocked");
+                    if (!generationExecution && native.Available) await native.Run(OperationArgs("execute", request), expectedExit: 1, outcome: "blocked");
                 }
                 await AssertPairExternalAbsent(target, role);
                 // Move the mutable alias after acceptance. All five nodes must retain revision 1.
                 await client.ApplyProviderAsync(new() { Declaration = ByteString.CopyFromUtf8(declaration.Replace("\"revision\":1", "\"revision\":2", StringComparison.Ordinal)) });
                 Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(new() { Environment = "pilot", Alias = "postgresql.primary", Target = new() { Name = "pg-main", Revision = 2 }, Expected = new() { Name = "pg-main", Revision = 1 } })).Status);
                 if (mode == "success")
-                    await ExecutePair(client, native, connection, plan, commit);
+                    await ExecutePair(client, native, connection, plan, commit, generationExecution: generationExecution);
                 if (mode == "success") history = await PairHistory(client, plan, commit);
+                if (mode == "retry")
+                    Assert.Equal(OperationStatus.Succeeded, (await client.ExecuteOperationAsync(PairRequest(commit, Ordered(plan)[0].OperationId))).Status);
+                Assert.True(immutable == await PairSnapshot(connection), "Execution changed immutable graph/fingerprint.");
                 await host.StopAsync();
             }
             if (mode != "success")
             {
-                var host = OperatorHostApplication.Build(Arguments(connection, certificatePath), services =>
+                var hostConnection = connection;
+                var readerRole = "generation_reader_" + Guid.NewGuid().ToString("N");
+                if (mode == "retry")
+                {
+                    await ExecutionSql(connection, $"CREATE ROLE {readerRole}; GRANT ALL ON SCHEMA public TO {readerRole}; GRANT ALL ON ALL TABLES IN SCHEMA public TO {readerRole}; REVOKE SELECT ON secret_payloads FROM {readerRole}");
+                    hostConnection = new NpgsqlConnectionStringBuilder(connection) { Options = "-c role=" + readerRole }.ConnectionString;
+                }
+                var host = OperatorHostApplication.Build(Arguments(hostConnection, certificatePath), services =>
                 {
                     services.AddLogging(b => b.AddProvider(logs));
                     if (mode == "uncertain") services.AddSingleton<IPostgreSqlAccessFaultHooks>(fault);
@@ -157,12 +178,34 @@ public sealed partial class OperatorHostIntegrationTests
                     native.Endpoint = host.Urls.Single();
                     using var channel = Channel(host, certificate);
                     var client = new ManifestOperator.ManifestOperatorClient(channel);
-                    if (mode == "uncertain") await ExecutePair(client, native, connection, plan, commit, uncertain: true);
+                    if (mode == "retry")
+                    {
+                        var stopped = await client.ExecuteGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
+                        Assert.Equal(GenerationExecutionStatus.RetryableFailure, stopped.Status);
+                        Assert.Equal(OperationStatus.RetryableFailure, stopped.StopOutcome);
+                        Assert.Equal(1, stopped.Progress.Completed);
+                        Assert.False(stopped.Progress.HasAppliedGeneration);
+                        Assert.Equal(Ordered(plan)[1].OperationId, stopped.StoppedOperationId);
+                        Assert.Equal(3, stopped.Progress.Nodes.Count(n => n.Operation.State == OperationState.Pending));
+                        Assert.Equal(2, stopped.Progress.Nodes.Sum(n => n.Operation.AttemptNumber));
+                        var read = await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
+                        Assert.Equal(stopped.Progress, read.Progress);
+                        if (native.Available) await native.Run(["deployment", "generation", "get", commit.DeploymentId, "1"]);
+                        // The failed invocation ended. Restore the exact material access, then make a new explicit request.
+                        await ExecutionSql(connection, $"GRANT SELECT ON secret_payloads TO {readerRole}");
+                        await ExecutePair(client, native, connection, plan, commit, generationExecution: true, resumed: true);
+                    }
+                    else if (mode == "uncertain") await ExecutePair(client, native, connection, plan, commit, uncertain: true, generationExecution: generationExecution);
                     else
                     {
                         var first = PairRequest(commit, Ordered(plan).First().OperationId);
                         Assert.Equal(OperationStatus.HandlerUnavailable, (await client.ExecuteOperationAsync(first)).Status);
                         if (native.Available) await native.Run(OperationArgs("execute", first), expectedExit: 2, outcome: "handlerUnavailable");
+                        if (generationExecution)
+                        {
+                            Assert.Equal(GenerationExecutionStatus.HandlerUnavailable, (await client.ExecuteGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 })).Status);
+                            if (native.Available) await native.Run(["deployment", "generation", "execute", commit.DeploymentId, "1"], expectedExit: 2, outcome: "handlerUnavailable");
+                        }
                         await AssertPairCatalog(connection, 0, 0, 0, 0, applied: false);
                         await AssertPairExternalAbsent(target, role);
                         return;
@@ -190,7 +233,7 @@ public sealed partial class OperatorHostIntegrationTests
                 try
                 {
                     native.ForbiddenMaterial = Encoding.ASCII.GetString(saved);
-                    if (mode == "success")
+                    if (mode != "uncertain")
                     {
                         await using var context = PairContext(connection);
                         var row = await context.OperationOutputs.AsNoTracking().SingleAsync(o => o.OperationId == Ordered(plan).Last().OperationId);
@@ -204,6 +247,22 @@ public sealed partial class OperatorHostIntegrationTests
                         await AssertPairOwnership(target, role);
                     }
                     Assert.Equal(history, await PairHistory(client, plan, commit));
+                    var before = await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
+                    Assert.Equal(plan.Operations, before.DesiredGeneration.Operations);
+                    Assert.Equal(mode != "uncertain" ? 5 : 4, before.Progress.Completed);
+                    Assert.Equal(mode != "uncertain", before.Progress.HasAppliedGeneration);
+                    if (generationExecution)
+                    {
+                        var expectedGeneration = mode != "uncertain" ? GenerationExecutionStatus.Succeeded : GenerationExecutionStatus.NeedsAttention;
+                        Assert.Equal(expectedGeneration, (await client.ExecuteGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 })).Status);
+                        if (native.Available)
+                        {
+                            await native.Run(["deployment", "generation", "get", commit.DeploymentId, "1"]);
+                            await native.Run(["deployment", "generation", "execute", commit.DeploymentId, "1"], expectedExit: mode != "uncertain" ? 0 : 1,
+                                outcome: mode != "uncertain" ? "succeeded" : "needsAttention");
+                        }
+                        Assert.Equal(before, await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 }));
+                    }
                     foreach (var original in history)
                     {
                         Assert.Equal(1, original.Operation.ConfigurationRevision);
@@ -223,7 +282,7 @@ public sealed partial class OperatorHostIntegrationTests
                 }
                 finally { Array.Clear(saved); }
             }
-            await AssertPairCatalog(connection, 5, mode == "success" ? 4 : 3, 1, 1, applied: mode == "success");
+            await AssertPairCatalog(connection, mode == "retry" ? 6 : 5, mode != "uncertain" ? 4 : 3, 1, 1, applied: mode != "uncertain");
             Assert.True(originalIdentities == await PairIdentities(connection), "Successful/uncertain repeats changed retained identities or outputs.");
             Assert.Equal(mode == "uncertain" ? 1 : 0, fault.Commits);
             Assert.False((native.Transcript + logs.Text).Contains(admin.Password!, StringComparison.Ordinal));
@@ -275,22 +334,51 @@ public sealed partial class OperatorHostIntegrationTests
     }
 
     private static async Task ExecutePair(ManifestOperator.ManifestOperatorClient client, OperatorNativeClient native,
-        string connection, DurablePlanSummary plan, DurableCommitSummary commit, bool uncertain = false)
+        string connection, DurablePlanSummary plan, DurableCommitSummary commit, bool uncertain = false, bool generationExecution = false, bool resumed = false)
     {
+        var snapshot = await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
+        if (generationExecution)
+        {
+            if (native.Available)
+                await native.Run(["deployment", "generation", "execute", commit.DeploymentId, "1"], expectedExit: uncertain ? 1 : 0,
+                    outcome: uncertain ? "needsAttention" : "succeeded");
+            else Assert.Equal(uncertain ? GenerationExecutionStatus.NeedsAttention : GenerationExecutionStatus.Succeeded,
+                (await client.ExecuteGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 })).Status);
+            var after = await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
+            Assert.Equal(snapshot.DesiredGeneration, after.DesiredGeneration);
+            Assert.Equal(uncertain ? 4 : 5, after.Progress.Completed);
+            Assert.Equal(!uncertain, after.Progress.HasAppliedGeneration);
+        }
         var ordered = Ordered(plan);
         for (var index = 0; index < ordered.Length; index++)
         {
             var request = PairRequest(commit, ordered[index].OperationId);
             var expected = uncertain && index == 4 ? OperationStatus.NeedsAttention : OperationStatus.Succeeded;
-            if (native.Available) await native.Run(OperationArgs("execute", request), expectedExit: expected == OperationStatus.Succeeded ? 0 : 1,
+            if (!generationExecution && native.Available) await native.Run(OperationArgs("execute", request), expectedExit: expected == OperationStatus.Succeeded ? 0 : 1,
                 outcome: expected == OperationStatus.Succeeded ? "succeeded" : "needsAttention");
-            else Assert.Equal(expected, (await client.ExecuteOperationAsync(request)).Status);
+            else if (!generationExecution) Assert.Equal(expected, (await client.ExecuteOperationAsync(request)).Status);
             var view = await client.GetOperationAsync(request);
-            Assert.Single(view.Attempts);
+            Assert.Equal(resumed && index == 1 ? 2 : 1, view.Attempts.Count);
             Assert.Equal(expected == OperationStatus.Succeeded ? OperationState.Succeeded : OperationState.NeedsAttention, view.Operation.State);
             await using var verify = PairContext(connection);
-            Assert.Equal(index == 4 && !uncertain ? 1L : null, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            Assert.Equal((generationExecution || index == 4) && !uncertain ? 1L : null, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
         }
+        if (generationExecution)
+        {
+            var history = await PairHistory(client, plan, commit);
+            var identities = await PairIdentities(connection);
+            Assert.Equal(uncertain ? GenerationExecutionStatus.NeedsAttention : GenerationExecutionStatus.Succeeded,
+                (await client.ExecuteGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 })).Status);
+            Assert.Equal(history, await PairHistory(client, plan, commit));
+            Assert.True(identities == await PairIdentities(connection), "Repeat changed retained output/material identities.");
+        }
+    }
+
+    private static async Task<string> PairSnapshot(string connection)
+    {
+        await using var context = PairContext(connection);
+        var generation = await context.DeploymentGenerations.AsNoTracking().SingleAsync();
+        return generation.Fingerprint + ":" + generation.GraphJson;
     }
 
     private static async Task<string> PairIdentities(string connection)
@@ -299,7 +387,8 @@ public sealed partial class OperatorHostIntegrationTests
         var outputs = await context.OperationOutputs.AsNoTracking().OrderBy(r => r.OperationId).Select(r => r.Payload).ToArrayAsync();
         var slots = await context.GeneratedCredentialSlots.AsNoTracking().Select(r => new { r.SecretId, r.VersionId }).ToArrayAsync();
         var names = await context.ProviderResourceReservations.AsNoTracking().Select(r => r.Value).ToArrayAsync();
-        return string.Join('|', outputs.Concat(slots.Select(r => r.SecretId + ":" + r.VersionId)).Concat(names));
+        var generation = await context.DeploymentGenerations.AsNoTracking().SingleAsync();
+        return string.Join('|', outputs.Concat(slots.Select(r => r.SecretId + ":" + r.VersionId)).Concat(names)) + ":" + generation.Fingerprint + ":" + generation.GraphJson;
     }
 
     private static async Task AssertPairCatalog(string connection, int attempts, int outputs, int slots, int reservations, bool applied)
@@ -397,7 +486,17 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.False((text + errors).Contains(administrativePassword, StringComparison.Ordinal));
             Assert.False(ForbiddenMaterial is not null && (text + errors).Contains(ForbiddenMaterial, StringComparison.Ordinal));
             Assert.DoesNotContain("SCRAM-SHA-256$", text + errors);
-            Assert.True(process.ExitCode == expectedExit, $"{string.Join(' ', args.Take(2))} exit {process.ExitCode}, expected {expectedExit}; safe stderr length {errors.Length}.");
+            var safeOutcome = "(text)";
+            if (format == "json" && text.Length > 0)
+            {
+                using var result = JsonDocument.Parse(text);
+                safeOutcome = result.RootElement.GetProperty("outcome"u8).GetString()!;
+                if (result.RootElement.GetProperty("data"u8).TryGetProperty("progress"u8, out var progress))
+                    safeOutcome += ":" + string.Join(',', progress.GetProperty("nodes"u8).EnumerateArray().Select(n =>
+                        n.GetProperty("operation"u8).GetProperty("state"u8).GetString() + "/" +
+                        (n.GetProperty("operation"u8).TryGetProperty("reason"u8, out var reason) ? reason.GetString() : "none")));
+            }
+            Assert.True(process.ExitCode == expectedExit, $"{string.Join(' ', args.Take(2))} exit {process.ExitCode}, expected {expectedExit}; outcome {safeOutcome}; safe stderr length {errors.Length}.");
             Assert.Equal("", errors);
             LastText = text;
             Transcript += text;

@@ -265,9 +265,11 @@ public sealed partial class OperatorHostIntegrationTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Transport_cancellation_preserves_barrier_and_durable_history(bool afterMarker)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Transport_cancellation_preserves_barrier_and_durable_history(bool afterMarker, bool generationExecution)
     {
         await using var scenario = await ExecutionScenarioAsync();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -286,13 +288,15 @@ public sealed partial class OperatorHostIntegrationTests
             var client = new ManifestOperator.ManifestOperatorClient(channel);
             request = await CommitExecutionAsync(client, scenario.Database);
             using var cancellation = new CancellationTokenSource();
-            using var call = client.ExecuteOperationAsync(request, cancellationToken: cancellation.Token);
+            using var operationCall = generationExecution ? null : client.ExecuteOperationAsync(request, cancellationToken: cancellation.Token);
+            using var generationCall = generationExecution ? client.ExecuteGenerationAsync(new() { DeploymentId = request.DeploymentId, Generation = 1 }, cancellationToken: cancellation.Token) : null;
+            Task response = generationExecution ? generationCall!.ResponseAsync : operationCall!.ResponseAsync;
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
             // A read concurrent with the paused execution is read-only and does not wait on its semaphore.
             var observed = await client.GetOperationAsync(request);
             Assert.Equal(afterMarker ? OperationState.Dispatching : OperationState.Preparing, observed.Operation.State);
             cancellation.Cancel();
-            var error = await Assert.ThrowsAsync<RpcException>(async () => await call.ResponseAsync);
+            var error = await Assert.ThrowsAsync<RpcException>(async () => await response);
             Assert.Equal(StatusCode.Cancelled, error.StatusCode);
             await completed.Task.WaitAsync(TimeSpan.FromSeconds(15));
             // Graceful stop drains the canceled request before restarting the same catalog.
@@ -308,8 +312,10 @@ public sealed partial class OperatorHostIntegrationTests
         await AssertExecutionCatalog(scenario, exists: !afterMarker, applied: !afterMarker, dispatched: 1);
     }
 
-    [Fact]
-    public async Task Published_native_CLI_imports_plans_commits_executes_and_reads_the_real_PostgreSQL_effect()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Published_native_CLI_imports_plans_commits_executes_and_reads_the_real_PostgreSQL_effect(bool generationExecution)
     {
         var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
         if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
@@ -333,7 +339,7 @@ public sealed partial class OperatorHostIntegrationTests
                 using var accepted = await Run("changeset", "commit", changeId, "--plan", plan);
                 deployment = accepted.RootElement.GetProperty("data"u8).GetProperty("commit"u8).GetProperty("deploymentId"u8).GetString()!;
                 await AssertExecutionCatalog(scenario, exists: false, applied: false, dispatched: 0);
-                using var executed = await Run("operation", "execute", deployment, "1", "db-create");
+                using var executed = await Run(generationExecution ? ["deployment", "generation", "execute", deployment, "1"] : ["operation", "execute", deployment, "1", "db-create"]);
                 Assert.Equal("succeeded", executed.RootElement.GetProperty("outcome"u8).GetString());
                 Assert.DoesNotContain(scenario.Password, executed.RootElement.GetRawText());
             }
@@ -342,7 +348,7 @@ public sealed partial class OperatorHostIntegrationTests
                 var args = new[] { "operation", "get", deployment, "1", "db-create" };
                 using var before = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(), args));
                 using var retry = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(),
-                    ["operation", "execute", deployment, "1", "db-create"]));
+                    generationExecution ? ["deployment", "generation", "execute", deployment, "1"] : ["operation", "execute", deployment, "1", "db-create"]));
                 using var after = JsonDocument.Parse(await RunNativeCommitCli(binary, restarted.Urls.Single(), args));
                 Assert.Equal(before.RootElement.GetRawText(), after.RootElement.GetRawText());
                 var operation = after.RootElement.GetProperty("data"u8);

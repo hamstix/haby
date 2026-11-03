@@ -163,7 +163,60 @@ a standalone-only description of the full workflow. A valid Plan/Check still
 reports planned/current, and text/JSON show all five nodes. No payload or password
 is included in these summaries.
 
-## Five explicit executions
+## Execute the committed generation
+
+The earlier rehearsal required five manually selected operation requests, checking
+and retaining each ID/result in dependency order. Issue #122 removes that operator
+loop while retaining the separate import, Plan, Check and explicit Commit above.
+The server's real `DurableGenerationRunner` owns the sequential pass; the CLI
+sends exactly one execution RPC and never accesses the target infrastructure.
+
+```powershell
+$executed = Invoke-Registry @('deployment', 'generation', 'execute', $deploymentId, $generation)
+$progress = $executed.data.progress
+if ($progress.completed -ne $progress.total -or $progress.appliedGeneration -ne 1) {
+    throw 'Generation incomplete; stop and inspect.'
+}
+$observed = Invoke-Registry @('deployment', 'generation', 'get', $deploymentId, $generation)
+```
+
+Successful text includes `succeeded` and `completed: 5/5`, desired/applied 1.
+JSON is one source-generated envelope and newline; `outcome: succeeded` has
+`data.progress.completed: 5`, `total: 5`, `appliedGeneration: 1`, and all five
+node states `succeeded`. The read-only get retains `data.desiredGeneration`
+unchanged and adds `data.progress`. Standalone database execution uses the
+same command and completes 1/1. Neither read nor startup dispatches anything.
+
+The pass skips successes without new attempts/material/outputs. It stops on the
+first non-success, including existing Failed/Dispatching/NeedsAttention even if
+independent Pending work is ready. One safely retryable pre-dispatch refusal
+ends this invocation; it never loops retries. After inspecting and removing that
+specific cause, a **later explicit** generation execute can resume allowed safe
+work and retain earlier successes. A retryable result is not permission to
+retry an uncertain operation. Dispatching is conservatively transitioned to
+NeedsAttention without redispatch. Role/access recovery stays deferred.
+
+For a lost, canceled or timed-out response, do not assume rollback or repeat:
+
+```powershell
+& $cli deployment generation get $deploymentId $generation --config $config -o json
+if ($LASTEXITCODE -ne 0) { throw 'Progress unavailable; stop.' }
+# Inspect the returned stopped/problematic node using operation get below.
+```
+
+Cancellation stops scheduling further nodes; an already dispatched effect may
+have completed. No background continuation or automatic transport retry exists.
+If progress is still Preparing/Dispatching, inspect again read-only after the
+request has drained; do not infer from a disconnected client that the server
+has already stopped. NeedsAttention requires a separately approved resolution,
+not a blind generation or operation repeat. See the exact
+[outcome/exit contract](122-generation-execute.md).
+
+## Per-node diagnostic and control path
+
+The following alternative remains available for diagnosing or deliberately
+executing one exact node at a time. Normal use is generation execute above.
+Do not run both blocks expecting new effects: successful work is retained.
 
 Select the IDs returned by this Plan, never guessed IDs. These are action-contract
 selectors for this rehearsal only; the CLI has no Provider-specific workflow verb.
@@ -212,10 +265,10 @@ over the same catalog with the same ordinary configuration. Repeat reads and
 execution after restart:
 
 ```powershell
-$repeat = Invoke-Registry @('operation', 'execute', $deploymentId, $generation, $access)
+$repeat = Invoke-Registry @('deployment', 'generation', 'execute', $deploymentId, $generation)
 # Operator: stop/restart the same single Host now, preserving its catalog.
-$afterRestart = Invoke-Registry @('operation', 'get', $deploymentId, $generation, $access)
-$repeatAfterRestart = Invoke-Registry @('operation', 'execute', $deploymentId, $generation, $access)
+$afterRestart = Invoke-Registry @('deployment', 'generation', 'get', $deploymentId, $generation)
+$repeatAfterRestart = Invoke-Registry @('deployment', 'generation', 'execute', $deploymentId, $generation)
 ```
 
 Compare all five states/attempt histories, exact Provider references, slot/ref,

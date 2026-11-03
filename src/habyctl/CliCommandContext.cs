@@ -30,6 +30,20 @@ internal sealed partial class CliCommandContext(
     internal int PrintCommit(string command, CommitReply reply) =>
         jsonOutput() ? jsonPresenter.PrintCommit(command, reply) : presenter.PrintCommit(command, reply);
 
+    internal async Task<int> ExecuteGenerationAsync(GenerationRequest request, CancellationToken token)
+    {
+        var responseReceived = false;
+        var exit = await ExecuteAsync(async (client, ct) =>
+        {
+            var reply = await client.ExecuteGenerationAsync(request, ct);
+            responseReceived = true;
+            return jsonOutput() ? jsonPresenter.PrintGeneration(reply) : presenter.PrintGeneration(reply);
+        }, token);
+        if (exit == CliApplication.TransportError && !responseReceived)
+            error.WriteLine($"Execution response unavailable; cancellation or connection loss does not prove rollback. Inspect: habyctl deployment generation get {request.DeploymentId} {request.Generation}. Do not automatically repeat execution.");
+        return exit;
+    }
+
     internal int PrintOperation(string command, OperationReply reply) =>
         jsonOutput() ? jsonPresenter.PrintOperation(command, reply) : presenter.PrintOperation(command, reply);
 

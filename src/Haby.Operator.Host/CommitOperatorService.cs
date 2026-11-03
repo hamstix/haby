@@ -80,7 +80,16 @@ public sealed partial class ManifestOperatorService
         catch (ArgumentException) { return CommitResult(CommitStatus.InvalidRequest); }
         var saved = await committer.FindGenerationAsync(id, generation, context.CancellationToken);
         return saved is null ? CommitResult(CommitStatus.GenerationNotFound)
-            : new CommitReply { Status = CommitStatus.Found, DesiredGeneration = Summary(saved) };
+            : new CommitReply
+            {
+                Status = CommitStatus.Found,
+                DesiredGeneration = Summary(saved),
+                Progress = await OperationCall(async () =>
+                {
+                    var progress = await generationRunner.ProgressAsync(id, generation, context.CancellationToken);
+                    return progress is null ? null : Summary(progress);
+                }, context)
+            };
     }
 
     private static CommitReply CommitResult(CommitStatus status) => new() { Status = status };

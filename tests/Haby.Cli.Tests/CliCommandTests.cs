@@ -75,6 +75,7 @@ public sealed class CliCommandTests
             throw new NotImplementedException();
         public Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
             throw new NotImplementedException();
+        public Task<GenerationExecutionReply> ExecuteGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken) =>
             throw new NotImplementedException();
         public Task<OperationReply> ExecuteOperationAsync(OperationRequest request, CancellationToken cancellationToken) =>
