@@ -52,7 +52,11 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
             }
             return;
         }
-        _container = new PostgreSqlBuilder("postgres:17.6-alpine").Build();
+        // A unique confidential sentinel cannot collide with ordinary metadata such as
+        // "postgresql" in captured CLI output, unlike the fixture's default password.
+        _container = new PostgreSqlBuilder("postgres:17.6-alpine")
+            .WithPassword(Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))
+            .Build();
         await _container.StartAsync();
         ConnectionString = new NpgsqlConnectionStringBuilder(_container.GetConnectionString())
         { Pooling = false }.ConnectionString;
