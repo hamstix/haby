@@ -13,5 +13,6 @@ public sealed record ProviderResourceReservation(ProviderInstanceId ProviderInst
 /// Storage failures must not be confused with an accepted or reassigned identity.</summary>
 public interface IProviderResourceReservations
 {
+    ValueTask<bool> ContainsAsync(ProviderResourceReservation reservation, CancellationToken cancellationToken);
     ValueTask<bool> TryReserveAsync(ProviderResourceReservation reservation, CancellationToken cancellationToken);
 }

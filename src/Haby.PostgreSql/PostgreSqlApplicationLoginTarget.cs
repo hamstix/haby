@@ -159,8 +159,8 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
         }
     }
 
-    private static async Task<bool> Authenticate(NpgsqlConnectionStringBuilder admin, PostgreSqlLoginTargetInput input,
-        byte[] password, CancellationToken token)
+    internal static async Task<bool> Authenticate(NpgsqlConnectionStringBuilder admin, PostgreSqlLoginTargetInput input,
+        byte[] password, CancellationToken token, string? schema = null)
     {
         // Do not give a non-superuser the administrator-only logging startup options.
         var builder = new NpgsqlConnectionStringBuilder(admin.ConnectionString)
@@ -174,6 +174,16 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
                 await using var identity = new NpgsqlCommand("SELECT current_user = $1 AND pg_catalog.current_database() = $2", login);
                 identity.Parameters.AddWithValue(input.RoleName); identity.Parameters.AddWithValue(input.Database.DatabaseName);
                 if (await identity.ExecuteScalarAsync(token) is not true) return false;
+                if (schema is not null)
+                {
+                    await using var access = new NpgsqlCommand("""
+                        SELECT pg_catalog.current_schema() = $1
+                          AND pg_catalog.has_schema_privilege(current_user, $1, 'USAGE,CREATE')
+                          AND pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'CONNECT,CREATE,TEMP')
+                        """, login);
+                    access.Parameters.AddWithValue(schema);
+                    if (await access.ExecuteScalarAsync(token) is not true) return false;
+                }
             }
             // A successful correct password under trust is insufficient. Refuse publication unless
             // an independent wrong-password connection actually receives invalid_password.
@@ -201,7 +211,7 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
         return await command.ExecuteScalarAsync(token) is true;
     }
 
-    private static async Task<bool> DatabaseEvidence(NpgsqlConnection connection, NpgsqlTransaction? transaction,
+    internal static async Task<bool> DatabaseEvidence(NpgsqlConnection connection, NpgsqlTransaction? transaction,
         PostgreSqlLoginTargetInput input, CancellationToken token)
     {
         await using var command = new NpgsqlCommand("""
@@ -231,7 +241,7 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
         command.Parameters.AddWithValue(role);
         return await command.ExecuteScalarAsync(token) is uint oid ? oid : 0;
     }
-    private static async Task<bool> RoleEvidence(NpgsqlConnection connection, PostgreSqlLoginTargetInput input, uint oid, CancellationToken token)
+    internal static async Task<bool> RoleEvidence(NpgsqlConnection connection, PostgreSqlLoginTargetInput input, uint oid, CancellationToken token)
     {
         await using var command = new NpgsqlCommand("""
             SELECT r.oid = $1 AND r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole

@@ -32,6 +32,26 @@ public sealed class PostgreSqlPairPlanningTests
         ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), ProviderAlias.Create("postgresql.primary"),
         ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), Provider.ImplementationId);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Competing_owner_policies_are_rejected_independently_of_declaration_order_and_bindings(bool reverse)
+    {
+        var envelope = Example(); var resources = envelope["manifest"]!["spec"]!["resources"]!.AsObject();
+        var duplicate = resources["app-login"]!.DeepClone();
+        if (reverse)
+        {
+            resources.Remove("app-login"); resources["other-login"] = duplicate; resources["app-login"] = duplicate.DeepClone();
+        }
+        else resources["other-login"] = duplicate;
+        var spec = Spec(envelope); var inputs = Inputs(); var configuration = Configuration(); var admission = Admission();
+        Assert.False(PostgreSqlPairResourceAdmission.HasSingleOwner(spec));
+        Assert.Equal(DurablePlanStatus.UnsupportedShape, admission.Admit(spec, Provider, inputs, configuration));
+        var original = admission.Plan(Spec(Example()), Provider, inputs, configuration);
+        Assert.False(admission.ValidateGraph(spec, Provider, inputs, configuration, original));
+        Assert.True(PostgreSqlPairResourceAdmission.HasSingleOwner(Spec(Example())));
+    }
+
     [Fact]
     public void Example_has_exact_five_mandatory_nodes_owners_dependencies_and_future_selectors_without_executors()
     {

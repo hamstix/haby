@@ -10,6 +10,9 @@ public interface IExternalOperationOutputContract
 {
     DurableActionExecutionKey Producer { get; }
     bool Validate(DurableOperationNode node, ExternalOperationOutput output);
+    /// <summary>Optional adapter-owned validation against the exact accepted context and pinned inputs.</summary>
+    ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
+        ExternalOperationOutput output, CancellationToken cancellationToken) => new(Validate(accepted.Node, output));
 }
 
 public sealed record AcceptedOperation(DurablePlanningInputs Inputs, DurableOperationGraph Graph,

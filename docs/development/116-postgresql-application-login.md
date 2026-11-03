@@ -1,5 +1,9 @@
 # PostgreSQL application login creation
 
+Subsequent [issue #118](118-postgresql-owner-access.md) implements the final real
+ownership/access action and complete five-node test composition. Production Host
+pair activation remains deferred. The scope below records the earlier #116 slice.
+
 Issue #116 implements the login-create slice of accepted ADR-006/025/026/032/033/034.
 It does not enable the production database/login pair. The Host registrations,
 common whole-graph capability gate and direct standalone database entry remain

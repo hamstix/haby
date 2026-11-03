@@ -19,7 +19,7 @@ public sealed partial class ExactActionAdmissionTests
     public sealed record QueueEvidence(string QueueName, string BrokerTarget, string Receipt);
     public sealed record QueueSubscribeInput(string QueueName);
 
-    private sealed class QueueEvidenceContract : IExternalOperationOutputContract
+    private sealed class QueueEvidenceContract(IProviderConfigurationStore configurations, QueueBoundary boundary) : IExternalOperationOutputContract
     {
         public const string Contract = "sample.queue-evidence/v1";
         public DurableActionExecutionKey Producer => Key;
@@ -34,6 +34,15 @@ public sealed partial class ExactActionAdmissionTests
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => node.Action == Producer &&
             node.Input.Format == "sample.queue-create/v1" && Decode(output) is { QueueName: "jobs", BrokerTarget: "queue-broker", Receipt: { Length: > 0 } } &&
             JsonSerializer.Deserialize(node.Input.Json, QueueJsonContext.Default.QueueCreateInput)?.QueueName == "jobs";
+        public async ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
+            ExternalOperationOutput output, CancellationToken cancellationToken)
+        {
+            var configuration = await configurations.FindRevisionAsync<SampleConfiguration>(accepted.Inputs.Environment,
+                accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken);
+            return !boundary.RejectAcceptedOutput && Validate(accepted.Node, output) &&
+                accepted.Spec.Resources[accepted.Node.ResourceId].Type == QueueContract &&
+                Decode(output)?.BrokerTarget == configuration?.Configuration.Target;
+        }
     }
 
     // Test-only adapter boundary: counted queue effects, never PostgreSQL database evidence or a production broker.
@@ -118,6 +127,35 @@ public sealed partial class ExactActionAdmissionTests
     [JsonSerializable(typeof(QueueEvidence))]
     [JsonSerializable(typeof(QueueSubscribeInput))]
     internal partial class QueueEvidenceJsonContext : JsonSerializerContext;
+
+    [Fact]
+    public async Task Non_database_adapter_context_validation_can_refuse_publication_and_consumption_without_common_provider_branches()
+    {
+        var boundary = new QueueBoundary { ExternalEvidence = true, RejectAcceptedOutput = true };
+        var scenario = await GraphCase(boundary);
+        var producer = new DurableOperationKey(scenario.Commit.DeploymentId, scenario.Commit.Generation, QueueEvidenceProducerId);
+        await using (var act = Services(scenario.Connection, boundary))
+            Assert.Equal(DurableExecutionOutcome.NeedsAttention, (await act.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(producer, default)).Outcome);
+        boundary.RejectAcceptedOutput = false;
+        await using (var restart = Services(scenario.Connection, boundary))
+            Assert.Equal(DurableExecutionOutcome.NeedsAttention, (await restart.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(producer, default)).Outcome);
+        Assert.Equal(1, boundary.Calls);
+        await using (var verify = OutputContext(scenario.Connection))
+        {
+            Assert.Empty(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
+            Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        }
+        var acceptedBoundary = new QueueBoundary { ExternalEvidence = true };
+        var acceptedScenario = await GraphCase(acceptedBoundary);
+        producer = new(acceptedScenario.Commit.DeploymentId, acceptedScenario.Commit.Generation, QueueEvidenceProducerId);
+        var consumer = producer with { OperationId = QueueEvidenceConsumerId };
+        await using (var act = Services(acceptedScenario.Connection, acceptedBoundary))
+            Assert.Equal(DurableExecutionOutcome.Succeeded, (await act.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(producer, default)).Outcome);
+        acceptedBoundary.RejectAcceptedOutput = true;
+        await using (var restart = Services(acceptedScenario.Connection, acceptedBoundary))
+            Assert.Null(await restart.GetRequiredService<IExternalOperationOutputs>().ConsumeAsync(consumer, QueueEvidenceSelector, default));
+        Assert.Equal(1, acceptedBoundary.Calls);
+    }
 
     [Fact]
     public async Task Non_database_external_output_crosses_generic_dispatch_publication_consumption_and_restart()

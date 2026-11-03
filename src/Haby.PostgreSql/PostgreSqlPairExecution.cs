@@ -4,11 +4,10 @@ namespace Haby.PostgreSql;
 
 internal static class PostgreSqlPairExecution
 {
-    // Only the exact accepted policy's four-step internal prefix. This never admits
-    // a different manifest policy or makes a five-step generation executable.
-    internal static bool IsPrefix(AcceptedOperation accepted, PreparedProviderConfiguration configuration)
+    // Retain the four-step effect fixture and admit the exact complete policy graph.
+    internal static bool IsSupported(AcceptedOperation accepted, PreparedProviderConfiguration configuration)
     {
-        if (accepted.Graph.Nodes.Count != 4) return false;
+        if (accepted.Graph.Nodes.Count is not (4 or 5)) return false;
         try
         {
             var expected = new List<DurableOperationNode>();
@@ -17,7 +16,7 @@ internal static class PostgreSqlPairExecution
                 var admission = new PostgreSqlPairResourceAdmission(resource.Value.Type);
                 if (!admission.Validate(accepted.Spec, resource.Key, accepted.Inputs, configuration)) return false;
                 expected.AddRange(admission.Plan(accepted.Spec, resource.Key, accepted.Inputs, configuration)
-                    .Where(n => n.Id.Value != "app-login-access"));
+                    .Where(n => accepted.Graph.Nodes.Count == 5 || n.Id.Value != "app-login-access"));
             }
             return new DurableOperationGraph(expected).Equals(accepted.Graph);
         }
