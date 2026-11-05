@@ -536,6 +536,13 @@ and confidential retrieval follow their explicit implementation/security gates.
 Provider-specific option schemas remain adapter-owned. Profiles never silently
 change accepted generations, and delivery is not the unauthenticated operator API.
 
+The [first composition slice](docs/architecture/configuration-composition-v1.md)
+starts with the pure static-template/ready-fragment composer, typed deferred
+Arguments and a separate redacted JSON preview. It performs no secret resolution,
+formatter execution, persistence or Host/CLI integration. Minimal Profile wire
+contracts and expansion follow on the same boundary, before exact-generation
+materialization and authorized delivery.
+
 Required end-to-end path:
 
 1. Accept and plan an Application manifest against prepared Environment and

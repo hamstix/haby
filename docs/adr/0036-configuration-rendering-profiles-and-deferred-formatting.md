@@ -67,8 +67,8 @@ implemented. This does not introduce confidential raw-text/Liquid interpolation.
 
 ### Typed deferred formatting
 
-Extend the internal ConfigurationValue model with a typed deferred-formatting
-node (conceptual name DeferredValue). It contains an exact versioned formatter
+Extend the internal ConfigurationValue model with ConfigurationDeferredValue,
+a typed deferred-formatting node. It contains an exact versioned formatter
 contract and validated typed inputs, including exact SecretReference nodes where
 required. It is not a magic user JSON object, arbitrary expression, executable
 script, CLR type name or already serialized secret-bearing string.
@@ -192,6 +192,21 @@ operator auth never permits unrestricted configuration retrieval. No reveal
 endpoint is authorized by this ADR.
 
 ## Required evidence
+
+### Accepted first composition slice
+
+The [first composition contract](../architecture/configuration-composition-v1.md)
+fixes ConfigurationFormatterId, immutable Arguments, registration/validation,
+all-or-nothing object projection, ordinary JSON serialization refusal and the
+separate redacted preview envelope. Arguments may contain exact SecretReference
+nodes but no nested ConfigurationDeferredValue. The formatter initially promises
+a String result; this slice validates its contract without executing formatting.
+
+Implement the pure composition boundary with supplied static templates and ready
+fragments first. This does not yet resolve bindings, load outputs, expand profiles,
+persist document revisions or expose Host/CLI endpoints. Those subsequent slices
+reuse this boundary. Minimal Profiles remain accepted work; their wire contract
+must still be agreed before implementation. Confidential delivery remains gated.
 
 - Two Components bind one login: identical exact SecretRef, different permitted
   consumer options, deterministic separate documents without new credentials.
