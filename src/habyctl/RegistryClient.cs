@@ -17,6 +17,9 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ProfileReply> GetProfileRevisionAsync(ProfileRevisionRequest request, CancellationToken cancellationToken);
+    Task<ProfileReply> ImportProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken);
+    Task<ProfileReply> ValidateProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken);
     Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken);
     Task<ProviderAccessReply> GetProviderAliasAsync(GetProviderAliasRequest request, CancellationToken cancellationToken);
     Task<ProviderAccessReply> SetProviderAliasAsync(SetProviderAliasRequest request, CancellationToken cancellationToken);
@@ -69,6 +72,12 @@ internal sealed class GrpcRegistryClientFactory : IRegistryClientFactory
 internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
 {
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
+    public async Task<ProfileReply> GetProfileRevisionAsync(ProfileRevisionRequest request, CancellationToken cancellationToken) =>
+        await _client.GetProfileRevisionAsync(request, cancellationToken: cancellationToken);
+    public async Task<ProfileReply> ImportProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) =>
+        await _client.ImportProfileAsync(request, cancellationToken: cancellationToken);
+    public async Task<ProfileReply> ValidateProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) =>
+        await _client.ValidateProfileAsync(request, cancellationToken: cancellationToken);
 
     public async Task<RecoveryReply> InspectOperationRecoveryAsync(OperationRequest request, CancellationToken cancellationToken) =>
         await _client.InspectOperationRecoveryAsync(request, cancellationToken: cancellationToken);

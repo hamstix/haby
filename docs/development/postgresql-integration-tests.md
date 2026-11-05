@@ -1,5 +1,9 @@
 # PostgreSQL checkpoint integration tests
 
+[Profile operator administration](134-profile-operator-path.md) adds generated
+gRPC/actual Host/PostgreSQL validation/import/exact-read, restart, cancellation,
+safe failure and published Native AOT CLI evidence, without assignment or delivery.
+
 [Profile revision persistence](132-profile-revision-persistence.md) adds real
 immutable acceptance/reload, synchronized equal/unequal insert races, cancellation
 and rollback, saved Profile/Application expansion, corrupt-read refusal and full

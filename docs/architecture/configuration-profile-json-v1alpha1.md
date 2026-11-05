@@ -7,7 +7,8 @@ in-process wire boundary, without storage, apply, Host/CLI commands, Environment
 lookup, authorization, output access, secret reads or formatter execution.
 [Issue #132](../development/132-profile-revision-persistence.md) adds separate
 side-effect-free import/exact-read use cases and immutable PostgreSQL persistence
-over this parser. Assignment persistence and delivery remain deferred.
+over this parser. [Issue #134](../development/134-profile-operator-path.md) exposes Profile administration
+through the operator Host and habyctl. Assignment persistence and delivery remain deferred.
 The Profile wire boundary itself requires no catalog reset. Issue #130 now adds
 Application Binding `configurationSlot` to the current v1alpha1 and advances its
 normalized/snapshot versions to 2, requiring an explicit fresh catalog for

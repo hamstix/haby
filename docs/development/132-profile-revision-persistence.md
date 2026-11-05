@@ -35,8 +35,9 @@ the first returned audit uses that same precision.
 `AcceptedConfigurationProfile` or null when that identity is absent. Both ports
 are asynchronous, accept cancellation, and expose no EF or transport types.
 Compose the importer with the registered store and a trusted clock in process.
-`AddPostgreSqlManifestCatalog` registers the store/query ports. No Host operation
-or habyctl command exposes this capability yet.
+`AddPostgreSqlManifestCatalog` registers the store/query ports.
+[Issue #134](134-profile-operator-path.md) exposes validation/import/exact safe
+metadata through the operator Host and habyctl.
 
 ## Atomic persistence and cancellation
 
@@ -125,7 +126,7 @@ The integration suite and Native AOT CI continue to cover existing Application
 import/query/provisioning. WSLc remains the documented local Windows fallback.
 
 Profile assignments and distribution authorization, defaults administration,
-Host/RPC/CLI, list/update/delete/rollout, planning integration, secret resolution,
+list/update/delete/rollout, planning integration, secret resolution,
 output rendering, materialization and confidential delivery remain deferred.
 Persisting a named secret declaration grants no distribution authority. A later
 secret-bearing assignment boundary must authorize distribution to its target
