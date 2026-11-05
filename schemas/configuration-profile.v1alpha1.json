@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haby.dev/schemas/configuration-profile.v1alpha1.json",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "const": "haby.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "ConfigurationProfile"
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/spec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "applicationId": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "localId": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "contractId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*/v[1-9][0-9]*(?:(?:alpha|beta)[1-9][0-9]*)?$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/(?:[^~]|~[01])*$"
+    },
+    "secretName": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/applicationId"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "document": {
+      "type": "object",
+      "properties": {
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "format": {
+          "const": "json"
+        },
+        "template": {}
+      },
+      "required": [
+        "fileName",
+        "format",
+        "template"
+      ],
+      "additionalProperties": false
+    },
+    "projection": {
+      "type": "object",
+      "properties": {
+        "documentRef": {
+          "$ref": "#/$defs/localId"
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        }
+      },
+      "required": [
+        "documentRef",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "secretRef": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/secretName"
+        },
+        "version": {
+          "$ref": "#/$defs/revision"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "secretProjection": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "format": {
+          "enum": [
+            "string",
+            "json"
+          ]
+        },
+        "secretRef": {
+          "$ref": "#/$defs/secretRef"
+        }
+      },
+      "required": [
+        "path",
+        "format",
+        "secretRef"
+      ],
+      "additionalProperties": false
+    },
+    "contribution": {
+      "type": "object",
+      "properties": {
+        "documentRef": {
+          "$ref": "#/$defs/localId"
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "value": {},
+        "secretProjections": {
+          "type": "array",
+          "maxItems": 255,
+          "items": {
+            "$ref": "#/$defs/secretProjection"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "documentRef",
+        "path",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "rule": {
+      "type": "object",
+      "properties": {
+        "slot": {
+          "$ref": "#/$defs/localId"
+        },
+        "rendererRef": {
+          "$ref": "#/$defs/contractId"
+        },
+        "options": {
+          "type": "object"
+        },
+        "documentProjections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/projection"
+          }
+        }
+      },
+      "required": [
+        "slot",
+        "rendererRef",
+        "documentProjections"
+      ],
+      "additionalProperties": false
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "documents": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "$ref": "#/$defs/localId"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/document"
+          }
+        },
+        "staticContributions": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "$ref": "#/$defs/localId"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/contribution"
+          }
+        },
+        "bindingRules": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "$ref": "#/$defs/localId"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/rule"
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+}

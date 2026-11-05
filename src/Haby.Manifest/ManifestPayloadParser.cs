@@ -101,7 +101,7 @@ public static class ManifestPayloadParser
 
     private static JsonSchema LoadSchema() => JsonSchema.FromText(LoadSchemaText(), SchemaUri, new JsonSchema.Options(allowFileSystemAndHttpResolution: false));
 
-    private static bool IsValidUtf8(ReadOnlySpan<byte> bytes)
+    internal static bool IsValidUtf8(ReadOnlySpan<byte> bytes)
     {
         try { _ = new UTF8Encoding(false, true).GetCharCount(bytes); return true; }
         catch (DecoderFallbackException) { return false; }
@@ -446,9 +446,9 @@ public static class ManifestPayloadParser
     private static bool IsManifestPath(string path) => path == "/manifest" || path.StartsWith("/manifest/", StringComparison.Ordinal);
     private static string StripManifest(string path) => path == "/manifest" ? "" : path["/manifest".Length..];
 
-    private sealed record SyntaxFinding(string Code, string Path, string Message, IReadOnlyDictionary<string, string> Parameters, ManifestSourceLocation? Location);
+    internal sealed record SyntaxFinding(string Code, string Path, string Message, IReadOnlyDictionary<string, string> Parameters, ManifestSourceLocation? Location);
 
-    private static List<SyntaxFinding> ScanSyntax(ReadOnlySpan<byte> bytes)
+    internal static List<SyntaxFinding> ScanSyntax(ReadOnlySpan<byte> bytes)
     {
         var findings = new List<SyntaxFinding>();
         var currentPath = "";
@@ -489,10 +489,10 @@ public static class ManifestPayloadParser
                 if (isObject)
                 {
                     if (reader.TokenType != JsonTokenType.PropertyName) throw new JsonException();
+                    // Validate escaped property names before GetString can throw a raw UTF-16 exception.
+                    if (HasInvalidUnicodeEscape(reader.ValueSpan)) throw new JsonException();
                     var name = reader.GetString()!;
                     childPath = path + "/" + Escape(name);
-                    if (HasInvalidUnicodeEscape(reader.ValueSpan))
-                        findings.Add(new("invalid-json", childPath, "The JSON payload contains invalid Unicode.", Params(), At(bytes, reader.TokenStartIndex)));
                     if (!names.Add(name))
                         findings.Add(new("duplicate-property", childPath, "An object member is duplicated.", Params(("property", SafeProperty(name))), At(bytes, reader.TokenStartIndex)));
                     currentPath = childPath;

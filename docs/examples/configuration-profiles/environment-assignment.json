@@ -1,0 +1,32 @@
+{
+  "apiVersion": "haby.dev/v1alpha1",
+  "kind": "ConfigurationProfileAssignment",
+  "spec": {
+    "target": {
+      "kind": "environment"
+    },
+    "decisions": [
+      {
+        "kind": "use",
+        "profileRef": {
+          "profileId": "layout",
+          "revision": 1
+        }
+      },
+      {
+        "kind": "use",
+        "profileRef": {
+          "profileId": "serilog",
+          "revision": 1
+        }
+      },
+      {
+        "kind": "use",
+        "profileRef": {
+          "profileId": "connections",
+          "revision": 1
+        }
+      }
+    ]
+  }
+}

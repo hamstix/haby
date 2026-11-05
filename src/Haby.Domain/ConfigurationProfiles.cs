@@ -53,19 +53,125 @@ public sealed record ProfileDocument
     public StructuredDocumentFormat Format { get; }
     public ConfigurationValue Template { get; }
 }
-public sealed record ProfileStaticContribution
+/// <summary>A named operator secret reference, without resolved identity or material.</summary>
+public sealed record ProfileNamedSecretRef
 {
-    public ProfileStaticContribution(ManifestLocalId id, ManifestLocalId document, string path, ConfigurationValue value)
+    public ProfileNamedSecretRef(string name, int version)
+    {
+        Name = EnvironmentId.Create(name).Value;
+        if (version <= 0) throw new ArgumentOutOfRangeException(nameof(version));
+        Version = version;
+    }
+    public string Name { get; }
+    public int Version { get; }
+}
+public enum ProfileSecretFormat { String, Json }
+public sealed record ProfileSecretProjection
+{
+    public ProfileSecretProjection(string path, ProfileSecretFormat format, ProfileNamedSecretRef secretRef)
+    {
+        ProfileSecretPaths.Decode(path);
+        if (format is not (ProfileSecretFormat.String or ProfileSecretFormat.Json)) throw new ArgumentOutOfRangeException(nameof(format));
+        Path = path; Format = format;
+        SecretRef = secretRef ?? throw new ArgumentNullException(nameof(secretRef));
+    }
+    public string Path { get; }
+    public ProfileSecretFormat Format { get; }
+    public ProfileNamedSecretRef SecretRef { get; }
+}
+public sealed class ProfileStaticContribution : IEquatable<ProfileStaticContribution>
+{
+    public ProfileStaticContribution(ManifestLocalId id, ManifestLocalId document, string path, ConfigurationValue value,
+        IEnumerable<ProfileSecretProjection>? secretProjections = null)
     {
         Id = id ?? throw new ArgumentNullException(nameof(id));
         Document = document ?? throw new ArgumentNullException(nameof(document));
         Path = path ?? throw new ArgumentNullException(nameof(path));
         Value = value ?? throw new ArgumentNullException(nameof(value));
+        SecretProjections = ProfileCollections.Copy(secretProjections ?? []);
+        ProfileSecretPaths.Validate(value, SecretProjections);
     }
     public ManifestLocalId Id { get; }
     public ManifestLocalId Document { get; }
     public string Path { get; }
     public ConfigurationValue Value { get; }
+    public IReadOnlyList<ProfileSecretProjection> SecretProjections { get; }
+    public bool Equals(ProfileStaticContribution? other) => other is not null && Id == other.Id && Document == other.Document &&
+        Path == other.Path && Value.Equals(other.Value) && ProfileCollections.Equal(SecretProjections, other.SecretProjections);
+    public override bool Equals(object? obj) => obj is ProfileStaticContribution other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(Id, Document, Path, Value, ProfileCollections.Hash(SecretProjections));
+}
+internal static class ProfileSecretPaths
+{
+    internal static string[] Decode(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path[0] != '/') throw new ArgumentException("Invalid secret projection path.");
+        var parts = path[1..].Split('/');
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var encoded = parts[i];
+            parts[i] = encoded.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
+            if (parts[i].Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal) != encoded)
+                throw new ArgumentException("Invalid secret projection path.");
+        }
+        return parts;
+    }
+    internal static void Validate(ConfigurationValue value, IEnumerable<ProfileSecretProjection> projections)
+    {
+        var paths = projections.Select(x => Decode(x.Path)).ToArray();
+        foreach (var parts in paths)
+        {
+            var current = value;
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (current is not ConfigurationObject obj) throw new ArgumentException("Secret projection insertion is blocked.");
+                if (!obj.Members.TryGetValue(parts[i], out var next)) break;
+                if (i == parts.Length - 1) throw new ArgumentException("Secret projection insertion is blocked.");
+                current = next;
+            }
+        }
+        for (var i = 0; i < paths.Length; i++)
+            for (var j = i + 1; j < paths.Length; j++)
+                if (Prefix(paths[i], paths[j]) || Prefix(paths[j], paths[i])) throw new ArgumentException("Secret projection paths conflict.");
+    }
+    private static bool Prefix(string[] a, string[] b) => a.Length <= b.Length && a.SequenceEqual(b.Take(a.Length), StringComparer.Ordinal);
+}
+
+/// <summary>Portable target identity. The trusted Environment context is deliberately absent.</summary>
+public abstract record ProfileAssignmentTarget
+{
+    private protected ProfileAssignmentTarget() { }
+    public sealed record Environment : ProfileAssignmentTarget;
+    public sealed record Application : ProfileAssignmentTarget
+    {
+        public Application(ApplicationId applicationId) => ApplicationId = applicationId ?? throw new ArgumentNullException(nameof(applicationId));
+        public ApplicationId ApplicationId { get; }
+    }
+    public sealed record Component : ProfileAssignmentTarget
+    {
+        public Component(ApplicationId applicationId, ManifestLocalId componentRef)
+        {
+            ApplicationId = applicationId ?? throw new ArgumentNullException(nameof(applicationId));
+            ComponentRef = componentRef ?? throw new ArgumentNullException(nameof(componentRef));
+        }
+        public ApplicationId ApplicationId { get; }
+        public ManifestLocalId ComponentRef { get; }
+    }
+}
+public sealed class ConfigurationProfileAssignment : IEquatable<ConfigurationProfileAssignment>
+{
+    public ConfigurationProfileAssignment(ProfileAssignmentTarget target, IEnumerable<ProfileDecision> decisions)
+    {
+        Target = target ?? throw new ArgumentNullException(nameof(target));
+        Decisions = ProfileCollections.Copy(decisions);
+        if (Decisions.Count > 64 || Decisions.Select(x => x.ProfileId).Distinct().Count() != Decisions.Count)
+            throw new ArgumentException("Invalid Profile decisions.", nameof(decisions));
+    }
+    public ProfileAssignmentTarget Target { get; }
+    public IReadOnlyList<ProfileDecision> Decisions { get; }
+    public bool Equals(ConfigurationProfileAssignment? other) => other is not null && Target == other.Target && ProfileCollections.Equal(Decisions, other.Decisions);
+    public override bool Equals(object? obj) => obj is ConfigurationProfileAssignment other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(Target, ProfileCollections.Hash(Decisions));
 }
 public sealed record ProfileProjection
 {

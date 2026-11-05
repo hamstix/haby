@@ -6,6 +6,8 @@ namespace Haby.Manifest;
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Metadata,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(ConfigurationProfileDocument))]
+[JsonSerializable(typeof(ConfigurationProfileAssignmentDocument))]
 [JsonSerializable(typeof(ImportApplicationEnvelope))]
 [JsonSerializable(typeof(ApplicationManifest))]
 [JsonSerializable(typeof(BindingTarget))]
