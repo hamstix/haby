@@ -387,6 +387,7 @@ public static class ManifestPayloadParser
         _ when path.EndsWith("/providerRef", StringComparison.Ordinal) => "provider-alias",
         _ when path.EndsWith("/applicationId", StringComparison.Ordinal) => "application",
         _ when path.EndsWith("/accessProfile", StringComparison.Ordinal) => "access-profile",
+        _ when path.EndsWith("/configurationSlot", StringComparison.Ordinal) => "configuration-slot",
         _ when path.EndsWith("/contract", StringComparison.Ordinal) || path.EndsWith("/type", StringComparison.Ordinal) || path.EndsWith("/rendererRef", StringComparison.Ordinal) => "contract",
         _ when path.EndsWith("/resourceRef", StringComparison.Ordinal) => "resource",
         _ when path.EndsWith("/exportRef", StringComparison.Ordinal) => "resource-export",

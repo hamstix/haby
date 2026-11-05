@@ -25,7 +25,7 @@
         "displayName": "Worker",
         "labels": { "role": "worker" },
         "bindings": {
-          "local": { "options": { "ssl": true }, "documentProjections": [{ "documentRef": "settings", "path": "/Database", "rendererRef": "postgresql.connection/v1alpha1" }], "target": { "resourceRef": "database", "kind": "local-resource" } },
+          "local": { "configurationSlot": "main-database", "options": { "ssl": true }, "documentProjections": [{ "documentRef": "settings", "path": "/Database", "rendererRef": "postgresql.connection/v1alpha1" }], "target": { "resourceRef": "database", "kind": "local-resource" } },
           "shared": { "target": { "applicationId": "shared.service", "exportRef": "database", "contract": "postgresql.connection/v1alpha1", "kind": "application-export" } }
         },
         "documents": {

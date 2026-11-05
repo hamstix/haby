@@ -86,6 +86,7 @@
       "type": "object",
       "properties": {
         "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/externalTarget" }] },
+        "configurationSlot": { "$ref": "#/$defs/localId" },
         "options": { "type": "object" },
         "documentProjections": { "type": "array", "items": { "$ref": "#/$defs/projection" }, "uniqueItems": true }
       },

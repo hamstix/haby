@@ -43,7 +43,7 @@ shape creates a typed `ConfigurationSecretReference`. Trusted domain operations
 can construct that node from an exact-version `SecretRef`.
 
 The internal `NormalizedApplicationManifestMapper` copies a validated
-v1alpha1 DTO into the immutable typed domain graph (normalized model version 1).
+v1alpha1 DTO into the immutable typed domain graph (normalized model version 2).
 Closed declarations, references and discriminators have domain types; only
 structured templates, Resource/Workload properties and Binding options use
 `ConfigurationValue`. The mapper materializes core defaults, sorts the two

@@ -57,10 +57,10 @@ internal static class NormalizedManifestStructuralComparer
             MapHash(value.Workloads, key => key.Value, WorkloadHash));
 
     private static bool Binding(NormalizedBinding left, NormalizedBinding right) =>
-        Target(left.Target, right.Target) && left.Options.Equals(right.Options) &&
+        left.ConfigurationSlot == right.ConfigurationSlot && Target(left.Target, right.Target) && left.Options.Equals(right.Options) &&
         Sequence(left.DocumentProjections, right.DocumentProjections, Projection);
     private static int BindingHash(NormalizedBinding value) =>
-        HashCode.Combine(TargetHash(value.Target), value.Options, SequenceHash(value.DocumentProjections, ProjectionHash));
+        HashCode.Combine(value.ConfigurationSlot, TargetHash(value.Target), value.Options, SequenceHash(value.DocumentProjections, ProjectionHash));
 
     private static bool Target(NormalizedBindingTarget left, NormalizedBindingTarget right) => (left, right) switch
     {

@@ -9,7 +9,7 @@ public sealed class NormalizedApplicationManifest : IEquatable<NormalizedApplica
     {
         InputApiVersion = inputApiVersion; Metadata = metadata; Spec = spec;
     }
-    public const int CurrentModelVersion = 1;
+    public const int CurrentModelVersion = 2;
     public int NormalizedModelVersion => CurrentModelVersion;
     public string InputApiVersion { get; }
     public ApplicationId ApplicationId => Metadata.Id;
@@ -93,10 +93,11 @@ public sealed class NormalizedComponent
 
 public sealed class NormalizedBinding
 {
-    internal NormalizedBinding(NormalizedBindingTarget target, ConfigurationObject options, ImmutableArray<NormalizedDocumentProjection> documentProjections)
+    internal NormalizedBinding(NormalizedBindingTarget target, ConfigurationObject options, ImmutableArray<NormalizedDocumentProjection> documentProjections, ManifestLocalId? configurationSlot)
     {
-        Target = target; Options = options; DocumentProjections = documentProjections;
+        Target = target; Options = options; DocumentProjections = documentProjections; ConfigurationSlot = configurationSlot;
     }
+    public ManifestLocalId? ConfigurationSlot { get; }
     public NormalizedBindingTarget Target { get; }
     public ConfigurationObject Options { get; }
     public IReadOnlyList<NormalizedDocumentProjection> DocumentProjections { get; }

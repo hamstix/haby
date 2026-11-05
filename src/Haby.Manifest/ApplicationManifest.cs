@@ -86,6 +86,7 @@ public sealed class BindingDeclaration
     private List<DocumentProjection>? _documentProjections;
 
     [JsonRequired] public required BindingTarget Target { get; init; }
+    public string? ConfigurationSlot { get; init; }
     public JsonElement Options { get => _options.ValueKind == JsonValueKind.Undefined ? JsonDefaults.EmptyObject : _options; init => _options = value; }
     public List<DocumentProjection> DocumentProjections { get => _documentProjections ??= []; init => _documentProjections = value; }
 }

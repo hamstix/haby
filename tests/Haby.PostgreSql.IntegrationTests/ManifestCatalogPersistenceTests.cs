@@ -181,8 +181,10 @@ public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) :
             .Count(result => result.Disposition == ImportApplicationManifestResult.ImportDisposition.ExistingEquivalent));
     }
 
-    [Fact]
-    public async Task Corrupt_and_unsupported_snapshots_fail_visibly()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(999)]
+    public async Task Corrupt_and_unsupported_snapshots_fail_visibly(int unsupportedFormat)
     {
         var connection = await NewDatabaseAsync();
         await using var services = Services(connection);
@@ -192,10 +194,17 @@ public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) :
         var query = services.GetRequiredService<IManifestRevisionQuery>();
         await using var check = new NpgsqlConnection(connection);
         await check.OpenAsync();
-        await using (var unsupported = new NpgsqlCommand("UPDATE manifest_revisions SET snapshot_format_version=999", check))
+        await using (var unsupported = new NpgsqlCommand("UPDATE manifest_revisions SET snapshot_format_version=@format", check))
+        {
+            unsupported.Parameters.AddWithValue("format", unsupportedFormat);
             await unsupported.ExecuteNonQueryAsync();
+        }
+        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         await Assert.ThrowsAsync<InvalidDataException>(async () => await query.FindAsync(result.ManifestRevisionRef));
-        await using (var corrupt = new NpgsqlCommand("UPDATE manifest_revisions SET snapshot_format_version=1, snapshot='{bad'", check))
+        await Assert.ThrowsAsync<InvalidDataException>(async () => await Import(services, FirstTime).ExecuteAsync(CompleteEnvelope("v1"), "retry"));
+        Assert.Equal(1, await ScalarAsync(check, "SELECT count(*) FROM manifest_revisions"));
+        Assert.Equal(unsupportedFormat, await ScalarAsync(check, "SELECT snapshot_format_version FROM manifest_revisions"));
+        await using (var corrupt = new NpgsqlCommand("UPDATE manifest_revisions SET snapshot_format_version=2, snapshot='{bad'", check))
             await corrupt.ExecuteNonQueryAsync();
         await Assert.ThrowsAsync<InvalidDataException>(async () => await query.FindAsync(result.ManifestRevisionRef));
     }
@@ -283,6 +292,86 @@ public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) :
         await using var verify = new NpgsqlConnection(connection);
         await verify.OpenAsync();
         Assert.Equal(0, await ScalarAsync(verify, "SELECT count(*) FROM \"__EFMigrationsHistory\""));
+    }
+
+    [Fact]
+    public async Task Saved_slots_survive_restart_drive_profile_requests_and_preserve_import_identity()
+    {
+        var connection = await NewDatabaseAsync();
+        var payload = Encoding.UTF8.GetBytes("""
+            {"applicationVersion":"slots-1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"slots"},"spec":{
+            "resources":{"db":{"type":"postgresql.database/v1alpha1","providerRef":"p"}},
+            "components":{
+              "api":{"bindings":{"consume":{"target":{"kind":"local-resource","resourceRef":"db"},"configurationSlot":"main","options":{"consumer":"api"}}}},
+              "worker":{"bindings":{"consume":{"target":{"kind":"local-resource","resourceRef":"db"},"configurationSlot":"main","options":{"consumer":"worker"}}}},
+              "unslotted":{"bindings":{"main":{"target":{"kind":"local-resource","resourceRef":"db"}}}}
+            }}}}
+            """);
+        var expected = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(payload, Catalog)).Candidate;
+        ManifestRevisionRef reference;
+        await using (var first = Services(connection))
+        {
+            await first.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+            reference = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await Import(first, FirstTime).ExecuteAsync(payload, "first")).ManifestRevisionRef;
+        }
+        await using (var fresh = Services(connection))
+        {
+            var revision = await fresh.GetRequiredService<IManifestRevisionQuery>().FindAsync(reference);
+            Assert.NotNull(revision);
+            Assert.Equal(expected.Declaration, revision.Declaration);
+            var profile = new ConfigurationProfileRevision(new(ProfileId.Create("layout"), 1),
+                [new(ManifestLocalId.Create("settings"), "appsettings.json", StructuredDocumentFormat.Json, new ConfigurationObject([]))], [],
+                [new(ManifestLocalId.Create("client"), ManifestLocalId.Create("main"), ConfigurationRendererId.Create("sample.client/v1"), new ConfigurationObject([]),
+                    [new(ManifestLocalId.Create("settings"), "/Connection")])]);
+            var expanded = new ConfigurationProfileExpander(new([profile])).Expand([new ProfileDecision.Use(profile.Reference)], [],
+                revision.Declaration.Spec.Components.Select(x => new ProfileComponentInput(x.Key, x.Value, [])));
+            Assert.True(expanded.IsSuccess);
+            Assert.Empty(expanded.Diagnostics);
+            foreach (var id in new[] { "api", "worker" })
+            {
+                var request = Assert.Single(expanded.Layouts!.Single(x => x.Component.Value == id).BindingRequests);
+                Assert.Equal(ManifestLocalId.Create("main"), request.Slot);
+                Assert.Equal(ManifestLocalId.Create("consume"), request.BindingId);
+                Assert.Equal(ManifestLocalId.Create("db"), Assert.IsType<NormalizedLocalResourceTarget>(request.Binding.Target).ResourceRef);
+                Assert.Equal(new ConfigurationString(id), request.Options.Members["consumer"]);
+                Assert.Equal("/Connection", Assert.Single(request.Projections).Path);
+                Assert.Equal(profile.Reference, request.Origin.Profile);
+            }
+            Assert.Empty(expanded.Layouts!.Single(x => x.Component.Value == "unslotted").BindingRequests);
+            var repeat = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await Import(fresh, FirstTime.AddHours(1)).ExecuteAsync(payload, "retry"));
+            Assert.Equal(ImportApplicationManifestResult.ImportDisposition.ExistingEquivalent, repeat.Disposition);
+            Assert.Equal("first", repeat.AuditMetadata.ActorId);
+            var changed = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(payload).Replace("\"configurationSlot\":\"main\"", "\"configurationSlot\":\"other\"", StringComparison.Ordinal));
+            var conflict = Assert.IsType<ImportApplicationManifestResult.ApplicationVersionContentConflict>(await Import(fresh, FirstTime).ExecuteAsync(changed, "actor"));
+            Assert.Equal(["/spec/components/api/bindings/consume/configurationSlot", "/spec/components/worker/bindings/consume/configurationSlot"], conflict.ChangedPaths);
+            var next = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(changed).Replace("slots-1", "slots-2", StringComparison.Ordinal));
+            Assert.Equal(2, Assert.IsType<ImportApplicationManifestResult.Succeeded>(await Import(fresh, FirstTime).ExecuteAsync(next, "actor")).ManifestRevisionRef.RevisionNumber.Value);
+        }
+        var restoredConnection = await NewDatabaseAsync();
+        var dump = "/tmp/haby-slots-" + Guid.NewGuid().ToString("N") + ".dump";
+        Exception? testFailure = null;
+        try
+        {
+            await fixture.RunClientUtilityAsync("pg_dump", "-U", "postgres", "--format=custom", "--file=" + dump,
+                "--dbname=" + new NpgsqlConnectionStringBuilder(connection).Database);
+            await fixture.RunClientUtilityAsync("pg_restore", "-U", "postgres", "--exit-on-error", "--no-owner", "--no-privileges",
+                "--dbname=" + new NpgsqlConnectionStringBuilder(restoredConnection).Database, dump);
+            await using var restored = Services(restoredConnection);
+            var revision = await restored.GetRequiredService<IManifestRevisionQuery>().FindAsync(reference);
+            Assert.NotNull(revision);
+            Assert.Equal(expected.Declaration, revision.Declaration);
+            Assert.Equal(ManifestLocalId.Create("main"), revision.Declaration.Spec.Components[ManifestLocalId.Create("api")].Bindings[ManifestLocalId.Create("consume")].ConfigurationSlot);
+            var repeat = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await Import(restored, FirstTime).ExecuteAsync(payload, "restored"));
+            Assert.Equal(ImportApplicationManifestResult.ImportDisposition.ExistingEquivalent, repeat.Disposition);
+            Assert.Equal("first", repeat.AuditMetadata.ActorId);
+        }
+        catch (Exception error) { testFailure = error; throw; }
+        finally
+        {
+            try { await fixture.RunClientUtilityAsync("rm", "-f", dump); }
+            catch (Exception error) when (testFailure is not null)
+            { throw new AggregateException("Slot restore drill and cleanup failed.", testFailure, error); }
+        }
     }
 
     private async Task<string> NewDatabaseAsync()

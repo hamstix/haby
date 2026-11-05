@@ -15,7 +15,7 @@ public sealed class NormalizedApplicationManifestMapperTests
     public void Complete_fixture_maps_all_closed_union_alternatives_to_typed_declarations()
     {
         var mapped = NormalizedApplicationManifestMapper.Map(ReadComplete());
-        Assert.Equal(1, mapped.NormalizedModelVersion);
+        Assert.Equal(2, mapped.NormalizedModelVersion);
         Assert.Equal("haby.dev/v1alpha1", mapped.InputApiVersion);
         Assert.Equal(ApplicationManifestKind.Application, mapped.Kind);
         Assert.Equal("example.service", mapped.ApplicationId.Value);

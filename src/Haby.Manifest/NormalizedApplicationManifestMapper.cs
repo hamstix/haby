@@ -85,7 +85,7 @@ internal static class NormalizedApplicationManifestMapper
             .OrderBy(x => x.DocumentRef.Value, StringComparer.Ordinal)
             .ThenBy(x => x.Path.Value, StringComparer.Ordinal)
             .ThenBy(x => x.RendererRef.Value, StringComparer.Ordinal)
-            .ToImmutableArray());
+            .ToImmutableArray(), value.ConfigurationSlot is null ? null : ManifestLocalId.Create(value.ConfigurationSlot));
 
     private static NormalizedBindingTarget Target(BindingTarget value) => value switch
     {

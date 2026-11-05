@@ -37,25 +37,31 @@ public sealed class ConfigurationProfileExpansionTests
         Assert.Contains(result.Diagnostics, x => x.Code == code);
     }
 
-    // These are existing published manifest fields. Slots remain separate typed inputs.
+    // Slots enter expansion only through the parsed normalized Binding.
     private static ProfileComponentInput Component(string id = "api", string bindings = "{}", string documents = "{}",
-        IEnumerable<ProfileDecision>? decisions = null, IEnumerable<BindingSlotAssociation>? slots = null,
+        IEnumerable<ProfileDecision>? decisions = null, string? slot = null,
         IEnumerable<ProfileStaticContribution>? contributions = null)
     {
+        if (slot is not null)
+        {
+            var wire = System.Text.Json.Nodes.JsonNode.Parse(bindings)!;
+            wire["consume"]!["configurationSlot"] = slot;
+            bindings = wire.ToJsonString();
+        }
         var json = """
             {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{
             "resources":{"one":{"type":"sample.resource/v1","providerRef":"available","properties":{}},
                          "two":{"type":"sample.resource/v1","providerRef":"available","properties":{}}},
             "components":{"COMPONENT":{"bindings":BINDINGS,"documents":DOCUMENTS}}}}}
             """.Replace("COMPONENT", id, StringComparison.Ordinal).Replace("BINDINGS", bindings, StringComparison.Ordinal).Replace("DOCUMENTS", documents, StringComparison.Ordinal);
-        var catalog = new ManifestContractCatalog([new(ResourceTypeId.Create("sample.resource/v1"), "{}", "{}")], [], [],
+        var catalog = new ManifestContractCatalog([new(ResourceTypeId.Create("sample.resource/v1"), "{}", "{}")], [],
+            [new(OutputContractId.Create("sample.output/v1"), "{}")],
             [new(ConfigurationRendererId.Create("sample.connection/v1"))]);
         var candidate = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Encoding.UTF8.GetBytes(json), catalog)).Candidate;
-        return new(Id(id), candidate.Declaration.Spec.Components[Id(id)], decisions ?? [], slots ?? [], contributions);
+        return new(Id(id), candidate.Declaration.Spec.Components[Id(id)], decisions ?? [], contributions);
     }
     private static string Binding(string resource = "one", string options = "{}", string projections = "[]") =>
         "{\"consume\":{\"target\":{\"kind\":\"local-resource\",\"resourceRef\":\"" + resource + "\"},\"options\":" + options + ",\"documentProjections\":" + projections + "}}";
-    private static BindingSlotAssociation Slot(string slot = "main") => new(Id("consume"), Id(slot));
 
     [Fact]
     public void Environment_only_defaults_apply_per_component_and_only_explicit_slots_create_requests()
@@ -64,7 +70,7 @@ public sealed class ConfigurationProfileExpansionTests
             Profile("telemetry", contributions: [Static("/OpenTelemetry", Obj())]),
             Profile("connections", rules: [Rule(), Rule("events", "/Events", "sample.events/v1"), Rule("unused", "/Unused")]) };
         var result = Expand(profiles, profiles.Select(x => new ProfileDecision.Use(x.Reference)),
-            [Component(bindings: Binding(), slots: [Slot()]), Component("worker", Binding("two"), slots: [Slot("events")]), Component("unbound")]);
+            [Component(bindings: Binding(), slot: "main"), Component("worker", Binding("two"), slot: "events"), Component("unbound")]);
         Assert.True(result.IsSuccess);
         var api = result.Layouts!.Single(x => x.Component == Id("api"));
         var worker = result.Layouts!.Single(x => x.Component == Id("worker"));
@@ -75,6 +81,18 @@ public sealed class ConfigurationProfileExpansionTests
         Assert.Empty(result.Layouts!.Single(x => x.Component == Id("unbound")).BindingRequests);
         Assert.All(api.Decisions, x => Assert.Equal(ProfileSelectionScope.Environment, x.Scope));
         Assert.DoesNotContain(result.Layouts!.SelectMany(x => x.BindingRequests), x => x.Slot == Id("unused"));
+    }
+
+    [Fact]
+    public void Slotted_external_target_is_portable_but_executable_profile_request_still_refuses()
+    {
+        var component = Component(bindings: """
+            {"consume":{"target":{"kind":"application-export","applicationId":"absent","exportRef":"login","contract":"sample.output/v1"},"configurationSlot":"main"}}
+            """);
+        var binding = component.Component.Bindings[Id("consume")];
+        Assert.IsType<NormalizedApplicationExportTarget>(binding.Target);
+        Assert.Equal(Id("main"), binding.ConfigurationSlot);
+        Fails(Expand([Layout(), Profile("client", rules: [Rule()])], [Use("layout"), Use("client")], [component]), "profile.binding.unsupported");
     }
 
     [Fact]
@@ -127,11 +145,9 @@ public sealed class ConfigurationProfileExpansionTests
         Fails(Expand([Profile("missing", contributions: [Static("/x")])], [Use("missing")]), "profile.document.not-found");
         Fails(Expand([Layout(), Profile("other", documents: [Document()])], [Use("layout"), Use("other")]), "profile.document.duplicate");
         Fails(Expand([Profile("layout", documents: [Document(), Document("other")])], [Use("layout")]), "profile.document.file-conflict");
-        var requested = Component(bindings: Binding(), slots: [Slot()]);
+        var requested = Component(bindings: Binding(), slot: "main");
         Fails(Expand([Layout()], [Use("layout")], [requested]), "profile.slot.not-found");
         Fails(Expand([Layout(), Profile("a", rules: [Rule()]), Profile("b", rules: [Rule()])], [Use("layout"), Use("a"), Use("b")], [requested]), "profile.slot.ambiguous");
-        Fails(Expand([Layout()], [Use("layout")], [Component(bindings: Binding(), slots: [Slot(), Slot()])]), "profile.slot.duplicate");
-        Fails(Expand([Layout()], [Use("layout")], [Component(slots: [Slot()])]), "profile.binding.not-found");
         var missing = Profile("missing", rules: [Rule(projections: [new(Id("absent"), "/x")])]);
         Fails(Expand([Layout(), missing], [Use("layout"), Use("missing")], [requested]), "profile.document.not-found");
         Only(Expand([Layout(), missing], [Use("layout"), Use("missing")])); // Unused rule emits nothing.
@@ -144,7 +160,7 @@ public sealed class ConfigurationProfileExpansionTests
         var defaults = Obj(("nested", nested), ("lower-only", Text("inherited")), ("nullable", Text("default")));
         var rule = Rule(defaults: defaults, projections: [new(Id("settings"), "/First"), new(Id("settings"), "/Second")]);
         var layout = Only(Expand([Layout(), Profile("client", rules: [rule])], [Use("layout"), Use("client")],
-            [Component(bindings: Binding(options: """{"nested":{"replacement":[1,2]},"nullable":null}"""), slots: [Slot()])]));
+            [Component(bindings: Binding(options: """{"nested":{"replacement":[1,2]},"nullable":null}"""), slot: "main")]));
         var request = Assert.Single(layout.BindingRequests);
         Assert.Equal(2, request.Projections.Count);
         Assert.Same(request.Binding.Options.Members["nested"], request.Options.Members["nested"]);
@@ -167,7 +183,7 @@ public sealed class ConfigurationProfileExpansionTests
     [InlineData("/a~1b/~0/0", "/a~1b/~0")]
     public void Static_and_unresolved_binding_paths_share_complete_collision_validation(string first, string second)
     {
-        var component = Component(bindings: Binding(), slots: [Slot()]);
+        var component = Component(bindings: Binding(), slot: "main");
         foreach (var mode in new[] { "static-static", "static-binding", "binding-binding" })
         {
             var contributions = mode == "static-static" ? new[] { Static(first, id: "one"), Static(second, id: "two") }
@@ -188,7 +204,7 @@ public sealed class ConfigurationProfileExpansionTests
         var template = Obj((key, key == "array" ? new ConfigurationArray([]) : Text("never-echo-value")));
         foreach (var useBinding in new[] { false, true })
             Fails(Expand([Profile("layout", documents: [Document(template: template)], contributions: useBinding ? [] : [Static(path)], rules: useBinding ? [Rule(path: path)] : [])],
-                [Use("layout")], [Component(bindings: Binding(), slots: useBinding ? [Slot()] : [])]), "render.projection.template-collision");
+                [Use("layout")], [Component(bindings: Binding(), slot: useBinding ? "main" : null)]), "render.projection.template-collision");
     }
 
     [Fact]
@@ -196,7 +212,7 @@ public sealed class ConfigurationProfileExpansionTests
     {
         foreach (var root in new ConfigurationValue[] { Text("private-value"), ConfigurationNull.Instance, new ConfigurationArray([]) })
             Fails(Expand([Profile("layout", documents: [Document(template: root)], rules: [Rule()])], [Use("layout")],
-                [Component(bindings: Binding(), slots: [Slot()])]), "render.projection.template-collision");
+                [Component(bindings: Binding(), slot: "main")]), "render.projection.template-collision");
         foreach (var path in new[] { "", "private-value", "/~2" })
         {
             var result = Expand([Layout(), Profile("bad", contributions: [Static(path)])], [Use("layout"), Use("bad")]);
@@ -221,6 +237,12 @@ public sealed class ConfigurationProfileExpansionTests
         var direct = Component(bindings: Binding(projections: projections), documents: docs);
         var successful = Only(Expand([], [], [direct]));
         Assert.Null(Assert.Single(successful.BindingRequests).Slot);
+        var slotted = Component(bindings: Binding(projections: projections), documents: docs, slot: "main");
+        var both = Only(Expand([Profile("client", rules: [Rule(path: "/other")])], [Use("client")], [slotted]));
+        Assert.Equal(2, both.BindingRequests.Count);
+        Assert.Single(both.BindingRequests, x => x.Slot is null);
+        Assert.Single(both.BindingRequests, x => x.Slot == Id("main"));
+        Fails(Expand([Profile("client", rules: [Rule(path: "/same")])], [Use("client")], [slotted]), "render.projection.path-conflict");
         Fails(Expand([Profile("other", contributions: [Static("/same/child")])], [Use("other")], [direct]), "render.projection.path-conflict");
     }
 
@@ -272,17 +294,16 @@ public sealed class ConfigurationProfileExpansionTests
         var profiles = new List<ConfigurationProfileRevision> { profile };
         var catalog = new ConfigurationProfileCatalog(profiles);
         var decisions = new List<ProfileDecision> { Use("all") };
-        var slots = new List<BindingSlotAssociation> { Slot() };
-        var component = Component(bindings: Binding(), decisions: decisions, slots: slots);
+        var component = Component(bindings: Binding(), decisions: decisions, slot: "main");
         var expander = new ConfigurationProfileExpander(catalog);
         var forward = Only(expander.Expand([], [], [component]));
         var reversedProfile = Profile("all", documents: documents.AsEnumerable().Reverse(), rules: rules.AsEnumerable().Reverse(), contributions: contributions.AsEnumerable().Reverse());
-        var reverse = Only(Expand([reversedProfile], [], [Component(bindings: Binding(), decisions: decisions.AsEnumerable().Reverse(), slots: slots.AsEnumerable().Reverse())]));
+        var reverse = Only(Expand([reversedProfile], [], [Component(bindings: Binding(), decisions: decisions.AsEnumerable().Reverse(), slot: "main")]));
         Assert.Equal(forward.Documents, reverse.Documents);
         Assert.Equal(forward.Contributions, reverse.Contributions);
         Assert.Equal(forward.Decisions, reverse.Decisions);
         Assert.Equal(forward.BindingRequests[0].Projections, reverse.BindingRequests[0].Projections);
-        documents.Clear(); projections.Clear(); rules.Clear(); contributions.Clear(); profiles.Clear(); decisions.Clear(); slots.Clear();
+        documents.Clear(); projections.Clear(); rules.Clear(); contributions.Clear(); profiles.Clear(); decisions.Clear();
         Assert.Equal(forward.Contributions, Only(expander.Expand([], [], [component])).Contributions);
         Assert.Single(forward.BindingRequests);
         Assert.Equal(2, forward.BindingRequests[0].Projections.Count);
@@ -324,7 +345,7 @@ public sealed class ConfigurationProfileExpansionTests
             Profile("beta", rules: [Rule(projections: [new(Id("settings"), "/z"), new(Id("settings"), "/y")])]) };
         var environment = new[] { Use("layout"), Use("alpha"), Use("beta") };
         var application = new[] { Disable("unused"), Use("alpha") };
-        var components = new[] { Component(bindings: Binding(), slots: [Slot()]), Component("worker", decisions: [Disable("beta"), Disable("unused")]) };
+        var components = new[] { Component(bindings: Binding(), slot: "main"), Component("worker", decisions: [Disable("beta"), Disable("unused")]) };
         var forward = Expand(profiles, environment, components, application);
         var reverse = Expand(profiles.Reverse(), environment.Reverse(), components.Reverse(), application.Reverse());
         Assert.True(forward.IsSuccess);
@@ -345,12 +366,8 @@ public sealed class ConfigurationProfileExpansionTests
     }
 
     [Fact]
-    public void Two_distinct_bindings_cannot_request_one_slot_and_one_invalid_component_refuses_all_layouts()
+    public void Invalid_profile_and_component_duplicates_refuse_all_layouts()
     {
-        var twoBindings = Binding()[..^1] + "," + Binding("two").Replace("consume", "other", StringComparison.Ordinal)[1..];
-        var invalid = Component("invalid", twoBindings, slots: [Slot(), new(Id("other"), Id("main"))]);
-        Fails(Expand([Layout(), Profile("rules", rules: [Rule()])], [Use("layout"), Use("rules")],
-            [Component(), invalid]), "profile.slot.duplicate");
         var duplicates = Profile("duplicates", contributions: [Static("/a"), Static("/b")], rules: [Rule(), Rule()]);
         var result = Expand([Layout(), duplicates], [Use("layout"), Use("duplicates")]);
         Fails(result, "profile.contribution.duplicate");
@@ -420,9 +437,9 @@ public sealed class ConfigurationProfileExpansionTests
             WireProfile("layout", """{"documents":{"settings":{"fileName":"appsettings.json","format":"json","template":{}}}}"""),
             WireProfile("logging", """{"staticContributions":{"logging":{"documentRef":"settings","path":"/Logging","value":{"MinimumLevel":"Information"}}}}"""),
             WireProfile("clients", """{"bindingRules":{"main":{"slot":"main","rendererRef":"sample.connection/v1","documentProjections":[{"documentRef":"settings","path":"/Connections/Main"}]},"events":{"slot":"events","rendererRef":"sample.events/v1","options":{"batch":20},"documentProjections":[{"documentRef":"settings","path":"/Events"}]}}}""") };
-        var components = new[] { Component(bindings: Binding(options: """{"consumer":"api"}"""), slots: [Slot()]),
-            Component("worker", Binding(options: """{"consumer":"worker"}"""), slots: [Slot()]),
-            Component("events", Binding("two", """{"batch":10}"""), slots: [Slot("events")]) };
+        var components = new[] { Component(bindings: Binding(options: """{"consumer":"api"}"""), slot: "main"),
+            Component("worker", Binding(options: """{"consumer":"worker"}"""), slot: "main"),
+            Component("events", Binding("two", """{"batch":10}"""), slot: "events") };
         var assignment = WireAssignment("environment", """[{"kind":"use","profileRef":{"profileId":"layout","revision":1}},{"kind":"use","profileRef":{"profileId":"logging","revision":1}},{"kind":"use","profileRef":{"profileId":"clients","revision":1}}]""");
         var result = Expand(profiles, assignment.Decisions, components);
         Assert.True(result.IsSuccess);
