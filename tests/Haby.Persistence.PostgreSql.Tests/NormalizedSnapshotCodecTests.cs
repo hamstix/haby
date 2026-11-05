@@ -37,6 +37,19 @@ public sealed class NormalizedSnapshotCodecTests
             NormalizedSnapshotCodec.FormatVersion));
     }
 
+    [Fact]
+    public void Deferred_nodes_are_not_silently_accepted_by_the_manifest_snapshot_codec()
+    {
+        var manifest = CompleteManifest();
+        var snapshot = System.Text.Json.Nodes.JsonNode.Parse(NormalizedSnapshotCodec.Encode(manifest))!;
+        snapshot["spec"]!["resources"]!["database"]!["properties"] = System.Text.Json.Nodes.JsonNode.Parse(
+            """{"kind":"object","members":{"confidential":{"kind":"deferred","formatter":"sample/v1","arguments":{"sensitive":"do not expose"}}}}"""u8);
+        var error = Assert.Throws<InvalidDataException>(() => NormalizedSnapshotCodec.Decode(snapshot.ToJsonString(),
+            manifest.InputApiVersion, manifest.NormalizedModelVersion, manifest.Metadata.Id.Value,
+            NormalizedSnapshotCodec.FormatVersion));
+        Assert.DoesNotContain("do not expose", error.Message);
+    }
+
     private static NormalizedApplicationManifest CompleteManifest()
     {
         using var stream = typeof(NormalizedSnapshotCodecTests).Assembly

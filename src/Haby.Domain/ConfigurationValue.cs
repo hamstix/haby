@@ -44,7 +44,7 @@ public sealed class ConfigurationNumber : ConfigurationValue
     private readonly string _coefficient;
     private readonly BigInteger _exponent;
 
-    internal string CanonicalText => _coefficient + "e" + _exponent.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public string CanonicalText => _coefficient + "e" + _exponent.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private ConfigurationNumber(string coefficient, BigInteger exponent)
     {
