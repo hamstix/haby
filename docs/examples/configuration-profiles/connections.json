@@ -1,0 +1,38 @@
+{
+  "apiVersion": "haby.dev/v1alpha1",
+  "kind": "ConfigurationProfile",
+  "metadata": {
+    "id": "connections",
+    "revision": 1
+  },
+  "spec": {
+    "bindingRules": {
+      "main": {
+        "slot": "main",
+        "rendererRef": "sample.connection/v1",
+        "options": {
+          "consumer": "default"
+        },
+        "documentProjections": [
+          {
+            "documentRef": "settings",
+            "path": "/Connections/Main"
+          }
+        ]
+      },
+      "events": {
+        "slot": "events",
+        "rendererRef": "sample.events/v1",
+        "options": {
+          "batch": 20
+        },
+        "documentProjections": [
+          {
+            "documentRef": "settings",
+            "path": "/Events"
+          }
+        ]
+      }
+    }
+  }
+}

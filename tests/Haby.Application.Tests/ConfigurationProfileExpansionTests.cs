@@ -415,11 +415,16 @@ public sealed class ConfigurationProfileExpansionTests
     [Fact]
     public void Two_synthetic_typed_families_use_actual_expansion_composer_and_redacted_preview_with_one_exact_secret()
     {
-        var profiles = new[] { Layout(), Profile("logging", contributions: [Static("/Logging")]), Profile("clients", rules: [Rule(), Rule("events", "/Events", "sample.events/v1")]) };
+        // The changed wire boundary feeds the existing typed synthetic renderer harness.
+        var profiles = new[] {
+            WireProfile("layout", """{"documents":{"settings":{"fileName":"appsettings.json","format":"json","template":{}}}}"""),
+            WireProfile("logging", """{"staticContributions":{"logging":{"documentRef":"settings","path":"/Logging","value":{"MinimumLevel":"Information"}}}}"""),
+            WireProfile("clients", """{"bindingRules":{"main":{"slot":"main","rendererRef":"sample.connection/v1","documentProjections":[{"documentRef":"settings","path":"/Connections/Main"}]},"events":{"slot":"events","rendererRef":"sample.events/v1","options":{"batch":20},"documentProjections":[{"documentRef":"settings","path":"/Events"}]}}}""") };
         var components = new[] { Component(bindings: Binding(options: """{"consumer":"api"}"""), slots: [Slot()]),
             Component("worker", Binding(options: """{"consumer":"worker"}"""), slots: [Slot()]),
             Component("events", Binding("two", """{"batch":10}"""), slots: [Slot("events")]) };
-        var result = Expand(profiles, profiles.Select(x => new ProfileDecision.Use(x.Reference)), components);
+        var assignment = WireAssignment("environment", """[{"kind":"use","profileRef":{"profileId":"layout","revision":1}},{"kind":"use","profileRef":{"profileId":"logging","revision":1}},{"kind":"use","profileRef":{"profileId":"clients","revision":1}}]""");
+        var result = Expand(profiles, assignment.Decisions, components);
         Assert.True(result.IsSuccess);
         var secret = new ConfigurationSecretReference(new(SecretId.New(), SecretVersionId.New()));
         var formatters = new ConfigurationFormatterCatalog([new ConnectionContract(), new EventsContract()],
@@ -460,4 +465,60 @@ public sealed class ConfigurationProfileExpansionTests
         var workerDeferred = Assert.IsType<ConfigurationDeferredValue>(Assert.IsType<ConfigurationObject>(Assert.IsType<ConfigurationObject>(documents["worker"]).Members["Connections"]).Members["Main"]);
         Assert.Same(apiDeferred.Arguments.Members["credential"], workerDeferred.Arguments.Members["credential"]);
     }
+    private static ConfigurationProfileRevision WireProfile(string id, string spec, int revision = 1)
+    {
+        var json = "{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"ConfigurationProfile\",\"metadata\":{\"id\":\"" + id + "\",\"revision\":" + revision + "},\"spec\":" + spec + "}";
+        var result = ProfilePayloadParser.ParseProfile(Encoding.UTF8.GetBytes(json));
+        Assert.True(result.IsSuccess);
+        return result.Declaration!;
+    }
+    private static ConfigurationProfileAssignment WireAssignment(string kind, string decisions)
+    {
+        var target = kind == "environment" ? "{\"kind\":\"environment\"}" : kind == "application" ?
+            "{\"kind\":\"application\",\"applicationId\":\"sample\"}" : "{\"kind\":\"component\",\"applicationId\":\"sample\",\"componentRef\":\"api\"}";
+        var result = ProfilePayloadParser.ParseAssignment(Encoding.UTF8.GetBytes(
+            "{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"ConfigurationProfileAssignment\",\"spec\":{\"target\":" + target + ",\"decisions\":" + decisions + "}}"));
+        Assert.True(result.IsSuccess);
+        return result.Declaration!;
+    }
+
+    [Fact]
+    public void Wire_assignments_select_whole_revisions_at_all_three_scopes()
+    {
+        var profiles = Enumerable.Range(1, 3).Select(revision => WireProfile("logging",
+            "{\"staticContributions\":{\"logging\":{\"documentRef\":\"settings\",\"path\":\"/Serilog\",\"value\":{\"MinimumLevel\":" +
+            (revision == 2 ? "{\"Default\":\"Warning\"}" : "\"Information\"") + "}}}}", revision)).Prepend(Layout()).ToArray();
+        var environment = WireAssignment("environment", """[{"kind":"use","profileRef":{"profileId":"layout","revision":1}},{"kind":"use","profileRef":{"profileId":"logging","revision":1}}]""");
+        var application = WireAssignment("application", """[{"kind":"use","profileRef":{"profileId":"logging","revision":2}}]""");
+        var component = WireAssignment("component", """[{"kind":"use","profileRef":{"profileId":"logging","revision":3}}]""");
+        Assert.IsType<ProfileAssignmentTarget.Component>(component.Target);
+        var result = Expand(profiles, environment.Decisions, [Component(decisions: component.Decisions), Component("worker")], application.Decisions);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, Assert.Single(result.Layouts!.Single(x => x.Component == Id("api")).Contributions).Origin.Profile!.Revision);
+        Assert.Equal(2, Assert.Single(result.Layouts!.Single(x => x.Component == Id("worker")).Contributions).Origin.Profile!.Revision);
+    }
+
+    [Fact]
+    public void Wire_secrets_preserve_every_field_in_catalog_conflicts_and_refuse_all_layouts()
+    {
+        const string spec = """{"documents":{"settings":{"fileName":"appsettings.json","format":"json","template":{}}},"staticContributions":{"otel":{"documentRef":"settings","path":"/OpenTelemetry","value":{},"secretProjections":[{"path":"/Otlp","format":"json","secretRef":{"name":"otel-connection","version":1}}]}}}""";
+        var profile = WireProfile("secret", spec);
+        _ = new ConfigurationProfileCatalog([profile, WireProfile("secret", spec)]);
+        foreach (var changed in new[] { spec.Replace("/Otlp", "/Other", StringComparison.Ordinal), spec.Replace("\"json\",\"secretRef\"", "\"string\",\"secretRef\"", StringComparison.Ordinal),
+            spec.Replace("otel-connection", "other-secret", StringComparison.Ordinal), spec.Replace("\"version\":1", "\"version\":2", StringComparison.Ordinal) })
+        {
+            var other = WireProfile("secret", changed);
+            Assert.NotEqual(profile, other);
+            Assert.Throws<ArgumentException>(() => new ConfigurationProfileCatalog([profile, other]));
+        }
+        var result = Expand([profile], [new ProfileDecision.Use(profile.Reference)], [Component(), Component("worker")]);
+        Fails(result, "profile.secret-projections.unsupported");
+        // The same restriction applies to direct semantic contributions, so the earlier path cannot drop metadata.
+        Fails(Expand([Layout()], [Use("layout")], [Component(contributions: profile.Contributions)]), "profile.secret-projections.unsupported");
+        var collision = WireProfile("collision", """{"staticContributions":{"child":{"documentRef":"settings","path":"/OpenTelemetry/Other","value":null}}}""");
+        Fails(Expand([profile, collision], [new ProfileDecision.Use(profile.Reference), new ProfileDecision.Use(collision.Reference)]), "render.projection.path-conflict");
+        var missing = WireProfile("missing", """{"staticContributions":{"c":{"documentRef":"external","path":"/x","value":null}}}""");
+        Fails(Expand([missing], [new ProfileDecision.Use(missing.Reference)]), "profile.document.not-found");
+    }
+
 }

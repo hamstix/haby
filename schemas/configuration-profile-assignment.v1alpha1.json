@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haby.dev/schemas/configuration-profile-assignment.v1alpha1.json",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "const": "haby.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "ConfigurationProfileAssignment"
+    },
+    "spec": {
+      "$ref": "#/$defs/spec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "applicationId": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "localId": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "profileRef": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "$ref": "#/$defs/applicationId"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        }
+      },
+      "required": [
+        "profileId",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "environment"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "application"
+            },
+            "applicationId": {
+              "$ref": "#/$defs/applicationId"
+            }
+          },
+          "required": [
+            "kind",
+            "applicationId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "component"
+            },
+            "applicationId": {
+              "$ref": "#/$defs/applicationId"
+            },
+            "componentRef": {
+              "$ref": "#/$defs/localId"
+            }
+          },
+          "required": [
+            "kind",
+            "applicationId",
+            "componentRef"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "use"
+            },
+            "profileRef": {
+              "$ref": "#/$defs/profileRef"
+            }
+          },
+          "required": [
+            "kind",
+            "profileRef"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "disable"
+            },
+            "profileId": {
+              "$ref": "#/$defs/applicationId"
+            }
+          },
+          "required": [
+            "kind",
+            "profileId"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "decisions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/decision"
+          }
+        }
+      },
+      "required": [
+        "target",
+        "decisions"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

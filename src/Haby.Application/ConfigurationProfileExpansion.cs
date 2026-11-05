@@ -190,7 +190,11 @@ public sealed class ConfigurationProfileExpander(ConfigurationProfileCatalog cat
                 if (!Ordinary(document.Definition.Template)) Error("profile.value.unsupported", document.Definition.Id.Value, source: Source(document.Origin));
             }
             foreach (var contribution in contributions)
+            {
                 if (!Ordinary(contribution.Contribution.Value)) Error("profile.value.unsupported", contribution.Contribution.Document.Value, source: Source(contribution.Origin));
+                if (contribution.Contribution.SecretProjections.Count != 0)
+                    Error("profile.secret-projections.unsupported", contribution.Contribution.Document.Value, source: Source(contribution.Origin));
+            }
             foreach (var slot in input.Slots.GroupBy(x => x.Slot))
             {
                 if (slot.Count() != 1) { Error("profile.slot.duplicate", source: slot.Key.Value); continue; }

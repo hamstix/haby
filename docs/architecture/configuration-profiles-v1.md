@@ -1,8 +1,9 @@
 # In-process Environment Profile expansion
 
 Implemented for issue #126 under [ADR-037](../adr/0037-environment-configuration-profiles-and-scoped-selection.md).
-This is a pure semantic API, without a Profile JSON contract, manifest field,
-persistence, Plan integration, Host operation or habyctl command. Profiles cannot
+The subsequent [Profile/assignment JSON boundary](configuration-profile-json-v1alpha1.md)
+implements issue #128 under ADR-038. Expansion remains a pure semantic API without
+a new Application manifest field, persistence, Plan integration, Host operation or habyctl command. Profiles cannot
 yet be configured through Host/habyctl. Existing published manifest APIs are unchanged.
 No catalog reset is needed.
 
@@ -22,7 +23,9 @@ format and already-static semantic template. Artifact names follow the current
 manifest's basename rules and are unique ordinally across effective documents.
 Only JSON executes in this slice. `ProfileStaticContribution` identifies its
 source, target document, canonical non-root JSON Pointer and ordinary immutable
-ConfigurationValue. Contribution IDs and rule IDs are unique within their
+ConfigurationValue plus immutable explicit named-secret projection declarations.
+Expansion refuses those declarations with `profile.secret-projections.unsupported`
+until the separately authorized planning/delivery capability exists. Contribution IDs and rule IDs are unique within their
 respective Profile collections; Application static contribution IDs are also unique.
 
 `ProfileBindingRule` declares a local slot, exact opaque ConfigurationRendererId,
@@ -123,6 +126,7 @@ values, formatter Arguments, SecretRefs and exception text are never copied.
 | `profile.slot.duplicate` | More than one association requests the same slot. |
 | `profile.slot.not-found` | Requested slot has no selected rule. |
 | `profile.slot.ambiguous` | Requested slot has several selected rules. |
+| `profile.secret-projections.unsupported` | Effective contribution requests secret insertion not yet supported by materialization. |
 | `profile.value.unsupported` | Static semantic input contains a trusted confidential node. |
 
 The structural checker additionally returns the existing

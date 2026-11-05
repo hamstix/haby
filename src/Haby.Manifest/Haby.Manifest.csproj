@@ -3,5 +3,7 @@
     <ProjectReference Include="..\Haby.Domain\Haby.Domain.csproj" />
     <PackageReference Include="Corvus.Text.Json.Validator" />
     <EmbeddedResource Include="..\..\schemas\application-manifest.v1alpha1.json" LogicalName="Haby.Manifest.application-manifest.v1alpha1.json" />
+    <EmbeddedResource Include="..\..\schemas\configuration-profile.v1alpha1.json" LogicalName="Haby.Manifest.configuration-profile.v1alpha1.json" />
+    <EmbeddedResource Include="..\..\schemas\configuration-profile-assignment.v1alpha1.json" LogicalName="Haby.Manifest.configuration-profile-assignment.v1alpha1.json" />
   </ItemGroup>
 </Project>
