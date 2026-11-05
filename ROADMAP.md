@@ -544,8 +544,9 @@ PR #125. [ADR-037](docs/adr/0037-environment-configuration-profiles-and-scoped-s
 accepts Environment Profile defaults with whole-Profile revision replacement,
 disable/add exceptions at Application/Component scope and explicit Binding slots.
 Independent static and Binding-driven contributions share one defined document;
-conflicts never become implicit overwrites. Start with typed in-memory selection
-and expansion into the composer. Profile/selection wire contracts, persistence
+conflicts never become implicit overwrites. Issue #126 implements
+[typed in-memory selection and expansion](docs/architecture/configuration-profiles-v1.md)
+into the composer. Profile/selection wire contracts, persistence
 and exact-generation planning integration follow before authorized delivery.
 
 Required end-to-end path:
