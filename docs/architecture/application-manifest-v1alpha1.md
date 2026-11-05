@@ -198,6 +198,26 @@ to empty. `documentProjections` defaults to an empty list. A Binding without a
 Document projection is valid because it may establish Resource access without
 placing Resource outputs into a Configuration document.
 
+`configurationSlot` is an optional manifest-local ID string. Omission means no
+requested Profile slot; explicit null, empty, invalid IDs and non-strings refuse.
+At most one Binding requests a slot within one Component; another Component may
+request the same slot. Slot membership is never inferred from a Binding, Resource,
+Provider or contract name. It grants no access and changes no external effect.
+A slot can coexist with direct document projections; both participate in effective
+collision checks. Import does not resolve Profiles, rules or output support.
+
+```json
+{
+  "target": { "kind": "local-resource", "resourceRef": "app-login" },
+  "configurationSlot": "main-database",
+  "options": {}
+}
+```
+
+The current v1alpha1 schema identity is unchanged under ADR-033/038. The normalized
+model and internal snapshot format are version 2; superseded snapshots require an
+explicit fresh catalog. See the [reset requirements](../development/130-binding-configuration-slot.md).
+
 A local target has exactly this closed shape:
 
 ```json

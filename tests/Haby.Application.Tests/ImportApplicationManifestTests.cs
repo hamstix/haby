@@ -202,6 +202,29 @@ public class ImportApplicationManifestTests
         Assert.Empty(store.Applications);
     }
 
+    [Theory]
+    [InlineData(null, "main")]
+    [InlineData("main", "other")]
+    [InlineData("main", null)]
+    public async Task Slot_add_change_remove_conflicts_at_exact_path_but_new_version_is_allowed(string? original, string? changed)
+    {
+        byte[] Payload(string version, string? slot) => EnvelopeWithSpec(version,
+            """
+            "resources":{"db":{"type":"example.resource/v1","providerRef":"main","properties":{"enabled":true}}},"components":{"api":{"bindings":{"consume":{"target":{"kind":"local-resource","resourceRef":"db"}SLOT}}}}
+            """
+                .Replace("SLOT", slot is null ? "" : ",\"configurationSlot\":\"" + slot + "\"", StringComparison.Ordinal));
+        var store = new InMemoryManifestImportStore();
+        var import = Create(store);
+        var first = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await import.ExecuteAsync(Payload("1", original), "actor"));
+        var repeat = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await import.ExecuteAsync(Payload("1", original), "retry"));
+        Assert.Equal(ImportApplicationManifestResult.ImportDisposition.ExistingEquivalent, repeat.Disposition);
+        Assert.Equal(first.AuditMetadata, repeat.AuditMetadata);
+        var conflict = Assert.IsType<ImportApplicationManifestResult.ApplicationVersionContentConflict>(await import.ExecuteAsync(Payload("1", changed), "actor"));
+        Assert.Equal(["/spec/components/api/bindings/consume/configurationSlot"], conflict.ChangedPaths);
+        var next = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await import.ExecuteAsync(Payload("2", changed), "actor"));
+        Assert.Equal(2, next.ManifestRevisionRef.RevisionNumber.Value);
+    }
+
     private static ImportApplicationManifest Create(IManifestImportStore store) => new(store, Catalog,
         new FixedTimeProvider(FirstTime));
 

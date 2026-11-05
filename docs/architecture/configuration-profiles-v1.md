@@ -2,10 +2,12 @@
 
 Implemented for issue #126 under [ADR-037](../adr/0037-environment-configuration-profiles-and-scoped-selection.md).
 The subsequent [Profile/assignment JSON boundary](configuration-profile-json-v1alpha1.md)
-implements issue #128 under ADR-038. Expansion remains a pure semantic API without
-a new Application manifest field, persistence, Plan integration, Host operation or habyctl command. Profiles cannot
-yet be configured through Host/habyctl. Existing published manifest APIs are unchanged.
-No catalog reset is needed.
+implements issue #128 under ADR-038. Issue #130 adds `configurationSlot` to the
+current Application v1alpha1 and normalized snapshots. Expansion remains a pure
+semantic API without Profile persistence, Plan integration, Host operation or
+habyctl command. Profiles cannot yet be configured through Host/habyctl.
+Superseded Application snapshots require an explicit fresh catalog; see the
+[reset requirements](../development/130-binding-configuration-slot.md).
 
 ## Inputs and identities
 
@@ -34,11 +36,12 @@ These are semantic typed trees, not serialized adapter arguments. Common code do
 not interpret option names or specialize on renderer/resource families.
 
 `ProfileComponentInput` accepts an existing immutable `NormalizedComponent`,
-Component decisions, explicit `BindingSlotAssociation` values and optional
-already-static Application contributions. Binding IDs must refer to that supplied
-Component. These typed associations model future author-declared slots; they
-are neither manifest fields nor operator mappings. Existing Application documents
-and direct Binding document projections participate as ordinary sources.
+Component decisions and optional already-static Application contributions.
+Slot associations come exclusively from `NormalizedBinding.ConfigurationSlot` in
+the supplied Component, including Components read from persisted revisions. No
+caller-supplied mapping or inferred association exists. Duplicate requested slots
+are checked again during expansion for restored semantic inputs. Existing
+Application documents and direct Binding document projections participate as ordinary sources.
 No Resources, Providers or Bindings are created or inferred.
 
 ## Selection and expansion
@@ -121,7 +124,6 @@ values, formatter Arguments, SecretRefs and exception text are never copied.
 | `profile.document.not-found` | Emitted contribution/request targets an absent document. |
 | `profile.contribution.duplicate` | Duplicate static contribution identity in one source. |
 | `profile.rule.duplicate` | Duplicate rule identity within a Profile. |
-| `profile.binding.not-found` | Slot association names an absent Component Binding. |
 | `profile.binding.unsupported` | Emitted Binding target is not local-resource. |
 | `profile.slot.duplicate` | More than one association requests the same slot. |
 | `profile.slot.not-found` | Requested slot has no selected rule. |

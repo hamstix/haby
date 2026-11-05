@@ -141,14 +141,17 @@ Database constraints remain the final integrity guard. A failed database write
 propagates as an infrastructure error; it is not converted into a content
 conflict.
 
-The declaration snapshot is internal JSON **format version 1**. It records the
-complete typed normalized graph under **normalized model version 1**, with
+The declaration snapshot is internal JSON **format version 2**. It records the
+complete typed normalized graph under **normalized model version 2**, with
 exact numbers encoded as canonical decimal coefficient and exponent text.
 Input API version, historical warnings and first-import actor/time are retained
 alongside it. Rehydration checks the format and model versions and fails on
 unsupported or corrupt snapshots. No original manifest parser or current
 extension catalog is consulted. Any encoding change requires a new format
-version and a migration or compatibility reader. The snapshot is not the
+version. Under ADR-033/038, superseded alpha snapshots require an explicit fresh
+catalog, without old readers or automatic reset. Each Binding must store
+`configurationSlot`, including explicit null for absence; omission is corrupt.
+See [reset requirements](../../docs/development/130-binding-configuration-slot.md). The snapshot is not the
 public manifest contract or an equality shortcut.
 
 `imported_at` is stored as PostgreSQL `timestamptz` with microsecond precision.

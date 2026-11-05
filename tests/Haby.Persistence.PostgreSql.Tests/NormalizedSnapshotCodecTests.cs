@@ -50,6 +50,57 @@ public sealed class NormalizedSnapshotCodecTests
         Assert.DoesNotContain("do not expose", error.Message);
     }
 
+    [Theory]
+    [InlineData("omit")]
+    [InlineData("omit-unslotted")]
+    [InlineData("invalid-id")]
+    [InlineData("wrong-type")]
+    [InlineData("old-format")]
+    [InlineData("old-model")]
+    [InlineData("wrong-column-model")]
+    [InlineData("old-column-format")]
+    public void Current_snapshot_requires_explicit_slot_and_exact_versions(string corruption)
+    {
+        var manifest = CompleteManifest();
+        var root = System.Text.Json.Nodes.JsonNode.Parse(NormalizedSnapshotCodec.Encode(manifest))!;
+        var binding = root["spec"]!["components"]!["worker"]!["bindings"]!["local"]!.AsObject();
+        var model = manifest.NormalizedModelVersion;
+        var format = NormalizedSnapshotCodec.FormatVersion;
+        switch (corruption)
+        {
+            case "omit": binding.Remove("configurationSlot"); break;
+            case "omit-unslotted": root["spec"]!["components"]!["worker"]!["bindings"]!["shared"]!.AsObject().Remove("configurationSlot"); break;
+            case "invalid-id": binding["configurationSlot"] = "private_Invalid"; break;
+            case "wrong-type": binding["configurationSlot"] = 1; break;
+            case "old-format": root["format"] = 1; break;
+            case "old-model": root["model"] = 1; break;
+            case "wrong-column-model": model = 1; break;
+            case "old-column-format": format = 1; break;
+        }
+        var error = Assert.Throws<InvalidDataException>(() => NormalizedSnapshotCodec.Decode(root.ToJsonString(),
+            manifest.InputApiVersion, model, manifest.ApplicationId.Value, format));
+        Assert.DoesNotContain("private_Invalid", error.Message);
+    }
+
+    [Fact]
+    public void Snapshot_preserves_explicit_null_and_requested_slot_and_expansion_rechecks_restored_duplicates()
+    {
+        var manifest = CompleteManifest();
+        var root = System.Text.Json.Nodes.JsonNode.Parse(NormalizedSnapshotCodec.Encode(manifest))!;
+        var bindings = root["spec"]!["components"]!["worker"]!["bindings"]!;
+        Assert.Equal("main-database", bindings["local"]!["configurationSlot"]!.GetValue<string>());
+        Assert.True(bindings["shared"]!.AsObject().ContainsKey("configurationSlot"));
+        Assert.Null(bindings["shared"]!["configurationSlot"]);
+        bindings["shared"]!["configurationSlot"] = "main-database";
+        var restored = NormalizedSnapshotCodec.Decode(root.ToJsonString(), manifest.InputApiVersion,
+            manifest.NormalizedModelVersion, manifest.ApplicationId.Value, NormalizedSnapshotCodec.FormatVersion);
+        var result = new Haby.Application.ConfigurationProfileExpander(new([])).Expand([], [],
+            [new(ManifestLocalId.Create("worker"), restored.Spec.Components[ManifestLocalId.Create("worker")], [])]);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Layouts);
+        Assert.Contains(result.Diagnostics, x => x.Code == "profile.slot.duplicate");
+    }
+
     private static NormalizedApplicationManifest CompleteManifest()
     {
         using var stream = typeof(NormalizedSnapshotCodecTests).Assembly

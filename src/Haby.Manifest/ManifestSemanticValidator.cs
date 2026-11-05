@@ -78,6 +78,17 @@ internal static class ManifestSemanticValidator
                 }
             }
 
+            foreach (var group in component.Bindings.Where(item => item.Value.ConfigurationSlot is not null)
+                .GroupBy(item => item.Value.ConfigurationSlot, StringComparer.Ordinal))
+            {
+                var paths = group.Select(item => componentPath + "/bindings/" + Escape(item.Key) + "/configurationSlot")
+                    .OrderBy(path => path, StringComparer.Ordinal).ToArray();
+                if (paths.Length > 1)
+                    diagnostics.Add(new("manifest.id.duplicate", ManifestDiagnosticSeverity.Error, paths[0],
+                        "Bindings in one component request the same configuration slot.",
+                        Parameters(("idKind", "configuration-slot")), paths[1..]));
+            }
+
             foreach (var group in validProjections.GroupBy(item => item.DocumentRef, StringComparer.Ordinal))
             {
                 var projections = group.OrderBy(item => item.ManifestPath, StringComparer.Ordinal).ToArray();

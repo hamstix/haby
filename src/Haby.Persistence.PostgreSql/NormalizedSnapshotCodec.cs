@@ -7,10 +7,10 @@ using ApplicationId = Haby.Domain.ApplicationId;
 
 namespace Haby.Persistence.PostgreSql;
 
-/// <summary>Version 1 of the internal typed declaration snapshot. It is never a manifest input.</summary>
+/// <summary>Version 2 of the internal typed declaration snapshot. It is never a manifest input.</summary>
 internal static class NormalizedSnapshotCodec
 {
-    internal const int FormatVersion = 1;
+    internal const int FormatVersion = 2;
 
     internal static string Encode(NormalizedApplicationManifest manifest) => new JsonObject
     {
@@ -105,6 +105,7 @@ internal static class NormalizedSnapshotCodec
                 },
                 _ => throw new InvalidOperationException("Unknown binding target.")
             },
+            ["configurationSlot"] = binding.ConfigurationSlot?.Value,
             ["options"] = EncodeValue(binding.Options),
             ["projections"] = new JsonArray(binding.DocumentProjections.Select(projection => (JsonNode?)new JsonObject
             {
@@ -160,7 +161,9 @@ internal static class NormalizedSnapshotCodec
                     return new NormalizedDocumentProjection(ManifestLocalId.Create(Text(projection, "document")),
                         ProjectionPath.FromValidated(Text(projection, "path")), ConfigurationRendererId.Create(Text(projection, "renderer")));
                 }).ToImmutableArray();
-                return new NormalizedBinding(parsedTarget, ReadObject(binding, "options"), projections);
+                RequireField(binding, "configurationSlot");
+                return new NormalizedBinding(parsedTarget, ReadObject(binding, "options"), projections,
+                    LocalId(OptionalText(binding, "configurationSlot")));
             }),
             ReadEntries(item, "documents", value =>
             {

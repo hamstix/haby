@@ -75,6 +75,7 @@ internal static class NormalizedManifestDiff
     }
     private static void Binding(NormalizedBinding a, NormalizedBinding b, string p, Action<string> add)
     {
+        Check(a.ConfigurationSlot, b.ConfigurationSlot, Child(p, "configurationSlot"), add);
         if (a.Target.GetType() != b.Target.GetType()) add(Child(p, "target"));
         else if (a.Target is NormalizedLocalResourceTarget localA && b.Target is NormalizedLocalResourceTarget localB)
             Check(localA.ResourceRef, localB.ResourceRef, Child(Child(p, "target"), "resourceRef"), add);

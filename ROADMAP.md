@@ -84,7 +84,7 @@ The in-process preview is not yet an operator endpoint or confidential delivery.
 
 - [x] Accept Profile/assignment JSON, explicit static secret projections and configurationSlot in the evolving current Application v1alpha1: [ADR-038](docs/adr/0038-profile-json-contracts-and-explicit-secret-projections.md).
 - [x] Implement strict Profile/assignment JSON parsing and immutable mapping, retaining secret projection declarations without enabling secret delivery: [wire contract](docs/architecture/configuration-profile-json-v1alpha1.md).
-- [ ] Implement configurationSlot in the current Application schema/DTO/normalized snapshot model; use one current alpha contract with explicit reset requirements if needed.
+- [x] Implement configurationSlot in the current Application schema/DTO/normalized snapshot model, with normalized Bindings as the single source for Profile slots: [issue #130 and reset requirements](docs/development/130-binding-configuration-slot.md).
 - [ ] Persist exact Profile revisions and selections, expose narrow operator administration and integrate frozen effective layouts/options into planning.
 - [ ] Define and implement adapter-owned Resource-output renderers, typed consumer option contracts and confidential formatters; start with the confirmed PostgreSQL application-login output.
 - [ ] Materialize immutable unresolved ConfigurationDocumentRevisions from exact applied-generation inputs, with idempotency, provenance and no secret-bearing strings in ordinary storage/results.
@@ -216,8 +216,8 @@ membership. ADR identifiers are not renumbered. Future issues belong to the
 delivery milestone whose observable outcome they advance.
 
 Issue #126 is delivered by PR #127. Issue #128 implements the Profile/assignment
-JSON boundary accepted in ADR-038. Next implement the current-alpha Application
-slot and snapshot changes. Secret declaration parsing does not authorize secret resolution or delivery.
+JSON boundary accepted in ADR-038. Issue #130 implements the current-alpha
+Application slot and snapshot changes. Secret declaration parsing does not authorize secret resolution or delivery.
 Continue P2 toward real output rendering,
 saved unresolved documents and scoped retrieval; do not repeat foundation work
 or start a general SDK/UI/HA project.

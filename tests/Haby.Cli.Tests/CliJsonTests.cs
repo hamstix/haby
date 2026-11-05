@@ -42,7 +42,7 @@ public sealed class CliJsonTests
         ApplicationId = "app",
         ApplicationVersion = "v1",
         InputApiVersion = "haby.dev/v1alpha1",
-        NormalizedModelVersion = 1,
+        NormalizedModelVersion = 2,
         TechnicalActorId = "actor",
         ImportedAtUtc = "2026-10-28T00:00:00Z",
         HistoricalWarnings = Report()

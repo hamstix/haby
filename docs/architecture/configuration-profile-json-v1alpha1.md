@@ -5,8 +5,10 @@ Implemented for issue #128 under [ADR-038](../adr/0038-profile-json-contracts-an
 standalone UTF-8 bytes and return immutable Domain declarations. This is an
 in-process wire boundary, without storage, apply, Host/CLI commands, Environment
 lookup, authorization, output access, secret reads or formatter execution.
-No catalog reset is required. Application JSON/snapshot contracts are unchanged;
-Application Binding `configurationSlot` belongs to the next slice.
+The Profile wire boundary itself requires no catalog reset. Issue #130 now adds
+Application Binding `configurationSlot` to the current v1alpha1 and advances its
+normalized/snapshot versions to 2, requiring an explicit fresh catalog for
+superseded snapshots. See [reset requirements](../development/130-binding-configuration-slot.md).
 
 ## Schemas and DTOs
 
@@ -68,7 +70,9 @@ examples together. Layout owns settings/appsettings.json, Serilog contributes it
 whole subtree, and connections declares two opaque typed synthetic renderers.
 A Component explicitly associated with slot main consumes its existing Binding;
 a Component using events receives the other rule. No Binding is inferred or created.
-These examples do not add slot JSON to the current Application contract.
+The [Application example](../examples/application-with-configuration-slots.json) declares
+this association with Binding `configurationSlot` for api and worker. Its Resource
+type is synthetic; importing it requires matching test/downstream contract metadata.
 
 Parse each Profile into ConfigurationProfileRevision, construct the exact
 ConfigurationProfileCatalog, then pass parsed assignment decisions to

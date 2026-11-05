@@ -27,19 +27,17 @@ public enum ProfileSelectionScope { Environment, Application, Component }
 public enum ProfileOptionScope { Profile, Binding }
 public sealed record EffectiveProfileDecision(ProfileDecision Decision, ProfileSelectionScope Scope);
 public sealed record ConfigurationLayoutOrigin(ProfileRevisionRef? Profile, ManifestLocalId Source);
-public sealed record BindingSlotAssociation(ManifestLocalId Binding, ManifestLocalId Slot);
 public sealed record ProfileExpansionDiagnostic(string Code, string Component, string Document, string Path, string Source);
 
-/// <summary>Already parsed Component plus author-declared slots. No new manifest fields or inferred associations.</summary>
+/// <summary>Already parsed Component with slots declared by its normalized Bindings.</summary>
 public sealed class ProfileComponentInput
 {
     public ProfileComponentInput(ManifestLocalId id, NormalizedComponent component, IEnumerable<ProfileDecision> decisions,
-        IEnumerable<BindingSlotAssociation> slots, IEnumerable<ProfileStaticContribution>? contributions = null)
+        IEnumerable<ProfileStaticContribution>? contributions = null)
     {
         Id = id ?? throw new ArgumentNullException(nameof(id));
         Component = component ?? throw new ArgumentNullException(nameof(component));
         Decisions = Snapshot(decisions);
-        Slots = Snapshot(slots);
         Contributions = Snapshot(contributions ?? []);
     }
     private static ImmutableArray<T> Snapshot<T>(IEnumerable<T> values)
@@ -52,7 +50,6 @@ public sealed class ProfileComponentInput
     public ManifestLocalId Id { get; }
     public NormalizedComponent Component { get; }
     public IReadOnlyList<ProfileDecision> Decisions { get; }
-    public IReadOnlyList<BindingSlotAssociation> Slots { get; }
     public IReadOnlyList<ProfileStaticContribution> Contributions { get; }
 }
 
@@ -195,17 +192,17 @@ public sealed class ConfigurationProfileExpander(ConfigurationProfileCatalog cat
                 if (contribution.Contribution.SecretProjections.Count != 0)
                     Error("profile.secret-projections.unsupported", contribution.Contribution.Document.Value, source: Source(contribution.Origin));
             }
-            foreach (var slot in input.Slots.GroupBy(x => x.Slot))
+            foreach (var slot in input.Component.Bindings.Where(x => x.Value.ConfigurationSlot is not null)
+                .GroupBy(x => x.Value.ConfigurationSlot!))
             {
                 if (slot.Count() != 1) { Error("profile.slot.duplicate", source: slot.Key.Value); continue; }
                 var association = slot.Single();
-                if (!input.Component.Bindings.TryGetValue(association.Binding, out var binding))
-                { Error("profile.binding.not-found", source: association.Binding.Value); continue; }
+                var binding = association.Value;
                 var matches = rules.Where(x => x.Rule.Slot == slot.Key).ToArray();
                 if (matches.Length != 1)
                 { Error(matches.Length == 0 ? "profile.slot.not-found" : "profile.slot.ambiguous", source: slot.Key.Value); continue; }
                 var (rule, origin) = matches[0];
-                AddRequest(association.Binding, binding, association.Slot, rule.Renderer, rule.Defaults, rule.Projections, origin);
+                AddRequest(association.Key, binding, slot.Key, rule.Renderer, rule.Defaults, rule.Projections, origin);
             }
             // Existing direct projections remain authoritative and share every collision check.
             foreach (var (id, binding) in input.Component.Bindings)

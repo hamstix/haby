@@ -98,6 +98,7 @@ parameter
 provider-alias
 contract
 access-profile
+configuration-slot
 ```
 
 `workload-profile` identifies the Workload `profile` field at
@@ -106,6 +107,13 @@ access-profile
 `/spec/exports/{exportId}/accessProfile`. Both use manifest-local ID syntax.
 Focused tests must assert the diagnostic code, path and `idKind` for each
 invalid field independently.
+
+`configuration-slot` identifies a Binding's optional `configurationSlot` at
+`/spec/components/{componentId}/bindings/{bindingId}/configurationSlot`.
+Invalid strings use `manifest.id.invalid`; duplicate requested slots within one
+Component use `manifest.id.duplicate` with `idKind=configuration-slot`. The duplicate
+diagnostic uses the ordinal first member path and the remaining member paths as
+RelatedPaths, with no slot value parameter. Cross-Component reuse is valid.
 
 A duplicate JSON map member is a syntax error and therefore uses
 `manifest.syntax.duplicate-property`, not `manifest.id.duplicate`.
