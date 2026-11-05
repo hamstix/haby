@@ -1,5 +1,13 @@
 # PostgreSQL manifest catalog
 
+The catalog also stores installation-scoped immutable Configuration Profile
+revisions through `IConfigurationProfileImportStore` and
+`IConfigurationProfileRevisionQuery`. See the [Profile persistence contract](../../docs/development/132-profile-revision-persistence.md)
+for exact import/read semantics, atomic concurrency, independent Profile format/model
+1, safe corrupt-read refusal, additive schema migration and real backup/restore
+evidence. Secret projection declarations remain unresolved metadata. This adds
+no Profile assignment, Host/CLI endpoint, planning or secret delivery capability.
+
 This project is the EF Core persistence adapter for accepted Applications,
 immutable ManifestRevisions and Provider configuration revisions. It does not
 persist deployments or execute Providers. `IManifestImportStore` retains the

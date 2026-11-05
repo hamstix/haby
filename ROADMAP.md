@@ -85,7 +85,8 @@ The in-process preview is not yet an operator endpoint or confidential delivery.
 - [x] Accept Profile/assignment JSON, explicit static secret projections and configurationSlot in the evolving current Application v1alpha1: [ADR-038](docs/adr/0038-profile-json-contracts-and-explicit-secret-projections.md).
 - [x] Implement strict Profile/assignment JSON parsing and immutable mapping, retaining secret projection declarations without enabling secret delivery: [wire contract](docs/architecture/configuration-profile-json-v1alpha1.md).
 - [x] Implement configurationSlot in the current Application schema/DTO/normalized snapshot model, with normalized Bindings as the single source for Profile slots: [issue #130 and reset requirements](docs/development/130-binding-configuration-slot.md).
-- [ ] Persist exact Profile revisions and selections, expose narrow operator administration and integrate frozen effective layouts/options into planning.
+- [x] Persist exact immutable Profile revisions with side-effect-free import/exact read, strict internal snapshots and PostgreSQL reload/concurrency/backup-restore evidence: [issue #132](docs/development/132-profile-revision-persistence.md).
+- [ ] Persist Profile selections, expose narrow operator administration and integrate frozen effective layouts/options into planning.
 - [ ] Define and implement adapter-owned Resource-output renderers, typed consumer option contracts and confidential formatters; start with the confirmed PostgreSQL application-login output.
 - [ ] Materialize immutable unresolved ConfigurationDocumentRevisions from exact applied-generation inputs, with idempotency, provenance and no secret-bearing strings in ordinary storage/results.
 - [ ] Expose redacted preview through the operator Host and habyctl.
