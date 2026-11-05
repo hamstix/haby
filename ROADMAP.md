@@ -73,6 +73,7 @@ with its generated credentials, without manual assembly of connection settings.
 - [x] Pure static-template/ready-fragment composition with deterministic collision refusal.
 - [x] Deterministic exact-number JSON and separate whole-value redacted preview.
 - [x] Ordinary serialization refuses unresolved confidential nodes.
+- [x] Environment Profile defaults, Application/Component whole-Profile exceptions and pure in-process expansion: [issue #126](https://github.com/hamstix/haby/issues/126), [expansion contract](docs/architecture/configuration-profiles-v1.md).
 
 Evidence: [issue #124](https://github.com/hamstix/haby/issues/124),
 merged [PR #125](https://github.com/hamstix/haby/pull/125) and the
@@ -81,7 +82,6 @@ The in-process preview is not yet an operator endpoint or confidential delivery.
 
 ### Next slices
 
-- [ ] Implement Environment Profile defaults, Application/Component whole-Profile exceptions and pure expansion: [issue #126](https://github.com/hamstix/haby/issues/126), ADR-037.
 - [ ] Agree Profile/selection JSON contracts and the versioned Application Binding-slot declaration before implementing those wire boundaries.
 - [ ] Persist exact Profile revisions and selections, expose narrow operator administration and integrate frozen effective layouts/options into planning.
 - [ ] Define and implement adapter-owned Resource-output renderers, typed consumer option contracts and confidential formatters; start with the confirmed PostgreSQL application-login output.

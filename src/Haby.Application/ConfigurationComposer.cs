@@ -40,33 +40,41 @@ public sealed class ConfigurationComposer(ConfigurationFormatterCatalog formatte
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(projections);
         var inputs = projections.ToArray();
+        foreach (var input in inputs) ArgumentNullException.ThrowIfNull(input);
         var errors = new List<ConfigurationRenderDiagnostic>();
-        var valid = new List<(ConfigurationProjection Projection, string[] Segments)>();
         ValidateTree(template, "", "", errors);
+        errors.AddRange(ValidateStructure(template, inputs.Select(x => (x.Path, x.Source.Value))));
         foreach (var projection in inputs)
+            if (Decode(projection.Path) is not null)
+                ValidateTree(projection.Fragment.Value, projection.Path, projection.Source.Value, errors);
+        if (errors.Count != 0) return new(null, errors);
+        var result = template;
+        foreach (var projection in inputs.OrderBy(x => x.Path, StringComparer.Ordinal))
+            result = Insert((ConfigurationObject)result, Decode(projection.Path)!, 0, projection.Fragment.Value);
+        return new(result, []);
+    }
+    /// <summary>Validate reserved paths without producing placeholder values or a document.</summary>
+    internal static IReadOnlyList<ConfigurationRenderDiagnostic> ValidateStructure(ConfigurationValue template,
+        IEnumerable<(string Path, string Source)> targets)
+    {
+        var errors = new List<ConfigurationRenderDiagnostic>();
+        var valid = new List<(string Path, string Source, string[] Segments)>();
+        foreach (var (path, source) in targets)
         {
-            ArgumentNullException.ThrowIfNull(projection);
-            var segments = Decode(projection.Path);
-            if (segments is null) errors.Add(new("render.projection.invalid-path", "", projection.Source.Value));
+            var segments = Decode(path);
+            if (segments is null) errors.Add(new("render.projection.invalid-path", "", source));
             else
             {
-                valid.Add((projection, segments));
-                ValidateTree(projection.Fragment.Value, projection.Path, projection.Source.Value, errors);
-                if (Collides(template, segments)) errors.Add(new("render.projection.template-collision", projection.Path, projection.Source.Value));
+                valid.Add((path, source, segments));
+                if (Collides(template, segments)) errors.Add(new("render.projection.template-collision", path, source));
             }
         }
         for (var i = 0; i < valid.Count; i++)
             for (var j = i + 1; j < valid.Count; j++)
                 if (Prefix(valid[i].Segments, valid[j].Segments) || Prefix(valid[j].Segments, valid[i].Segments))
-                {
                     foreach (var candidate in new[] { valid[i], valid[j] })
-                        errors.Add(new("render.projection.path-conflict", candidate.Projection.Path, candidate.Projection.Source.Value));
-                }
-        if (errors.Count != 0) return new(null, errors);
-        var result = template;
-        foreach (var (projection, segments) in valid.OrderBy(x => x.Projection.Path, StringComparer.Ordinal))
-            result = Insert((ConfigurationObject)result, segments, 0, projection.Fragment.Value);
-        return new(result, []);
+                        errors.Add(new("render.projection.path-conflict", candidate.Path, candidate.Source));
+        return errors;
     }
     private void ValidateTree(ConfigurationValue value, string path, string source, List<ConfigurationRenderDiagnostic> errors)
     {

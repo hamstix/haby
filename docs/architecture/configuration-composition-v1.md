@@ -208,5 +208,8 @@ semantic nodes. Structural equality/diffing handles the deferred alternative as
 one immutable value, without inspecting or emitting Arguments. The existing
 normalized-manifest persistence codec deliberately rejects deferred nodes through
 its unknown-kind refusal; this slice does not extend that codec or persist composed
-documents. No schema/migration/catalog reset is required. Profiles, formatter execution,
-application materialization, persistence and confidential delivery remain future work.
+documents. No schema/migration/catalog reset is required. The subsequent
+[in-process Profile expansion slice](configuration-profiles-v1.md) now reuses the
+structural checker for static contributions and unresolved Binding requests.
+Formatter execution, application materialization, persistence and confidential
+delivery remain future work.
