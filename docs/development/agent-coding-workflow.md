@@ -1,7 +1,8 @@
 # Agent-assisted development workflow
 
 - Status: Active maintainer process
-- Initial scope: M2.1 manifest foundation
+- Initial scope: M2.1 manifest foundation (completed historical execution wave)
+- Current scope: delivery milestones and active issues in [ROADMAP](../../ROADMAP.md)
 - Audience: maintainers coordinating one or more coding agents
 
 ## Purpose
@@ -516,6 +517,10 @@ other's contracts, project files or shared infrastructure and each can merge in
 either order.
 
 ## Initial M2.1 execution wave
+
+This section records the original completed execution wave. It is not the next
+implementation queue. Use the current delivery milestone and issue in
+[ROADMAP](../../ROADMAP.md); do not repeat these foundation slices.
 
 The first execution wave contains three sequential pull requests. Its purpose is
 to establish a deterministic manifest input boundary before implementing domain
