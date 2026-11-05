@@ -74,6 +74,13 @@ Pointer and ordinary immutable ConfigurationValue fragment. It applies for each
 Component receiving that effective Profile. Profiles cannot embed trusted
 SecretReference/DeferredValue nodes; renderers create confidential fragments later.
 
+[ADR-038](0038-profile-json-contracts-and-explicit-secret-projections.md) extends
+this rule with explicit named-secret projection declarations on static
+contributions. Ordinary JSON still cannot manufacture trusted confidential nodes.
+Planning pins exact references; separately authorized delivery alone resolves
+their material. The original ordinary-only implementation must not silently drop
+these newly declared projections.
+
 A Binding rule declares a logical slot, exact renderer ID, typed consumer defaults
 and one or more document/path projections. It contributes only when a Component
 Binding explicitly requests that slot. An unused rule contributes nothing and
@@ -151,6 +158,11 @@ a focused contract before that boundary is implemented. Do not add fields to the
 current manifest schema, silently reinterpret an existing field, or implement
 HTTP/gRPC/CLI operations in this first slice. In-memory slot associations model
 future author-declared slots; they are not mandatory per-Component operator mappings.
+
+That first slice is delivered by PR #127. ADR-038 now accepts the Profile/assignment
+wire shapes and configurationSlot in the current v1alpha1, through the separately
+scoped follow-up slices recorded there. This does not retroactively claim those
+wire or secret-projection capabilities are implemented by #127.
 
 Do not claim that expansion alone verifies real output availability, registered
 renderer execution compatibility, or adapter option constraints. Carry exact

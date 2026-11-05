@@ -69,11 +69,19 @@ the parser does not infer a document kind or try another version from its shape.
 canonical schema URI associated with the selected `apiVersion`. A mismatch is a
 manifest validation error. `$schema` remains excluded from normalized equality.
 
-Published manifest API versions are immutable while they are supported. Haby
-may support multiple input API versions through version-specific parsing,
-validation and normalization adapters. All supported versions are converted
-into a common internal model. Alpha versions carry no long-term compatibility
-guarantee and may be removed before the stable manifest contract is released.
+For the current evolving alpha, ADR-033 and
+[ADR-038](0038-profile-json-contracts-and-explicit-secret-projections.md) permit
+agreed schema/DTO/normalized-model changes within haby.dev/v1alpha1. Prefer one
+current model; do not retain old alpha forms or adapters solely for development
+compatibility. Update snapshot formats coherently and document a fresh-catalog
+requirement when necessary, never reset automatically. Accepted Application
+versions remain immutable within the current supported build/catalog.
+
+An explicit supported compatibility baseline will establish API-version and
+upgrade guarantees before stable use. Version-specific adapters may be introduced
+when that supported policy requires them; intermediate alpha publication alone
+does not create that obligation. Accepted normalized revisions do not require
+the original input adapter for planning or reconciliation.
 
 An unsupported `apiVersion` produces a standard bounded diagnostic at
 `/apiVersion`. Haby does not fall back to the newest version, downgrade the

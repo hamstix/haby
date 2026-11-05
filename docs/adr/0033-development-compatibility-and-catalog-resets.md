@@ -22,6 +22,12 @@ Do not add compatibility layers solely to preserve superseded development builds
 Remove obsolete readers, mappings, aliases and compatibility-only tests when the
 corresponding behavior is replaced. Keep useful current-behavior tests.
 
+This includes the evolving haby.dev/v1alpha1 Application manifest: accepted alpha
+changes may update the schema, DTOs and normalized model without changing
+apiVersion, as clarified by ADR-038. Do not create an alpha2/legacy adapter solely
+to preserve an intermediate alpha form. The explicit supported compatibility
+baseline below, rather than alpha publication, establishes that future obligation.
+
 A breaking slice may require a fresh Haby catalog. Its PR and runbook must state
 that requirement explicitly. No automatic data migration, backfill, old-reader
 support, upgrade/downgrade matrix, retained protobuf number or historical JSON

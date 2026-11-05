@@ -82,7 +82,9 @@ The in-process preview is not yet an operator endpoint or confidential delivery.
 
 ### Next slices
 
-- [ ] Agree Profile/selection JSON contracts and the versioned Application Binding-slot declaration before implementing those wire boundaries.
+- [x] Accept Profile/assignment JSON, explicit static secret projections and configurationSlot in the evolving current Application v1alpha1: [ADR-038](docs/adr/0038-profile-json-contracts-and-explicit-secret-projections.md).
+- [ ] Implement strict Profile/assignment JSON parsing and immutable mapping, retaining secret projection declarations without enabling secret delivery.
+- [ ] Implement configurationSlot in the current Application schema/DTO/normalized snapshot model; use one current alpha contract with explicit reset requirements if needed.
 - [ ] Persist exact Profile revisions and selections, expose narrow operator administration and integrate frozen effective layouts/options into planning.
 - [ ] Define and implement adapter-owned Resource-output renderers, typed consumer option contracts and confidential formatters; start with the confirmed PostgreSQL application-login output.
 - [ ] Materialize immutable unresolved ConfigurationDocumentRevisions from exact applied-generation inputs, with idempotency, provenance and no secret-bearing strings in ordinary storage/results.
@@ -213,8 +215,9 @@ is closed and retained for history. Closed issues keep their historical mileston
 membership. ADR identifiers are not renumbered. Future issues belong to the
 delivery milestone whose observable outcome they advance.
 
-Next coding work is issue #126. Follow ADR-037 and its in-process boundary.
-Before exposing Profiles through wire/persistence/planning, agree the missing
-contract identified in that ADR. Continue P2 toward real output rendering,
+Issue #126 is delivered by PR #127. Next implement the Profile/assignment JSON
+boundary accepted in ADR-038, then the current-alpha Application slot and snapshot
+changes. Secret declaration parsing does not authorize secret resolution or delivery.
+Continue P2 toward real output rendering,
 saved unresolved documents and scoped retrieval; do not repeat foundation work
 or start a general SDK/UI/HA project.
