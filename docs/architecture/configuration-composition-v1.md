@@ -130,3 +130,83 @@ changes or generation/provisioning changes. No new package is required by this
 decision. Next, specify minimal Profile/assignment wire contracts and feed their
 validated expansion into this composer; later connect exact generation outputs,
 document persistence and operator preview before authorized delivery.
+
+## Implemented in-process API
+
+`ConfigurationComposer` in Haby.Application accepts a static semantic template
+and ready `ConfigurationProjection` values. Each projection snapshots its path,
+immutable `ConfigurationFragment` and `ManifestLocalId` source identity; composition
+copies the supplied projection collection. Successful results retain only immutable
+tree nodes. No manifest expression is evaluated by this API. Callers must explicitly
+materialize supported inputs before calling it, and refuse unsupported evaluation.
+
+`ConfigurationFormatterCatalog` receives definitions separately from active
+implementation identities. Adapter definitions derive immutable records from
+`ConfigurationFormatterContract`; include all schema/semantic metadata in record
+equality and implement pure `ValidateArguments(ConfigurationObject)` using typed
+semantic decoders. Do not use mutable fields, external state, secret resolution,
+serialization to fake JSON or formatter execution. Equivalent records are idempotent;
+different records for one exact ID conflict. Duplicate active registrations are
+ambiguous even if their identities match. Active implementations without definitions
+are invalid. Definitions without an active implementation remain known but unavailable.
+The only current result kind is String. There are no production formatter registrations.
+
+Validation traverses templates and fragments recursively, including Arrays. A deferred
+node validates its Arguments through the exact registration; it never exposes those
+Arguments as document children. Validator exceptions become a fixed invalid-arguments
+refusal, without exception text. Confidential nodes remain unresolved on success.
+
+### Render diagnostics
+
+Every diagnostic is an error with only `Code`, canonical document `Path` and safe
+`Source` (the projection's local identity, or empty for the template). The standard
+code set is closed by the composer; validators cannot supply plugin-defined codes,
+messages or parameters:
+
+| Code | Meaning |
+| --- | --- |
+| `render.projection.invalid-path` | Not a canonical absolute non-root pointer; Path is empty and the rejected input is omitted. |
+| `render.projection.template-collision` | Existing leaf or non-Object root/parent blocks insertion. |
+| `render.projection.path-conflict` | Duplicate or ancestor/descendant projection; report each implicated path/source. |
+| `render.formatter.unknown` | No definition for the exact formatter ID. |
+| `render.formatter.unavailable` | Definition exists without an active implementation. |
+| `render.formatter.arguments-invalid` | Typed validation refused or threw. |
+
+Sort ordinally by Path, Code, Source and deduplicate identical triples. Return the
+first 100 diagnostics and the complete distinct `ErrorCount`; `IsTruncated` marks
+omitted errors. Any error refuses the whole result, regardless of truncation.
+Invalid paths never echo raw input. Paths identify locations, never node values;
+no formatter ID, SecretRef identity, Arguments, fragment/template values or exception
+text is copied into diagnostic parameters. Reports do not alter import warnings.
+
+### JSON profile and preview
+
+`ConfigurationJson.Profile` is `haby.configuration-json/v1`. Ordinary serialization
+returns a `ConfigurationJsonResult` with `Json = null` and `IsSuccess = false` if any
+SecretReference or DeferredValue exists, including at the root or late in an Array.
+It preflights confidentiality before creating output; it exposes no output sink.
+
+The profile emits compact UTF-8 JSON without BOM, indentation or trailing newline,
+with ordinal Object keys and Array order preserved. Strings/property names use
+`JavaScriptEncoder.Default` escaping (including non-ASCII/HTML-sensitive characters,
+JSON controls, quotes and backslashes). Exact numbers use ConfigurationNumber's
+normalized signed coefficient, lowercase `e` and invariant decimal exponent:
+remove leading/trailing coefficient zeroes, shift the exponent accordingly, and
+spell every zero including negative zero as `0e0`. No double/decimal conversion is
+used. These are document bytes, not the normalized manifest fingerprint codec.
+
+`ConfigurationJson.Preview` returns a separate JSON envelope with `document` and
+`redactedPaths`. A direct SecretReference or entire DeferredValue becomes the literal
+marker `***REDACTED***`; deferred Arguments are never traversed. Paths are distinct,
+canonical and ordinal, including empty for a confidential root. Literal marker text
+has no redacted path. This API provides no delivery or reveal option.
+
+### Existing consumers and compatibility
+
+Manifest mapping remains ordinary JSON-only and cannot construct confidential
+semantic nodes. Structural equality/diffing handles the deferred alternative as
+one immutable value, without inspecting or emitting Arguments. The existing
+normalized-manifest persistence codec deliberately rejects deferred nodes through
+its unknown-kind refusal; this slice does not extend that codec or persist composed
+documents. No schema/migration/catalog reset is required. Profiles, formatter execution,
+application materialization, persistence and confidential delivery remain future work.
