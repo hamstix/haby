@@ -539,9 +539,14 @@ change accepted generations, and delivery is not the unauthenticated operator AP
 The [first composition slice](docs/architecture/configuration-composition-v1.md)
 starts with the pure static-template/ready-fragment composer, typed deferred
 Arguments and a separate redacted JSON preview. It performs no secret resolution,
-formatter execution, persistence or Host/CLI integration. Minimal Profile wire
-contracts and expansion follow on the same boundary, before exact-generation
-materialization and authorized delivery.
+formatter execution, persistence or Host/CLI integration. It is implemented by
+PR #125. [ADR-037](docs/adr/0037-environment-configuration-profiles-and-scoped-selection.md)
+accepts Environment Profile defaults with whole-Profile revision replacement,
+disable/add exceptions at Application/Component scope and explicit Binding slots.
+Independent static and Binding-driven contributions share one defined document;
+conflicts never become implicit overwrites. Start with typed in-memory selection
+and expansion into the composer. Profile/selection wire contracts, persistence
+and exact-generation planning integration follow before authorized delivery.
 
 Required end-to-end path:
 

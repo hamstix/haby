@@ -128,6 +128,13 @@ SSL-disabled deployment recommendation.
 
 ### Minimal reusable Configuration Profiles
 
+[ADR-037](0037-environment-configuration-profiles-and-scoped-selection.md)
+refines this section: Environment defaults select Profiles automatically, with
+whole-Profile revision selection/disable/add decisions at Application and Component
+scope. It replaces mandatory individual assignment/mapping with author-declared
+Binding slots. Document definitions are separate from static and Binding-driven
+contributions, allowing independent Profiles to contribute to one document.
+
 A Configuration Profile is a separate reusable immutable configuration-layout
 entity, not a Resource privilegePolicy or Kubernetes Workload profile. Select it
 with ProfileRevisionRef { profileId, revision }; no unpinned latest reference.
@@ -141,12 +148,12 @@ The minimal profile supplies:
 
 For example, a reusable layout can supply settings JSON with
 PostgreSQL.DefaultConnection and project a connection-string fragment into its
-ConnectionString member. The profile's storage slot is explicitly connected to
+ConnectionString member. The profile's storage slot matches an explicit slot on
 the Component's declared storage Binding, which targets its own app-login.
 The profile never guesses Resource names, creates a Binding to arbitrary Resources
 or grants access merely through profile membership.
 
-Expand the selected profile and explicit assignments into validated effective
+Expand the selected Profiles and effective scope decisions into validated effective
 documents/projections before renderer execution. Validate binding-slot resolution,
 exact contracts, local references, effective options and the complete projection
 path set. Duplicate/conflicting document definitions or projections fail closed;
@@ -165,11 +172,12 @@ planning model. The current generation-1 pilot cannot promise updating all
 existing deployments; do not bypass that boundary by silently re-rendering them.
 Initial creation with exact profiles precedes later rollout/update support.
 
-Broad selectors, overlapping assignment precedence, global/group targeting,
-JSON Merge Patch/JSON Patch, arbitrary structural overrides and mass rollout
-remain deferred. Do not implement the full planned ADR-011 profile platform.
-The exact minimal profile/assignment wire schema, bounds and lifecycle operations
-must be specified in a focused implementation contract before coding; examples
+Environment defaults and per-ID scope selection are accepted under ADR-037.
+Broad selectors, overlapping target sets, group targeting, JSON Merge Patch/JSON
+Patch, arbitrary structural overrides, Profile parameters and mass rollout remain
+deferred. Do not implement the full planned ADR-011 profile platform.
+The exact minimal Profile/selection wire schema, bounds and lifecycle operations
+must be specified before implementing their transport/storage boundary; examples
 in discussion are conceptual, not newly valid Application JSON members.
 
 ### Persistence, preview and confidential delivery
@@ -205,8 +213,9 @@ a String result; this slice validates its contract without executing formatting.
 Implement the pure composition boundary with supplied static templates and ready
 fragments first. This does not yet resolve bindings, load outputs, expand profiles,
 persist document revisions or expose Host/CLI endpoints. Those subsequent slices
-reuse this boundary. Minimal Profiles remain accepted work; their wire contract
-must still be agreed before implementation. Confidential delivery remains gated.
+reuse this boundary. ADR-037 accepts the subsequent typed in-memory Profile
+selection/expansion slice; its wire contract must still be agreed before wire
+implementation. Confidential delivery remains gated.
 
 - Two Components bind one login: identical exact SecretRef, different permitted
   consumer options, deterministic separate documents without new credentials.
