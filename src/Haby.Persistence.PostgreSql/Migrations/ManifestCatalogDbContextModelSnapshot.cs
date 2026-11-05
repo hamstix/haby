@@ -807,6 +807,52 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProfileRevisionRow", b =>
+                {
+                    b.Property<string>("ProfileId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("profile_id");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("ImportedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("imported_at");
+
+                    b.Property<int>("ModelVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("model_version");
+
+                    b.Property<string>("Snapshot")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("snapshot");
+
+                    b.Property<int>("SnapshotFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("snapshot_format_version");
+
+                    b.HasKey("ProfileId", "Revision");
+
+                    b.ToTable("configuration_profile_revisions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_profile_revisions_actor", "length(actor_id) > 0");
+
+                            t.HasCheckConstraint("CK_profile_revisions_id", "profile_id ~ '^[a-z][a-z0-9]*([.-][a-z0-9]+)*$'");
+
+                            t.HasCheckConstraint("CK_profile_revisions_revision", "revision > 0");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderAliasAuditRow", b =>
                 {
                     b.Property<Guid>("Id")

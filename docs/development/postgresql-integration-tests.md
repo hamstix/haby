@@ -1,5 +1,11 @@
 # PostgreSQL checkpoint integration tests
 
+[Profile revision persistence](132-profile-revision-persistence.md) adds real
+immutable acceptance/reload, synchronized equal/unequal insert races, cancellation
+and rollback, saved Profile/Application expansion, corrupt-read refusal and full
+`pg_dump`/`pg_restore` evidence. These tests use the same disposable runtime and
+independent DbContexts. They add no Profile operator endpoint or secret delivery.
+
 Subsequent [issue #120 activation](120-five-step-operator-path.md) enables the full
 production Host/operator path. Earlier-slice production-gate statements below
 describe their implementation baseline.

@@ -5,6 +5,9 @@ Implemented for issue #128 under [ADR-038](../adr/0038-profile-json-contracts-an
 standalone UTF-8 bytes and return immutable Domain declarations. This is an
 in-process wire boundary, without storage, apply, Host/CLI commands, Environment
 lookup, authorization, output access, secret reads or formatter execution.
+[Issue #132](../development/132-profile-revision-persistence.md) adds separate
+side-effect-free import/exact-read use cases and immutable PostgreSQL persistence
+over this parser. Assignment persistence and delivery remain deferred.
 The Profile wire boundary itself requires no catalog reset. Issue #130 now adds
 Application Binding `configurationSlot` to the current v1alpha1 and advances its
 normalized/snapshot versions to 2, requiring an explicit fresh catalog for
