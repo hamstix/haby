@@ -100,7 +100,6 @@ public sealed partial class OperatorHostIntegrationTests
                 foreach (var component in envelope["manifest"]!["spec"]!["components"]!.AsObject())
                 {
                     component.Value!["bindings"]!["storage"]!["configurationSlot"] = "main";
-                    component.Value!["bindings"]!["storage"]!["options"]!["timeout"] = component.Key == "api" ? 60 : 30;
                 }
                 envelope["manifest"]!["metadata"]!["id"] = "operator.pair";
                 envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = target;
@@ -139,16 +138,16 @@ public sealed partial class OperatorHostIntegrationTests
                     plan = (await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId })).Plan;
                     commit = (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Commit;
                 }
-                // A mutable assignment created after commit affects only future planning.
+                // An assignment changed after commit affects only future planning.
                 var pinnedGeneration = (await host.Services.GetRequiredService<IDurableDesiredStateCommitter>().FindGenerationAsync(
                     ApplicationDeploymentId.Parse(commit.DeploymentId), DeploymentGeneration.Create(1), default))!;
                 Assert.NotNull(pinnedGeneration.Inputs.Configuration);
                 Assert.Equal(2, pinnedGeneration.Inputs.Configuration.Layouts.Count);
                 Assert.All(pinnedGeneration.Inputs.Configuration.Layouts, x => { Assert.Single(x.Documents); Assert.Single(x.BindingRequests); });
-                Assert.Equal(ProfileAssignmentStatus.Created, (await client.ApplyProfileAssignmentAsync(new()
+                Assert.Equal(ProfileAssignmentStatus.Updated, (await client.ApplyProfileAssignmentAsync(new()
                 {
                     Environment = "pilot",
-                    ExpectedAbsence = true,
+                    ExpectedConcurrencyToken = initialAssignment.Assignment.ConcurrencyToken,
                     Payload = ByteString.CopyFromUtf8("""{"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfileAssignment","spec":{"target":{"kind":"environment"},"decisions":[{"kind":"disable","profileId":"layout"}]}}""")
                 })).Status);
                 Assert.Equal(pinnedGeneration, await host.Services.GetRequiredService<IDurableDesiredStateCommitter>().FindGenerationAsync(

@@ -37,13 +37,19 @@ public sealed partial class DurableDeploymentPlanningTests
         source["spec"]!["bindingRules"]!["connection"]!["documentProjections"]!.AsArray().RemoveAt(1);
         source["spec"]!["staticContributions"]!["logging"]!["value"]!["Level"] = "private-config-value";
         Assert.Equal(ProfileStatus.Created, (await client.ImportProfileAsync(new() { Payload = ByteString.CopyFrom(Bytes(source)) })).Status);
-        await Apply(worker, 2, "2");
         // Later import has a renamed Component. Assignment applicability still uses the exact requested revision.
         var later = JsonNode.Parse(Envelope)!;
         later["applicationVersion"] = "9";
         later["manifest"]!["spec"]!["components"] = new JsonObject { ["renamed"] = new JsonObject() };
         var laterImported = await client.ImportAsync(new() { OriginalEnvelope = ByteString.CopyFrom(Bytes(later)) });
         Assert.NotNull(laterImported.Created);
+        // Highest version, most recently imported version, checked assignment revision and
+        // the planned revision deliberately differ. CheckedRevision is audit, not applicability.
+        var checkedVersion = JsonNode.Parse(Envelope)!;
+        checkedVersion["applicationVersion"] = "3";
+        checkedVersion["manifest"]!["spec"]!["components"] = new JsonObject { ["worker"] = new JsonObject() };
+        Assert.NotNull((await client.ImportAsync(new() { OriginalEnvelope = ByteString.CopyFrom(Bytes(checkedVersion)) })).Created);
+        await Apply(worker, 2, "3");
         var change = (await client.CreateChangeSetAsync(new()
         {
             EnvironmentId = "pilot",
