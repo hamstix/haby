@@ -43,7 +43,7 @@ public sealed class ImportConfigurationProfile(IConfigurationProfileImportStore 
         if (actorId.Length is 0 or > 256 || actorId.Any(char.IsControl))
             throw new ArgumentException("Actor identity must be bounded and nonempty.", nameof(actorId));
         cancellationToken.ThrowIfCancellationRequested();
-        var parsed = ProfilePayloadParser.ParseProfile(payload);
+        var parsed = ValidateConfigurationProfile.Execute(payload, cancellationToken);
         if (!parsed.IsSuccess) return new ImportConfigurationProfileResult.InvalidDeclaration(parsed);
         cancellationToken.ThrowIfCancellationRequested();
         var result = await store.CompareAndCreateAsync(parsed.Declaration!, new(actorId, clock.GetUtcNow()), cancellationToken);

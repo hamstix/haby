@@ -1,5 +1,9 @@
 # Local alpha operator workflow
 
+For installation-scoped Configuration Profile validation/import and exact safe
+revision metadata, use the [Profile administration runbook](134-profile-operator-path.md).
+This path performs no assignment, rendering or secret delivery.
+
 The production Host now also admits the complete five-step database/login pair.
 Use the [executable five-step rehearsal](120-five-step-operator-path.md) for
 bootstrap, shared-login import, graph review, explicit execution and restart.

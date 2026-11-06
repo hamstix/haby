@@ -4,6 +4,9 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc ValidateProfile(ProfilePayloadRequest) returns (ProfileReply);
+  rpc ImportProfile(ProfilePayloadRequest) returns (ProfileReply);
+  rpc GetProfileRevision(ProfileRevisionRequest) returns (ProfileReply);
   rpc CheckProvider (CheckProviderRequest) returns (ProviderAccessReply);
   rpc GetProviderAlias (GetProviderAliasRequest) returns (ProviderAccessReply);
   rpc SetProviderAlias (SetProviderAliasRequest) returns (ProviderAccessReply);
@@ -604,4 +607,32 @@ message GenerationExecutionReply {
   GenerationProgress progress = 2;
   optional string stopped_operation_id = 3;
   optional OperationStatus stop_outcome = 4;
+}
+
+// Installation-scoped immutable configuration declaration administration only.
+message ProfilePayloadRequest { bytes payload = 1; }
+message ProfileRevisionRequest { string profile_id = 1; int32 revision = 2; }
+enum ProfileStatus {
+  PROFILE_STATUS_UNSPECIFIED = 0;
+  PROFILE_STATUS_VALID = 1;
+  PROFILE_STATUS_CREATED = 2;
+  PROFILE_STATUS_EXISTING_EQUIVALENT = 3;
+  PROFILE_STATUS_INVALID_DECLARATION = 4;
+  PROFILE_STATUS_REVISION_CONTENT_CONFLICT = 5;
+  PROFILE_STATUS_FOUND = 6;
+  PROFILE_STATUS_NOT_FOUND = 7;
+}
+message ProfileMetadata {
+  ProfileRevisionRequest reference = 1;
+  string technical_actor_id = 2;
+  string imported_at_utc = 3;
+}
+message ProfileDiagnostic { string code = 1; string path = 2; }
+message ProfileReply {
+  ProfileStatus status = 1;
+  ProfileRevisionRequest reference = 2;
+  ProfileMetadata metadata = 3;
+  repeated ProfileDiagnostic diagnostics = 4;
+  int32 error_count = 5;
+  bool diagnostics_truncated = 6;
 }

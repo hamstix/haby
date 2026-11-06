@@ -70,6 +70,7 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [], [], []));
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ImportApplicationManifest>();
+        builder.Services.AddSingleton<ImportConfigurationProfile>();
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         builder.Services.AddSingleton<PreviewImportedDatabase>();
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
