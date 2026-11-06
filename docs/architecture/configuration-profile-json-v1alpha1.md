@@ -9,7 +9,8 @@ lookup, authorization, output access, secret reads or formatter execution.
 side-effect-free import/exact-read use cases and immutable PostgreSQL persistence
 over this parser. [Issue #134](../development/134-profile-operator-path.md) exposes Profile administration
 through the operator Host and habyctl. [Issue #136](../development/136-scoped-profile-assignments.md)
-adds persisted assignment administration; planning and delivery remain deferred.
+adds persisted assignment administration. [Issue #142](../development/142-frozen-profile-planning.md)
+freezes those assignments and structural layouts in durable Plans/generations; rendering and delivery remain deferred.
 The Profile wire boundary itself requires no catalog reset. Issue #130 now adds
 Application Binding `configurationSlot` to the current v1alpha1 and advances its
 normalized/snapshot versions to 2, requiring an explicit fresh catalog for
