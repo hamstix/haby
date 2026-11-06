@@ -177,7 +177,11 @@ public sealed partial class OperatorHostIntegrationTests
         var connection = await NewDatabaseAsync();
         var args = new[] { "--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0" };
         var sources = Haby.Tests.ProfileDeclarationBoundarySamples.Sources().Select((body, i) =>
-            body.Replace("\"revision\":1", "\"revision\":" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)).ToArray();
+            body.Replace("\"revision\":1", "\"revision\":" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))
+            .Concat(new[] { 1047552, 1048570 }.SelectMany(bytes => new[] { false, true }.Select(secret =>
+                Haby.Tests.ProfileDeclarationBoundarySamples.IntegerBoundary(bytes, secret, profileId:
+                    "integer-" + bytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + (secret ? "-secret" : "-revision")))))
+            .ToArray();
         var originals = new List<ProfileReply>();
         var normalized = new List<ByteString>();
         var gate = new ProfileQueryGate(); var logs = new ProfileLog();
@@ -193,7 +197,7 @@ public sealed partial class OperatorHostIntegrationTests
                 for (var i = 0; i < sources.Length; i++)
                 {
                     var payload = ByteString.CopyFromUtf8(sources[i]);
-                    Assert.True(payload.Length < 1024 * 1024 - 1024);
+                    Assert.True(new ProfilePayloadRequest { Payload = payload }.CalculateSize() <= OperatorHostApplication.MaxReceiveBytes);
                     var expected = ProfilePayloadParser.ParseProfile(payload.Memory);
                     Assert.True(expected.IsSuccess);
                     var imported = await client.ImportProfileAsync(new() { Payload = payload });
@@ -242,21 +246,13 @@ public sealed partial class OperatorHostIntegrationTests
                 instance: registry
                 environmentId: never-created
             """);
-        foreach (var command in new[]
-        {
-            new[] { "profile", "import", file },
-            new[] { "profile", "revision", "get", "layout", expected.Reference.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture) }
-        })
+        var canImport = Encoding.UTF8.GetByteCount(source) <= 1047552;
+        var get = new[] { "profile", "revision", "get", expected.Reference.ProfileId.Value, expected.Reference.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        var commands = canImport ? new[] { new[] { "profile", "import", file }, get } : new[] { get };
+        foreach (var command in commands)
             foreach (var format in new[] { "json", "text" })
             {
-                var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = System.Text.Encoding.UTF8 };
-                foreach (var arg in command.Concat(new[] { "--config", config, "-o", format })) start.ArgumentList.Add(arg);
-                using var process = Process.Start(start)!;
-                var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
-                Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
-                var output = await stdout;
+                var output = await Run(command, format);
                 if (format == "text") { Assert.True(output.Length < 256); continue; }
                 using var json = JsonDocument.Parse(output, new JsonDocumentOptions { MaxDepth = 66 });
                 var data = json.RootElement.GetProperty("data"u8);
@@ -276,8 +272,29 @@ public sealed partial class OperatorHostIntegrationTests
                     var reimport = await new ManifestOperator.ManifestOperatorClient(channel).ImportProfileAsync(new() { Payload = extracted });
                     Assert.Equal(ProfileStatus.ExistingEquivalent, reimport.Status);
                     Assert.Equal(audit, reimport.Metadata);
+                    if (canImport)
+                    {
+                        await File.WriteAllBytesAsync(file, extracted.ToByteArray());
+                        using var nativeReimport = JsonDocument.Parse(await Run(["profile", "import", file], "json"));
+                        Assert.Equal("existingEquivalent", nativeReimport.RootElement.GetProperty("outcome"u8).GetString());
+                        var accepted = nativeReimport.RootElement.GetProperty("data"u8);
+                        Assert.Equal(audit.TechnicalActorId, accepted.GetProperty("technicalActorId"u8).GetString());
+                        Assert.Equal(audit.ImportedAtUtc, accepted.GetProperty("importedAtUtc"u8).GetString());
+                    }
                 }
             }
+
+        async Task<string> Run(string[] command, string format)
+        {
+            var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
+            foreach (var arg in command.Concat(new[] { "--config", config, "-o", format })) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start)!;
+            var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+            Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
+            return await stdout;
+        }
     }
 
     [Fact]

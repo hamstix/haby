@@ -29,15 +29,8 @@ public sealed partial class CliLoopbackTests
         public override Task<ProfileReply> GetProfileRevision(ProfileRevisionRequest request, ServerCallContext context)
         {
             Assert.Equal("layout", request.ProfileId);
-            if (request.Revision >= 10)
-            {
-                var index = request.Revision - 10;
-                var replies = CliProfilePresentationTests.InvalidDeclarations().Select(x => CliProfilePresentationTests.Found((string)x[0]))
-                    .Concat([CliProfilePresentationTests.Found()]).ToArray();
-                var reply = replies[index];
-                if (index < replies.Length - 1) { reply.Reference = request; reply.Metadata.Reference = request; }
-                return Task.FromResult(reply);
-            }
+            // Deliberate request/reply mismatch, separate from malformed bodies.
+            if (request.Revision == 10) return Task.FromResult(CliProfilePresentationTests.Found());
             return Task.FromResult(new ProfileReply
             {
                 Status = request.Revision == 1 ? ProfileStatus.Found : ProfileStatus.NotFound,
@@ -57,15 +50,22 @@ public sealed partial class CliLoopbackTests
 
     private sealed class BoundaryProfileRegistry(string declaration) : ManifestOperator.ManifestOperatorBase
     {
-        public override Task<ProfileReply> GetProfileRevision(ProfileRevisionRequest request, ServerCallContext context) =>
-            Task.FromResult(CliProfilePresentationTests.Found(declaration));
+        internal string Declaration { get; set; } = declaration;
+        public override Task<ProfileReply> GetProfileRevision(ProfileRevisionRequest request, ServerCallContext context)
+        {
+            var reply = CliProfilePresentationTests.Found(Declaration);
+            reply.Reference = request; reply.Metadata.Reference = request;
+            return Task.FromResult(reply);
+        }
     }
 
     [Fact]
     public async Task Profile_boundary_declarations_and_malformed_replies_use_published_binary()
     {
         var binary = AotBinary();
-        foreach (var declaration in Haby.Tests.ProfileDeclarationBoundarySamples.Sources())
+        var boundaries = Haby.Tests.ProfileDeclarationBoundarySamples.Sources().Select(body => (Body: body, Revision: 1))
+            .Concat(new[] { false, true }.Select(secret => (Haby.Tests.ProfileDeclarationBoundarySamples.IntegerBoundary(1047552, secret), 1000000000)));
+        foreach (var (declaration, revision) in boundaries)
         {
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0, l => l.Protocols = HttpProtocols.Http2));
@@ -73,7 +73,7 @@ public sealed partial class CliLoopbackTests
             await using var host = builder.Build(); host.MapGrpcService<BoundaryProfileRegistry>(); await host.StartAsync();
             foreach (var format in new[] { "json", "text" })
             {
-                var arguments = new[] { "profile", "revision", "get", "layout", "1", "-o", format };
+                var arguments = new[] { "profile", "revision", "get", "layout", revision.ToString(System.Globalization.CultureInfo.InvariantCulture), "-o", format };
                 using var output = new StringWriter(); using var error = new StringWriter();
                 var cli = new CliApplication(new FixedEndpoint(host.Urls.Single()), new GrpcRegistryClientFactory(), output, error);
                 Assert.Equal(0, await cli.RunAsync(arguments)); Assert.Equal("", error.ToString()); Check(output.ToString());
@@ -94,25 +94,58 @@ public sealed partial class CliLoopbackTests
             }
             await host.StopAsync();
         }
+        // Select negative cases independently of the exact requested identity.
+        // A valid control on the same service/command proves refusal is body-specific.
+        foreach (var body in CliProfilePresentationTests.InvalidDeclarations().Select(x => (string)x[0]))
+        {
+            var registry = new BoundaryProfileRegistry(body);
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0, l => l.Protocols = HttpProtocols.Http2));
+            builder.Services.AddGrpc(); builder.Services.AddSingleton(registry);
+            await using var host = builder.Build(); host.MapGrpcService<BoundaryProfileRegistry>(); await host.StartAsync();
+            foreach (var accepted in new[] { false, true })
+            {
+                registry.Declaration = accepted ? CliProfilePresentationTests.Declaration : body;
+                foreach (var format in new[] { "json", "text" })
+                {
+                    var arguments = new[] { "profile", "revision", "get", "layout", "1", "-o", format };
+                    using var output = new StringWriter(); using var error = new StringWriter();
+                    var cli = new CliApplication(new FixedEndpoint(host.Urls.Single()), new GrpcRegistryClientFactory(), output, error);
+                    Assert.Equal(accepted ? 0 : 2, await cli.RunAsync(arguments));
+                    if (accepted) { Assert.NotEmpty(output.ToString()); Assert.Equal("", error.ToString()); }
+                    else { Assert.Equal("", output.ToString()); Assert.NotEmpty(error.ToString()); }
+                    if (binary is not null)
+                    {
+                        var result = await RunProfileBinary(binary, host.Urls.Single(), arguments);
+                        Assert.Equal(accepted ? 0 : 2, result.Exit);
+                        if (accepted) { Assert.NotEmpty(result.Output); Assert.Equal("", result.Error); }
+                        else
+                        {
+                            Assert.Equal("", result.Output); Assert.NotEmpty(result.Error);
+                            Assert.DoesNotContain("ordinary", result.Error);
+                        }
+                    }
+                }
+            }
+            await host.StopAsync();
+        }
         {
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0, l => l.Protocols = HttpProtocols.Http2));
             builder.Services.AddGrpc();
             await using var host = builder.Build(); host.MapGrpcService<ProfileRegistry>(); await host.StartAsync();
-            for (var index = 0; index <= CliProfilePresentationTests.InvalidDeclarations().Count(); index++)
-                foreach (var format in new[] { "json", "text" })
+            foreach (var format in new[] { "json", "text" })
+            {
+                var arguments = new[] { "profile", "revision", "get", "layout", "10", "-o", format };
+                using var output = new StringWriter(); using var error = new StringWriter();
+                var cli = new CliApplication(new FixedEndpoint(host.Urls.Single()), new GrpcRegistryClientFactory(), output, error);
+                Assert.Equal(2, await cli.RunAsync(arguments)); Assert.Equal("", output.ToString());
+                if (binary is not null)
                 {
-                    var arguments = new[] { "profile", "revision", "get", "layout", (index + 10).ToString(System.Globalization.CultureInfo.InvariantCulture), "-o", format };
-                    using var output = new StringWriter(); using var error = new StringWriter();
-                    var cli = new CliApplication(new FixedEndpoint(host.Urls.Single()), new GrpcRegistryClientFactory(), output, error);
-                    Assert.Equal(2, await cli.RunAsync(arguments)); Assert.Equal("", output.ToString()); Assert.NotEmpty(error.ToString());
-                    if (binary is not null)
-                    {
-                        var result = await RunProfileBinary(binary, host.Urls.Single(), arguments);
-                        Assert.Equal(2, result.Exit); Assert.Equal("", result.Output); Assert.NotEmpty(result.Error);
-                        Assert.DoesNotContain("ordinary", result.Error);
-                    }
+                    var result = await RunProfileBinary(binary, host.Urls.Single(), arguments);
+                    Assert.Equal(2, result.Exit); Assert.Equal("", result.Output);
                 }
+            }
             await host.StopAsync();
         }
     }
@@ -249,6 +282,45 @@ public sealed class CliProfilePresentationTests
         Assert.Throws<InvalidDataException>(() => new CliJsonPresenter(output).PrintProfile("profile revision get", reply));
         Assert.Throws<InvalidDataException>(() => new CliTextPresenter(output).PrintProfile("profile revision get", reply));
         Assert.Equal("", output.ToString());
+    }
+
+    [Theory]
+    [InlineData("1e9", 1000000000)]
+    [InlineData("1.000000000e9", 1000000000)]
+    [InlineData("10E+0000000008", 1000000000)]
+    [InlineData("2.147483647e9", 2147483647)]
+    [InlineData("1000e-3", 1)]
+    [InlineData("1e-1", 0)]
+    [InlineData("0", 0)]
+    [InlineData("-1", 0)]
+    [InlineData("2147483648", 0)]
+    [InlineData("0.99999999999999999999999", 0)]
+    [InlineData("1e99999999999999999999999", 0)]
+    [InlineData("1e-99999999999999999999999", 0)]
+    [InlineData("\"1e9\"", 0)]
+    [InlineData("null", 0)]
+    public void Contract_integer_tokens_are_exact_positive_bounded_values(string token, int expected)
+    {
+        foreach (var secretVersion in new[] { false, true })
+        {
+            var body = secretVersion ? Declaration.Replace("\"staticContributions\":{}",
+                "\"staticContributions\":{\"secret\":{\"documentRef\":\"settings\",\"path\":\"/x\",\"value\":{},\"secretProjections\":[{\"path\":\"/secret\",\"format\":\"string\",\"secretRef\":{\"name\":\"missing\",\"version\":" + token + "}}]}}", StringComparison.Ordinal)
+                : Declaration.Replace("\"revision\":1", "\"revision\":" + token, StringComparison.Ordinal);
+            var reply = Found(body);
+            if (!secretVersion && expected > 0) { reply.Reference.Revision = expected; reply.Metadata.Reference.Revision = expected; }
+            using var output = new StringWriter();
+            if (expected > 0)
+            {
+                Assert.Equal(0, new CliJsonPresenter(output).PrintProfile("profile revision get", reply));
+                Assert.Equal(0, new CliTextPresenter(output).PrintProfile("profile revision get", reply));
+            }
+            else
+            {
+                Assert.Throws<InvalidDataException>(() => new CliJsonPresenter(output).PrintProfile("profile revision get", reply));
+                Assert.Throws<InvalidDataException>(() => new CliTextPresenter(output).PrintProfile("profile revision get", reply));
+                Assert.Equal("", output.ToString());
+            }
+        }
     }
 
     [Theory]

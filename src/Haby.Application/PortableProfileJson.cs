@@ -25,11 +25,23 @@ internal static class PortableProfileJson
     {
         foreach (var property in type.Properties)
         {
+            if (type.Type == typeof(Haby.Manifest.ProfileMetadata) && property.Name == "revision" ||
+                type.Type == typeof(ProfileNamedSecretDocument) && property.Name == "version")
+                property.CustomConverter = new RevisionConverter();
             if (type.Type == typeof(ProfileSpec) || type.Type == typeof(ProfileContributionDocument) && property.Name == "secretProjections")
                 property.ShouldSerialize = (_, value) => value is System.Collections.ICollection { Count: > 0 };
             else if (type.Type == typeof(ProfileRuleDocument) && property.Name == "options")
                 property.ShouldSerialize = (_, value) => value is JsonElement element && element.EnumerateObject().Any();
         }
+    }
+
+    // Override the intake DTO's property-level converter only in this output
+    // metadata. Contract integers have the same compact budget as ordinary numbers.
+    private sealed class RevisionConverter : JsonConverter<int>
+    {
+        public override int Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
+        public override void Write(Utf8JsonWriter writer, int value, JsonSerializerOptions options) =>
+            writer.WriteRawValue(CompactNumber(Haby.Domain.ConfigurationNumber.Parse(value.ToString(CultureInfo.InvariantCulture)).CanonicalText));
     }
 
     private sealed class StringConverter : JsonConverter<string>

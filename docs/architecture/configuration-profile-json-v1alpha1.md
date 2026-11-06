@@ -145,7 +145,9 @@ consistency before output, without duplicating semantic acceptance. Empty spec
 maps, empty options and empty secretProjections use documented omitted defaults.
 Portable numeric spelling may differ from internal CanonicalText: zero is `0`,
 unnecessary `e0` is omitted and a shorter exact plain form may be used; huge
-exponents remain scientific. No double/decimal conversion, decimal expansion,
+exponents remain scientific. The same compact policy covers positive Int32
+revision/secret-version fields (for example `1e9`), with exact bounded-integer
+reply validation. No double/decimal conversion, decimal expansion,
 Domain equality/hash/normalization, snapshot or existing configuration JSON change
 is involved. Portable JSON uses minimal lossless string escaping, including
 Unicode in ordinary keys and contract paths; the CLI embeds the checked tokens

@@ -79,7 +79,9 @@ order and numbers retain exact arbitrary precision as JSON numbers (including
 `1e999`). Empty maps/options/secretProjections use documented omitted defaults.
 Portable numeric spelling can differ from internal CanonicalText: `0e0` becomes
 `0`, unnecessary `e0` is omitted, and plain spelling is used only when shorter.
-Huge exponents stay scientific. Domain normalization/equality/hashing, internal
+Huge exponents stay scientific. Contract integers (`metadata.revision` and
+`secretRef.version`) also use shorter exact exponent spelling when beneficial;
+the CLI decodes them exactly as positive Int32 values, including `1e9`. Domain normalization/equality/hashing, internal
 snapshots and existing configuration JSON serialization remain unchanged. Text get remains a concise status/identity/audit summary.
 
 Validate/import replies, including Created/ExistingEquivalent, and assignment
@@ -94,7 +96,7 @@ habyctl profile revision get operator-layout 1 -o json | ForEach-Object {
     $result = [System.Text.Json.JsonDocument]::Parse($_, $options)
     try { $result.RootElement.GetProperty("data").GetProperty("declaration").GetRawText() }
     finally { $result.Dispose() }
-} | Set-Content -Encoding utf8 normalized-profile.json
+} | Set-Content -NoNewline -Encoding utf8 normalized-profile.json
 habyctl profile import normalized-profile.json -o json
 ```
 

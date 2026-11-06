@@ -74,6 +74,24 @@ public sealed class ConfigurationProfileDeclarationTests
         Assert.True(normalized.Length < Bytes(source).Length);
     }
 
+    [Theory]
+    [InlineData(1047552, false)]
+    [InlineData(1048570, false)]
+    [InlineData(1047552, true)]
+    [InlineData(1048570, true)]
+    public void Compact_contract_integers_preserve_exact_admission_budget(int bytes, bool secretVersion)
+    {
+        var input = Encoding.UTF8.GetBytes(Haby.Tests.ProfileDeclarationBoundarySamples.IntegerBoundary(bytes, secretVersion));
+        Assert.Equal(bytes, input.Length);
+        var accepted = ProfilePayloadParser.ParseProfile(input);
+        Assert.True(accepted.IsSuccess);
+        var output = ConfigurationProfileDeclaration.Serialize(accepted.Declaration!);
+        Assert.True(output.Length <= input.Length, $"Input {input.Length}; normalized {output.Length}.");
+        Assert.Equal(accepted.Declaration, ProfilePayloadParser.ParseProfile(output).Declaration);
+        Assert.Contains("\"revision\":1e9", Encoding.UTF8.GetString(output));
+        if (secretVersion) Assert.Contains("\"version\":1e9", Encoding.UTF8.GetString(output));
+    }
+
     [Fact]
     public void Near_limit_normalized_output_reimports_within_existing_byte_budget()
     {

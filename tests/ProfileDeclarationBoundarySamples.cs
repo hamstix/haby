@@ -22,6 +22,19 @@ internal static class ProfileDeclarationBoundarySamples
         yield return Wrap(new string('[', 60) + "1e999" + new string(']', 60));
     }
 
+    // Minimal shapes leave no compensating default omission; exponent spelling
+    // applies to both contract integer fields, not just ordinary values.
+    internal static string IntegerBoundary(int bytes, bool secretVersion, int revision = 1000000000, string profileId = "layout")
+    {
+        var prefix = "{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"ConfigurationProfile\",\"metadata\":{\"id\":\"" + profileId + "\",\"revision\":" +
+            (revision == 1000000000 ? "1e9" : revision.ToString(System.Globalization.CultureInfo.InvariantCulture)) + "},\"spec\":{";
+        var body = secretVersion
+            ? "\"staticContributions\":{\"settings\":{\"documentRef\":\"settings\",\"path\":\"/x\",\"value\":{\"padding\":\"PADDING\"},\"secretProjections\":[{\"path\":\"/secret\",\"format\":\"string\",\"secretRef\":{\"name\":\"missing\",\"version\":1e9}}]}}"
+            : "\"documents\":{\"settings\":{\"fileName\":\"app.json\",\"format\":\"json\",\"template\":\"PADDING\"}}";
+        var source = prefix + body + "}}";
+        return source.Replace("PADDING", new string('x', bytes - System.Text.Encoding.UTF8.GetByteCount(source) + 7), StringComparison.Ordinal);
+    }
+
     private static string Wrap(string template) =>
         "{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"ConfigurationProfile\",\"metadata\":{\"id\":\"layout\",\"revision\":1},\"spec\":{\"documents\":{\"settings\":{\"fileName\":\"app.json\",\"format\":\"json\",\"template\":" +
         template + "}},\"staticContributions\":{},\"bindingRules\":{}}}";

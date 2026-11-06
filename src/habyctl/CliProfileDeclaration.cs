@@ -19,7 +19,7 @@ internal static partial class ProfileDeclarationReply
             var metadata = root.GetProperty("metadata"u8);
             Fields(metadata, ["id", "revision"]);
             if (Text(metadata, "id") != reply.Reference.ProfileId ||
-                !metadata.GetProperty("revision"u8).TryGetInt32(out var revision) || revision != reply.Reference.Revision) throw Invalid();
+                !PositiveInt32(metadata.GetProperty("revision"u8), out var revision) || revision != reply.Reference.Revision) throw Invalid();
             var spec = root.GetProperty("spec"u8);
             Fields(spec, [], "documents", "staticContributions", "bindingRules");
             foreach (var member in Map(spec, "documents"))
@@ -44,7 +44,7 @@ internal static partial class ProfileDeclarationReply
                     var reference = secret.GetProperty("secretRef"u8);
                     Fields(reference, ["name", "version"]);
                     _ = Text(reference, "name");
-                    if (!reference.GetProperty("version"u8).TryGetInt32(out var version) || version <= 0) throw Invalid();
+                    if (!PositiveInt32(reference.GetProperty("version"u8), out _)) throw Invalid();
                 }
             }
             foreach (var member in Map(spec, "bindingRules"))
@@ -68,6 +68,41 @@ internal static partial class ProfileDeclarationReply
             // Never retain parser messages or body fragments in diagnostics.
             throw Invalid();
         }
+    }
+
+    // Exact bounded-integer transport decoding, not portable semantic validation.
+    // Trim zero padding before parsing; huge exponents are refused without decimal
+    // expansion or arbitrary-size integer arithmetic. JSON syntax is already checked.
+    private static bool PositiveInt32(JsonElement value, out int result)
+    {
+        result = 0;
+        if (value.ValueKind != JsonValueKind.Number) return false;
+        var raw = value.GetRawText();
+        if (raw[0] == '-') return false;
+        var separator = raw.IndexOfAny(['e', 'E']);
+        var mantissa = separator < 0 ? raw : raw[..separator];
+        var exponent = 0;
+        if (separator >= 0)
+        {
+            var token = raw[(separator + 1)..];
+            var negative = token[0] == '-';
+            if (token[0] is '+' or '-') token = token[1..];
+            token = token.TrimStart('0');
+            // No admissible body can have enough coefficient digits to balance
+            // an exponent this large into a positive Int32.
+            if (token.Length > 8) return false;
+            if (token.Length > 0) exponent = int.Parse(token, System.Globalization.CultureInfo.InvariantCulture);
+            if (negative) exponent = -exponent;
+        }
+        var point = mantissa.IndexOf('.');
+        var fraction = point < 0 ? 0 : mantissa.Length - point - 1;
+        var digits = mantissa.Replace(".", "", StringComparison.Ordinal).TrimStart('0');
+        if (digits.Length == 0) return false;
+        var significant = digits.TrimEnd('0');
+        exponent += digits.Length - significant.Length - fraction;
+        if (exponent is < 0 or > 9 || significant.Length + exponent > 10) return false;
+        return int.TryParse(significant + new string('0', exponent), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out result) && result > 0;
     }
 
     private static InvalidDataException Invalid() => new("Invalid Profile declaration reply.");
