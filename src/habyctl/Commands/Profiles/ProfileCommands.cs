@@ -24,14 +24,18 @@ internal static class ProfileCommands
             }, ct));
             group.Subcommands.Add(command);
         }
-        var revision = new Command("revision", "Inspect exact Profile revision metadata.");
+        var revision = new Command("revision", "Inspect exact Profile revisions.");
         revision.SetAction(_ => context.MissingSubcommand());
         var id = new Argument<string>("profile-id");
         var number = new Argument<int>("revision");
-        var get = new Command("get", "Read exact revision metadata; no latest fallback or export.") { id, number };
+        var get = new Command("get", "Read an exact revision; JSON includes the normalized declaration.") { id, number };
         get.SetAction((parse, ct) => context.ExecuteRevisionAsync(parse.GetRequiredValue(number), async (client, token) =>
-            context.PrintProfile("profile revision get", await client.GetProfileRevisionAsync(new ProfileRevisionRequest
-            { ProfileId = parse.GetRequiredValue(id), Revision = parse.GetRequiredValue(number) }, token)), ct));
+        {
+            var request = new ProfileRevisionRequest { ProfileId = parse.GetRequiredValue(id), Revision = parse.GetRequiredValue(number) };
+            var reply = await client.GetProfileRevisionAsync(request, token);
+            if (!Equals(reply.Reference, request)) throw new InvalidDataException("Inconsistent Profile identity.");
+            return context.PrintProfile("profile revision get", reply);
+        }, ct));
         revision.Subcommands.Add(get);
         group.Subcommands.Add(revision);
         return group;

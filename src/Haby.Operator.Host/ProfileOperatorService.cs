@@ -38,9 +38,16 @@ public sealed partial class ManifestOperatorService
         ProfileRevisionRef reference;
         try { reference = new(ProfileId.Create(request.ProfileId), request.Revision); }
         catch (ArgumentException) { throw new RpcException(new(StatusCode.InvalidArgument, "Invalid Profile revision reference.")); }
-        var result = await SafeProfileOperation(() => profileRevisions.FindAsync(reference, context.CancellationToken), context.CancellationToken);
-        return result is null ? new ProfileReply { Status = ProfileStatus.NotFound, Reference = ProfileReference(reference) }
-            : ProfileAccepted(result, ProfileStatus.Found);
+        return await SafeProfileOperation(async () =>
+        {
+            var result = await profileRevisions.FindAsync(reference, context.CancellationToken);
+            if (result is null) return new ProfileReply { Status = ProfileStatus.NotFound, Reference = ProfileReference(reference) };
+            context.CancellationToken.ThrowIfCancellationRequested();
+            var reply = ProfileAccepted(result, ProfileStatus.Found);
+            reply.DeclarationJson = Google.Protobuf.ByteString.CopyFrom(ConfigurationProfileDeclaration.Serialize(result.Declaration));
+            context.CancellationToken.ThrowIfCancellationRequested();
+            return reply;
+        }, context.CancellationToken);
     }
 
     private static ProfileReply ProfileAccepted(AcceptedConfigurationProfile accepted, ProfileStatus status) => new()

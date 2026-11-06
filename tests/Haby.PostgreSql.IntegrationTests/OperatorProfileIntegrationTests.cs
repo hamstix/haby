@@ -95,6 +95,10 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.True(commands.Count > validationCommands);
             Assert.Equal(OperatorHostApplication.TechnicalActorId, original.Metadata.TechnicalActorId);
             SafeProfileReply(original);
+            var secretReads = commands.SecretReads;
+            var firstRead = await client.GetProfileRevisionAsync(original.Reference);
+            Assert.Equal(Parse(source), ProfilePayloadParser.ParseProfile(firstRead.DeclarationJson.Memory).Declaration);
+            Assert.Equal(secretReads, commands.SecretReads);
             await ProfileNative(host, source, "existingEquivalent");
             await host.StopAsync();
         }
@@ -105,6 +109,12 @@ public sealed partial class OperatorHostIntegrationTests
             var found = await client.GetProfileRevisionAsync(original.Reference);
             Assert.Equal(ProfileStatus.Found, found.Status);
             Assert.Equal(original.Metadata, found.Metadata);
+            Assert.Equal(Parse(source), ProfilePayloadParser.ParseProfile(found.DeclarationJson.Memory).Declaration);
+            var normalized = await client.ImportProfileAsync(new() { Payload = found.DeclarationJson });
+            Assert.Equal(ProfileStatus.ExistingEquivalent, normalized.Status);
+            Assert.Equal(original.Metadata, normalized.Metadata);
+            SafeProfileReply(normalized);
+            Assert.Equal(found.DeclarationJson, (await client.GetProfileRevisionAsync(original.Reference)).DeclarationJson);
             var repeat = await client.ImportProfileAsync(Payload(Equivalent(source)));
             Assert.Equal(ProfileStatus.ExistingEquivalent, repeat.Status);
             Assert.Equal(original.Metadata, repeat.Metadata);
@@ -116,6 +126,9 @@ public sealed partial class OperatorHostIntegrationTests
             var missing = await client.GetProfileRevisionAsync(new() { ProfileId = "layout", Revision = 2 });
             Assert.Equal(ProfileStatus.NotFound, missing.Status);
             Assert.Equal(2, missing.Reference.Revision);
+            Assert.True(missing.DeclarationJson.IsEmpty);
+            var other = await client.GetProfileRevisionAsync(new() { ProfileId = "layout", Revision = 3 });
+            Assert.Equal(Parse(next), ProfilePayloadParser.ParseProfile(other.DeclarationJson.Memory).Declaration);
             // The actual persisted secret-bearing declaration still refuses expansion atomically.
             var accepted = await host.Services.GetRequiredService<IConfigurationProfileRevisionQuery>()
                 .FindAsync(new(ProfileId.Create("layout"), 1));
@@ -156,6 +169,115 @@ public sealed partial class OperatorHostIntegrationTests
         Assert.DoesNotContain("future-token", logs.Text);
         await using var verify = ProfileContext(connection);
         Assert.Equal("sensitive-corrupt-marker", (await verify.ProfileRevisions.AsNoTracking().SingleAsync(x => x.ProfileId == "layout" && x.Revision == 1)).Snapshot);
+    }
+
+    [Fact]
+    public async Task Profile_boundary_declarations_round_trip_through_real_store_restart_and_native_cli()
+    {
+        var connection = await NewDatabaseAsync();
+        var args = new[] { "--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0" };
+        var sources = Haby.Tests.ProfileDeclarationBoundarySamples.Sources().Select((body, i) =>
+            body.Replace("\"revision\":1", "\"revision\":" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)).ToArray();
+        var originals = new List<ProfileReply>();
+        var normalized = new List<ByteString>();
+        var gate = new ProfileQueryGate(); var logs = new ProfileLog();
+        var folder = Path.Combine(Path.GetTempPath(), "haby-profile-boundary-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            for (var lifetime = 0; lifetime < 2; lifetime++)
+            {
+                await using var host = await ProfileHost(args, logs, gate);
+                using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                for (var i = 0; i < sources.Length; i++)
+                {
+                    var payload = ByteString.CopyFromUtf8(sources[i]);
+                    Assert.True(payload.Length < 1024 * 1024 - 1024);
+                    var expected = ProfilePayloadParser.ParseProfile(payload.Memory);
+                    Assert.True(expected.IsSuccess);
+                    var imported = await client.ImportProfileAsync(new() { Payload = payload });
+                    Assert.Equal(lifetime == 0 ? ProfileStatus.Created : ProfileStatus.ExistingEquivalent, imported.Status);
+                    SafeProfileReply(imported);
+                    if (lifetime == 0) originals.Add(imported); else Assert.Equal(originals[i].Metadata, imported.Metadata);
+                    var secretReads = gate.SecretReads;
+                    var found = await client.GetProfileRevisionAsync(imported.Reference);
+                    Assert.Equal(ProfileStatus.Found, found.Status);
+                    Assert.Equal(originals[i].Metadata, found.Metadata);
+                    Assert.Equal(expected.Declaration, ProfilePayloadParser.ParseProfile(found.DeclarationJson.Memory).Declaration);
+                    if (lifetime == 0) normalized.Add(found.DeclarationJson); else Assert.Equal(normalized[i], found.DeclarationJson);
+                    var repeat = await client.ImportProfileAsync(new() { Payload = found.DeclarationJson });
+                    Assert.Equal(ProfileStatus.ExistingEquivalent, repeat.Status);
+                    await BoundaryNative(host, folder, sources[i], expected.Declaration!, originals[i].Metadata);
+                    Assert.Equal(secretReads, gate.SecretReads);
+                }
+                await ProfileState(connection, sources.Length);
+                await host.StopAsync();
+            }
+        }
+        finally
+        {
+            foreach (var file in Directory.GetFiles(folder)) File.Delete(file);
+            Directory.Delete(folder);
+        }
+        Assert.DoesNotContain("template", logs.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task BoundaryNative(WebApplication host, string folder, string source,
+        ConfigurationProfileRevision expected, Haby.Operator.Contracts.ProfileMetadata audit)
+    {
+        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrWhiteSpace(binary));
+        if (binary is null) return;
+        var config = Path.Combine(folder, "config.yaml"); var file = Path.Combine(folder, "profile.json");
+        await File.WriteAllTextAsync(file, source);
+        await File.WriteAllTextAsync(config, $"""
+            formatVersion: 1
+            currentContext: selected
+            instances:
+              registry:
+                endpoint: {host.Urls.Single()}
+            contexts:
+              selected:
+                instance: registry
+                environmentId: never-created
+            """);
+        foreach (var command in new[]
+        {
+            new[] { "profile", "import", file },
+            new[] { "profile", "revision", "get", "layout", expected.Reference.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture) }
+        })
+            foreach (var format in new[] { "json", "text" })
+            {
+                var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = System.Text.Encoding.UTF8 };
+                foreach (var arg in command.Concat(new[] { "--config", config, "-o", format })) start.ArgumentList.Add(arg);
+                using var process = Process.Start(start)!;
+                var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+                Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
+                var output = await stdout;
+                if (format == "text") { Assert.True(output.Length < 256); continue; }
+                using var json = JsonDocument.Parse(output, new JsonDocumentOptions { MaxDepth = 66 });
+                var data = json.RootElement.GetProperty("data"u8);
+                Assert.Equal(audit.TechnicalActorId, data.GetProperty("technicalActorId"u8).GetString());
+                Assert.Equal(audit.ImportedAtUtc, data.GetProperty("importedAtUtc"u8).GetString());
+                if (command[1] == "import") Assert.False(data.TryGetProperty("declaration"u8, out _));
+                else
+                {
+                    var declaration = data.GetProperty("declaration"u8);
+                    Assert.Equal(JsonValueKind.Object, declaration.ValueKind);
+                    // Compare complete values without imposing the intake byte budget on an output envelope.
+                    using var expectedJson = JsonDocument.Parse(ConfigurationProfileDeclaration.Serialize(expected));
+                    Assert.True(JsonElement.DeepEquals(expectedJson.RootElement, declaration));
+                    var extracted = ByteString.CopyFromUtf8(declaration.GetRawText());
+                    Assert.True(extracted.Length <= Encoding.UTF8.GetByteCount(source));
+                    using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+                    var reimport = await new ManifestOperator.ManifestOperatorClient(channel).ImportProfileAsync(new() { Payload = extracted });
+                    Assert.Equal(ProfileStatus.ExistingEquivalent, reimport.Status);
+                    Assert.Equal(audit, reimport.Metadata);
+                }
+            }
     }
 
     [Fact]
@@ -222,6 +344,7 @@ public sealed partial class OperatorHostIntegrationTests
     private static ProfilePayloadRequest Payload(JsonNode node) => new() { Payload = ByteString.CopyFrom(Bytes(node)) };
     private static void SafeProfileReply(ProfileReply reply)
     {
+        Assert.True(reply.DeclarationJson.IsEmpty);
         foreach (var marker in new[] { "sensitive-", "future-token", "future-otel", "timeout", "ordinary", "Information", "template", "snapshot" })
             Assert.DoesNotContain(marker, reply.ToString(), StringComparison.OrdinalIgnoreCase);
     }
@@ -321,7 +444,7 @@ public sealed partial class OperatorHostIntegrationTests
                 (["profile", "validate", bom], "invalidDeclaration", 1)
                 })
                 {
-                    var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                    var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = System.Text.Encoding.UTF8 };
                     foreach (var arg in arguments.Concat(new[] { "--config", config, "--context", "chosen", "-o", format })) start.ArgumentList.Add(arg);
                     using var process = Process.Start(start)!;
                     var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
@@ -331,11 +454,23 @@ public sealed partial class OperatorHostIntegrationTests
                     Assert.Equal("", await stderr);
                     var text = await stdout;
                     Assert.Contains(outcome, text);
-                    foreach (var marker in new[] { "sensitive-", "future-token", "future-otel", "Information", "timeout", "snapshot" }) Assert.DoesNotContain(marker, text);
+                    if (format != "json" || outcome != "found")
+                        foreach (var marker in new[] { "sensitive-", "future-token", "future-otel", "Information", "timeout", "snapshot" }) Assert.DoesNotContain(marker, text);
                     if (format == "json")
                     {
                         using var json = JsonDocument.Parse(text);
                         Assert.Equal(outcome, json.RootElement.GetProperty("outcome"u8).GetString());
+                        var hasDeclaration = json.RootElement.GetProperty("data"u8).TryGetProperty("declaration"u8, out var declaration);
+                        Assert.Equal(outcome == "found", hasDeclaration);
+                        if (hasDeclaration)
+                        {
+                            Assert.Equal(JsonValueKind.Object, declaration.ValueKind);
+                            Assert.Equal(Parse(source), ProfilePayloadParser.ParseProfile(Encoding.UTF8.GetBytes(declaration.GetRawText())).Declaration);
+                            using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+                            var reimport = await new ManifestOperator.ManifestOperatorClient(channel).ImportProfileAsync(new()
+                            { Payload = ByteString.CopyFromUtf8(declaration.GetRawText()) });
+                            Assert.Equal(ProfileStatus.ExistingEquivalent, reimport.Status);
+                        }
                         if (outcome is "created" or "found" or "existingEquivalent")
                         {
                             Assert.Equal(OperatorHostApplication.TechnicalActorId, json.RootElement.GetProperty("data"u8).GetProperty("technicalActorId"u8).GetString());
