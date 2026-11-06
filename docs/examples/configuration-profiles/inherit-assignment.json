@@ -1,0 +1,8 @@
+{
+  "apiVersion": "haby.dev/v1alpha1",
+  "kind": "ConfigurationProfileAssignment",
+  "spec": {
+    "target": { "kind": "application", "applicationId": "processor-service" },
+    "decisions": []
+  }
+}

@@ -6,7 +6,10 @@ revisions through `IConfigurationProfileImportStore` and
 for exact import/read semantics, atomic concurrency, independent Profile format/model
 1, safe corrupt-read refusal, additive schema migration and real backup/restore
 evidence. Secret projection declarations remain unresolved metadata. This adds
-no Profile assignment, Host/CLI endpoint, planning or secret delivery capability.
+no planning or secret delivery capability.
+[Scoped assignment administration](../../docs/development/136-scoped-profile-assignments.md)
+adds conditional local state through `IProfileAssignmentStore`, with exact scope
+validation, immutable last-change audit, strict snapshots and the Host/CLI path.
 
 This project is the EF Core persistence adapter for accepted Applications,
 immutable ManifestRevisions and Provider configuration revisions. It does not

@@ -107,7 +107,7 @@ remain required. Run the solution restore/build/test/format commands from
 CONTRIBUTING and the disposable PostgreSQL suite; Windows can use
 `scripts/test-postgresql-wslc.ps1` with the same Native AOT environment variables.
 
-Profile assignments/selections, planning integration, renderers, document
+[Scoped assignment administration](136-scoped-profile-assignments.md) is now implemented separately. Planning integration, renderers, document
 materialization, secret resolution/distribution/delivery, list/search/export,
 updates/deletion and UI remain deferred. Persisted secret-bearing Profiles still
 fail effective expansion with `profile.secret-projections.unsupported` and no

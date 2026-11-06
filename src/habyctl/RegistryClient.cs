@@ -17,6 +17,9 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ProfileAssignmentReply> ValidateProfileAssignmentAsync(ProfilePayloadRequest request, CancellationToken cancellationToken);
+    Task<ProfileAssignmentReply> GetProfileAssignmentAsync(GetProfileAssignmentRequest request, CancellationToken cancellationToken);
+    Task<ProfileAssignmentReply> ApplyProfileAssignmentAsync(ApplyProfileAssignmentRequest request, CancellationToken cancellationToken);
     Task<ProfileReply> GetProfileRevisionAsync(ProfileRevisionRequest request, CancellationToken cancellationToken);
     Task<ProfileReply> ImportProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken);
     Task<ProfileReply> ValidateProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken);
@@ -72,6 +75,12 @@ internal sealed class GrpcRegistryClientFactory : IRegistryClientFactory
 internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
 {
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
+    public async Task<ProfileAssignmentReply> ValidateProfileAssignmentAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) =>
+        await _client.ValidateProfileAssignmentAsync(request, cancellationToken: cancellationToken);
+    public async Task<ProfileAssignmentReply> GetProfileAssignmentAsync(GetProfileAssignmentRequest request, CancellationToken cancellationToken) =>
+        await _client.GetProfileAssignmentAsync(request, cancellationToken: cancellationToken);
+    public async Task<ProfileAssignmentReply> ApplyProfileAssignmentAsync(ApplyProfileAssignmentRequest request, CancellationToken cancellationToken) =>
+        await _client.ApplyProfileAssignmentAsync(request, cancellationToken: cancellationToken);
     public async Task<ProfileReply> GetProfileRevisionAsync(ProfileRevisionRequest request, CancellationToken cancellationToken) =>
         await _client.GetProfileRevisionAsync(request, cancellationToken: cancellationToken);
     public async Task<ProfileReply> ImportProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) =>

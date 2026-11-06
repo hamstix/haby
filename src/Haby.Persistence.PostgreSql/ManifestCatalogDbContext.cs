@@ -35,6 +35,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigureProfileRevisions(modelBuilder);
+        ConfigureProfileAssignments(modelBuilder);
         ConfigureProviderResourceReservations(modelBuilder);
         modelBuilder.Entity<ApplicationRow>(entity =>
         {

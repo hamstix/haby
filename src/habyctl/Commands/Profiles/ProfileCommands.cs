@@ -10,6 +10,7 @@ internal static class ProfileCommands
     {
         var group = new Command("profile", "Manage installation-scoped configuration Profile declarations.");
         group.SetAction(_ => context.MissingSubcommand());
+        group.Subcommands.Add(AssignmentCommands.Create(context));
         foreach (var import in new[] { false, true })
         {
             var name = import ? "import" : "validate";

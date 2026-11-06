@@ -17,7 +17,7 @@ using static Haby.Tests.ProfilePersistenceSamples;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class ConfigurationProfilePersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed partial class ConfigurationProfilePersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     [Fact]
     public async Task Fresh_composition_retains_full_secret_declaration_audit_and_exact_retry_behavior()
@@ -271,9 +271,18 @@ public sealed class ConfigurationProfilePersistenceTests(PostgreSqlFixture fixtu
         var one = (await query.FindAsync(Parse(layout).Reference))!;
         var two = (await query.FindAsync(Parse(replacement).Reference))!;
         var app = (await fresh.GetRequiredService<IManifestRevisionQuery>().FindAsync(applicationRef))!;
+        await fresh.GetRequiredService<IEnvironmentCatalog>().CreateOrGetAsync(EnvironmentId.Create("expansion"), default);
+        var admin = AssignmentAdmin(fresh);
+        await admin.ApplyAsync(AssignmentBytes(new ProfileAssignmentTarget.Environment(), new ProfileDecision.Use(one.Reference)), "expansion", null, new AssignmentPrecondition.ExpectedAbsence(), "operator");
+        await admin.ApplyAsync(AssignmentBytes(new ProfileAssignmentTarget.Application(app.ApplicationId)), "expansion", null, new AssignmentPrecondition.ExpectedAbsence(), "operator");
+        var workerTarget = new ProfileAssignmentTarget.Component(app.ApplicationId, ManifestLocalId.Create("worker"));
+        await admin.ApplyAsync(AssignmentBytes(workerTarget, new ProfileDecision.Use(two.Reference)), "expansion", "1", new AssignmentPrecondition.ExpectedAbsence(), "operator");
+        var envDecisions = (await admin.GetAsync("expansion", new ProfileAssignmentTarget.Environment())).Assignment!.Declaration.Decisions;
+        var appDecisions = (await admin.GetAsync("expansion", new ProfileAssignmentTarget.Application(app.ApplicationId))).Assignment!.Declaration.Decisions;
+        var workerDecisions = (await admin.GetAsync("expansion", workerTarget)).Assignment!.Declaration.Decisions;
         var components = app.Declaration.Spec.Components.Select(x => new ProfileComponentInput(x.Key, x.Value,
-            x.Key.Value == "worker" ? [new ProfileDecision.Use(two.Reference)] : []));
-        var expanded = new ConfigurationProfileExpander(new([one.Declaration, two.Declaration])).Expand([new ProfileDecision.Use(one.Reference)], [], components);
+            x.Key.Value == "worker" ? workerDecisions : []));
+        var expanded = new ConfigurationProfileExpander(new([one.Declaration, two.Declaration])).Expand(envDecisions, appDecisions, components);
         Assert.True(expanded.IsSuccess, string.Join(";", expanded.Diagnostics));
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
         var composer = new ConfigurationComposer(new([], []));
@@ -308,6 +317,32 @@ public sealed class ConfigurationProfilePersistenceTests(PostgreSqlFixture fixtu
             Assert.DoesNotContain(secret.SecretId.ToString(), preview.Json);
             Assert.DoesNotContain(secret.SecretVersionId.ToString(), preview.Json);
         }
+        // A later accepted revision omits the old worker and renames api. Read only exact
+        // current Component targets; the old local exception remains inspectable, never transferred.
+        var next = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(
+            fresh.GetRequiredService<IManifestImportStore>(), catalog, new Clock(Time)).ExecuteAsync(Encoding.UTF8.GetBytes("""
+            {"applicationVersion":"2","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"slotted"},"spec":{"components":{"renamed":{}}}}}
+            """), "app-author"));
+        var currentApp = (await fresh.GetRequiredService<IManifestRevisionQuery>().FindAsync(next.ManifestRevisionRef))!;
+        var renamedTarget = new ProfileAssignmentTarget.Component(app.ApplicationId, ManifestLocalId.Create("renamed"));
+        Assert.Equal(AssignmentOutcome.NotFound, (await admin.GetAsync("expansion", renamedTarget)).Outcome);
+        Assert.Equal(workerDecisions, (await admin.GetAsync("expansion", workerTarget)).Assignment!.Declaration.Decisions);
+        var currentInputs = currentApp.Declaration.Spec.Components.Select(x => new ProfileComponentInput(x.Key, x.Value, []));
+        var inherited = new ConfigurationProfileExpander(new([one.Declaration, two.Declaration])).Expand(envDecisions, appDecisions, currentInputs);
+        Assert.True(inherited.IsSuccess);
+        Assert.Equal(one.Reference, Assert.IsType<ProfileDecision.Use>(Assert.Single(Assert.Single(inherited.Layouts!).Decisions).Decision).Reference);
+        var appTarget = new ProfileAssignmentTarget.Application(app.ApplicationId);
+        var local = (await admin.GetAsync("expansion", appTarget)).Assignment!;
+        var disabled = await admin.ApplyAsync(AssignmentBytes(appTarget, new ProfileDecision.Disable(one.Reference.ProfileId)), "expansion", null, Match(local), "disable");
+        var disabledRead = (await admin.GetAsync("expansion", appTarget)).Assignment!;
+        var suppressed = new ConfigurationProfileExpander(new([one.Declaration, two.Declaration])).Expand(envDecisions, disabledRead.Declaration.Decisions, currentInputs);
+        Assert.True(suppressed.IsSuccess); Assert.Empty(Assert.Single(suppressed.Layouts!).Documents);
+        var reset = await admin.ApplyAsync(AssignmentBytes(appTarget), "expansion", null, Match(disabled.Assignment!), "inherit");
+        Assert.Equal(AssignmentOutcome.Updated, reset.Outcome);
+        var emptyRead = (await admin.GetAsync("expansion", appTarget)).Assignment!;
+        Assert.Empty(emptyRead.Declaration.Decisions);
+        var restored = new ConfigurationProfileExpander(new([one.Declaration, two.Declaration])).Expand(envDecisions, emptyRead.Declaration.Decisions, currentInputs);
+        Assert.True(restored.IsSuccess); Assert.Single(Assert.Single(restored.Layouts!).Documents);
     }
 
     private sealed record ConnectionOutput(SecretRef Credential, ConfigurationObject Options);
