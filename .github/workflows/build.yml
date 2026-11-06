@@ -113,10 +113,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
       - name: Publish native CLI for persisted planning, commit, execution and recovery rehearsals
         run: dotnet publish ./src/habyctl/habyctl.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true -o ./.artifacts/aot/linux-x64
-      - name: Restore PostgreSQL integration tests
-        run: dotnet restore ./tests/Haby.PostgreSql.IntegrationTests/Haby.PostgreSql.IntegrationTests.csproj --artifacts-path ./.artifacts
       - name: Run real PostgreSQL integration tests
+        shell: pwsh
         env:
           HABY_AOT_CLI_REQUIRED: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
-        run: dotnet test ./tests/Haby.PostgreSql.IntegrationTests/Haby.PostgreSql.IntegrationTests.csproj --no-restore --artifacts-path ./.artifacts
+        run: ./scripts/test-postgresql-measured.ps1 -ResultsDirectory ./.artifacts/postgresql-measurement
+      - name: Publish allowlisted PostgreSQL timing and case inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgresql-timing-${{ github.sha }}
+          path: .artifacts/postgresql-measurement/safe/
+          if-no-files-found: error
+          retention-days: 14

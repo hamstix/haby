@@ -396,6 +396,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
 
     private async Task<string> NewDatabaseAsync()
     {
+        using var timing = TestTiming.CatalogCreate();
         var name = "haby_operator_" + Guid.NewGuid().ToString("N");
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
         await connection.OpenAsync();
@@ -425,6 +426,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
 
     private static async Task<WebApplication> StartAsync(string connection, string path, string environment = "Production")
     {
+        using var timing = TestTiming.HostStartMigrate();
         var app = await OperatorHostApplication.BuildMigratedAsync(Arguments(connection, path, environment));
         await app.StartAsync();
         return app;

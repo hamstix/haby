@@ -21,6 +21,7 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        using var timing = TestTiming.ClusterReady();
         var external = Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_EXTERNAL") == "1";
         var supplied = Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_CONNECTION");
         if (supplied is not null && !external)
@@ -64,6 +65,7 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        using var timing = TestTiming.ClusterCleanup();
         if (_container is not null) await _container.DisposeAsync();
     }
 
