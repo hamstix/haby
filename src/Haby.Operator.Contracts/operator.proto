@@ -4,6 +4,9 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc ValidateProfileAssignment(ProfilePayloadRequest) returns (ProfileAssignmentReply);
+  rpc ApplyProfileAssignment(ApplyProfileAssignmentRequest) returns (ProfileAssignmentReply);
+  rpc GetProfileAssignment(GetProfileAssignmentRequest) returns (ProfileAssignmentReply);
   rpc ValidateProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc ImportProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc GetProfileRevision(ProfileRevisionRequest) returns (ProfileReply);
@@ -632,6 +635,59 @@ message ProfileReply {
   ProfileStatus status = 1;
   ProfileRevisionRequest reference = 2;
   ProfileMetadata metadata = 3;
+  repeated ProfileDiagnostic diagnostics = 4;
+  int32 error_count = 5;
+  bool diagnostics_truncated = 6;
+}
+
+// Local scope only; no effective expansion or confidential declaration content.
+message ProfileAssignmentTarget {
+  string kind = 1;
+  string application_id = 2;
+  string component_ref = 3;
+}
+message GetProfileAssignmentRequest { string environment = 1; ProfileAssignmentTarget target = 2; }
+message ApplyProfileAssignmentRequest {
+  bytes payload = 1;
+  string environment = 2;
+  optional string application_version = 3;
+  oneof precondition { bool expected_absence = 4; string expected_concurrency_token = 5; }
+}
+enum ProfileAssignmentStatus {
+  PROFILE_ASSIGNMENT_STATUS_UNSPECIFIED = 0;
+  PROFILE_ASSIGNMENT_STATUS_VALID = 1;
+  PROFILE_ASSIGNMENT_STATUS_INVALID_DECLARATION = 2;
+  PROFILE_ASSIGNMENT_STATUS_CREATED = 3;
+  PROFILE_ASSIGNMENT_STATUS_UPDATED = 4;
+  PROFILE_ASSIGNMENT_STATUS_UNCHANGED = 5;
+  PROFILE_ASSIGNMENT_STATUS_FOUND = 6;
+  PROFILE_ASSIGNMENT_STATUS_NOT_FOUND = 7;
+  PROFILE_ASSIGNMENT_STATUS_CONFLICT = 8;
+  PROFILE_ASSIGNMENT_STATUS_INVALID_CONTEXT = 9;
+  PROFILE_ASSIGNMENT_STATUS_ENVIRONMENT_NOT_FOUND = 10;
+  PROFILE_ASSIGNMENT_STATUS_APPLICATION_NOT_FOUND = 11;
+  PROFILE_ASSIGNMENT_STATUS_APPLICATION_VERSION_NOT_FOUND = 12;
+  PROFILE_ASSIGNMENT_STATUS_COMPONENT_NOT_FOUND = 13;
+  PROFILE_ASSIGNMENT_STATUS_PROFILE_REVISION_NOT_FOUND = 14;
+}
+message ProfileAssignmentDecision {
+  string profile_id = 1;
+  oneof decision { int32 use_revision = 2; bool disable = 3; }
+}
+message ProfileAssignmentState {
+  string environment = 1;
+  string environment_record_id = 2;
+  ProfileAssignmentTarget target = 3;
+  repeated ProfileAssignmentDecision decisions = 4;
+  string concurrency_token = 5;
+  string technical_actor_id = 6;
+  string changed_at_utc = 7;
+  RevisionReference checked_revision = 8;
+}
+message ProfileAssignmentReply {
+  ProfileAssignmentStatus status = 1;
+  ProfileAssignmentTarget target = 2;
+  ProfileAssignmentState assignment = 3;
   repeated ProfileDiagnostic diagnostics = 4;
   int32 error_count = 5;
   bool diagnostics_truncated = 6;

@@ -1,0 +1,15 @@
+{
+  "apiVersion": "haby.dev/v1alpha1",
+  "kind": "ConfigurationProfileAssignment",
+  "spec": {
+    "target": {
+      "kind": "component",
+      "applicationId": "processor-service",
+      "componentRef": "api"
+    },
+    "decisions": [
+      { "kind": "use", "profileRef": { "profileId": "serilog", "revision": 1 } },
+      { "kind": "disable", "profileId": "optional-telemetry" }
+    ]
+  }
+}

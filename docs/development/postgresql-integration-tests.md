@@ -1,5 +1,9 @@
 # PostgreSQL checkpoint integration tests
 
+[Scoped Profile assignments](136-scoped-profile-assignments.md) add actual
+Host/generated-client/all-scope CAS, restart/restore, exact validation versions,
+secret-free acceptance and published Native AOT CLI evidence.
+
 [Profile operator administration](134-profile-operator-path.md) adds generated
 gRPC/actual Host/PostgreSQL validation/import/exact-read, restart, cancellation,
 safe failure and published Native AOT CLI evidence, without assignment or delivery.

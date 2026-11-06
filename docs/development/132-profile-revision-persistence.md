@@ -125,9 +125,8 @@ exact numbers and pre/post-acceptance cancellation.
 The integration suite and Native AOT CI continue to cover existing Application
 import/query/provisioning. WSLc remains the documented local Windows fallback.
 
-Profile assignments and distribution authorization, defaults administration,
-list/update/delete/rollout, planning integration, secret resolution,
-output rendering, materialization and confidential delivery remain deferred.
-Persisting a named secret declaration grants no distribution authority. A later
-secret-bearing assignment boundary must authorize distribution to its target
-before accepting effective configuration for delivery.
+[Scoped assignment administration](136-scoped-profile-assignments.md) now implements
+persisted defaults and exceptions under ADR-039. Trusted administrator assignment
+consents to declared-secret distribution; Profile import alone grants no such
+authority. List/delete/rollout, planning integration, secret resolution, output
+rendering, materialization and confidential delivery remain deferred.

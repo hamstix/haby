@@ -807,6 +807,65 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProfileAssignmentRow", b =>
+                {
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("TargetKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("target_kind");
+
+                    b.Property<string>("ApplicationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("application_id");
+
+                    b.Property<string>("ComponentRef")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("component_ref");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("ChangedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("changed_at_utc");
+
+                    b.Property<Guid?>("CheckedApplicationRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("checked_application_record_id");
+
+                    b.Property<long?>("CheckedRevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("checked_revision_number");
+
+                    b.Property<string>("Snapshot")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("snapshot");
+
+                    b.Property<Guid>("Token")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid")
+                        .HasColumnName("token");
+
+                    b.HasKey("EnvironmentRecordId", "TargetKind", "ApplicationId", "ComponentRef");
+
+                    b.ToTable("configuration_profile_assignments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_profile_assignments_audit", "length(actor_id) > 0 AND token <> '00000000-0000-0000-0000-000000000000'::uuid AND ((target_kind = 'component' AND checked_application_record_id IS NOT NULL AND checked_revision_number IS NOT NULL AND checked_revision_number > 0) OR (target_kind <> 'component' AND checked_application_record_id IS NULL AND checked_revision_number IS NULL))");
+
+                            t.HasCheckConstraint("CK_profile_assignments_target", "(target_kind = 'environment' AND application_id = '' AND component_ref = '') OR (target_kind = 'application' AND application_id ~ '^[a-z][a-z0-9]*([.-][a-z0-9]+)*$' AND component_ref = '') OR (target_kind = 'component' AND application_id ~ '^[a-z][a-z0-9]*([.-][a-z0-9]+)*$' AND component_ref ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$')");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProfileRevisionRow", b =>
                 {
                     b.Property<string>("ProfileId")
@@ -1499,6 +1558,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_postgresql_database_recovery_decisions_durable_create_oper~1");
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProfileAssignmentRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderAliasAuditRow", b =>

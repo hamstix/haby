@@ -48,6 +48,9 @@ public sealed class CliConfigurationTests
     {
         public Task<ProfileReply> ValidateProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProfileReply> ImportProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ProfileAssignmentReply> ValidateProfileAssignmentAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ProfileAssignmentReply> GetProfileAssignmentAsync(GetProfileAssignmentRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ProfileAssignmentReply> ApplyProfileAssignmentAsync(ApplyProfileAssignmentRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProfileReply> GetProfileRevisionAsync(ProfileRevisionRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();

@@ -185,12 +185,15 @@ public sealed partial class OperatorHostIntegrationTests
     private sealed class ProfileQueryGate : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
     {
         private bool _armed;
+        internal string WatchedTable { get; set; } = "configuration_profile_revisions";
+        internal int SecretReads { get; private set; }
         private int _count;
         internal int Count => _count;
         public override System.Data.Common.DbCommand CommandInitialized(Microsoft.EntityFrameworkCore.Diagnostics.CommandEndEventData eventData,
             System.Data.Common.DbCommand result)
         {
             Interlocked.Increment(ref _count);
+            if (result.CommandText.Contains("FROM secrets", StringComparison.Ordinal) || result.CommandText.Contains("FROM secret_", StringComparison.Ordinal)) SecretReads++;
             return result;
         }
         internal TaskCompletionSource Entered { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -205,7 +208,7 @@ public sealed partial class OperatorHostIntegrationTests
             System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
             Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result, CancellationToken cancellationToken = default)
         {
-            if (_armed && command.CommandText.Contains("configuration_profile_revisions", StringComparison.Ordinal))
+            if (_armed && command.CommandText.Contains(WatchedTable, StringComparison.Ordinal))
             {
                 _armed = false;
                 Entered.TrySetResult();

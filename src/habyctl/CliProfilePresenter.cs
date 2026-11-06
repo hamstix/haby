@@ -9,7 +9,7 @@ internal sealed record CliProfileData(CliProfileReference? Reference, string? Te
 
 internal static class ProfilePresentation
 {
-    private static bool ValidProfileId(string value) => value.Length is > 0 and <= 128 &&
+    internal static bool ValidProfileId(string value) => value.Length is > 0 and <= 128 &&
         value[0] is >= 'a' and <= 'z' && value[^1] is not ('.' or '-') &&
         value.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '-') &&
         !value.Contains("..", StringComparison.Ordinal) && !value.Contains(".-", StringComparison.Ordinal) &&
