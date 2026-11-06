@@ -5,6 +5,7 @@ using Haby.Domain;
 using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
@@ -134,6 +135,54 @@ public sealed partial class ConfigurationProfilePersistenceTests
         }
         await using var check = Context(connection);
         Assert.Single(await check.ProfileAssignments.AsNoTracking().ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task Unchanged_assignment_conflicts_when_changed_writer_commits_after_its_read()
+    {
+        var (connection, environment) = await AssignmentDatabase();
+        var writer = new PostgreSqlProfileAssignmentStore(new Factory(connection));
+        var original = (await writer.ApplyAsync(environment, new(EnvironmentTarget, [Disable("before")]),
+            new AssignmentPrecondition.ExpectedAbsence(), new("original", Time, null), default)).Assignment!;
+        var pause = new AssignmentSavePause();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var unchangedStore = new PostgreSqlProfileAssignmentStore(new Factory(connection, pause));
+        var unchanged = unchangedStore.ApplyAsync(environment, original.Declaration, Match(original),
+            new("must-not-rewrite-audit", Time.AddDays(2), null), timeout.Token).AsTask();
+        AssignmentResult changed;
+        var replacement = new ConfigurationProfileAssignment(EnvironmentTarget, [Disable("winner"), Disable("another")]);
+        var audit = new AssignmentAudit("changed-writer", Time.AddDays(1), null);
+        try
+        {
+            // The equal contender has read the original row but has not executed its guarded UPDATE.
+            await pause.Entered.Task.WaitAsync(timeout.Token);
+            changed = await writer.ApplyAsync(environment, replacement, Match(original), audit, timeout.Token);
+        }
+        finally { pause.Resume.TrySetResult(); }
+        var equalResult = await unchanged.WaitAsync(timeout.Token);
+        Assert.Equal(AssignmentOutcome.Updated, changed.Outcome);
+        Assert.Equal(AssignmentOutcome.Conflict, equalResult.Outcome);
+        Assert.Null(equalResult.Assignment);
+        Assert.NotEqual(original.Token, changed.Assignment!.Token);
+        Assert.Equal(replacement, changed.Assignment.Declaration);
+        Assert.Equal(audit, changed.Assignment.Audit);
+        var independent = new PostgreSqlProfileAssignmentStore(new Factory(connection));
+        Assert.Equal(changed.Assignment, await independent.FindAsync(environment, EnvironmentTarget, default));
+        await using var check = Context(connection);
+        Assert.Single(await check.ProfileAssignments.AsNoTracking().ToArrayAsync());
+    }
+
+    private sealed class AssignmentSavePause : SaveChangesInterceptor
+    {
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult();
+            await Resume.Task.WaitAsync(cancellationToken);
+            return result;
+        }
     }
 
     [Theory]

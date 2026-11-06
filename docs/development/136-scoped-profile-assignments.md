@@ -65,9 +65,12 @@ habyctl profile assignment apply component.json --environment production --appli
 habyctl profile assignment apply component.json --environment production --application-version 2.4.0 --if-match <concurrency-token>
 ```
 
-The flags are mutually exclusive and bypass automatic validation/read acquisition;
-the server still performs all authoritative checks. A matching token with equal
-decisions returns `unchanged`, retaining token, actor, UTC time and checked revision.
+The flags are mutually exclusive and bypass only the Get used to acquire a
+precondition. Every apply first uses server-side portable validation to obtain
+its authoritative target. Accepted replies must match that target and Environment
+before any output, including with explicit flags. The server still performs all
+authoritative checks. A matching token with equal decisions returns `unchanged`,
+retaining token, actor, UTC time and checked revision.
 A real replacement returns `updated` with a fresh token and last-change audit.
 Initial acceptance returns `created`, including an empty declaration. ExpectedAbsence
 against an existing row and any stale token return `conflict`, even for equal content.
@@ -111,7 +114,8 @@ Tests exercise generated client -> actual Host -> Application -> disposable
 PostgreSQL for all three targets, out-of-order exact versions, stable Unchanged
 audit, reference refusal, missing secrets without secret reads, restart and real
 `pg_dump`/`pg_restore`. Synchronized store tests cover insertion/update races,
-precondition-before-equality, non-recycled tokens, empty state and cancellation/
+precondition-before-equality, a paused Unchanged contender losing to a committed
+changed writer, non-recycled tokens, empty state and cancellation/
 lost commit responses with independent contexts. Persisted decisions and exact
 Profile reads feed the existing expander and two synthetic output families through
 the real composer. These are test families, not another production Provider.

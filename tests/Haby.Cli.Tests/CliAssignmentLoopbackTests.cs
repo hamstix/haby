@@ -18,11 +18,13 @@ public sealed partial class CliLoopbackTests
     {
         internal static readonly string Token = Guid.NewGuid().ToString();
         internal int Reads, Validations, Writes;
+        internal ProfileAssignmentTarget ValidationTarget { get; set; } = new() { Kind = "environment" };
+        internal ProfileAssignmentTarget? ForeignReplyTarget { get; set; }
         public override Task<ProfileAssignmentReply> ValidateProfileAssignment(ProfilePayloadRequest request, ServerCallContext context)
         {
             Interlocked.Increment(ref Validations);
             Assert.Equal("sensitive-assignment-source", request.Payload.ToStringUtf8());
-            return Task.FromResult(new ProfileAssignmentReply { Status = ProfileAssignmentStatus.Valid, Target = new() { Kind = "environment" } });
+            return Task.FromResult(new ProfileAssignmentReply { Status = ProfileAssignmentStatus.Valid, Target = ValidationTarget.Clone() });
         }
         public override Task<ProfileAssignmentReply> GetProfileAssignment(GetProfileAssignmentRequest request, ServerCallContext context)
         {
@@ -34,6 +36,18 @@ public sealed partial class CliLoopbackTests
         {
             Interlocked.Increment(ref Writes);
             Assert.Equal("sensitive-assignment-source", request.Payload.ToStringUtf8());
+            if (ForeignReplyTarget is { } foreign)
+            {
+                Assert.Equal("2", request.ApplicationVersion);
+                if (!request.ExpectedAbsence) Assert.Equal(Token, request.ExpectedConcurrencyToken);
+                var reply = Reply(request.Environment, request.ExpectedAbsence ? ProfileAssignmentStatus.Created : ProfileAssignmentStatus.Updated);
+                reply.Assignment.ConcurrencyToken = Guid.NewGuid().ToString();
+                reply.Target = foreign.Clone();
+                reply.Assignment.Target = foreign.Clone();
+                if (foreign.Kind == "component") reply.Assignment.CheckedRevision = new()
+                { ApplicationRecordId = "137aa6d4-084d-4f8e-8f50-a34206555a0b", RevisionNumber = 1 };
+                return Task.FromResult(reply);
+            }
             if (request.Environment == "lost") throw new RpcException(new(StatusCode.Unavailable, "private-driver-exception"));
             if (request.Environment == "malformed")
             {
@@ -63,6 +77,76 @@ public sealed partial class CliLoopbackTests
                 ChangedAtUtc = "2026-11-06T08:00:00.0000000+00:00"
             }
         };
+    }
+
+    [Fact]
+    public async Task Assignment_explicit_preconditions_reject_foreign_targets_before_output_including_published_binary()
+    {
+        var service = new AssignmentRegistry
+        { ValidationTarget = new() { Kind = "component", ApplicationId = "assigned", ComponentRef = "api" } };
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0, l => l.Protocols = HttpProtocols.Http2));
+        builder.Services.AddGrpc(); builder.Services.AddSingleton(service);
+        await using var host = builder.Build(); host.MapGrpcService<AssignmentRegistry>(); await host.StartAsync();
+        var file = Path.GetTempFileName(); var config = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(file, "sensitive-assignment-source");
+            await File.WriteAllTextAsync(config, $"""
+                formatVersion: 1
+                currentContext: chosen
+                instances:
+                  local:
+                    endpoint: {host.Urls.Single()}
+                contexts:
+                  chosen:
+                    instance: local
+                    environmentId: production
+                """);
+            var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+            if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrWhiteSpace(binary));
+            foreach (var native in binary is null ? new[] { false } : new[] { false, true })
+                foreach (var format in new[] { "text", "json" })
+                    foreach (var absent in new[] { true, false })
+                        foreach (var foreign in new ProfileAssignmentTarget[]
+                        {
+                            new() { Kind = "component", ApplicationId = "assigned", ComponentRef = "worker" },
+                            new() { Kind = "component", ApplicationId = "another", ComponentRef = "api" },
+                            new() { Kind = "application", ApplicationId = "assigned" },
+                            new() { Kind = "environment" }
+                        })
+                        {
+                            service.ForeignReplyTarget = foreign;
+                            var before = (service.Reads, service.Validations, service.Writes);
+                            string[] precondition = absent ? ["--if-absent"] : ["--if-match", AssignmentRegistry.Token];
+                            string[] args = ["profile", "assignment", "apply", file, "--application-version", "2",
+                                .. precondition, "--config", config, "-o", format];
+                            string stdout, stderr; int code;
+                            if (native)
+                            {
+                                var start = new ProcessStartInfo(binary!) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                                foreach (var arg in args) start.ArgumentList.Add(arg);
+                                using var process = Process.Start(start)!;
+                                var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
+                                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                                try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+                                code = process.ExitCode; stdout = await output; stderr = await error;
+                            }
+                            else
+                            {
+                                using var output = new StringWriter(); using var error = new StringWriter();
+                                var cli = new CliApplication(new FixedEndpoint("http://localhost:1"), new GrpcRegistryClientFactory(), output, error);
+                                code = await cli.RunAsync(args); stdout = output.ToString(); stderr = error.ToString();
+                            }
+                            Assert.Equal(3, code);
+                            Assert.Equal("", stdout);
+                            Assert.Contains("Assignment outcome is uncertain", stderr);
+                            Assert.Contains("Read the exact scope", stderr);
+                            Assert.DoesNotContain("sensitive-assignment-source", stderr);
+                            Assert.Equal((0, 1, 1), (service.Reads - before.Reads, service.Validations - before.Validations, service.Writes - before.Writes));
+                        }
+        }
+        finally { File.Delete(file); File.Delete(config); await host.StopAsync(); }
     }
 
     [Fact]
@@ -98,14 +182,14 @@ public sealed partial class CliLoopbackTests
                         (["get"], "found", 0, 1, 0, 0),
                         (["apply", file], "unchanged", 0, 1, 1, 1),
                         (["apply", file, "--environment", "new"], "created", 0, 1, 1, 1),
-                        (["apply", file, "--if-absent"], "conflict", 1, 0, 0, 1),
-                        (["apply", file, "--if-match", AssignmentRegistry.Token], "unchanged", 0, 0, 0, 1),
-                        (["apply", file, "--if-match", Guid.NewGuid().ToString()], "conflict", 1, 0, 0, 1),
+                        (["apply", file, "--if-absent"], "conflict", 1, 0, 1, 1),
+                        (["apply", file, "--if-match", AssignmentRegistry.Token], "unchanged", 0, 0, 1, 1),
+                        (["apply", file, "--if-match", Guid.NewGuid().ToString()], "conflict", 1, 0, 1, 1),
                         (["apply", file, "--if-absent", "--if-match", AssignmentRegistry.Token], null, 2, 0, 0, 0),
                         (["apply", file, "--if-match", "bad"], null, 2, 0, 0, 0),
                         (["get", "--component", "api"], null, 2, 0, 0, 0),
-                        (["apply", file, "--environment", "lost", "--if-absent"], null, 3, 0, 0, 1),
-                        (["apply", file, "--environment", "malformed", "--if-absent"], null, 3, 0, 0, 1)
+                        (["apply", file, "--environment", "lost", "--if-absent"], null, 3, 0, 1, 1),
+                        (["apply", file, "--environment", "malformed", "--if-absent"], null, 3, 0, 1, 1)
                     })
                     {
                         var before = (service.Reads, service.Validations, service.Writes);

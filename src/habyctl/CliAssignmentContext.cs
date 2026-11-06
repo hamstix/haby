@@ -45,16 +45,16 @@ internal sealed partial class CliCommandContext
             var payload = ByteString.CopyFrom(await CliApplication.ReadEnvelopeAsync(file, ct));
             var request = new ApplyProfileAssignmentRequest { Payload = payload, Environment = env };
             if (version is not null) request.ApplicationVersion = version;
-            ProfileAssignmentTarget? target = null;
+            // Always obtain the authoritative target, including with an explicit precondition.
+            // Only precondition acquisition is skipped; portable parsing stays on the server.
+            var validation = await client.ValidateProfileAssignmentAsync(new() { Payload = payload }, ct);
+            AssignmentPresentation.Check("profile assignment validate", validation);
+            if (validation.Status != ProfileAssignmentStatus.Valid) return PrintAssignment("profile assignment apply", validation);
+            var target = validation.Target;
             if (absent) request.ExpectedAbsence = true;
             else if (match is not null) request.ExpectedConcurrencyToken = match;
             else
             {
-                // The server parses portable JSON. The CLI does not implement assignment semantics.
-                var validation = await client.ValidateProfileAssignmentAsync(new() { Payload = payload }, ct);
-                AssignmentPresentation.Check("profile assignment validate", validation);
-                if (validation.Status != ProfileAssignmentStatus.Valid) return PrintAssignment("profile assignment apply", validation);
-                target = validation.Target;
                 var current = await client.GetProfileAssignmentAsync(new() { Environment = env, Target = target }, ct);
                 AssignmentPresentation.Check("profile assignment get", current);
                 AssignmentPresentation.CheckScope(current, env, target);

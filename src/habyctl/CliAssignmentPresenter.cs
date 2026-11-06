@@ -20,9 +20,9 @@ internal static class AssignmentPresentation
         "component" => ProfilePresentation.ValidProfileId(target.ApplicationId) && Name(target.ComponentRef, 63),
         _ => false
     };
-    internal static void CheckScope(ProfileAssignmentReply reply, string environment, ProfileAssignmentTarget? target)
+    internal static void CheckScope(ProfileAssignmentReply reply, string environment, ProfileAssignmentTarget target)
     {
-        if (reply.Assignment is { } state && (state.Environment != environment || target is not null && !Equals(state.Target, target)))
+        if (reply.Assignment is { } state && (state.Environment != environment || !Equals(state.Target, target)))
             throw new InvalidDataException("Foreign assignment reply.");
     }
     internal static (string Outcome, int Exit) Check(string command, ProfileAssignmentReply reply)
