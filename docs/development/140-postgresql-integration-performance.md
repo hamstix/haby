@@ -124,7 +124,9 @@ one-connection limit and uses targeted cleanup instead of `ClearAllPools`.
 Provider/application authentication, generated-password verification, fault hooks,
 restore targets, truly empty catalogs and every migration invocation are retained.
 The normal parallel operator class and all collection scheduling are unchanged.
-No template clone, new dependency, new container or CI shard is introduced. Tradeoff:
+No template clone, new dependency or CI shard is introduced. The lifecycle guard
+class adds one short-lived fixture container on Docker; WSLc reuses the helper's
+cluster. The optimization itself retains the existing cluster ownership. Tradeoff:
 a case can retain idle PostgreSQL backends until its deterministic teardown, in
 exchange for fewer physical connections/authentication handshakes. This is a
 test-only lifecycle; no production connection policy changes.

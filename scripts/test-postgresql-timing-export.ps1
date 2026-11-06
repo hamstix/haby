@@ -72,3 +72,4 @@ exit $LASTEXITCODE
         Remove-Item -LiteralPath $directory -Recurse -Force
     }
 }
+exit 0
