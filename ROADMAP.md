@@ -87,7 +87,9 @@ The in-process preview is not yet an operator endpoint or confidential delivery.
 - [x] Implement configurationSlot in the current Application schema/DTO/normalized snapshot model, with normalized Bindings as the single source for Profile slots: [issue #130 and reset requirements](docs/development/130-binding-configuration-slot.md).
 - [x] Persist exact immutable Profile revisions with side-effect-free import/exact read, strict internal snapshots and PostgreSQL reload/concurrency/backup-restore evidence: [issue #132](docs/development/132-profile-revision-persistence.md).
 - [x] Expose Profile validation/import/exact revision metadata through generated gRPC, the operator Host and Native AOT habyctl: [issue #134](docs/development/134-profile-operator-path.md).
-- [ ] Persist Profile selections and integrate frozen effective layouts/options into planning.
+- [ ] Persist/administer scoped Profile assignments under [ADR-039](docs/adr/0039-scoped-profile-assignment-administration.md), with exact Component validation versions and optimistic concurrency.
+- [ ] Extend Profile exact-read JSON to return the full normalized declaration without secret resolution, in a separate slice under ADR-039.
+- [ ] Integrate frozen effective layouts/options and assignment inputs into planning.
 - [ ] Define and implement adapter-owned Resource-output renderers, typed consumer option contracts and confidential formatters; start with the confirmed PostgreSQL application-login output.
 - [ ] Materialize immutable unresolved ConfigurationDocumentRevisions from exact applied-generation inputs, with idempotency, provenance and no secret-bearing strings in ordinary storage/results.
 - [ ] Expose redacted preview through the operator Host and habyctl.

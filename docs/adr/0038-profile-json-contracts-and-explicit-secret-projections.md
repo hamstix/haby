@@ -118,11 +118,13 @@ delivery, with no partial secret-bearing response. A secret JSON root Object/Arr
 is not permission for other projections to inspect or insert into it.
 
 Assigning a secret-bearing Profile grants distribution to Components receiving
-that effective Profile. The assignment/acceptance path must check permission to
-distribute each referenced secret to that target scope. Component configuration
-retrieval is separately authorized. The existing unauthenticated operator surface
-does not authorize secret distribution or delivery. Pure parsing/expansion tests
-are not evidence that those production security gates exist.
+that effective Profile. Under [ADR-039](0039-scoped-profile-assignment-administration.md),
+the isolated operator API trusts its administrator: assignment itself authorizes
+all declared secrets for that scope, including future inheriting Components.
+No separate per-secret operator permission check is required in this pilot.
+Assignment does not resolve names or read material. Component configuration
+retrieval still requires a separately accepted authorization boundary. Pure
+parsing/expansion tests do not establish an implemented delivery security gate.
 
 ### ConfigurationProfileAssignment
 
@@ -151,6 +153,9 @@ Future assignment apply replaces the complete local decision set under optimisti
 concurrency. Concurrency metadata belongs to the operation, not the portable JSON.
 Changing assignment never directly mutates an accepted Plan/generation or triggers
 automatic rollout. Structural parsing does not claim scope/secret authorization.
+[ADR-039](0039-scoped-profile-assignment-administration.md) defines persisted
+existence checks, explicit Component validation version, conditional replacement,
+trusted-administrator consent and the operator administration boundary.
 
 ### Application Binding configurationSlot
 

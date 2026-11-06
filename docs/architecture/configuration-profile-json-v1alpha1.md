@@ -117,7 +117,10 @@ secret-bearing Profile before expansion uses only the actual effective revision.
 
 Ordinary magic-looking JSON remains ordinary: no discriminator/member can create
 SecretReference, DeferredValue or commands. Future planning must pin exact internal
-references; distribution and confidential retrieval each require authorization.
+references. [ADR-039](../adr/0039-scoped-profile-assignment-administration.md)
+accepts trusted administrator assignment as distribution consent for all declared
+secrets in the target scope; no per-secret permission check is required in this
+pilot. Confidential retrieval still requires its separate authorization boundary.
 Future delivery must implement typed JSON insertion, whole-node redaction and
 all-or-nothing output. A String-only formatter is insufficient for format json.
 None of those capabilities or permissions is provided by successful parsing.
