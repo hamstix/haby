@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\ProfilePersistenceSamples.cs" Link="ProfilePersistenceSamples.cs" />
+    <Compile Include="..\ProfileDeclarationBoundarySamples.cs" Link="ProfileDeclarationBoundarySamples.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio">

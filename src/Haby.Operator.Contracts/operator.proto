@@ -638,6 +638,8 @@ message ProfileReply {
   repeated ProfileDiagnostic diagnostics = 4;
   int32 error_count = 5;
   bool diagnostics_truncated = 6;
+  // Complete normalized portable UTF-8 JSON object, present only on exact get/Found.
+  bytes declaration_json = 7;
 }
 
 // Local scope only; no effective expansion or confidential declaration content.

@@ -1,7 +1,7 @@
 # Profile operator administration
 
 Issue #134 exposes installation-scoped Configuration Profile declaration validation,
-immutable import and exact revision metadata through the existing internal alpha
+immutable import and exact revision reads through the existing internal alpha
 gRPC Host and Native AOT `habyctl`. These are Configuration Profiles, separate from
 Resource privilege policies and Kubernetes Workload profiles.
 
@@ -62,15 +62,55 @@ explicit positive Int32 revision to accept another immutable declaration. Readin
 an absent revision returns `notFound`, even when a higher revision exists. There
 is no automatic next revision, latest, replacement or Environment fallback.
 
-Both text and JSON output contain only status, exact identity, original audit
-when accepted/found, and safe bounded diagnostics when invalid. JSON stdout is
-one format-version-1 envelope. Diagnostics retain standard codes, total error
+Exact get with JSON output now returns the complete normalized portable declaration
+in object-valued `data.declaration`, alongside exact `data.reference` and original
+import audit. It includes every document/template, static contribution/value,
+Binding rule/options/projection and declared secret name/version/path/format.
+Names may be absent from SecretStore: read never resolves names, reads material,
+executes templates/formatters/renderers or calls Provider/output adapters. Ordinary
+values are returned unchanged; credentials mistakenly embedded in ordinary values
+are also returned unchanged. This is declaration administration under the existing
+isolated operator boundary, with no new reveal switch or network/auth policy.
+
+This is normalized content, not original file bytes, ordering, omission choices,
+source formatting, an internal snapshot wrapper or a serialized CLR graph. Maps
+and projection sets use deterministic ordinal ordering; ordinary arrays retain
+order and numbers retain exact arbitrary precision as JSON numbers (including
+`1e999`). Empty maps/options/secretProjections use documented omitted defaults.
+Portable numeric spelling can differ from internal CanonicalText: `0e0` becomes
+`0`, unnecessary `e0` is omitted, and plain spelling is used only when shorter.
+Huge exponents stay scientific. Contract integers (`metadata.revision` and
+`secretRef.version`) also use shorter exact exponent spelling when beneficial;
+the CLI decodes them exactly as positive Int32 values, including `1e9`. Domain normalization/equality/hashing, internal
+snapshots and existing configuration JSON serialization remain unchanged. Text get remains a concise status/identity/audit summary.
+
+Validate/import replies, including Created/ExistingEquivalent, and assignment
+responses remain metadata/decisions only. NotFound/conflict/failure never includes
+partial declaration content. JSON stdout is one format-version-1 envelope.
+Extract a successful exact read in PowerShell 7 using JsonElement.GetRawText(),
+which copies number tokens without conversion to double/decimal:
+
+```powershell
+habyctl profile revision get operator-layout 1 -o json | ForEach-Object {
+    $options = [System.Text.Json.JsonDocumentOptions]@{ MaxDepth = 66 }
+    $result = [System.Text.Json.JsonDocument]::Parse($_, $options)
+    try { $result.RootElement.GetProperty("data").GetProperty("declaration").GetRawText() }
+    finally { $result.Dispose() }
+} | Set-Content -NoNewline -Encoding utf8 normalized-profile.json
+habyctl profile import normalized-profile.json -o json
+```
+
+Successful equivalent reimport preserves the first import actor/time and returns
+ExistingEquivalent. Use number-preserving tooling when editing the extracted
+JSON; converting arbitrary values through floating-point types loses precision.
+
+Diagnostics retain standard codes, total error
 count and truncation; arbitrary member names or overly long source paths are
 reported at the root rather than echoed. Equal redacted findings are deduplicated
 and sorted; the total counts original findings and truncation also signals this
-reduction of diagnostic detail. No raw JSON, template/static values,
-options, secret names/versions, Arguments or snapshots are returned. There is
-no export/reveal/raw option; editing uses the operator's original source file.
+reduction of diagnostic detail. Diagnostics never contain source values, Arguments
+or snapshots. No export/reveal/raw command is added; editing may use the original
+source file or an extracted normalized declaration.
 
 Exit codes follow existing commands: 0 success, 1 expected refusal/conflict or
 not-found, 2 usage/configuration/file failure, 3 transport/server failure.
@@ -91,7 +131,11 @@ with a fixed safe Internal status, never not-found or a repaired declaration.
 
 `OperatorProfileIntegrationTests` exercises generated client -> actual Host ->
 Application parser/import/query -> disposable PostgreSQL, including startup,
-restart, reordered retries, conflicts, independent revisions, malformed requests,
+restart, full normalized declaration round-trip and ExistingEquivalent reimport,
+original audit preservation, exact numeric values, missing declared secrets,
+near-limit strings/numbers, Unicode block-list characters, omitted defaults
+and depth-64 content through published CLI, reordered retries, conflicts,
+independent revisions, malformed requests,
 size/depth limits, bounded diagnostics, zero database commands for validation,
 no unrelated writes, corrupt snapshots and captured log redaction. Separate
 DbContexts arrange and verify persisted state. A blocking command interceptor
@@ -102,6 +146,18 @@ binary, this test runs real CLI imports, retries, validation and exact reads
 against both Host lifetimes, using text/JSON, config/context override, BOM refusal,
 conflict and not-found exits. `CliLoopbackTests` additionally runs the published
 binary against a disposable generated service in Linux/Windows Native AOT CI.
+Malformed/missing/truncated/foreign declaration replies and forbidden outcome
+content fail before any stdout in both formats, including the published binary.
+The CLI checks transport structure/identity/status, without a second semantic
+Profile parser or persistence dependency. The Profile JSON envelope alone permits
+two additional wrapper containers; declaration depth remains 64. Host portable
+serialization uses minimal JSON escaping (including Unicode property names,
+controls and contract paths) and the CLI preserves its checked tokens. The
+1,000,234-byte / 500,000-zero regression proves import -> exact get -> native JSON
+extraction -> ExistingEquivalent reimport with original audit on both Host lifetimes.
+The published CLI writes UTF-8 without BOM even on Windows, preserving literal
+Unicode independently of the console code page. No
+unrelated request/message limits are changed.
 Existing Application persistence, generation, provisioning and startup suites
 remain required. Run the solution restore/build/test/format commands from
 CONTRIBUTING and the disposable PostgreSQL suite; Windows can use

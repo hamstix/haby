@@ -1,21 +1,35 @@
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Haby.Operator.Contracts;
 
 namespace Haby.Cli;
 
 internal sealed record CliProfileReference(string ProfileId, int Revision);
 internal sealed record CliProfileData(CliProfileReference? Reference, string? TechnicalActorId, string? ImportedAtUtc,
-    int ErrorCount, bool DiagnosticsTruncated);
+    int ErrorCount, bool DiagnosticsTruncated,
+    [property: JsonConverter(typeof(ProfileDeclarationElementConverter))] JsonElement? Declaration);
 
 internal static class ProfilePresentation
 {
+    internal static JsonElement? Declaration(ProfileReply reply)
+    {
+        if (reply.Status == ProfileStatus.Found)
+        {
+            if (reply.DeclarationJson.IsEmpty) throw new InvalidDataException("Missing Profile declaration.");
+            return ProfileDeclarationReply.Read(reply);
+        }
+        if (!reply.DeclarationJson.IsEmpty) throw new InvalidDataException("Unexpected Profile declaration.");
+        return null;
+    }
+
     internal static bool ValidProfileId(string value) => value.Length is > 0 and <= 128 &&
         value[0] is >= 'a' and <= 'z' && value[^1] is not ('.' or '-') &&
         value.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '-') &&
         !value.Contains("..", StringComparison.Ordinal) && !value.Contains(".-", StringComparison.Ordinal) &&
         !value.Contains("-.", StringComparison.Ordinal) && !value.Contains("--", StringComparison.Ordinal);
 
-    internal static (string Outcome, int Exit) Check(string command, ProfileReply reply)
+    internal static (string Outcome, int Exit, JsonElement? Declaration) Check(string command, ProfileReply reply)
     {
         var allowed = command switch
         {
@@ -42,7 +56,8 @@ internal static class ProfilePresentation
                 !DateTimeOffset.TryParseExact(reply.Metadata.ImportedAtUtc, "O", CultureInfo.InvariantCulture,
                     DateTimeStyles.None, out var time) || time.Offset != TimeSpan.Zero : reply.Metadata is not null)
             throw new InvalidDataException("Incomplete Profile audit.");
-        return reply.Status switch
+        var declaration = Declaration(reply);
+        var (outcome, exit) = reply.Status switch
         {
             ProfileStatus.Valid => ("valid", 0),
             ProfileStatus.Created => ("created", 0),
@@ -53,6 +68,7 @@ internal static class ProfilePresentation
             ProfileStatus.NotFound => ("notFound", 1),
             _ => throw new InvalidDataException("Unknown Profile outcome.")
         };
+        return (outcome, exit, declaration);
     }
 }
 
@@ -64,13 +80,15 @@ internal sealed partial class CliCommandContext
 
 internal sealed partial class CliJsonPresenter
 {
+    private static readonly CliOutputJsonContext ProfileJsonContext = new(new JsonSerializerOptions(CliOutputJsonContext.Default.Options)
+    { MaxDepth = 66 });
     internal int PrintProfile(string command, ProfileReply reply)
     {
-        var (outcome, exit) = ProfilePresentation.Check(command, reply);
+        var (outcome, exit, declaration) = ProfilePresentation.Check(command, reply);
         Write(command, outcome, new CliProfileData(reply.Reference is { } r ? new(r.ProfileId, r.Revision) : null,
-            reply.Metadata?.TechnicalActorId, reply.Metadata?.ImportedAtUtc, reply.ErrorCount, reply.DiagnosticsTruncated),
+            reply.Metadata?.TechnicalActorId, reply.Metadata?.ImportedAtUtc, reply.ErrorCount, reply.DiagnosticsTruncated, declaration),
             [.. reply.Diagnostics.Select(x => new CliDiagnostic(x.Code, x.Path, "", "Error", [], null))],
-            CliOutputJsonContext.Default.CliEnvelopeCliProfileData);
+            ProfileJsonContext.CliEnvelopeCliProfileData);
         return exit;
     }
 }
@@ -79,7 +97,7 @@ internal sealed partial class CliTextPresenter
 {
     internal int PrintProfile(string command, ProfileReply reply)
     {
-        var (outcome, exit) = ProfilePresentation.Check(command, reply);
+        var (outcome, exit, _) = ProfilePresentation.Check(command, reply);
         _output.WriteLine(outcome);
         if (reply.Reference is { } r) _output.WriteLine($"{r.ProfileId} revision {r.Revision}");
         if (reply.Metadata is { } m) _output.WriteLine($"technicalActorId: {m.TechnicalActorId} importedAtUtc: {m.ImportedAtUtc}");

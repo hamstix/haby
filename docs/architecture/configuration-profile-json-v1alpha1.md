@@ -8,7 +8,8 @@ lookup, authorization, output access, secret reads or formatter execution.
 [Issue #132](../development/132-profile-revision-persistence.md) adds separate
 side-effect-free import/exact-read use cases and immutable PostgreSQL persistence
 over this parser. [Issue #134](../development/134-profile-operator-path.md) exposes Profile administration
-through the operator Host and habyctl. Assignment persistence and delivery remain deferred.
+through the operator Host and habyctl. [Issue #136](../development/136-scoped-profile-assignments.md)
+adds persisted assignment administration; planning and delivery remain deferred.
 The Profile wire boundary itself requires no catalog reset. Issue #130 now adds
 Application Binding `configurationSlot` to the current v1alpha1 and advances its
 normalized/snapshot versions to 2, requiring an explicit fresh catalog for
@@ -124,6 +125,41 @@ pilot. Confidential retrieval still requires its separate authorization boundary
 Future delivery must implement typed JSON insertion, whole-node redaction and
 all-or-nothing output. A String-only formatter is insufficient for format json.
 None of those capabilities or permissions is provided by successful parsing.
+
+## Normalized exact declaration reads
+
+Under ADR-039 and issue #138, successful exact Profile get returns the full current
+portable ConfigurationProfile object in CLI JSON `data.declaration`, with exact
+identity and original audit beside it. The Host rehydrates the accepted immutable
+revision through the existing query/store and explicitly maps to the DTO roots in
+ManifestJsonContext. Generated protobuf carries portable UTF-8 JSON bytes in
+`ProfileReply.declaration_json`; this field is absent on all other outcomes and
+commands. The CLI embeds a checked JsonElement as an object through generated
+metadata, never a JSON string or Google Struct/double representation.
+
+Maps and set-like projections are ordered ordinally, defaults may be explicit,
+and exact numbers and all ordinary JSON kinds survive. Original bytes/source
+formatting and internal snapshot encodings are not returned. The CLI validates
+root/kind/version, structural completeness, exact identity and audit/outcome
+consistency before output, without duplicating semantic acceptance. Empty spec
+maps, empty options and empty secretProjections use documented omitted defaults.
+Portable numeric spelling may differ from internal CanonicalText: zero is `0`,
+unnecessary `e0` is omitted and a shorter exact plain form may be used; huge
+exponents remain scientific. The same compact policy covers positive Int32
+revision/secret-version fields (for example `1e9`), with exact bounded-integer
+reply validation. No double/decimal conversion, decimal expansion,
+Domain equality/hash/normalization, snapshot or existing configuration JSON change
+is involved. Portable JSON uses minimal lossless string escaping, including
+Unicode in ordinary keys and contract paths; the CLI embeds the checked tokens
+without re-escaping. This is output normalization, not a digest/canonicalization
+standard. Existing parser/CLI/transport admission limits remain unchanged. Text remains
+a short summary. Named-secret selectors are declarations only and are returned
+even when missing; no secret resolution, rendering, output access or material
+lookup occurs. Ordinary credentials embedded by mistake are returned as stored.
+Validate/import/assignment/error responses still contain no Profile content.
+See the [operator guide](../development/134-profile-operator-path.md) for extraction,
+reimport, boundary tests, safe failures and exit conventions. No storage model,
+migration/reset, network/auth policy or planning/delivery capability is added.
 
 ## Diagnostics
 

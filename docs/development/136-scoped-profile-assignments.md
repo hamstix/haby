@@ -127,7 +127,8 @@ and the complete disposable PostgreSQL suite; Windows can use the WSLc helper.
 
 Planning snapshots/fingerprints, rollout/generation mutation, effective preview,
 rendering, materialization, secret resolution/delivery/authorization, selectors,
-list/delete/history/receipts and full Profile-content reads remain separate work.
+list/delete/history/receipts remain separate work. Exact Profile get now returns
+normalized declaration content in JSON under issue #138; assignment replies do not.
 Secret-bearing effective expansion still refuses with
 `profile.secret-projections.unsupported` and null layouts. Assignment does not
 verify cross-Profile document/slot/path compatibility or execute Provider effects.
