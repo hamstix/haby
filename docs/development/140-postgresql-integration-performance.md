@@ -66,6 +66,8 @@ or full-suite correctness claim is made from an incomplete or failed run.
 | Run | Source/test behavior | Helper wall | Cases | Outcome |
 | --- | --- | ---: | ---: | --- |
 | Windows baseline 1 | `cc16bf01e3745a6e4302f475f1c818ed28172758`, unchanged | 634.91 s | 453 | 451 passed, 2 failed, zero skipped |
+| Windows baseline 2 | `5ff73a2fd9a7626d9674af423de498a1fcf6aae0`, measurement only | 638.79 s | 453 | 446 passed, 7 failed, zero skipped |
+| Linux CI baseline 1 | `5753fc6841f6bdab65edd39ead71503bb882702a` (PR merge ref for `5ff73a2`) | 516.86 s (runner) | 453 | all passed, zero skipped |
 
 Environment: Windows 11 build 26200, .NET SDK 10.0.402, runtime 10.0.13,
 Debug, WSLc 3.0.3, PostgreSQL 17.6-alpine, required published win-x64 Native AOT
@@ -86,6 +88,26 @@ or removed. Sampled TIME_WAIT counts reached 8,039; a later container sample sho
 7 sessions, 464 databases and max_connections=100 (samples, not measured peaks).
 This failed run establishes connection churn as a Windows investigation lead,
 not a successful baseline or a Linux performance result.
+
+Windows baseline 2 separated restore 1.09 s, build 9.79 s, test invocation 609.70 s
+and artifact export 0.36 s (runner total 621.21 s, helper total 638.79 s).
+Its full identity inventory exactly matches baseline 1. Socket exhaustion recurred;
+the additional failures are retained. The assembly was built from clean `5ff73a2`
+before candidate edits; its SHA-256 was captured independently while running.
+The initial runner captured the worktree diff at the end, so baseline 2's diff hash
+includes subsequent uncompiled investigation edits. Later runner versions capture
+source/diff and assembly hash before execution and flag source drift explicitly.
+
+Linux baseline 1 is [Build #259](https://github.com/hamstix/haby/actions/runs/42224403732),
+with its [allowlisted artifact](https://github.com/hamstix/haby/actions/runs/42224403732/artifacts/13505088230).
+It used a fresh Ubuntu 26.04.1 Actions runner, four CPUs, 15.61 GiB RAM,
+SDK 10.0.403, runtime 10.0.14, Docker 29.4.2 and required linux-x64 Native AOT.
+Restore/build/test/export were 4.94/22.11/488.91/0.72 s. Native publication and
+artifact upload remain separate steps. All five CI jobs passed. These runner
+resources and SDK differ from Windows; timings must not be compared across OSes.
+
+Checked-in allowlisted CSV inventories under `evidence/140` retain every case
+identity/outcome/duration beyond CI artifact expiration. Parameters remain hashed.
 
 The first Windows baseline uses the unchanged post-#138 test assembly and original
 helper, adding only explicit raw TRX arguments in a local ignored helper copy.

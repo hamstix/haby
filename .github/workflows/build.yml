@@ -31,6 +31,10 @@ jobs:
       - name: Test
         run: dotnet test ./HamstixHaby.slnx --no-build --artifacts-path ./.artifacts
 
+      - name: Verify PostgreSQL timing artifact safety and failure propagation
+        shell: pwsh
+        run: ./scripts/test-postgresql-timing-export.ps1
+
       - name: Audit vulnerable dependencies
         run: |
           dotnet package list --project ./HamstixHaby.slnx --vulnerable --include-transitive --format json > dependency-audit.json
@@ -123,7 +127,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: postgresql-timing-${{ github.sha }}
+          name: postgresql-timing-${{ github.sha }}-${{ github.run_attempt }}
           path: .artifacts/postgresql-measurement/safe/
           if-no-files-found: error
           retention-days: 14

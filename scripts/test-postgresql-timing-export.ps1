@@ -55,7 +55,13 @@ exit $LASTEXITCODE
         $env:HABY_TIMING_TEST_DESTINATION = Join-Path $directory "failed-run-$valid"
         & (Join-Path $PSHOME 'pwsh') -NoProfile -File $child *> (Join-Path $directory "child-$valid.log")
         if ($LASTEXITCODE -ne 17) { throw 'Test exit code was masked by timing export.' }
-        $metadata = Get-Content (Join-Path $env:HABY_TIMING_TEST_DESTINATION 'safe/measurement.json') -Raw | ConvertFrom-Json
+        $manifest = Join-Path $env:HABY_TIMING_TEST_DESTINATION 'safe/measurement.json'
+        if (-not (Test-Path $manifest)) {
+            $diagnostic = Get-Content (Join-Path $directory "child-$valid.log") -Raw
+            $locations = @([regex]::Matches($diagnostic, 'test-postgresql-measured\.ps1:[0-9]+') | ForEach-Object Value | Sort-Object -Unique)
+            throw ('Measurement manifest absent; safe runner locations: ' + ($locations -join ', '))
+        }
+        $metadata = Get-Content $manifest -Raw | ConvertFrom-Json
         if ($metadata.testExitCode -ne 17) { throw 'Recorded failure code changed.' }
     }
     Write-Output 'Timing exporter: redaction, distinct parameterized cases, failed outcomes and duplicate refusal passed.'

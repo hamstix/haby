@@ -40,12 +40,14 @@ $counters = $document.SelectSingleNode('//t:ResultSummary/t:Counters', $ns)
 if ([int]$counters.total -ne $cases.Count) { throw 'TRX inventory does not match counters.' }
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 $cases | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $OutputDirectory 'cases.json') -Encoding utf8
-$cases | Sort-Object seconds -Descending | Select-Object -First 20 | Export-Csv (Join-Path $OutputDirectory 'top-duration.csv') -NoTypeInformation -Encoding utf8
+$cases | Sort-Object seconds -Descending | Select-Object -First 20 method, case, outcome, @{n='seconds';e={$_.seconds.ToString('R', [Globalization.CultureInfo]::InvariantCulture)}}, start, end |
+    Export-Csv (Join-Path $OutputDirectory 'top-duration.csv') -NoTypeInformation -Encoding utf8
 $cases | Group-Object { $_.method.Substring(0, $_.method.LastIndexOf('.')) } | ForEach-Object {
     $starts = @($_.Group | ForEach-Object { [DateTimeOffset]::Parse($_.start) } | Sort-Object)
     $ends = @($_.Group | ForEach-Object { [DateTimeOffset]::Parse($_.end) } | Sort-Object)
     [pscustomobject]@{ collectionClass = $_.Name; cases = $_.Count; testSeconds = ($_.Group | Measure-Object seconds -Sum).Sum; spanSeconds = ($ends[-1] - $starts[0]).TotalSeconds }
-} | Sort-Object spanSeconds -Descending | Export-Csv (Join-Path $OutputDirectory 'class-duration.csv') -NoTypeInformation -Encoding utf8
+} | Sort-Object spanSeconds -Descending | Select-Object collectionClass, cases, @{n='testSeconds';e={$_.testSeconds.ToString('R', [Globalization.CultureInfo]::InvariantCulture)}}, @{n='spanSeconds';e={$_.spanSeconds.ToString('R', [Globalization.CultureInfo]::InvariantCulture)}} |
+    Export-Csv (Join-Path $OutputDirectory 'class-duration.csv') -NoTypeInformation -Encoding utf8
 
 # A minimal TRX retains per-case outcome/timing, with hashed parameter identities.
 $xmlSettings = [Xml.XmlWriterSettings]::new(); $xmlSettings.Indent = $true
@@ -57,9 +59,10 @@ try {
     $writer.WriteAttributeString('name', 'Allowlisted PostgreSQL measurement')
     $writer.WriteStartElement('Results')
     foreach ($case in $cases) {
+        $id = [Guid]::ParseExact($case.case.Substring(0, 32), 'N').ToString()
         $writer.WriteStartElement('UnitTestResult')
         foreach ($pair in @{
-            testId = $case.case; executionId = $case.case; testName = $case.method + '#' + $case.case
+            testId = $id; executionId = $id; testName = $case.method + '#' + $case.case; computerName = 'withheld'
             testType = '13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b'; testListId = '8c43106b-9dc1-4907-a29f-aa66a61bf5b6'
             outcome = $case.outcome; duration = [TimeSpan]::FromSeconds($case.seconds).ToString('c')
             startTime = $case.start; endTime = $case.end
@@ -69,9 +72,10 @@ try {
     $writer.WriteEndElement()
     $writer.WriteStartElement('TestDefinitions')
     foreach ($case in $cases) {
-        $writer.WriteStartElement('UnitTest'); $writer.WriteAttributeString('id', $case.case)
+        $id = [Guid]::ParseExact($case.case.Substring(0, 32), 'N').ToString()
+        $writer.WriteStartElement('UnitTest'); $writer.WriteAttributeString('id', $id)
         $writer.WriteAttributeString('name', $case.method + '#' + $case.case)
-        $writer.WriteStartElement('Execution'); $writer.WriteAttributeString('id', $case.case); $writer.WriteEndElement()
+        $writer.WriteStartElement('Execution'); $writer.WriteAttributeString('id', $id); $writer.WriteEndElement()
         $writer.WriteStartElement('TestMethod')
         $split = $case.method.LastIndexOf('.')
         $writer.WriteAttributeString('className', $case.method.Substring(0, $split))
@@ -79,6 +83,17 @@ try {
         $writer.WriteEndElement()
     }
     $writer.WriteEndElement()
+    $writer.WriteStartElement('TestEntries')
+    foreach ($case in $cases) {
+        $id = [Guid]::ParseExact($case.case.Substring(0, 32), 'N').ToString()
+        $writer.WriteStartElement('TestEntry')
+        $writer.WriteAttributeString('testId', $id); $writer.WriteAttributeString('executionId', $id)
+        $writer.WriteAttributeString('testListId', '8c43106b-9dc1-4907-a29f-aa66a61bf5b6'); $writer.WriteEndElement()
+    }
+    $writer.WriteEndElement()
+    $writer.WriteStartElement('TestLists'); $writer.WriteStartElement('TestList')
+    $writer.WriteAttributeString('name', 'Results Not in a List'); $writer.WriteAttributeString('id', '8c43106b-9dc1-4907-a29f-aa66a61bf5b6')
+    $writer.WriteEndElement(); $writer.WriteEndElement()
     $writer.WriteStartElement('ResultSummary')
     $writer.WriteAttributeString('outcome', $(if (@($cases | Where-Object outcome -ne Passed).Count) { 'Failed' } else { 'Completed' }))
     $writer.WriteStartElement('Counters')
