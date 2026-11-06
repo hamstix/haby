@@ -19,8 +19,11 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class LoginLoggingCollection;
 
 [Collection("Login logging isolated")]
-public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>, IDisposable
 {
+    private readonly TestCatalogPools _catalogPools = new();
+    public void Dispose() => _catalogPools.Dispose();
+
     private sealed record Scenario(string Connection, string Database, DurableChangeSetCommit Commit, DurablePlan Plan)
     {
         public DurableOperationKey Key(string id) => new(Commit.DeploymentId, Commit.Generation, OperationId.Create(id));
@@ -70,7 +73,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
     }
     private async Task<Scenario> Prepare(bool full = false)
     {
-        var connection = await Database("login_catalog_");
+        var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("login_catalog_")));
         var name = "login_target_" + Guid.NewGuid().ToString("N");
         await using var services = Services(connection, full: full);
         await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();

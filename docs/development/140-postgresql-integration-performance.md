@@ -109,6 +109,33 @@ resources and SDK differ from Windows; timings must not be compared across OSes.
 Checked-in allowlisted CSV inventories under `evidence/140` retain every case
 identity/outcome/duration beyond CI artifact expiration. Parameters remain hashed.
 
+## Selected candidate
+
+The exclusive `PostgreSqlApplicationLoginTests` class is a measured serial segment
+on both platforms (Windows baseline 1: 268.52 s; Linux baseline 1: 183.74 s).
+Only its ordinary catalog setup now registers per-case pools. Each pool has a
+minimum of zero and a maximum of eight physical connections; each case can register
+at most four distinct pools (a hard ceiling of 32 catalog connections for this
+exclusive class, normally one pool). xUnit disposes the owner after every case,
+closing idle sessions and marking borrowed sessions for closure on return. Normal
+session reset remains enabled. The existing one-connection-pool case retains its
+one-connection limit and uses targeted cleanup instead of `ClearAllPools`.
+
+Provider/application authentication, generated-password verification, fault hooks,
+restore targets, truly empty catalogs and every migration invocation are retained.
+The normal parallel operator class and all collection scheduling are unchanged.
+No template clone, new dependency, new container or CI shard is introduced. Tradeoff:
+a case can retain idle PostgreSQL backends until its deterministic teardown, in
+exchange for fewer physical connections/authentication handshakes. This is a
+test-only lifecycle; no production connection policy changes.
+
+Three new full-suite guard cases check session reuse/reset, the eighth-connection
+bound and cancellable ninth waiter, owned idle/borrowed cleanup, an independent
+pool's survival, pool-budget refusal and disposed-owner refusal. A Windows WSLc
+focused run passed all three plus the existing single-pool final-action case
+(4 passed, zero failed/skipped; 6 s runner duration). Full candidate results remain
+to be measured; this focused result is not a speedup claim.
+
 The first Windows baseline uses the unchanged post-#138 test assembly and original
 helper, adding only explicit raw TRX arguments in a local ignored helper copy.
 It requires the freshly published Windows Native AOT binary. Later measured runs
