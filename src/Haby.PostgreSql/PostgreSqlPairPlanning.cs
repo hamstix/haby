@@ -114,9 +114,8 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
             PostgreSqlApplicationLoginContract.Parse(logins[0].Value.Properties) is not { } properties ||
             properties.DatabaseRef != databases[0].Key.Value) return null;
         foreach (var component in spec.Components.Values)
-            if (component.Documents.Count != 0 || component.Workloads.Count != 0 || component.Bindings.Values.Any(b =>
-                b.Target is not NormalizedLocalResourceTarget target || target.ResourceRef != logins[0].Key ||
-                b.Options.Members.Count != 0 || b.DocumentProjections.Count != 0)) return null;
+            if (component.Workloads.Count != 0 || component.Bindings.Values.Any(b =>
+                b.Target is not NormalizedLocalResourceTarget target || target.ResourceRef != logins[0].Key)) return null;
         try
         {
             var snapshot = JsonSerializer.Deserialize(configuration.PayloadJson, PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot);

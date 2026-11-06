@@ -89,20 +89,39 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             ProviderInstanceId.Parse(plan.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(plan.ConfigurationRevisionNumber), plan.ImplementationId);
         DurableOperationGraph graph;
-        try { graph = DurableOperationGraphCodec.Decode(plan.GraphJson); graph.ValidateReferences(inputs); }
+        try
+        {
+            if (plan.SnapshotFormatVersion != 2) return new DurableCommitResult.PlanInputUnavailable();
+            inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(plan.ConfigurationJson, inputs.Revision) };
+            graph = DurableOperationGraphCodec.Decode(plan.GraphJson); graph.ValidateReferences(inputs);
+        }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
-        if (plan.SnapshotFormatVersion != 1 || plan.EnvironmentRecordId != change.EnvironmentRecordId ||
+        if (plan.EnvironmentRecordId != change.EnvironmentRecordId ||
             plan.ApplicationRecordId != change.ApplicationRecordId || plan.RevisionNumber != change.RevisionNumber ||
             plan.EnvironmentKey != inputs.EnvironmentKey.Value ||
             plan.Fingerprint != DurableOperationGraphCodec.Fingerprint(inputs, graph))
-            return new DurableCommitResult.PlanStale();
+            return new DurableCommitResult.PlanInputUnavailable();
+
+        IReadOnlyList<ConfigurationPlanningScope> scopes;
+        try
+        {
+            scopes = await ConfigurationPlanningCapture.ReadScopesAsync(context,
+                new(inputs.Environment, inputs.EnvironmentKey), inputs.Configuration!.Manifest, cancellationToken);
+        }
+        catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
+        if (!ConfigurationPlanningCapture.SameScopes(scopes, inputs.Configuration.Scopes)) return new DurableCommitResult.PlanStale();
 
         var manifestRow = await context.Revisions.AsNoTracking().SingleOrDefaultAsync(row =>
             row.ApplicationRecordId == change.ApplicationRecordId &&
             row.LocalRevisionNumber == change.RevisionNumber, cancellationToken);
         if (manifestRow is null) return new DurableCommitResult.PlanInputUnavailable();
-        var declaration = NormalizedSnapshotCodec.Decode(manifestRow.Snapshot, manifestRow.InputApiVersion,
-            manifestRow.NormalizedModelVersion, manifestRow.ApplicationId, manifestRow.SnapshotFormatVersion);
+        NormalizedApplicationManifest declaration;
+        try
+        {
+            declaration = NormalizedSnapshotCodec.Decode(manifestRow.Snapshot, manifestRow.InputApiVersion,
+                manifestRow.NormalizedModelVersion, manifestRow.ApplicationId, manifestRow.SnapshotFormatVersion);
+        }
+        catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
         var spec = declaration.Spec;
         if (!DurableActionAdmission.SupportsPilotShape(spec)) return new DurableCommitResult.UnsupportedShape();
         if (DurableActionAdmission.SingleAlias(spec)?.Value != plan.ProviderAlias)
@@ -110,6 +129,15 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         var admitted = await planner.AdmitAsync(context, spec, revision, inputs, cancellationToken);
         if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
         if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
+
+        if (!declaration.Equals(inputs.Configuration.Manifest)) return new DurableCommitResult.PlanInputUnavailable();
+        try
+        {
+            var captured = await ConfigurationPlanningCapture.CaptureAsync(context,
+                new(inputs.Environment, inputs.EnvironmentKey), inputs.Revision, declaration, cancellationToken);
+            if (captured.Snapshot is null || !captured.Snapshot.Equals(inputs.Configuration)) return new DurableCommitResult.PlanInputUnavailable();
+        }
+        catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
 
         try
         {
@@ -148,6 +176,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             ImplementationId = plan.ImplementationId,
             Fingerprint = plan.Fingerprint,
             GraphJson = plan.GraphJson,
+            ConfigurationJson = plan.ConfigurationJson,
             AcceptedAt = committedAt,
             ActorId = actorId
         });
@@ -206,6 +235,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 ManifestRevisionNumber.Create(row.RevisionNumber)), ProviderAlias.Create(row.ProviderAlias),
             ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
+        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision) };
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
         if (row.Fingerprint != DurableOperationGraphCodec.Fingerprint(inputs, graph))
             throw new InvalidDataException("Generation snapshot is inconsistent.");

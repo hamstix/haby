@@ -157,7 +157,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var arrange = ProfileContext(connection))
         {
             var row = await arrange.ProfileRevisions.SingleAsync();
-            row.Snapshot = Haby.Persistence.PostgreSql.ProfileSnapshotCodec.Encode(Parse(Node()));
+            row.Snapshot = Haby.Application.ProfileSnapshotCodec.Encode(Parse(Node()));
             row.SnapshotFormatVersion++;
             await arrange.SaveChangesAsync();
         }

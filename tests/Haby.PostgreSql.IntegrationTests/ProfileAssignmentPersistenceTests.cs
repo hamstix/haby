@@ -115,7 +115,7 @@ public sealed partial class ConfigurationProfilePersistenceTests
             var store = new PostgreSqlProfileAssignmentStore(new Factory(connection));
             original = (await store.ApplyAsync(environment, new(EnvironmentTarget, [Disable("before")]), new AssignmentPrecondition.ExpectedAbsence(), new("before", Time, null), default)).Assignment!;
         }
-        var barrier = new CandidateBarrier(6);
+        var barrier = new AssignmentLockBarrier(6);
         var results = await Task.WhenAll(Enumerable.Range(0, 6).Select(async i =>
         {
             var store = new PostgreSqlProfileAssignmentStore(new Factory(connection, barrier));
@@ -138,7 +138,7 @@ public sealed partial class ConfigurationProfilePersistenceTests
     }
 
     [Fact]
-    public async Task Unchanged_assignment_conflicts_when_changed_writer_commits_after_its_read()
+    public async Task Unchanged_assignment_conflicts_when_changed_writer_wins_before_its_scope_lock()
     {
         var (connection, environment) = await AssignmentDatabase();
         var writer = new PostgreSqlProfileAssignmentStore(new Factory(connection));
@@ -154,7 +154,7 @@ public sealed partial class ConfigurationProfilePersistenceTests
         var audit = new AssignmentAudit("changed-writer", Time.AddDays(1), null);
         try
         {
-            // The equal contender has read the original row but has not executed its guarded UPDATE.
+            // The equal contender is paused before its scope lock; the changed writer commits first.
             await pause.Entered.Task.WaitAsync(timeout.Token);
             changed = await writer.ApplyAsync(environment, replacement, Match(original), audit, timeout.Token);
         }
@@ -172,13 +172,28 @@ public sealed partial class ConfigurationProfilePersistenceTests
         Assert.Single(await check.ProfileAssignments.AsNoTracking().ToArrayAsync());
     }
 
-    private sealed class AssignmentSavePause : SaveChangesInterceptor
+    private sealed class AssignmentLockBarrier(int count) : DbCommandInterceptor
+    {
+        private int _arrived;
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(System.Data.Common.DbCommand command, CommandEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!command.CommandText.Contains("pg_advisory_xact_lock(", StringComparison.Ordinal)) return result;
+            if (Interlocked.Increment(ref _arrived) == count) _ready.TrySetResult();
+            await _ready.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            return result;
+        }
+    }
+
+    private sealed class AssignmentSavePause : DbCommandInterceptor
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(System.Data.Common.DbCommand command, CommandEventData eventData,
             InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
+            if (!command.CommandText.Contains("pg_advisory_xact_lock(", StringComparison.Ordinal)) return result;
             Entered.TrySetResult();
             await Resume.Task.WaitAsync(cancellationToken);
             return result;

@@ -11,7 +11,7 @@ public static class CheckpointDatabaseShape
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     public static bool IsSupported(NormalizedManifestSpec spec) =>
-        spec.Resources.Count == 1 && spec.Components.Count == 0 && spec.Exports.Count == 0 &&
+        spec.Resources.Count == 1 && DurableActionAdmission.SupportsConfigurationComponents(spec) && spec.Exports.Count == 0 &&
         spec.Parameters.Count == 0 && IsSupportedResource(spec.Resources.Single().Value);
 
     public static bool IsSupportedResource(NormalizedResource resource) =>

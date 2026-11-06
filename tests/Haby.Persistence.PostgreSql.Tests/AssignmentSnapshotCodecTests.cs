@@ -1,3 +1,4 @@
+using Haby.Application;
 using Haby.Domain;
 using Haby.Persistence.PostgreSql;
 using Xunit;

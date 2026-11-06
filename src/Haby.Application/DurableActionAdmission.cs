@@ -129,7 +129,10 @@ public sealed class DurableActionRegistry
 public sealed class DurableActionAdmission(DurableActionRegistry registry)
 {
     public static bool SupportsPilotShape(NormalizedManifestSpec spec) => spec.Resources.Count is > 0 and <= 256 &&
-        spec.Exports.Count == 0 && spec.Parameters.Count == 0;
+        spec.Exports.Count == 0 && spec.Parameters.Count == 0 && SupportsConfigurationComponents(spec);
+
+    public static bool SupportsConfigurationComponents(NormalizedManifestSpec spec) => spec.Components.Values.All(c =>
+        c.Workloads.Count == 0 && c.Bindings.Values.All(b => b.Target is NormalizedLocalResourceTarget));
 
     // This pilot pins one Provider. A distinct alias is refused, never collapsed to a first match.
     public static ProviderAlias? SingleAlias(NormalizedManifestSpec spec) =>
@@ -150,7 +153,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
             if (handler is null) return DurablePlanStatus.ProviderCapabilityMismatch;
             var valid = handler is IDurableResourcePlanComposer composer && configuration is not null
                 ? composer.Validate(spec, resource.Key, inputs, configuration)
-                : spec.Resources.Count == 1 && spec.Components.Count == 0 && handler.Validate(resource.Value, inputs);
+                : spec.Resources.Count == 1 && SupportsConfigurationComponents(spec) && handler.Validate(resource.Value, inputs);
             if (!valid) return DurablePlanStatus.UnsupportedShape;
         }
         return DurablePlanStatus.Planned;

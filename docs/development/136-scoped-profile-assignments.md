@@ -125,7 +125,8 @@ include assignment command checks; PostgreSQL CI runs the native binary against
 the actual Host. Run CONTRIBUTING's solution validation, EF pending-model check
 and the complete disposable PostgreSQL suite; Windows can use the WSLc helper.
 
-Planning snapshots/fingerprints, rollout/generation mutation, effective preview,
+Planning snapshots/fingerprints are integrated by [issue #142](142-frozen-profile-planning.md).
+Rollout/generation mutation, effective preview,
 rendering, materialization, secret resolution/delivery/authorization, selectors,
 list/delete/history/receipts remain separate work. Exact Profile get now returns
 normalized declaration content in JSON under issue #138; assignment replies do not.

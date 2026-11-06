@@ -203,6 +203,7 @@ enum PlanningStatus {
   PLANNING_STATUS_EXPIRED = 19;
   PLANNING_STATUS_PLAN_STALE = 20;
   PLANNING_STATUS_PLAN_INPUT_UNAVAILABLE = 21;
+  PLANNING_STATUS_CONFIGURATION_REFUSED = 22;
 }
 enum PlanningPrecondition {
   PLANNING_PRECONDITION_UNSPECIFIED = 0;
@@ -281,6 +282,7 @@ message PlanningReply {
   PlanningStatus status = 1;
   DurableChangeSetSummary change_set = 2;
   DurablePlanSummary plan = 3;
+  repeated string configuration_error_codes = 4;
 }
 
 // No caller-supplied actor or implicit Plan selection.

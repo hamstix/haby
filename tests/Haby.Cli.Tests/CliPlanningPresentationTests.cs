@@ -43,6 +43,7 @@ public sealed class CliPlanningPresentationTests
     [InlineData(PlanningStatus.ProviderRevisionUnavailable, "providerRevisionUnavailable")]
     [InlineData(PlanningStatus.ProviderCapabilityMismatch, "providerCapabilityMismatch")]
     [InlineData(PlanningStatus.UnsupportedShape, "unsupportedShape")]
+    [InlineData(PlanningStatus.ConfigurationRefused, "configurationRefused")]
     [InlineData(PlanningStatus.PlanNotFound, "planNotFound")]
     [InlineData(PlanningStatus.Expired, "expired")]
     [InlineData(PlanningStatus.PlanStale, "planStale")]
@@ -172,6 +173,26 @@ public sealed class CliPlanningPresentationTests
             .GetProperty("intendedWork"u8).GetProperty("action"u8);
         Assert.Equal(resourceType, action.GetProperty("resourceType"u8).GetString());
         Assert.Equal(targetName, action.GetProperty("target"u8).GetProperty("name"u8).GetString());
+    }
+
+    [Theory]
+    [InlineData("plan")]
+    [InlineData("change")]
+    [InlineData("unknown-code")]
+    [InlineData("wrong-outcome")]
+    [InlineData("excess")]
+    public void Invalid_configuration_refusal_replies_fail_before_any_output(string mode)
+    {
+        var reply = new PlanningReply { Status = PlanningStatus.ConfigurationRefused };
+        if (mode == "plan") reply.Plan = new() { TechnicalActorId = "private-value" };
+        if (mode == "change") reply.ChangeSet = new() { TechnicalActorId = "private-value" };
+        reply.ConfigurationErrorCodes.Add(mode == "unknown-code" ? "private-value" : "profile.secret-projections.unsupported");
+        if (mode == "wrong-outcome") reply.Status = PlanningStatus.Planned;
+        if (mode == "excess") for (var i = 0; i < 100; i++) reply.ConfigurationErrorCodes.Add("profile.slot.not-found");
+        using var json = new StringWriter(); using var text = new StringWriter();
+        Assert.Throws<InvalidDataException>(() => new CliJsonPresenter(json).PrintPlanning("plan create", reply));
+        Assert.Throws<InvalidDataException>(() => new CliTextPresenter(text).PrintPlanning("plan create", reply));
+        Assert.Equal("", json.ToString()); Assert.Equal("", text.ToString());
     }
 
     private static PlanningReply DescriptionReply(PlanDescription description) => new()

@@ -118,7 +118,7 @@ public sealed class ProfileExpansionResult
     public bool IsTruncated => ErrorCount > Diagnostics.Count;
 }
 
-/// <summary>Pure whole-Profile selection and static layout expansion, without rendering, I/O or planning integration.</summary>
+/// <summary>Pure whole-Profile selection and static layout expansion, without rendering or I/O. Durable planning freezes its accepted results.</summary>
 public sealed class ConfigurationProfileExpander(ConfigurationProfileCatalog catalog)
 {
     private readonly ConfigurationProfileCatalog _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));

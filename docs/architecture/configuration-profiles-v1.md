@@ -4,10 +4,12 @@ Implemented for issue #126 under [ADR-037](../adr/0037-environment-configuration
 The subsequent [Profile/assignment JSON boundary](configuration-profile-json-v1alpha1.md)
 implements issue #128 under ADR-038. Issue #130 adds `configurationSlot` to the
 current Application v1alpha1 and normalized snapshots. Expansion remains a pure
-semantic API without Plan integration, Host operation or habyctl command.
+semantic API. [Issue #142](../development/142-frozen-profile-planning.md) connects it
+to durable Plan/commit through existing Host and habyctl operations.
 [Issue #132](../development/132-profile-revision-persistence.md) adds separate
 in-process Profile import/exact read and PostgreSQL persistence; loaded declarations
-can populate this exact catalog. Profiles cannot yet be configured through Host/habyctl.
+can populate this exact catalog. [Profile administration](../development/134-profile-operator-path.md)
+and [scoped assignments](../development/136-scoped-profile-assignments.md) are available through Host/habyctl.
 Superseded Application snapshots require an explicit fresh catalog; see the
 [reset requirements](../development/130-binding-configuration-slot.md).
 

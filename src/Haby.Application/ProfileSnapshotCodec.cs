@@ -1,11 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
 
-namespace Haby.Persistence.PostgreSql;
+namespace Haby.Application;
 
 /// <summary>Internal Profile model/format v1, independent of Application snapshots and wire adapters.</summary>
 internal static partial class ProfileSnapshotCodec

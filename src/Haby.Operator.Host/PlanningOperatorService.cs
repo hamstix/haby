@@ -60,7 +60,7 @@ public sealed partial class ManifestOperatorService
         try { id = DeploymentChangeSetId.Parse(request.ChangeSetId); }
         catch (ArgumentException) { return Result(PlanningStatus.InvalidRequest); }
         var result = await planner.CreatePlanAsync(id, OperatorHostApplication.TechnicalActorId, context.CancellationToken);
-        return new PlanningReply
+        var reply = new PlanningReply
         {
             Status = result.Status switch
             {
@@ -72,12 +72,17 @@ public sealed partial class ManifestOperatorService
                 DurablePlanStatus.ProviderRevisionUnavailable => PlanningStatus.ProviderRevisionUnavailable,
                 DurablePlanStatus.ProviderCapabilityMismatch => PlanningStatus.ProviderCapabilityMismatch,
                 DurablePlanStatus.UnsupportedShape => PlanningStatus.UnsupportedShape,
+                DurablePlanStatus.ConfigurationRefused => PlanningStatus.ConfigurationRefused,
+                DurablePlanStatus.PlanInputUnavailable => PlanningStatus.PlanInputUnavailable,
                 _ => throw new InvalidOperationException("Unknown Plan outcome.")
             },
             Plan = result.Plan is null ? null : await PlanSummaryAsync(
                 await planner.FindPlanAsync(result.Plan.Id, context.CancellationToken)
                     ?? throw new InvalidOperationException("Committed Plan was not found."), context.CancellationToken)
         };
+        if (result.ConfigurationReport is { } report)
+            reply.ConfigurationErrorCodes.AddRange(report.Diagnostics.Select(x => x.Code).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+        return reply;
     }
 
     public override Task<PlanningReply> GetPlan(PlanRequest request, ServerCallContext context) =>
