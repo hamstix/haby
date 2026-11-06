@@ -136,8 +136,13 @@ public sealed partial class DurableDeploymentPlanningTests
             await save.Entered.Task.WaitAsync(timeout.Token);
             commit = committer.CommitAsync(plan.ChangeSetId, plan.Id, "commit", timeout.Token).AsTask();
         }
-        try { await signal.Entered.Task.WaitAsync(timeout.Token); }
-        finally { save.Resume.TrySetResult(); }
+        try
+        {
+            await signal.Entered.Task.WaitAsync(timeout.Token);
+            await ObserveConfigurationLockWait(setup.Connection, save.BackendPid, signal.BackendPid,
+                commitFirst ? write : commit, commitFirst ? "ExclusiveLock" : "ShareLock", timeout.Token);
+        }
+        finally { save.Resume.TrySetResult(); await Task.WhenAll(commit, write); }
         Assert.Equal(existing ? AssignmentOutcome.Updated : AssignmentOutcome.Created, (await write).Outcome);
         var result = await commit;
         if (commitFirst)
@@ -172,8 +177,13 @@ public sealed partial class DurableDeploymentPlanningTests
         var app = new ProfileAssignmentTarget.Application(Haby.Domain.ApplicationId.Create("operator-example"));
         var write = writer.ApplyAsync(setup.Environment, new(app, [ConfigDisable()]), new AssignmentPrecondition.ExpectedAbsence(),
             new("writer", Time, null), timeout.Token).AsTask();
-        try { await signal.Entered.Task.WaitAsync(timeout.Token); }
-        finally { save.Resume.TrySetResult(); }
+        try
+        {
+            await signal.Entered.Task.WaitAsync(timeout.Token);
+            await ObserveConfigurationLockWait(setup.Connection, save.BackendPid, signal.BackendPid,
+                write, "ExclusiveLock", timeout.Token);
+        }
+        finally { save.Resume.TrySetResult(); await Task.WhenAll(pending, write); }
         var plan = (await pending).Plan!;
         await write;
         Assert.Null(plan.Inputs.Configuration!.Scopes[1].Token);
@@ -318,6 +328,46 @@ public sealed partial class DurableDeploymentPlanningTests
         Assert.Equal(19L, await new NpgsqlCommand("SELECT count(*) FROM \"__EFMigrationsHistory\"", check).ExecuteScalarAsync());
     }
 
+    private static async Task ObserveConfigurationLockWait(string connection, int owner, int contender,
+        Task operation, string mode, CancellationToken token)
+    {
+        // An independent backend observes the actual PostgreSQL wait, not the interceptor's
+        // pre-execution notification. The matching granted lock must belong to the paused owner.
+        await using var observer = new NpgsqlConnection(connection);
+        await observer.OpenAsync(token);
+        Assert.NotEqual(owner, contender);
+        Assert.NotEqual(owner, observer.ProcessID);
+        Assert.NotEqual(contender, observer.ProcessID);
+        await using var query = new NpgsqlCommand("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_locks AS waiting
+                JOIN pg_locks AS held ON held.locktype = waiting.locktype
+                    AND held.database IS NOT DISTINCT FROM waiting.database
+                    AND held.classid = waiting.classid AND held.objid = waiting.objid
+                    AND held.objsubid = waiting.objsubid
+                WHERE waiting.locktype = 'advisory' AND waiting.pid = @contender
+                    AND NOT waiting.granted AND waiting.mode = @mode
+                    AND held.pid = @owner AND held.granted
+                    AND @owner = ANY(pg_blocking_pids(@contender)))
+            """, observer);
+        query.Parameters.AddWithValue("owner", owner);
+        query.Parameters.AddWithValue("contender", contender);
+        query.Parameters.AddWithValue("mode", mode);
+        while (true)
+        {
+            var observation = query.ExecuteScalarAsync(token);
+            var first = await Task.WhenAny(observation, operation);
+            if (first == operation)
+            {
+                // Drain the observer command before disposal, preserving the useful assertion.
+                await observation;
+                Assert.Fail("The competing operation completed before PostgreSQL reported it blocked by the paused owner.");
+            }
+            if ((bool)(await observation)!) return;
+            token.ThrowIfCancellationRequested();
+        }
+    }
+
     private sealed class ConfigFactory(string connection, params IInterceptor[] interceptors) : IDbContextFactory<ManifestCatalogDbContext>
     {
         public ManifestCatalogDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>()
@@ -325,16 +375,19 @@ public sealed partial class DurableDeploymentPlanningTests
     }
     private sealed class ConfigSavePause : SaveChangesInterceptor
     {
+        internal int BackendPid { get; private set; }
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
         {
+            BackendPid = ((NpgsqlConnection)eventData.Context!.Database.GetDbConnection()).ProcessID;
             Entered.TrySetResult(); await Resume.Task.WaitAsync(cancellationToken); return result;
         }
     }
     private sealed class ConfigReadPause : DbCommandInterceptor
     {
+        internal int BackendPid { get; private set; }
         private int _entered;
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -343,6 +396,7 @@ public sealed partial class DurableDeploymentPlanningTests
         {
             if (command.CommandText.Contains("configuration_profile_assignments", StringComparison.Ordinal) && Interlocked.Exchange(ref _entered, 1) == 0)
             {
+                BackendPid = ((NpgsqlConnection)command.Connection!).ProcessID;
                 Entered.TrySetResult(); await Resume.Task.WaitAsync(cancellationToken);
             }
             return result;
@@ -350,11 +404,16 @@ public sealed partial class DurableDeploymentPlanningTests
     }
     private sealed class ConfigLockSignal(string commandText) : DbCommandInterceptor
     {
+        internal int BackendPid { get; private set; }
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command, CommandEventData eventData,
             InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
-            if (command.CommandText.Contains(commandText, StringComparison.Ordinal)) Entered.TrySetResult();
+            if (command.CommandText.Contains(commandText, StringComparison.Ordinal))
+            {
+                BackendPid = ((NpgsqlConnection)command.Connection!).ProcessID;
+                Entered.TrySetResult();
+            }
             return ValueTask.FromResult(result);
         }
     }

@@ -118,6 +118,10 @@ without secret reads. Existing real five-step execution tests change an assignme
 after commit and retain generation execution/retry, uncertainty, outputs and
 AppliedGeneration behavior. CLI checks new refusal metadata before any output.
 
+[PR #143 F1 evidence](143-configuration-race-oracle.md) strengthens synchronization
+with server-observed ungranted advisory locks and blocking-owner PIDs, and records
+an executed counterfactual that releases protection after comparison but before commit.
+
 Run CONTRIBUTING's complete solution restore/build/test/format workflow, EF
 pending-model checks and the entire [PostgreSQL gate](postgresql-integration-tests.md),
 including its unchanged measured runner and required Windows/Linux Native AOT CI.
