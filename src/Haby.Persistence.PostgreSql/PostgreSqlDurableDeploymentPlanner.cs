@@ -107,6 +107,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId),
             reference, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber,
             resolved.ImplementationId);
+        try
+        {
+            var configuration = await ConfigurationPlanningCapture.CaptureAsync(context,
+                new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken);
+            if (configuration.Snapshot is null) return new(DurablePlanStatus.ConfigurationRefused, ConfigurationReport: configuration.Expansion);
+            inputs = inputs with { Configuration = configuration.Snapshot };
+        }
+        catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
         if (admitted != DurablePlanStatus.Planned) return new(admitted);
         DurableOperationGraph graph;
@@ -126,7 +134,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ProviderInstanceId = Guid.Parse(resolved.Binding.InstanceId.ToString()),
             ConfigurationRevisionNumber = resolved.Binding.RevisionNumber.Value,
             ImplementationId = resolved.ImplementationId,
-            SnapshotFormatVersion = 1,
+            SnapshotFormatVersion = 2,
+            ConfigurationJson = ConfigurationPlanningSnapshotCodec.Encode(inputs.Configuration!),
             GraphJson = DurableOperationGraphCodec.Encode(graph),
             Fingerprint = DurableOperationGraphCodec.Fingerprint(inputs, graph),
             CreatedAt = createdAt,
@@ -194,7 +203,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (clock.GetUtcNow() >= plan.ExpiresAt) return DurablePlanCurrentStatus.Expired;
         if (plan.ClosedAt is not null) return DurablePlanCurrentStatus.Closed;
         (DurablePlanStatus Status, DurablePlanningInputs? Inputs) result;
-        try { result = await CreateCurrentInputsAsync(plan.ChangeSetId, cancellationToken); }
+        try { result = await CreateCurrentInputsAsync(plan, cancellationToken); }
         catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
         if (result.Status == DurablePlanStatus.ChangeSetStale) return DurablePlanCurrentStatus.ChangeSetStale;
         if (result.Status != DurablePlanStatus.Planned || result.Inputs is null)
@@ -216,10 +225,12 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
     }
 
     private async ValueTask<(DurablePlanStatus Status, DurablePlanningInputs? Inputs)> CreateCurrentInputsAsync(
-        DeploymentChangeSetId id, CancellationToken cancellationToken)
+        DurablePlan plan, CancellationToken cancellationToken)
     {
+        var id = plan.ChangeSetId;
         // Re-evaluate without writing a replacement Plan.
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         var row = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == Guid.Parse(id.ToString()), cancellationToken);
         if (row is null || !row.ExpectedAbsence) return (DurablePlanStatus.ChangeSetStale, null);
@@ -250,6 +261,15 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var inputs = new DurablePlanningInputs(environmentId,
             EnvironmentId.Create(environment.EnvironmentId), revision, alias, resolution.Binding.InstanceId,
             resolution.Binding.RevisionNumber, resolution.ImplementationId);
+        var frozen = plan.Inputs.Configuration ?? throw new InvalidDataException();
+        var scopes = await ConfigurationPlanningCapture.ReadScopesAsync(context,
+            new(environmentId, inputs.EnvironmentKey), frozen.Manifest, cancellationToken);
+        if (!ConfigurationPlanningCapture.SameScopes(scopes, frozen.Scopes)) return (DurablePlanStatus.Planned, inputs);
+        if (!manifest.Declaration.Equals(frozen.Manifest)) return (DurablePlanStatus.PlanInputUnavailable, null);
+        var captured = await ConfigurationPlanningCapture.CaptureAsync(context,
+            new(environmentId, inputs.EnvironmentKey), revision, manifest.Declaration, cancellationToken);
+        if (captured.Snapshot is null || !captured.Snapshot.Equals(frozen)) return (DurablePlanStatus.PlanInputUnavailable, null);
+        inputs = inputs with { Configuration = frozen };
         var admitted = await AdmitAsync(context, manifest.Declaration.Spec, providerRevision, inputs, cancellationToken);
         return (admitted, admitted == DurablePlanStatus.Planned ? inputs : null);
     }
@@ -325,13 +345,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
 
     private static DurablePlan ToPlan(DurablePlanRow row, DateTimeOffset? closedAt, string? closedByActorId)
     {
-        if (row.SnapshotFormatVersion != 1) throw new InvalidDataException("Planning snapshot version is unavailable.");
+        if (row.SnapshotFormatVersion != 2) throw new InvalidDataException("Planning snapshot version is unavailable.");
         var application = ApplicationRecordId.Parse(row.ApplicationRecordId.ToString());
         var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
             EnvironmentId.Create(row.EnvironmentKey),
             ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(row.RevisionNumber)),
             ProviderAlias.Create(row.ProviderAlias), ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
+        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision) };
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
         if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint) throw new InvalidDataException("Planning snapshot is inconsistent.");
         return new(DeploymentPlanId.Parse(row.Id.ToString()), DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()),

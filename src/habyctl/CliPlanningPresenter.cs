@@ -13,7 +13,10 @@ internal sealed record CliPlanDescription(string Status, CliIntendedAction? Acti
 internal sealed record CliIntendedAction(string Kind, string ResourceId, string ResourceType,
     CliIntendedActionTarget Target);
 internal sealed record CliIntendedActionTarget(string Name);
-internal sealed record CliPlanningData(CliChangeSet? ChangeSet, CliPlan? Plan);
+internal sealed record CliPlanningData(CliChangeSet? ChangeSet, CliPlan? Plan)
+{
+    public string[] ConfigurationErrorCodes { get; init; } = [];
+}
 
 internal static class PlanningPresentation
 {
@@ -36,6 +39,7 @@ internal static class PlanningPresentation
         PlanningStatus.ProviderRevisionUnavailable => "providerRevisionUnavailable",
         PlanningStatus.ProviderCapabilityMismatch => "providerCapabilityMismatch",
         PlanningStatus.UnsupportedShape => "unsupportedShape",
+        PlanningStatus.ConfigurationRefused => "configurationRefused",
         PlanningStatus.PlanNotFound => "planNotFound",
         PlanningStatus.Expired => "expired",
         PlanningStatus.PlanStale => "planStale",
@@ -46,6 +50,18 @@ internal static class PlanningPresentation
     internal static int Exit(string command, PlanningReply reply)
     {
         _ = Outcome(reply.Status);
+        if (reply.Status == PlanningStatus.ConfigurationRefused && (reply.Plan is not null || reply.ChangeSet is not null))
+            throw new InvalidDataException("Configuration refusal contains forbidden content.");
+        if (reply.ConfigurationErrorCodes.Count > 100 ||
+            reply.Status != PlanningStatus.ConfigurationRefused && reply.ConfigurationErrorCodes.Count != 0 ||
+            reply.ConfigurationErrorCodes.Any(code => code is not (
+                "profile.binding.unsupported" or "profile.component.duplicate" or "profile.contribution.duplicate" or
+                "profile.document.duplicate" or "profile.document.file-conflict" or "profile.document.invalid-file-name" or
+                "profile.document.not-found" or "profile.document.unsupported" or "profile.revision.not-found" or
+                "profile.rule.duplicate" or "profile.secret-projections.unsupported" or "profile.selection.duplicate" or
+                "profile.slot.ambiguous" or "profile.slot.duplicate" or "profile.slot.not-found" or "profile.value.unsupported" or
+                "render.projection.invalid-path" or "render.projection.template-collision" or "render.projection.path-conflict")))
+            throw new InvalidDataException("Invalid configuration refusal metadata.");
         // Reading an existing immutable Plan succeeds even when checking it would reject execution.
         if (command == "plan get" && reply.Plan is not null) return CliApplication.Success;
         return reply.Status is PlanningStatus.Created or PlanningStatus.Found or PlanningStatus.Planned or PlanningStatus.Current ||
@@ -63,7 +79,8 @@ internal static class PlanningPresentation
             plan.ProviderAlias, plan.ProviderInstanceId, plan.ConfigurationRevision, plan.ImplementationId,
             plan.Fingerprint, plan.CreatedAtUtc, plan.ExpiresAtUtc, plan.TechnicalActorId,
             plan.HasClosedAtUtc ? plan.ClosedAtUtc : null,
-            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations)));
+            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations)))
+    { ConfigurationErrorCodes = reply.ConfigurationErrorCodes.ToArray() };
 
     internal static CliPlannedOperation[] Operations(IEnumerable<PlannedOperationSummary> operations) =>
         operations.Select(n => new CliPlannedOperation(n.OperationId, n.ResourceId, n.ActionContract, n.Dependencies.ToArray())).ToArray();
@@ -116,6 +133,7 @@ internal sealed partial class CliTextPresenter
         var exit = PlanningPresentation.Exit(command, reply);
         var data = PlanningPresentation.Data(reply);
         _output.WriteLine(PlanningPresentation.Outcome(reply.Status));
+        foreach (var code in data.ConfigurationErrorCodes) _output.WriteLine(code);
         if (data.ChangeSet is { } change)
         {
             _output.WriteLine($"ChangeSet: {change.ChangeSetId}; Environment record: {change.EnvironmentRecordId}");

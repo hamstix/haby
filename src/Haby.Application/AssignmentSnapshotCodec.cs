@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Haby.Domain;
 
-namespace Haby.Persistence.PostgreSql;
+namespace Haby.Application;
 
 /// <summary>Closed internal format, independent of the portable assignment parser.</summary>
 internal static class AssignmentSnapshotCodec

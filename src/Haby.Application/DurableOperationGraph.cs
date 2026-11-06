@@ -120,11 +120,13 @@ public static class DurableOperationGraphCodec
     public static string Fingerprint(DurablePlanningInputs inputs, DurableOperationGraph graph)
     {
         graph.ValidateReferences(inputs);
-        var text = string.Join('\n', "haby-operation-plan/v1", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
+        if (inputs.Configuration is { } frozen && frozen.Revision != inputs.Revision) throw new InvalidDataException("Configuration revision mismatch.");
+        var text = string.Join('\n', "haby-operation-plan/v2", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
             inputs.Revision.ApplicationRecordId.ToString(), inputs.Revision.RevisionNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
             inputs.Alias.Value, inputs.ProviderInstance.ToString(),
-            inputs.ConfigurationRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), inputs.ImplementationId, Encode(graph));
-        return "v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+            inputs.ConfigurationRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), inputs.ImplementationId, Encode(graph),
+            inputs.Configuration is { } configuration ? ConfigurationPlanningSnapshotCodec.Encode(configuration) : "unprepared");
+        return "v2:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 }
 

@@ -176,6 +176,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(generation.RevisionNumber)),
             ProviderAlias.Create(generation.ProviderAlias), ProviderInstanceId.Parse(generation.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(generation.ConfigurationRevisionNumber), generation.ImplementationId);
+        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(generation.ConfigurationJson, inputs.Revision) };
         if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != generation.Fingerprint) return null;
         var revision = await context.Revisions.AsNoTracking().SingleOrDefaultAsync(r =>
             r.ApplicationRecordId == generation.ApplicationRecordId && r.LocalRevisionNumber == generation.RevisionNumber, token);

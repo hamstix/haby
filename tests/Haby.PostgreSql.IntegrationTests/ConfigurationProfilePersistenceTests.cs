@@ -282,7 +282,17 @@ public sealed partial class ConfigurationProfilePersistenceTests(PostgreSqlFixtu
         var workerDecisions = (await admin.GetAsync("expansion", workerTarget)).Assignment!.Declaration.Decisions;
         var components = app.Declaration.Spec.Components.Select(x => new ProfileComponentInput(x.Key, x.Value,
             x.Key.Value == "worker" ? workerDecisions : []));
-        var expanded = new ConfigurationProfileExpander(new([one.Declaration, two.Declaration])).Expand(envDecisions, appDecisions, components);
+        ProfileExpansionResult expanded;
+        await using (var capture = Context(connection))
+        await using (var transaction = await capture.Database.BeginTransactionAsync())
+        {
+            var environment = (await fresh.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("expansion"), default))!;
+            var prepared = await ConfigurationPlanningCapture.CaptureAsync(capture, environment, applicationRef, app.Declaration, default);
+            Assert.NotNull(prepared.Snapshot);
+            var encoded = ConfigurationPlanningSnapshotCodec.Encode(prepared.Snapshot);
+            Assert.Equal(prepared.Snapshot, ConfigurationPlanningSnapshotCodec.Decode(encoded, applicationRef));
+            expanded = prepared.Expansion;
+        }
         Assert.True(expanded.IsSuccess, string.Join(";", expanded.Diagnostics));
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
         var composer = new ConfigurationComposer(new([], []));

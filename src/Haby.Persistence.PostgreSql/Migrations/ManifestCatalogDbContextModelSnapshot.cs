@@ -152,6 +152,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("change_set_id");
 
+                    b.Property<string>("ConfigurationJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("configuration_json");
+
                     b.Property<long>("ConfigurationRevisionNumber")
                         .HasColumnType("bigint")
                         .HasColumnName("configuration_revision_number");
@@ -448,6 +453,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.Property<Guid>("ChangeSetId")
                         .HasColumnType("uuid")
                         .HasColumnName("change_set_id");
+
+                    b.Property<string>("ConfigurationJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("configuration_json");
 
                     b.Property<long>("ConfigurationRevisionNumber")
                         .HasColumnType("bigint")

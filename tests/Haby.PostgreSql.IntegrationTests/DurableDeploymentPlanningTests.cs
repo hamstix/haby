@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     private const string Implementation = PostgreSqlDatabaseCheckpointCapability.ImplementationId;
     private const string AnyObject = """{"type":"object"}""";
@@ -628,7 +628,7 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
     }
 
     private static ServiceProvider Services(string connection, TimeProvider clock, bool registerCodec = true,
-        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null)
+        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(clock)
@@ -638,6 +638,8 @@ public sealed class DurableDeploymentPlanningTests(PostgreSqlFixture fixture) : 
             .AddPostgreSqlProviderAliasStore();
         if (saveInterceptor is not null)
             services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(saveInterceptor));
+        if (commandInterceptor is not null)
+            services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(commandInterceptor));
         if (supportsCapability) services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         else services.AddSingleton<ICheckpointProviderCapability, RejectCapability>();
         if (registerCodec) services.AddPostgreSqlProviderConfigurationCodec();

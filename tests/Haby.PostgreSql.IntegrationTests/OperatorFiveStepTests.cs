@@ -85,7 +85,22 @@ public sealed partial class OperatorHostIntegrationTests
                     Assert.Equal(ProviderAccessStatus.Ready, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "pg-main", Revision = 1 })).Status);
                     Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(new() { Environment = "pilot", Alias = "postgresql.primary", Target = new() { Name = "pg-main", Revision = 1 }, ExpectedAbsent = true })).Status);
                 }
+                var layout = Haby.Tests.ProfilePersistenceSamples.Node(false);
+                layout["spec"]!["bindingRules"]!["connection"]!["documentProjections"]!.AsArray().RemoveAt(1);
+                Assert.Equal(ProfileStatus.Created, (await client.ImportProfileAsync(new()
+                { Payload = ByteString.CopyFrom(Haby.Tests.ProfilePersistenceSamples.Bytes(layout)) })).Status);
+                var initialAssignment = await client.ApplyProfileAssignmentAsync(new()
+                {
+                    Environment = "pilot",
+                    ExpectedAbsence = true,
+                    Payload = ByteString.CopyFromUtf8("""{"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfileAssignment","spec":{"target":{"kind":"environment"},"decisions":[{"kind":"use","profileRef":{"profileId":"layout","revision":1}}]}}""")
+                });
+                Assert.Equal(ProfileAssignmentStatus.Created, initialAssignment.Status);
                 var envelope = PostgreSqlPairPlanningTests.Example();
+                foreach (var component in envelope["manifest"]!["spec"]!["components"]!.AsObject())
+                {
+                    component.Value!["bindings"]!["storage"]!["configurationSlot"] = "main";
+                }
                 envelope["manifest"]!["metadata"]!["id"] = "operator.pair";
                 envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = target;
                 var bytes = PostgreSqlPairPlanningTests.Bytes(envelope);
@@ -123,6 +138,20 @@ public sealed partial class OperatorHostIntegrationTests
                     plan = (await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId })).Plan;
                     commit = (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Commit;
                 }
+                // An assignment changed after commit affects only future planning.
+                var pinnedGeneration = (await host.Services.GetRequiredService<IDurableDesiredStateCommitter>().FindGenerationAsync(
+                    ApplicationDeploymentId.Parse(commit.DeploymentId), DeploymentGeneration.Create(1), default))!;
+                Assert.NotNull(pinnedGeneration.Inputs.Configuration);
+                Assert.Equal(2, pinnedGeneration.Inputs.Configuration.Layouts.Count);
+                Assert.All(pinnedGeneration.Inputs.Configuration.Layouts, x => { Assert.Single(x.Documents); Assert.Single(x.BindingRequests); });
+                Assert.Equal(ProfileAssignmentStatus.Updated, (await client.ApplyProfileAssignmentAsync(new()
+                {
+                    Environment = "pilot",
+                    ExpectedConcurrencyToken = initialAssignment.Assignment.ConcurrencyToken,
+                    Payload = ByteString.CopyFromUtf8("""{"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfileAssignment","spec":{"target":{"kind":"environment"},"decisions":[{"kind":"disable","profileId":"layout"}]}}""")
+                })).Status);
+                Assert.Equal(pinnedGeneration, await host.Services.GetRequiredService<IDurableDesiredStateCommitter>().FindGenerationAsync(
+                    pinnedGeneration.DeploymentId, pinnedGeneration.Generation, default));
                 Assert.Equal(5, plan.Operations.Count);
                 var beforeProgress = await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
                 Assert.Equal(0, beforeProgress.Progress.Completed);
@@ -378,7 +407,7 @@ public sealed partial class OperatorHostIntegrationTests
     {
         await using var context = PairContext(connection);
         var generation = await context.DeploymentGenerations.AsNoTracking().SingleAsync();
-        return generation.Fingerprint + ":" + generation.GraphJson;
+        return generation.Fingerprint + ":" + generation.GraphJson + ":" + generation.ConfigurationJson;
     }
 
     private static async Task<string> PairIdentities(string connection)
@@ -388,7 +417,7 @@ public sealed partial class OperatorHostIntegrationTests
         var slots = await context.GeneratedCredentialSlots.AsNoTracking().Select(r => new { r.SecretId, r.VersionId }).ToArrayAsync();
         var names = await context.ProviderResourceReservations.AsNoTracking().Select(r => r.Value).ToArrayAsync();
         var generation = await context.DeploymentGenerations.AsNoTracking().SingleAsync();
-        return string.Join('|', outputs.Concat(slots.Select(r => r.SecretId + ":" + r.VersionId)).Concat(names)) + ":" + generation.Fingerprint + ":" + generation.GraphJson;
+        return string.Join('|', outputs.Concat(slots.Select(r => r.SecretId + ":" + r.VersionId)).Concat(names)) + ":" + generation.Fingerprint + ":" + generation.GraphJson + ":" + generation.ConfigurationJson;
     }
 
     private static async Task AssertPairCatalog(string connection, int attempts, int outputs, int slots, int reservations, bool applied)

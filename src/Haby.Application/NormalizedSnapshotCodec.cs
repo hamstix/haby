@@ -5,7 +5,7 @@ using Haby.Domain;
 using Haby.Manifest;
 using ApplicationId = Haby.Domain.ApplicationId;
 
-namespace Haby.Persistence.PostgreSql;
+namespace Haby.Application;
 
 /// <summary>Version 2 of the internal typed declaration snapshot. It is never a manifest input.</summary>
 internal static class NormalizedSnapshotCodec

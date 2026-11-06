@@ -108,6 +108,13 @@ public sealed partial class CliLoopbackTests
         }
         public override Task<PlanningReply> CreatePlan(ChangeSetRequest request, ServerCallContext context)
         {
+            if (request.ChangeSetId == "refused")
+            {
+                var refusal = new PlanningReply { Status = PlanningStatus.ConfigurationRefused };
+                refusal.ConfigurationErrorCodes.Add("profile.secret-projections.unsupported");
+                return Task.FromResult(refusal);
+            }
+            if (request.ChangeSetId == "unavailable") return Task.FromResult(new PlanningReply { Status = PlanningStatus.PlanInputUnavailable });
             Assert.Equal(ChangeId, request.ChangeSetId);
             return Task.FromResult(new PlanningReply { Status = PlanningStatus.Planned, Plan = Plan });
         }
@@ -162,6 +169,8 @@ public sealed partial class CliLoopbackTests
                 (["changeset", "commit", "get", PlanningRegistry.ChangeId], "changeset commit get", "found", 0),
                 (["deployment", "generation", "get", PlanningRegistry.ChangeId, "1"], "deployment generation get", "found", 0),
                 (["plan", "create", PlanningRegistry.ChangeId], "plan create", "planned", 0),
+                (["plan", "create", "refused"], "plan create", "configurationRefused", 1),
+                (["plan", "create", "unavailable"], "plan create", "planInputUnavailable", 1),
                 (["plan", "get", PlanningRegistry.PlanId], "plan get", "current", 0),
                 (["plan", "check", PlanningRegistry.PlanId], "plan check", "planStale", 1),
                 (["plan", "close", PlanningRegistry.PlanId], "plan close", "closed", 0),
@@ -194,7 +203,7 @@ public sealed partial class CliLoopbackTests
                     void Verify(string text)
                     {
                         Assert.Contains(outcome, text);
-                        if (command.StartsWith("plan", StringComparison.Ordinal) && outcome != "planNotFound")
+                        if (command.StartsWith("plan", StringComparison.Ordinal) && outcome is not ("planNotFound" or "configurationRefused" or "planInputUnavailable"))
                         {
                             Assert.Contains("sample_db", text);
                             Assert.Contains("postgresql.database/v1alpha1", text);

@@ -22,6 +22,7 @@ public sealed class PostgreSqlProfileAssignmentStore(IDbContextFactory<ManifestC
         {
             await using var context = await contexts.CreateDbContextAsync(cancellationToken);
             await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            await ConfigurationPlanningCapture.LockAsync(context, Guid.Parse(environment.RecordId.ToString()), [declaration.Target], false, cancellationToken);
             var row = await Query(context, environment, declaration.Target).SingleOrDefaultAsync(cancellationToken);
             var current = row is null ? null : Rehydrate(row, environment, declaration.Target);
             // A stale expectation must fail even when the proposed content is identical.
@@ -86,7 +87,7 @@ public sealed class PostgreSqlProfileAssignmentStore(IDbContextFactory<ManifestC
         ProfileAssignmentTarget.Component c => ("component", c.ApplicationId.Value, c.ComponentRef.Value),
         _ => throw new ArgumentException("Invalid assignment target.")
     };
-    private static PersistedProfileAssignment Rehydrate(ProfileAssignmentRow row, EnvironmentMetadata environment, ProfileAssignmentTarget target)
+    internal static PersistedProfileAssignment Rehydrate(ProfileAssignmentRow row, EnvironmentMetadata environment, ProfileAssignmentTarget target)
     {
         try
         {

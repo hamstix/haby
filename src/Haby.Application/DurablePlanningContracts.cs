@@ -5,7 +5,10 @@ namespace Haby.Application;
 /// <summary>Exact, non-secret inputs; the alias is retained only as selection provenance.</summary>
 public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, EnvironmentId EnvironmentKey,
     ManifestRevisionRef Revision, ProviderAlias Alias, ProviderInstanceId ProviderInstance,
-    ProviderConfigurationRevisionNumber ConfigurationRevision, string ImplementationId);
+    ProviderConfigurationRevisionNumber ConfigurationRevision, string ImplementationId)
+{
+    public ConfigurationPlanningSnapshot? Configuration { get; init; }
+}
 
 /// <summary>A Plan is immutable; closure is stored separately from its original record.</summary>
 public sealed record DurablePlan(DeploymentPlanId Id, DeploymentChangeSetId ChangeSetId,
@@ -26,10 +29,10 @@ public sealed record DurableChangeSetCreateResult(DurableChangeSetCreateStatus S
 public enum DurablePlanStatus
 {
     Planned, ChangeSetNotFound, ChangeSetStale, RevisionNotFound, AliasNotResolved,
-    ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape
+    ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape, ConfigurationRefused, PlanInputUnavailable
 }
 
-public sealed record DurablePlanResult(DurablePlanStatus Status, DurablePlan? Plan = null);
+public sealed record DurablePlanResult(DurablePlanStatus Status, DurablePlan? Plan = null, ProfileExpansionResult? ConfigurationReport = null);
 
 public enum DurablePlanCloseStatus { Closed, AlreadyClosed, PlanNotFound }
 public enum DurablePlanCurrentStatus

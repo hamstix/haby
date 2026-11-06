@@ -293,6 +293,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.SnapshotFormatVersion).HasColumnName("snapshot_format_version");
             entity.Property(row => row.GraphJson).HasColumnName("graph_json").IsRequired();
+            entity.Property(row => row.ConfigurationJson).HasColumnName("configuration_json").IsRequired();
             entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.ExpiresAt).HasColumnName("expires_at");
@@ -345,6 +346,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.Property(row => row.ConfigurationRevisionNumber).HasColumnName("configuration_revision_number");
             entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.GraphJson).HasColumnName("graph_json").IsRequired();
+            entity.Property(row => row.ConfigurationJson).HasColumnName("configuration_json").IsRequired();
             entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
             entity.Property(row => row.AcceptedAt).HasColumnName("accepted_at");
             entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
@@ -549,6 +551,7 @@ internal sealed class DurablePlanRow
     public int SnapshotFormatVersion { get; set; }
     public required string Fingerprint { get; set; }
     public string GraphJson { get; set; } = null!;
+    public string ConfigurationJson { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public required string ActorId { get; set; }
@@ -588,6 +591,7 @@ internal sealed class DeploymentGenerationRow
     public required string ImplementationId { get; set; }
     public required string Fingerprint { get; set; }
     public string GraphJson { get; set; } = null!;
+    public string ConfigurationJson { get; set; } = null!;
     public DateTimeOffset AcceptedAt { get; set; }
     public required string ActorId { get; set; }
 }
