@@ -52,7 +52,8 @@ from TRX or attachments are copied. Raw TRX/build/test logs stay under `private`
 and must never be uploaded wholesale. Export rejects duplicate execution, missing
 definitions, counter mismatches and unsupported outcomes. XML DTDs are prohibited
 and raw XML input is limited to 64 MiB. A failed export fails an otherwise successful
-run; a failing test's original nonzero exit code survives either export outcome.
+run; a failing test's original nonzero exit code survives export and manifest/output
+failures. Native command error-action preferences cannot intercept that exit code.
 
 The WSLc helper restores temporary environment settings and stops exactly its own
 container in `finally`. Cleanup failures are reported separately. Existing database,
@@ -129,7 +130,9 @@ class adds one short-lived fixture container on Docker; WSLc reuses the helper's
 cluster. The optimization itself retains the existing cluster ownership. Tradeoff:
 a case can retain idle PostgreSQL backends until its deterministic teardown, in
 exchange for fewer physical connections/authentication handshakes. This is a
-test-only lifecycle; no production connection policy changes.
+test-only lifecycle; no production connection policy changes. Clearing closes
+physical sessions; Npgsql's connection-string pool metadata can remain until the
+test process exits. No managed-memory reduction is claimed.
 
 Three new full-suite guard cases check session reuse/reset, the eighth-connection
 bound and cancellable ninth waiter, owned idle/borrowed cleanup, an independent

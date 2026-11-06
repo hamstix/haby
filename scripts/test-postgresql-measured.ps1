@@ -1,5 +1,6 @@
 param([Parameter(Mandatory)][string]$ResultsDirectory)
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path $PSScriptRoot -Parent
 $destination = [IO.Path]::GetFullPath($ResultsDirectory)
 if (Test-Path $destination) { throw 'Use a new results directory for each measurement.' }
@@ -41,46 +42,51 @@ try {
     }
 } finally {
     $env:HABY_TEST_TIMING_DIRECTORY = $oldTimingDirectory
-    $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
-        & (Join-Path $PSScriptRoot 'export-postgresql-timing.ps1') -TrxPath (Join-Path $private 'full.trx') -OutputDirectory $safe
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            & (Join-Path $PSScriptRoot 'export-postgresql-timing.ps1') -TrxPath (Join-Path $private 'full.trx') -OutputDirectory $safe
+        } catch {
+            $reportFailed = $true
+            # Do not surface parser exceptions containing raw diagnostic content.
+            Write-Warning 'Timing export failed; raw results remain private.'
+        }
+        $phases.Add([pscustomobject]@{ phase = 'artifact-export'; seconds = $timer.Elapsed.TotalSeconds; exitCode = [int]$reportFailed })
+        $buildWarningCodes = @()
+        if (Test-Path (Join-Path $private 'build.log')) {
+            [string]$buildText = Get-Content (Join-Path $private 'build.log') -Raw
+            if (-not [string]::IsNullOrEmpty($buildText)) {
+                $buildWarningCodes = @([regex]::Matches($buildText, '(?i)\bwarning\s+([A-Z]+[0-9]+)') | ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() } | Sort-Object -Unique)
+            }
+        }
+        $endSha = (& git -C $root rev-parse HEAD | Out-String).Trim()
+        $endDiff = (& git -C $root diff --binary HEAD | Out-String)
+        $endDiffHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($endDiff))).ToLowerInvariant()
+        [pscustomobject]@{
+            source = $sha; trackedDiffSha256 = $diffHash; sdk = (& dotnet --version | Out-String).Trim()
+            testAssemblySha256 = $assemblyHash
+            untrackedFileCountAtStart = $untracked.Count
+            sourceChangedDuringRun = $sha -ne $endSha -or $diffHash -ne $endDiffHash
+            installedRuntimes = @(& dotnet --list-runtimes | ForEach-Object { ($_ -split ' ')[0..1] -join ' ' })
+            os = [Runtime.InteropServices.RuntimeInformation]::OSDescription
+            architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+            processors = [Environment]::ProcessorCount; configuration = 'Debug'
+            parallelism = 'xUnit CPU-bound default; existing exclusive collections unchanged'
+            runnerPackages = $runnerPackages
+            buildWarningCodes = $buildWarningCodes
+            externalCluster = $env:HABY_POSTGRESQL_EPHEMERAL_EXTERNAL -eq '1'
+            requiredAot = $env:HABY_AOT_CLI_REQUIRED -eq '1'
+            wallSeconds = $wall.Elapsed.TotalSeconds; testExitCode = $testExit; phases = $phases
+        } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $safe 'measurement.json') -Encoding utf8
+        Write-Output ('POSTGRESQL_MEASUREMENT ' + (Get-Content (Join-Path $safe 'measurement.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 5 -Compress))
+        if (Test-Path (Join-Path $safe 'cases.json')) {
+            foreach ($case in @(Get-Content (Join-Path $safe 'cases.json') -Raw | ConvertFrom-Json)) {
+                Write-Output ('POSTGRESQL_CASE ' + ($case | Select-Object method, case, outcome, seconds | ConvertTo-Json -Compress))
+            }
+        }
     } catch {
         $reportFailed = $true
-        # Do not surface parser exceptions containing raw diagnostic content.
-        Write-Warning 'Timing export failed; raw results remain private.'
-    }
-    $phases.Add([pscustomobject]@{ phase = 'artifact-export'; seconds = $timer.Elapsed.TotalSeconds; exitCode = [int]$reportFailed })
-    $buildWarningCodes = @()
-    if (Test-Path (Join-Path $private 'build.log')) {
-        [string]$buildText = Get-Content (Join-Path $private 'build.log') -Raw
-        if (-not [string]::IsNullOrEmpty($buildText)) {
-            $buildWarningCodes = @([regex]::Matches($buildText, '(?i)\bwarning\s+([A-Z]+[0-9]+)') | ForEach-Object { $_.Groups[1].Value.ToUpperInvariant() } | Sort-Object -Unique)
-        }
-    }
-    $endSha = (& git -C $root rev-parse HEAD | Out-String).Trim()
-    $endDiff = (& git -C $root diff --binary HEAD | Out-String)
-    $endDiffHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($endDiff))).ToLowerInvariant()
-    [pscustomobject]@{
-        source = $sha; trackedDiffSha256 = $diffHash; sdk = (& dotnet --version | Out-String).Trim()
-        testAssemblySha256 = $assemblyHash
-        untrackedFileCountAtStart = $untracked.Count
-        sourceChangedDuringRun = $sha -ne $endSha -or $diffHash -ne $endDiffHash
-        installedRuntimes = @(& dotnet --list-runtimes | ForEach-Object { ($_ -split ' ')[0..1] -join ' ' })
-        os = [Runtime.InteropServices.RuntimeInformation]::OSDescription
-        architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
-        processors = [Environment]::ProcessorCount; configuration = 'Debug'
-        parallelism = 'xUnit CPU-bound default; existing exclusive collections unchanged'
-        runnerPackages = $runnerPackages
-        buildWarningCodes = $buildWarningCodes
-        externalCluster = $env:HABY_POSTGRESQL_EPHEMERAL_EXTERNAL -eq '1'
-        requiredAot = $env:HABY_AOT_CLI_REQUIRED -eq '1'
-        wallSeconds = $wall.Elapsed.TotalSeconds; testExitCode = $testExit; phases = $phases
-    } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $safe 'measurement.json') -Encoding utf8
-    Write-Output ('POSTGRESQL_MEASUREMENT ' + (Get-Content (Join-Path $safe 'measurement.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 5 -Compress))
-    if (Test-Path (Join-Path $safe 'cases.json')) {
-        foreach ($case in @(Get-Content (Join-Path $safe 'cases.json') -Raw | ConvertFrom-Json)) {
-            Write-Output ('POSTGRESQL_CASE ' + ($case | Select-Object method, case, outcome, seconds | ConvertTo-Json -Compress))
-        }
+        Write-Warning 'Timing report unavailable; output withheld and test exit preserved.'
     }
 }
 if ($testExit -ne 0) { exit $testExit }

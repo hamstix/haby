@@ -43,6 +43,9 @@ function global:dotnet {
             Copy-Item -LiteralPath $env:HABY_TIMING_TEST_TRX -Destination (Join-Path $args[$index + 1] 'full.trx')
         }
         $global:LASTEXITCODE = 17
+        if ($env:HABY_TIMING_TEST_REPORT_FAILURE -eq '1') {
+            function global:ConvertTo-Json { throw 'Injected artifact output failure.' }
+        }
     } else { $global:LASTEXITCODE = 0 }
 }
 & $env:HABY_TIMING_TEST_RUNNER -ResultsDirectory $env:HABY_TIMING_TEST_DESTINATION
@@ -50,11 +53,13 @@ exit $LASTEXITCODE
 '@ | Set-Content $child
     $env:HABY_TIMING_TEST_RUNNER = Join-Path $PSScriptRoot 'test-postgresql-measured.ps1'
     $env:HABY_TIMING_TEST_TRX = $raw
-    foreach ($valid in @('1', '0')) {
-        $env:HABY_TIMING_TEST_VALID_TRX = $valid
+    foreach ($valid in @('1', '0', 'report-failure')) {
+        $env:HABY_TIMING_TEST_VALID_TRX = $(if ($valid -eq '0') { '0' } else { '1' })
+        $env:HABY_TIMING_TEST_REPORT_FAILURE = $(if ($valid -eq 'report-failure') { '1' } else { '0' })
         $env:HABY_TIMING_TEST_DESTINATION = Join-Path $directory "failed-run-$valid"
         & (Join-Path $PSHOME 'pwsh') -NoProfile -File $child *> (Join-Path $directory "child-$valid.log")
         if ($LASTEXITCODE -ne 17) { throw 'Test exit code was masked by timing export.' }
+        if ($valid -eq 'report-failure') { continue }
         $manifest = Join-Path $env:HABY_TIMING_TEST_DESTINATION 'safe/measurement.json'
         if (-not (Test-Path $manifest)) {
             $diagnostic = Get-Content (Join-Path $directory "child-$valid.log") -Raw
