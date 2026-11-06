@@ -88,7 +88,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         // Adapter accepted-context validation must not hold a catalog connection while resolving
         // other immutable inputs through their own contexts.
-        scenario = scenario with { Connection = new NpgsqlConnectionStringBuilder(scenario.Connection) { Pooling = true, MaxPoolSize = 1, Timeout = 5 }.ConnectionString };
+        scenario = scenario with { Connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(scenario.Connection) { Timeout = 5 }, maximumPoolSize: 1) };
         await AccessReady(scenario);
         Assert.Equal(DurableExecutionOutcome.Succeeded, (await AccessExecute(scenario)).Outcome);
         Assert.Equal(new NpgsqlConnectionStringBuilder(fixture.ConnectionString).Host, (await ConnectionOutput(scenario)).Host);
@@ -99,7 +99,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.True(await outputs.CompleteAsync(scenario.Key("app-login-access"), attempt, PostgreSqlApplicationConnectionContract.Encode(output), DateTimeOffset.UtcNow, default));
         Assert.False(await outputs.CompleteAsync(scenario.Key("app-login-access"), attempt, PostgreSqlApplicationConnectionContract.Encode(output with { Host = "wrong" }), DateTimeOffset.UtcNow, default));
         await AssertComplete(scenario);
-        NpgsqlConnection.ClearAllPools();
+        _catalogPools.Dispose();
     }
 
     [Theory]

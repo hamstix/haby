@@ -1,5 +1,8 @@
 # PostgreSQL checkpoint integration tests
 
+For full-suite per-case timing, safe CI artifacts, repeatable measurement commands
+and source-bound performance evidence, see [issue #140 measurements](140-postgresql-integration-performance.md).
+
 [Scoped Profile assignments](136-scoped-profile-assignments.md) add actual
 Host/generated-client/all-scope CAS, restart/restore, exact validation versions,
 secret-free acceptance and published Native AOT CLI evidence.

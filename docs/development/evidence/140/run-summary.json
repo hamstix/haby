@@ -1,0 +1,914 @@
+[
+  {
+    "run": "windows-baseline-1",
+    "branchHead": "cc16bf01e3745a6e4302f475f1c818ed28172758",
+    "measurement": null,
+    "counts": {
+      "total": 453,
+      "passed": 451,
+      "failed": 2,
+      "skipped": 0
+    },
+    "helperWallSeconds": 634.9089466,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 298.5919535,
+        "summedTestSeconds": 305.6535976
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 268.5241042,
+        "summedTestSeconds": 271.0229964999999
+      }
+    ],
+    "ciRun": null,
+    "artifactId": null,
+    "artifactSha256": null,
+    "notes": "Unchanged cold-build baseline; no separate phase trace."
+  },
+  {
+    "run": "windows-baseline-2",
+    "branchHead": "5ff73a2fd9a7626d9674af423de498a1fcf6aae0",
+    "measurement": {
+      "source": "5ff73a2fd9a7626d9674af423de498a1fcf6aae0",
+      "trackedDiffSha256": "71a428f4db5a11c10cf329b51d4b3008f86fd12470ef9aeae6d8782032903e9d",
+      "sdk": "10.0.402",
+      "os": "Microsoft Windows 10.0.26200",
+      "architecture": "X64",
+      "processors": 16,
+      "configuration": "Debug",
+      "externalCluster": true,
+      "requiredAot": true,
+      "wallSeconds": 621.2142223,
+      "testExitCode": 1,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 1.0907654,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 9.7874461,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 609.7043861,
+          "exitCode": 1
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.3566523,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 453,
+      "passed": 446,
+      "failed": 7,
+      "skipped": 0
+    },
+    "helperWallSeconds": 638.7928248,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 296.5735951,
+        "summedTestSeconds": 302.20425880000005
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 276.5132385,
+        "summedTestSeconds": 278.9608823
+      }
+    ],
+    "ciRun": null,
+    "artifactId": null,
+    "artifactSha256": null,
+    "notes": "Assembly built before candidate edits. Initial metadata captured diff at end.",
+    "compiledSourceProof": {
+      "compiledSource": "5ff73a2fd9a7626d9674af423de498a1fcf6aae0",
+      "assemblySha256": "F92F1DAE2598F32E5301F0368224618A3721B7122171BC030CF0FFB8F2407F36",
+      "assemblyLastWriteUtc": "2026-11-06T13:18:02.1807508Z",
+      "note": "Baseline 2 built before candidate edits; assembly has not been rebuilt."
+    }
+  },
+  {
+    "run": "windows-candidate-1",
+    "branchHead": "42a8b44aea379e52fe13bb4200bf6c315b57bdc0",
+    "measurement": {
+      "source": "42a8b44aea379e52fe13bb4200bf6c315b57bdc0",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sdk": "10.0.402",
+      "testAssemblySha256": "b05542b559e6337327178f0f435ea02084fddc00d22bcb5ae0fa469b65e3cb6c",
+      "untrackedFileCountAtStart": 0,
+      "sourceChangedDuringRun": true,
+      "installedRuntimes": [
+        "Microsoft.AspNetCore.App 6.0.0",
+        "Microsoft.AspNetCore.App 6.0.7",
+        "Microsoft.AspNetCore.App 7.0.20",
+        "Microsoft.AspNetCore.App 8.0.0-preview.5.23302.2",
+        "Microsoft.AspNetCore.App 8.0.7",
+        "Microsoft.AspNetCore.App 8.0.11",
+        "Microsoft.AspNetCore.App 8.0.33",
+        "Microsoft.AspNetCore.App 9.0.0",
+        "Microsoft.AspNetCore.App 9.0.22",
+        "Microsoft.AspNetCore.App 10.0.0",
+        "Microsoft.AspNetCore.App 10.0.13",
+        "Microsoft.AspNetCore.App 10.0.14",
+        "Microsoft.AspNetCore.App 11.0.0-preview.5.26302.115",
+        "Microsoft.AspNetCore.App 11.0.0-rc.3.26522.148",
+        "Microsoft.NETCore.App 6.0.0",
+        "Microsoft.NETCore.App 6.0.7",
+        "Microsoft.NETCore.App 6.0.11",
+        "Microsoft.NETCore.App 7.0.20",
+        "Microsoft.NETCore.App 8.0.0-preview.5.23280.8",
+        "Microsoft.NETCore.App 8.0.7",
+        "Microsoft.NETCore.App 8.0.11",
+        "Microsoft.NETCore.App 8.0.33",
+        "Microsoft.NETCore.App 9.0.0",
+        "Microsoft.NETCore.App 9.0.22",
+        "Microsoft.NETCore.App 10.0.0",
+        "Microsoft.NETCore.App 10.0.13",
+        "Microsoft.NETCore.App 10.0.14",
+        "Microsoft.NETCore.App 11.0.0-preview.5.26302.115",
+        "Microsoft.NETCore.App 11.0.0-rc.3.26522.148",
+        "Microsoft.WindowsDesktop.App 6.0.0",
+        "Microsoft.WindowsDesktop.App 6.0.7",
+        "Microsoft.WindowsDesktop.App 6.0.11",
+        "Microsoft.WindowsDesktop.App 7.0.20",
+        "Microsoft.WindowsDesktop.App 8.0.0-preview.5.23302.2",
+        "Microsoft.WindowsDesktop.App 8.0.7",
+        "Microsoft.WindowsDesktop.App 8.0.11",
+        "Microsoft.WindowsDesktop.App 8.0.33",
+        "Microsoft.WindowsDesktop.App 9.0.0",
+        "Microsoft.WindowsDesktop.App 9.0.22",
+        "Microsoft.WindowsDesktop.App 10.0.0",
+        "Microsoft.WindowsDesktop.App 10.0.13",
+        "Microsoft.WindowsDesktop.App 10.0.14",
+        "Microsoft.WindowsDesktop.App 11.0.0-preview.5.26302.115",
+        "Microsoft.WindowsDesktop.App 11.0.0-rc.3.26522.148"
+      ],
+      "os": "Microsoft Windows 10.0.26200",
+      "architecture": "X64",
+      "processors": 16,
+      "configuration": "Debug",
+      "parallelism": "xUnit CPU-bound default; existing exclusive collections unchanged",
+      "runnerPackages": [
+        {
+          "name": "Microsoft.NET.Test.Sdk",
+          "version": "17.11.1"
+        },
+        {
+          "name": "Npgsql",
+          "version": "10.0.3"
+        },
+        {
+          "name": "Testcontainers.PostgreSql",
+          "version": "4.16.0"
+        },
+        {
+          "name": "xunit",
+          "version": "2.9.2"
+        },
+        {
+          "name": "xunit.runner.visualstudio",
+          "version": "2.8.2"
+        }
+      ],
+      "buildWarningCodes": [],
+      "externalCluster": true,
+      "requiredAot": true,
+      "wallSeconds": 454.5199738,
+      "testExitCode": 1,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 1.1030249,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 5.1965833,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 447.3633258,
+          "exitCode": 1
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.3627621,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 456,
+      "passed": 452,
+      "failed": 4,
+      "skipped": 0
+    },
+    "helperWallSeconds": 472.8272628,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 292.8265652,
+        "summedTestSeconds": 298.69841360000004
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 119.7984812,
+        "summedTestSeconds": 120.86080129999998
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.TestCatalogPoolTests",
+        "cases": 3,
+        "spanSeconds": 0.6888137,
+        "summedTestSeconds": 0.7187287000000001
+      }
+    ],
+    "ciRun": null,
+    "artifactId": null,
+    "artifactSha256": null,
+    "notes": "Source drift was subsequent script/documentation commits; no C# changes during execution."
+  },
+  {
+    "run": "windows-candidate-2",
+    "branchHead": "465c2d29266d68e2cc3e268e2ba3c152fcaa1b55",
+    "measurement": {
+      "source": "465c2d29266d68e2cc3e268e2ba3c152fcaa1b55",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sdk": "10.0.402",
+      "testAssemblySha256": "e0ced23384047e2650caee13cf72c531c49c9f8caed37eeac8706c3b3a49a3ab",
+      "untrackedFileCountAtStart": 0,
+      "sourceChangedDuringRun": false,
+      "installedRuntimes": [
+        "Microsoft.AspNetCore.App 6.0.0",
+        "Microsoft.AspNetCore.App 6.0.7",
+        "Microsoft.AspNetCore.App 7.0.20",
+        "Microsoft.AspNetCore.App 8.0.0-preview.5.23302.2",
+        "Microsoft.AspNetCore.App 8.0.7",
+        "Microsoft.AspNetCore.App 8.0.11",
+        "Microsoft.AspNetCore.App 8.0.33",
+        "Microsoft.AspNetCore.App 9.0.0",
+        "Microsoft.AspNetCore.App 9.0.22",
+        "Microsoft.AspNetCore.App 10.0.0",
+        "Microsoft.AspNetCore.App 10.0.13",
+        "Microsoft.AspNetCore.App 10.0.14",
+        "Microsoft.AspNetCore.App 11.0.0-preview.5.26302.115",
+        "Microsoft.AspNetCore.App 11.0.0-rc.3.26522.148",
+        "Microsoft.NETCore.App 6.0.0",
+        "Microsoft.NETCore.App 6.0.7",
+        "Microsoft.NETCore.App 6.0.11",
+        "Microsoft.NETCore.App 7.0.20",
+        "Microsoft.NETCore.App 8.0.0-preview.5.23280.8",
+        "Microsoft.NETCore.App 8.0.7",
+        "Microsoft.NETCore.App 8.0.11",
+        "Microsoft.NETCore.App 8.0.33",
+        "Microsoft.NETCore.App 9.0.0",
+        "Microsoft.NETCore.App 9.0.22",
+        "Microsoft.NETCore.App 10.0.0",
+        "Microsoft.NETCore.App 10.0.13",
+        "Microsoft.NETCore.App 10.0.14",
+        "Microsoft.NETCore.App 11.0.0-preview.5.26302.115",
+        "Microsoft.NETCore.App 11.0.0-rc.3.26522.148",
+        "Microsoft.WindowsDesktop.App 6.0.0",
+        "Microsoft.WindowsDesktop.App 6.0.7",
+        "Microsoft.WindowsDesktop.App 6.0.11",
+        "Microsoft.WindowsDesktop.App 7.0.20",
+        "Microsoft.WindowsDesktop.App 8.0.0-preview.5.23302.2",
+        "Microsoft.WindowsDesktop.App 8.0.7",
+        "Microsoft.WindowsDesktop.App 8.0.11",
+        "Microsoft.WindowsDesktop.App 8.0.33",
+        "Microsoft.WindowsDesktop.App 9.0.0",
+        "Microsoft.WindowsDesktop.App 9.0.22",
+        "Microsoft.WindowsDesktop.App 10.0.0",
+        "Microsoft.WindowsDesktop.App 10.0.13",
+        "Microsoft.WindowsDesktop.App 10.0.14",
+        "Microsoft.WindowsDesktop.App 11.0.0-preview.5.26302.115",
+        "Microsoft.WindowsDesktop.App 11.0.0-rc.3.26522.148"
+      ],
+      "os": "Microsoft Windows 10.0.26200",
+      "architecture": "X64",
+      "processors": 16,
+      "configuration": "Debug",
+      "parallelism": "xUnit CPU-bound default; existing exclusive collections unchanged",
+      "runnerPackages": [
+        {
+          "name": "Microsoft.NET.Test.Sdk",
+          "version": "17.11.1"
+        },
+        {
+          "name": "Npgsql",
+          "version": "10.0.3"
+        },
+        {
+          "name": "Testcontainers.PostgreSql",
+          "version": "4.16.0"
+        },
+        {
+          "name": "xunit",
+          "version": "2.9.2"
+        },
+        {
+          "name": "xunit.runner.visualstudio",
+          "version": "2.8.2"
+        }
+      ],
+      "buildWarningCodes": [],
+      "externalCluster": true,
+      "requiredAot": true,
+      "wallSeconds": 467.509573,
+      "testExitCode": 1,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 1.1357992,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 5.3599413,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 460.0677907,
+          "exitCode": 1
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.4236677,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 456,
+      "passed": 455,
+      "failed": 1,
+      "skipped": 0
+    },
+    "helperWallSeconds": 485.2772625,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 303.4895092,
+        "summedTestSeconds": 309.62118500000014
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 120.6198876,
+        "summedTestSeconds": 121.77309280000006
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.TestCatalogPoolTests",
+        "cases": 3,
+        "spanSeconds": 0.4876522,
+        "summedTestSeconds": 0.4906235
+      }
+    ],
+    "ciRun": null,
+    "artifactId": null,
+    "artifactSha256": null,
+    "notes": "Clean source throughout execution."
+  },
+  {
+    "run": "linux-baseline-1",
+    "branchHead": "5ff73a2fd9a7626d9674af423de498a1fcf6aae0",
+    "measurement": {
+      "source": "5753fc6841f6bdab65edd39ead71503bb882702a",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sdk": "10.0.403",
+      "os": "Ubuntu 26.04.1 LTS",
+      "architecture": "X64",
+      "processors": 4,
+      "configuration": "Debug",
+      "externalCluster": false,
+      "requiredAot": true,
+      "wallSeconds": 516.8619864,
+      "testExitCode": 0,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 4.944019,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 22.1060224,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 488.9123945,
+          "exitCode": 0
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.7215909,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 453,
+      "passed": 453,
+      "failed": 0,
+      "skipped": 0
+    },
+    "helperWallSeconds": null,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 238.9817298,
+        "summedTestSeconds": 246.0808473
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 183.7367708,
+        "summedTestSeconds": 185.8882588
+      }
+    ],
+    "ciRun": "42224403732",
+    "artifactId": "13505088230",
+    "artifactSha256": "863972302c77c2d5d8daa8ad145c22d6f1901814064a5d4e0784358b4dc411f6",
+    "notes": null
+  },
+  {
+    "run": "linux-baseline-2",
+    "branchHead": "9254f56042b51108c3ba2d0ebd23cc60a0f02d4c",
+    "measurement": {
+      "source": "53c787cbc7267b63d165c5b20e8f199155afdb65",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sdk": "10.0.403",
+      "testAssemblySha256": "fa39991fa9ad32c34b7a701035e75977658bbe85209ef77ea76ce8454d00aa0b",
+      "untrackedFileCountAtStart": 0,
+      "sourceChangedDuringRun": false,
+      "installedRuntimes": [
+        "Microsoft.AspNetCore.App 8.0.6",
+        "Microsoft.AspNetCore.App 8.0.22",
+        "Microsoft.AspNetCore.App 8.0.33",
+        "Microsoft.AspNetCore.App 9.0.6",
+        "Microsoft.AspNetCore.App 9.0.22",
+        "Microsoft.AspNetCore.App 10.0.8",
+        "Microsoft.AspNetCore.App 10.0.11",
+        "Microsoft.AspNetCore.App 10.0.12",
+        "Microsoft.AspNetCore.App 10.0.14",
+        "Microsoft.NETCore.App 8.0.6",
+        "Microsoft.NETCore.App 8.0.22",
+        "Microsoft.NETCore.App 8.0.33",
+        "Microsoft.NETCore.App 9.0.6",
+        "Microsoft.NETCore.App 9.0.22",
+        "Microsoft.NETCore.App 10.0.8",
+        "Microsoft.NETCore.App 10.0.11",
+        "Microsoft.NETCore.App 10.0.12",
+        "Microsoft.NETCore.App 10.0.14"
+      ],
+      "os": "Ubuntu 26.04.1 LTS",
+      "architecture": "X64",
+      "processors": 4,
+      "configuration": "Debug",
+      "parallelism": "xUnit CPU-bound default; existing exclusive collections unchanged",
+      "runnerPackages": [
+        {
+          "name": "Microsoft.NET.Test.Sdk",
+          "version": "17.11.1"
+        },
+        {
+          "name": "Npgsql",
+          "version": "10.0.3"
+        },
+        {
+          "name": "Testcontainers.PostgreSql",
+          "version": "4.16.0"
+        },
+        {
+          "name": "xunit",
+          "version": "2.9.2"
+        },
+        {
+          "name": "xunit.runner.visualstudio",
+          "version": "2.8.2"
+        }
+      ],
+      "buildWarningCodes": [],
+      "externalCluster": false,
+      "requiredAot": true,
+      "wallSeconds": 504.3617971,
+      "testExitCode": 0,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 4.3884996,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 20.3576437,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 478.389905,
+          "exitCode": 0
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.501163,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 453,
+      "passed": 453,
+      "failed": 0,
+      "skipped": 0
+    },
+    "helperWallSeconds": null,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 234.6671268,
+        "summedTestSeconds": 240.95282980000005
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 177.4937184,
+        "summedTestSeconds": 179.4350532999999
+      }
+    ],
+    "ciRun": "42226250156",
+    "artifactId": "13507115011",
+    "artifactSha256": "473d18bba717f3a968abe3bd9bf8eaf9ca687020a7bd64fd71f9999fd49b7b5a",
+    "notes": null
+  },
+  {
+    "run": "linux-candidate-1",
+    "branchHead": "42a8b44aea379e52fe13bb4200bf6c315b57bdc0",
+    "measurement": {
+      "source": "930836bf38c8e2b8c621f4614bb8ae4f9a3ad536",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sdk": "10.0.403",
+      "testAssemblySha256": "ff1fcf7ed69f4d1c4070ee82063560b27fa3c78ed9bccf74fd09aae059001395",
+      "untrackedFileCountAtStart": 0,
+      "sourceChangedDuringRun": false,
+      "installedRuntimes": [
+        "Microsoft.AspNetCore.App 8.0.6",
+        "Microsoft.AspNetCore.App 8.0.22",
+        "Microsoft.AspNetCore.App 8.0.33",
+        "Microsoft.AspNetCore.App 9.0.6",
+        "Microsoft.AspNetCore.App 9.0.22",
+        "Microsoft.AspNetCore.App 10.0.8",
+        "Microsoft.AspNetCore.App 10.0.11",
+        "Microsoft.AspNetCore.App 10.0.12",
+        "Microsoft.AspNetCore.App 10.0.14",
+        "Microsoft.NETCore.App 8.0.6",
+        "Microsoft.NETCore.App 8.0.22",
+        "Microsoft.NETCore.App 8.0.33",
+        "Microsoft.NETCore.App 9.0.6",
+        "Microsoft.NETCore.App 9.0.22",
+        "Microsoft.NETCore.App 10.0.8",
+        "Microsoft.NETCore.App 10.0.11",
+        "Microsoft.NETCore.App 10.0.12",
+        "Microsoft.NETCore.App 10.0.14"
+      ],
+      "os": "Ubuntu 26.04.1 LTS",
+      "architecture": "X64",
+      "processors": 4,
+      "configuration": "Debug",
+      "parallelism": "xUnit CPU-bound default; existing exclusive collections unchanged",
+      "runnerPackages": [
+        {
+          "name": "Microsoft.NET.Test.Sdk",
+          "version": "17.11.1"
+        },
+        {
+          "name": "Npgsql",
+          "version": "10.0.3"
+        },
+        {
+          "name": "Testcontainers.PostgreSql",
+          "version": "4.16.0"
+        },
+        {
+          "name": "xunit",
+          "version": "2.9.2"
+        },
+        {
+          "name": "xunit.runner.visualstudio",
+          "version": "2.8.2"
+        }
+      ],
+      "buildWarningCodes": [],
+      "externalCluster": false,
+      "requiredAot": true,
+      "wallSeconds": 405.5464994,
+      "testExitCode": 0,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 4.6159873,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 17.8243734,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 382.1631169,
+          "exitCode": 0
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.5355201,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 456,
+      "passed": 456,
+      "failed": 0,
+      "skipped": 0
+    },
+    "helperWallSeconds": null,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 159.9437252,
+        "summedTestSeconds": 162.50976760000003
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 71.48116,
+        "summedTestSeconds": 72.27377290000001
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.TestCatalogPoolTests",
+        "cases": 3,
+        "spanSeconds": 0.4112362,
+        "summedTestSeconds": 0.4135495
+      }
+    ],
+    "ciRun": "42226464863",
+    "artifactId": "13506178439",
+    "artifactSha256": "e213de88931dd1fbe2b10cd3451f460d62dad6efa7bac9cd5b908f535d097ebb",
+    "notes": null
+  },
+  {
+    "run": "linux-candidate-2",
+    "branchHead": "c86c9399068c23ec85b8942da40d8778bab128ef",
+    "measurement": {
+      "source": "51433c3e45529e7c6dbd39ddfcb75dab2965af03",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sdk": "10.0.403",
+      "testAssemblySha256": "d6528a88be27dfbf464c229a5d394b941a606e369dd921a41013055668d56462",
+      "untrackedFileCountAtStart": 0,
+      "sourceChangedDuringRun": false,
+      "installedRuntimes": [
+        "Microsoft.AspNetCore.App 8.0.6",
+        "Microsoft.AspNetCore.App 8.0.22",
+        "Microsoft.AspNetCore.App 8.0.33",
+        "Microsoft.AspNetCore.App 9.0.6",
+        "Microsoft.AspNetCore.App 9.0.22",
+        "Microsoft.AspNetCore.App 10.0.8",
+        "Microsoft.AspNetCore.App 10.0.11",
+        "Microsoft.AspNetCore.App 10.0.12",
+        "Microsoft.AspNetCore.App 10.0.14",
+        "Microsoft.NETCore.App 8.0.6",
+        "Microsoft.NETCore.App 8.0.22",
+        "Microsoft.NETCore.App 8.0.33",
+        "Microsoft.NETCore.App 9.0.6",
+        "Microsoft.NETCore.App 9.0.22",
+        "Microsoft.NETCore.App 10.0.8",
+        "Microsoft.NETCore.App 10.0.11",
+        "Microsoft.NETCore.App 10.0.12",
+        "Microsoft.NETCore.App 10.0.14"
+      ],
+      "os": "Ubuntu 26.04.1 LTS",
+      "architecture": "X64",
+      "processors": 4,
+      "configuration": "Debug",
+      "parallelism": "xUnit CPU-bound default; existing exclusive collections unchanged",
+      "runnerPackages": [
+        {
+          "name": "Microsoft.NET.Test.Sdk",
+          "version": "17.11.1"
+        },
+        {
+          "name": "Npgsql",
+          "version": "10.0.3"
+        },
+        {
+          "name": "Testcontainers.PostgreSql",
+          "version": "4.16.0"
+        },
+        {
+          "name": "xunit",
+          "version": "2.9.2"
+        },
+        {
+          "name": "xunit.runner.visualstudio",
+          "version": "2.8.2"
+        }
+      ],
+      "buildWarningCodes": [],
+      "externalCluster": false,
+      "requiredAot": true,
+      "wallSeconds": 413.8598174,
+      "testExitCode": 0,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 4.4340487,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 22.3928697,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 385.8515247,
+          "exitCode": 0
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.4530182,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 456,
+      "passed": 456,
+      "failed": 0,
+      "skipped": 0
+    },
+    "helperWallSeconds": null,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 203.6597112,
+        "summedTestSeconds": 206.63061450000006
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 76.1691988,
+        "summedTestSeconds": 76.99604139999998
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.TestCatalogPoolTests",
+        "cases": 3,
+        "spanSeconds": 0.4994548,
+        "summedTestSeconds": 0.49861790000000006
+      }
+    ],
+    "ciRun": "42226969978",
+    "artifactId": "13506478424",
+    "artifactSha256": "0d79c4881ae5bf444d52b66b930aee53d9f42ea63df17b89e5a4622e1917eb78",
+    "notes": null
+  },
+  {
+    "run": "linux-candidate-3",
+    "branchHead": "465c2d29266d68e2cc3e268e2ba3c152fcaa1b55",
+    "measurement": {
+      "source": "9b4fd8ee416640b0ebeedd8888d3c707edb763a9",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sdk": "10.0.403",
+      "testAssemblySha256": "2de845d3f58bf7e65274d1654c670acea0ad6f8ea1a2381c723e3a7a0776a6c0",
+      "untrackedFileCountAtStart": 0,
+      "sourceChangedDuringRun": false,
+      "installedRuntimes": [
+        "Microsoft.AspNetCore.App 8.0.6",
+        "Microsoft.AspNetCore.App 8.0.22",
+        "Microsoft.AspNetCore.App 8.0.33",
+        "Microsoft.AspNetCore.App 9.0.6",
+        "Microsoft.AspNetCore.App 9.0.22",
+        "Microsoft.AspNetCore.App 10.0.8",
+        "Microsoft.AspNetCore.App 10.0.11",
+        "Microsoft.AspNetCore.App 10.0.12",
+        "Microsoft.AspNetCore.App 10.0.14",
+        "Microsoft.NETCore.App 8.0.6",
+        "Microsoft.NETCore.App 8.0.22",
+        "Microsoft.NETCore.App 8.0.33",
+        "Microsoft.NETCore.App 9.0.6",
+        "Microsoft.NETCore.App 9.0.22",
+        "Microsoft.NETCore.App 10.0.8",
+        "Microsoft.NETCore.App 10.0.11",
+        "Microsoft.NETCore.App 10.0.12",
+        "Microsoft.NETCore.App 10.0.14"
+      ],
+      "os": "Ubuntu 26.04.1 LTS",
+      "architecture": "X64",
+      "processors": 4,
+      "configuration": "Debug",
+      "parallelism": "xUnit CPU-bound default; existing exclusive collections unchanged",
+      "runnerPackages": [
+        {
+          "name": "Microsoft.NET.Test.Sdk",
+          "version": "17.11.1"
+        },
+        {
+          "name": "Npgsql",
+          "version": "10.0.3"
+        },
+        {
+          "name": "Testcontainers.PostgreSql",
+          "version": "4.16.0"
+        },
+        {
+          "name": "xunit",
+          "version": "2.9.2"
+        },
+        {
+          "name": "xunit.runner.visualstudio",
+          "version": "2.8.2"
+        }
+      ],
+      "buildWarningCodes": [],
+      "externalCluster": false,
+      "requiredAot": true,
+      "wallSeconds": 424.1034914,
+      "testExitCode": 0,
+      "phases": [
+        {
+          "phase": "restore",
+          "seconds": 3.6104285,
+          "exitCode": 0
+        },
+        {
+          "phase": "build",
+          "seconds": 19.0961244,
+          "exitCode": 0
+        },
+        {
+          "phase": "test",
+          "seconds": 400.4149763,
+          "exitCode": 0
+        },
+        {
+          "phase": "artifact-export",
+          "seconds": 0.5061998,
+          "exitCode": 0
+        }
+      ]
+    },
+    "counts": {
+      "total": 456,
+      "passed": 456,
+      "failed": 0,
+      "skipped": 0
+    },
+    "helperWallSeconds": null,
+    "criticalClasses": [
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests",
+        "cases": 81,
+        "spanSeconds": 188.1664333,
+        "summedTestSeconds": 191.16127799999992
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.PostgreSqlApplicationLoginTests",
+        "cases": 82,
+        "spanSeconds": 77.7413228,
+        "summedTestSeconds": 78.6003507
+      },
+      {
+        "class": "Haby.PostgreSql.IntegrationTests.TestCatalogPoolTests",
+        "cases": 3,
+        "spanSeconds": 0.5630686,
+        "summedTestSeconds": 0.5681578
+      }
+    ],
+    "ciRun": "42227357171",
+    "artifactId": "13506164989",
+    "artifactSha256": "5dd39a424d19c25e2b76dc11b303c825929edbdb17db2d64455046e87b4fb26a",
+    "notes": null
+  }
+]

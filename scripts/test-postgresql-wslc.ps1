@@ -1,3 +1,4 @@
+param([string]$ResultsDirectory = (Join-Path $PSScriptRoot ('../.artifacts/postgresql-' + [Guid]::NewGuid().ToString('N'))))
 $ErrorActionPreference = 'Stop'
 
 if (-not (Get-Command wslc -ErrorAction SilentlyContinue)) { throw 'wslc is unavailable in this PowerShell process.' }
@@ -14,6 +15,7 @@ $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
 $listener.Stop()
 $password = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
 $runAttempted = $false
+$testExitCode = 1
 $oldMode = [Environment]::GetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL')
 $oldConnection = [Environment]::GetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONNECTION')
 $oldContainer = [Environment]::GetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONTAINER')
@@ -31,9 +33,8 @@ try {
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL', '1')
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONNECTION', $builder.ConnectionString)
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONTAINER', $name)
-    dotnet test .\tests\Haby.PostgreSql.IntegrationTests\Haby.PostgreSql.IntegrationTests.csproj `
-        --artifacts-path .\.artifacts
-    if ($LASTEXITCODE -ne 0) { throw 'The PostgreSQL integration tests failed.' }
+    & (Join-Path $PSScriptRoot 'test-postgresql-measured.ps1') -ResultsDirectory $ResultsDirectory
+    $testExitCode = $LASTEXITCODE
 }
 finally {
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL', $oldMode)
@@ -44,3 +45,4 @@ finally {
         if ($LASTEXITCODE -ne 0) { Write-Warning "Cleanup failed for test-owned container $name." }
     }
 }
+exit $testExitCode
