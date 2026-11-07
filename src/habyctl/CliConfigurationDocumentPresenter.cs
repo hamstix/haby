@@ -15,6 +15,7 @@ internal sealed record CliConfigurationDocumentData(CliConfigurationDocumentTarg
 internal static class ConfigurationDocumentPresentation
 {
     private const int MaxBytes = 4 * 1024 * 1024;
+    internal const int MaxDocumentDepth = 64;
     internal static (string Outcome, int Exit, CliConfigurationDocumentData Data) Check(string command, ConfigurationDocumentRequest request, ConfigurationDocumentReply reply)
     {
         var status = reply.Status;
@@ -55,12 +56,12 @@ internal static class ConfigurationDocumentPresentation
         if (bytes.Length > MaxBytes) throw new InvalidDataException("Oversized configuration preview.");
         try
         {
-            using var doc = JsonDocument.Parse(bytes.Memory, new JsonDocumentOptions { MaxDepth = 66 });
+            using var doc = JsonDocument.Parse(bytes.Memory, new JsonDocumentOptions { MaxDepth = MaxDocumentDepth + 2 });
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object || !root.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).SequenceEqual(new[] { "document", "redactedPaths" }))
                 throw new InvalidDataException();
             var document = root.GetProperty("document");
-            Validate(document);
+            Validate(document, 0);
             var paths = root.GetProperty("redactedPaths").EnumerateArray().Select(x => x.GetString() ?? throw new InvalidDataException()).ToArray();
             if (!paths.SequenceEqual(paths.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))) throw new InvalidDataException();
             foreach (var path in paths)
@@ -84,14 +85,16 @@ internal static class ConfigurationDocumentPresentation
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         { throw new InvalidDataException("Invalid configuration preview."); }
-        static void Validate(JsonElement node)
+        static void Validate(JsonElement node, int depth)
         {
+            if (node.ValueKind is JsonValueKind.Object or JsonValueKind.Array && ++depth > MaxDocumentDepth)
+                throw new InvalidDataException("Configuration preview exceeds the semantic depth limit.");
             if (node.ValueKind == JsonValueKind.Object)
             {
                 var seen = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var p in node.EnumerateObject()) { if (!seen.Add(p.Name)) throw new InvalidDataException(); Validate(p.Value); }
+                foreach (var p in node.EnumerateObject()) { if (!seen.Add(p.Name)) throw new InvalidDataException(); Validate(p.Value, depth); }
             }
-            else if (node.ValueKind == JsonValueKind.Array) foreach (var child in node.EnumerateArray()) Validate(child);
+            else if (node.ValueKind == JsonValueKind.Array) foreach (var child in node.EnumerateArray()) Validate(child, depth);
         }
     }
     private static bool Uuid(string text) => Guid.TryParseExact(text, "D", out var id) && id != Guid.Empty && id.Version == 7;
@@ -101,6 +104,11 @@ internal static class ConfigurationDocumentPresentation
 
 internal sealed partial class CliCommandContext
 {
+    // CliEnvelope, data and preview add three containers around the semantic document.
+    // Clone the generated options so other command groups retain their existing budget.
+    private static readonly CliOutputJsonContext ConfigurationDocumentJsonContext = new(
+        new JsonSerializerOptions(CliOutputJsonContext.Default.Options) { MaxDepth = ConfigurationDocumentPresentation.MaxDocumentDepth + 3 });
+
     internal Task<int> ExecuteConfigurationDocumentAsync(string command, ConfigurationDocumentRequest request, string? environment, long? generation, CancellationToken token)
     {
         if (generation <= 0) return ExecuteRevisionAsync(0, (_, _) => Task.FromResult(0), token);
@@ -117,7 +125,7 @@ internal sealed partial class CliCommandContext
             var checkedReply = ConfigurationDocumentPresentation.Check(command, request, reply);
             // Serialize and size-check the entire envelope before touching stdout.
             var envelope = new CliEnvelope<CliConfigurationDocumentData>(1, "configuration " + command, checkedReply.Outcome, checkedReply.Data, []);
-            var json = JsonSerializer.Serialize(envelope, CliOutputJsonContext.Default.CliEnvelopeCliConfigurationDocumentData);
+            var json = JsonSerializer.Serialize(envelope, ConfigurationDocumentJsonContext.CliEnvelopeCliConfigurationDocumentData);
             if (Encoding.UTF8.GetByteCount(json) + Encoding.UTF8.GetByteCount(output.NewLine) > 8 * 1024 * 1024)
                 throw new InvalidDataException("Oversized configuration response.");
             if (jsonOutput()) output.WriteLine(json);

@@ -55,6 +55,16 @@ public sealed partial class CliLoopbackTests
             if (preview) reply.PreviewJson = ByteString.CopyFromUtf8("{\"document\":{\"Logging\":true,\"Connection\":\"***REDACTED***\"},\"redactedPaths\":[\"/Connection\"]}");
             switch (Mode)
             {
+                case "depth-61":
+                case "depth-62":
+                case "depth-63":
+                case "depth-64":
+                case "depth-65":
+                    var depth = int.Parse(Mode.AsSpan(6), System.Globalization.CultureInfo.InvariantCulture);
+                    var document = "true";
+                    for (var i = 0; i < depth; i++) document = i % 2 == 0 ? "[" + document + "]" : "{\"child\":" + document + "}";
+                    reply.PreviewJson = ByteString.CopyFromUtf8("{\"document\":" + document + ",\"redactedPaths\":[]}");
+                    break;
                 case "foreign-selector": reply.Selector.Environment = "foreign"; break;
                 case "foreign-generation": reply.Target.Generation = 4; break;
                 case "missing-metadata": reply.Artifact = null; break;
@@ -93,6 +103,11 @@ public sealed partial class CliLoopbackTests
 
     [Theory]
     [InlineData("good", 0)]
+    [InlineData("depth-61", 0)]
+    [InlineData("depth-62", 0)]
+    [InlineData("depth-63", 0)]
+    [InlineData("depth-64", 0)]
+    [InlineData("depth-65", 2)]
     [InlineData("boundary", 0)]
     [InlineData("outer-boundary", 0)]
     [InlineData("outer-over", 2)]
@@ -153,11 +168,26 @@ public sealed partial class CliLoopbackTests
             Assert.Equal("", stderr); Assert.Contains(expected == 0 ? "found" : "notFound", stdout);
             if (format == "json")
             {
-                using var doc = JsonDocument.Parse(stdout); var data = doc.RootElement.GetProperty("data");
+                using var doc = JsonDocument.Parse(stdout, new JsonDocumentOptions { MaxDepth = 67 }); var data = doc.RootElement.GetProperty("data");
                 Assert.Equal(3, data.GetProperty("target").GetProperty("generation").GetInt64());
                 if (expected == 0) Assert.Equal(JsonValueKind.Object, data.GetProperty("preview").ValueKind);
                 Assert.True(Encoding.UTF8.GetByteCount(stdout) <= 8 * 1024 * 1024);
                 if (mode == "outer-boundary") Assert.Equal(8 * 1024 * 1024, Encoding.UTF8.GetByteCount(stdout));
+            }
+            if (mode.StartsWith("depth-", StringComparison.Ordinal))
+            {
+                var previewText = format == "json" ? stdout : stdout[(stdout.IndexOf(Environment.NewLine, StringComparison.Ordinal) + Environment.NewLine.Length)..];
+                using var parsed = JsonDocument.Parse(previewText, new JsonDocumentOptions { MaxDepth = 67 });
+                var preview = format == "json" ? parsed.RootElement.GetProperty("data").GetProperty("preview") : parsed.RootElement;
+                var value = preview.GetProperty("document");
+                var containers = 0;
+                while (value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                {
+                    containers++;
+                    value = value.ValueKind == JsonValueKind.Array ? value[0] : value.GetProperty("child");
+                }
+                Assert.Equal(int.Parse(mode.AsSpan(6), System.Globalization.CultureInfo.InvariantCulture), containers);
+                Assert.True(value.GetBoolean());
             }
         }
     }
