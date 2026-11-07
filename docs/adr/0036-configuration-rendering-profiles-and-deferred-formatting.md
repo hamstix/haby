@@ -109,9 +109,11 @@ rotate a password or change Resource ownership/Provider selection.
 Use the exact Resource/output binding-options schema under ADR-018 and typed
 adapter codecs; no arbitrary connection-string suffix, unvalidated dictionary
 or secret interpolation. Allowed parameter names, types, units, bounds, defaults
-and security restrictions will be specified in the relevant Provider/adapter
-contract documentation before implementation. This ADR does not select those
-fields or a universal TLS default. Connection and command timeouts are distinct.
+and security restrictions are specified by the relevant Provider/adapter contract.
+[ADR-040](0040-postgresql-connection-rendering-and-consumer-options.md) now selects
+the first PostgreSQL allow-list: timeout, commandTimeout and sslMode, with a
+verify-full renderer default. These are adapter-specific rules, not a universal
+Provider policy. Connection and command timeouts are distinct.
 
 Effective settings have explicit precedence:
 
