@@ -37,12 +37,13 @@ public sealed class ConfigurationRenderingCatalogTests
         var decoded = ConfigurationPlanningSnapshotCodec.Decode(saved, snapshot.Revision);
         Assert.Equal(snapshot, decoded); Assert.True(changed.Supports(pin));
         Assert.Equal(defaults, pin.Defaults);
-        var fragment = catalog.Render(pin, new("sample.output/v1", "value", "{}"))!;
+        Assert.Null(catalog.Render(pin, new("sample.output/v1", "value", "{}")));
+        var fragment = catalog.Render(pin, new("sample.output/v1", "value", "{\"Destination\":\"events\"}"))!;
         var deferred = Assert.IsType<ConfigurationDeferredValue>(fragment.Value);
         var result = changed.Format(pin, deferred, "supplied");
         Assert.True(result?.Reveal() == "supplied");
         Assert.Null(catalog.Render(pin, new("wrong/v1", "value", "{}")));
-        Assert.Null(ConfigurationRenderingCatalog.Empty.Render(pin, new("sample.output/v1", "value", "{}")));
+        Assert.Null(ConfigurationRenderingCatalog.Empty.Render(pin, new("sample.output/v1", "value", "{\"Destination\":\"events\"}")));
         Assert.False(ConfigurationRenderingCatalog.Empty.Supports(pin));
         foreach (var field in new[] { "renderer", "rendererImplementation", "formatter", "formatterImplementation", "outputContract", "outputKey", "producer" })
         {
@@ -51,9 +52,33 @@ public sealed class ConfigurationRenderingCatalogTests
             { Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(json.ToJsonString(), snapshot.Revision)); continue; }
             var altered = ConfigurationPlanningSnapshotCodec.Decode(json.ToJsonString(), snapshot.Revision);
             Assert.NotEqual(snapshot, altered);
+            Assert.NotEqual(ConfigurationPlanningSnapshotTests.Fingerprint(snapshot), ConfigurationPlanningSnapshotTests.Fingerprint(altered));
             Assert.False(catalog.Supports(altered.RenderPins.Single()));
         }
     }
+    [Fact]
+    public void Frozen_pin_defaults_effective_values_origins_and_closed_shape_are_checked_and_fingerprinted()
+    {
+        var snapshot = Snapshot(Catalog(defaults: new(new Dictionary<string, ConfigurationValue> { ["mode"] = new ConfigurationString("original") })));
+        var text = ConfigurationPlanningSnapshotCodec.Encode(snapshot);
+        foreach (var path in new[] { "defaults", "options", "origins" })
+        {
+            var corrupt = JsonNode.Parse(text)!; corrupt["renderPins"]![0]![path]!["mode"] = "changed";
+            Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(corrupt.ToJsonString(), snapshot.Revision));
+        }
+        var changed = JsonNode.Parse(text)!;
+        changed["renderPins"]![0]!["defaults"]!["mode"] = "changed";
+        changed["renderPins"]![0]!["options"]!["mode"] = "changed";
+        var changedDefaults = ConfigurationPlanningSnapshotCodec.Decode(changed.ToJsonString(), snapshot.Revision);
+        Assert.NotEqual(ConfigurationPlanningSnapshotTests.Fingerprint(snapshot), ConfigurationPlanningSnapshotTests.Fingerprint(changedDefaults));
+        var action = JsonNode.Parse(text)!; action["renderPins"]![0]!["producerAction"]!["action"] = "changed/v1";
+        var changedAction = ConfigurationPlanningSnapshotCodec.Decode(action.ToJsonString(), snapshot.Revision);
+        Assert.False(Catalog().Supports(changedAction.RenderPins.Single()));
+        Assert.NotEqual(ConfigurationPlanningSnapshotTests.Fingerprint(snapshot), ConfigurationPlanningSnapshotTests.Fingerprint(changedAction));
+        var unknown = JsonNode.Parse(text)!; unknown["renderPins"]![0]!["unknown"] = true;
+        Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(unknown.ToJsonString(), snapshot.Revision));
+    }
+
     [Fact]
     public void Explicit_registration_rejects_ambiguity_conflict_and_missing_support_without_fallback()
     {

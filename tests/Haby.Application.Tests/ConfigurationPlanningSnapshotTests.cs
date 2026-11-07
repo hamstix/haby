@@ -31,10 +31,10 @@ public sealed class ConfigurationPlanningSnapshotTests
     private static ConfigurationPlanningSnapshot Snapshot(NormalizedApplicationManifest manifest, ConfigurationProfileRevision profile, AssignmentToken token) =>
         ConfigurationPlanningSnapshot.Prepare(Revision, manifest, Scopes(manifest, token, new ProfileDecision.Use(profile.Reference)), [profile], Haby.Tests.ConfigurationRenderingSamples.Catalog()).Snapshot!;
 
-    private static string Fingerprint(ConfigurationPlanningSnapshot snapshot)
+    internal static string Fingerprint(ConfigurationPlanningSnapshot snapshot)
     {
         var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse("019a2b70-1234-7123-8123-123456789abc"), EnvironmentId.Create("pilot"),
-            Revision, ProviderAlias.Create("available"), ProviderInstanceId.Parse("019a2b70-1234-7123-8123-123456789abd"),
+            snapshot.Revision, ProviderAlias.Create("available"), ProviderInstanceId.Parse("019a2b70-1234-7123-8123-123456789abd"),
             ProviderConfigurationRevisionNumber.Create(1), "sample/v1")
         { Configuration = snapshot };
         var node = new DurableOperationNode(OperationId.Create("create"), ManifestLocalId.Create("resource"),

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Haby.Application;
 using Haby.Domain;
 
@@ -21,18 +23,26 @@ internal static class ConfigurationRenderingSamples
     {
         public ConfigurationRendererId Contract => exact ?? RendererId;
         public ManifestLocalId Identity => Implementation;
-        public ConfigurationFragment? Render(ExternalOperationOutput output, ConfigurationObject settings) =>
-            new(new ConfigurationDeferredValue(FormatterId, settings));
+        public ConfigurationFragment? Render(ExternalOperationOutput output, ConfigurationObject settings)
+        {
+            var evidence = JsonSerializer.Deserialize(output.Payload, SampleRenderingJsonContext.Default.SampleRenderEvidence);
+            if (evidence is null || string.IsNullOrWhiteSpace(evidence.Destination)) return null;
+            return new(new ConfigurationDeferredValue(FormatterId, new(new Dictionary<string, ConfigurationValue>
+            { ["destination"] = new ConfigurationString(evidence.Destination), ["settings"] = settings })));
+        }
     }
     internal sealed record FormatterDefinition() : ConfigurationFormatterContract(FormatterId)
     {
-        public override bool ValidateArguments(ConfigurationObject arguments) => true;
+        public override bool ValidateArguments(ConfigurationObject arguments) => arguments.Members.Count == 2 &&
+            arguments.Members.TryGetValue("destination", out var destination) && destination is ConfigurationString { Value.Length: > 0 } &&
+            arguments.Members.TryGetValue("settings", out var settings) && settings is ConfigurationObject;
     }
     internal sealed class Formatter : IConfigurationFormatter
     {
         public ConfigurationFormatterId Contract => FormatterId;
         public ManifestLocalId Identity => Implementation;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) => new(material.ToString());
+        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) =>
+            new FormatterDefinition().ValidateArguments(arguments) && !material.IsEmpty ? new(material.ToString()) : null;
     }
     internal static ConfigurationRenderingCatalog Catalog(string resource = "sample.resource/v1", ConfigurationObject? defaults = null, bool events = false) =>
         new(events ? [new Definition(ResourceTypeId.Create(resource), defaults ?? new([])),
@@ -41,3 +51,8 @@ internal static class ConfigurationRenderingSamples
             events ? [new Renderer(), new Renderer(ConfigurationRendererId.Create("sample.events/v1"))] : [new Renderer()],
             new([new FormatterDefinition()], [new(Implementation, FormatterId)]), [new Formatter()]);
 }
+
+internal sealed record SampleRenderEvidence(string Destination);
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectRequiredConstructorParameters = true)]
+[JsonSerializable(typeof(SampleRenderEvidence))]
+internal partial class SampleRenderingJsonContext : JsonSerializerContext;
