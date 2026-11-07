@@ -132,9 +132,14 @@ The saved frozen snapshot identifies each exact receiving projection and formatt
 implementation. Saved confirmed output associations identify the producer output.
 Pure adapter binding metadata validates the complete deferred argument object
 against that output and frozen options. Common code admits exactly one reference
-per supported deferred node, derives its Resource owner from the persisted
-deployment and frozen Resource local ID, and permits ApplicationLogin only. The
-scoped store checks owner/purpose/version and server-side payload length before
+per supported deferred node. Saved output associations follow the frozen request
+order, with one occurrence per participating render request. Repeated consumption
+must agree on the exact producer/contract/key, confirmed attempt and output payload;
+missing, extra or conflicting evidence refuses before material reads. This permits
+two direct projections or a slot plus direct projection to reuse one output without
+rewriting existing artifacts. Common code derives the Resource owner from the
+persisted deployment and frozen Resource local ID, and permits ApplicationLogin
+only. The scoped store checks owner/purpose/version and server-side payload length before
 fetching bytes. The PostgreSQL binding also validates random-password/v1 material.
 No Provider/default/alias discovery, renderer invocation, replan or external effect
 occurs during delivery. Ordinary magic-looking JSON is data.

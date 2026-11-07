@@ -101,19 +101,30 @@ public sealed class ConfigurationDeliveryTests
         public DeliverConfiguration Service(params IConfigurationResolutionBinding[] registrations) => new(Store, Store, Store, Catalog, registrations.Length == 0 ? [Adapter] : registrations);
         public ValueTask<ConfigurationDeliveryResult> Run() => Service().ExecuteAsync("opaque", Store.Grant.Document.Id, default);
     }
-    private static async Task<Harness> Prepare(int projections = 1)
+    private static async Task<Harness> Prepare(int projections = 1, bool separateRequests = false)
     {
-        var manifest = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Encoding.UTF8.GetBytes("""
+        var declaration = JsonNode.Parse("""
             {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{
             "resources":{"resource":{"type":"sample.resource/v1","providerRef":"available","properties":{}}},
             "components":{"api":{"bindings":{"consume":{"target":{"kind":"local-resource","resourceRef":"resource"},"configurationSlot":"main"}}}}}}}
-            """), new([new(Resource, "{}", "{}")], [], [], []))).Candidate.Declaration;
+            """u8)!;
+        if (separateRequests)
+        {
+            var component = declaration["manifest"]!["spec"]!["components"]!["api"]!;
+            component["documents"] = JsonNode.Parse("""{"settings":{"fileName":"appsettings.json","format":"json","template":{}}}"""u8);
+            var binding = component["bindings"]!["consume"]!.AsObject();
+            binding.Remove("configurationSlot");
+            binding["documentProjections"] = JsonNode.Parse("""[{"documentRef":"settings","path":"/value","rendererRef":"sample.delivery/v1"},{"documentRef":"settings","path":"/second","rendererRef":"sample.delivery/v1"}]"""u8);
+        }
+        var manifest = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Encoding.UTF8.GetBytes(declaration.ToJsonString()),
+            new([new(Resource, "{}", "{}")], [], [], [new(Renderer)]))).Candidate.Declaration;
         var profileNode = JsonNode.Parse("""
             {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"layout","revision":1},"spec":{
             "documents":{"settings":{"fileName":"appsettings.json","format":"json","template":{}}},
             "bindingRules":{"connection":{"slot":"main","rendererRef":"sample.delivery/v1","documentProjections":[{"documentRef":"settings","path":"/value"}]}}}}
             """u8)!;
         if (projections == 2) profileNode["spec"]!["bindingRules"]!["connection"]!["documentProjections"]!.AsArray().Add(new JsonObject { ["documentRef"] = "settings", ["path"] = "/second" });
+        if (separateRequests) profileNode["spec"]!["documents"]!.AsObject().Remove("settings");
         var profile = Haby.Tests.ProfilePersistenceSamples.Parse(profileNode);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
         var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((t, i) => new ConfigurationPlanningScope(t, i == 0 ? AssignmentToken.New() : null, new(t, i == 0 ? [new ProfileDecision.Use(profile.Reference)] : [])));
@@ -124,9 +135,10 @@ public sealed class ConfigurationDeliveryTests
         var environment = EnvironmentRecordId.New();
         var target = new ConfigurationDocumentTarget(ApplicationDeploymentId.New(), DeploymentGeneration.Create(1), ManifestLocalId.Create("api"), ManifestLocalId.Create("settings"));
         var composed = (await new ComposeConfigurationDocument(catalog, formatters, new Evidence(adapter)).ExecuteAsync(frozen, target, environment, default))!;
+        var attempt = Guid.CreateVersion7();
         var associations = ConfigurationDocumentCodec.EncodeBounded(w =>
         {
-            w.WriteStartArray(); foreach (var output in composed.Outputs) { w.WriteStartArray(); w.WriteStringValue(output.Pin.Producer.Value); w.WriteStringValue(Guid.CreateVersion7().ToString()); w.WriteStringValue(output.Output.Contract); w.WriteStringValue(output.Output.Key); w.WriteStringValue(output.Output.Payload); w.WriteEndArray(); }
+            w.WriteStartArray(); foreach (var output in composed.Outputs) { w.WriteStartArray(); w.WriteStringValue(output.Pin.Producer.Value); w.WriteStringValue(attempt.ToString()); w.WriteStringValue(output.Output.Contract); w.WriteStringValue(output.Output.Key); w.WriteStringValue(output.Output.Payload); w.WriteEndArray(); }
             w.WriteEndArray();
         });
         var revision = new ConfigurationDocumentRevision(new(ConfigurationDocumentRevisionId.New(), target, EnvironmentId.Create("pilot"), manifest.ApplicationId, reference, DeploymentPlanId.New(),
@@ -134,6 +146,48 @@ public sealed class ConfigurationDeliveryTests
         var store = new Store { Artifact = new(revision, environment), Grant = new(Guid.CreateVersion7(), revision.Metadata, "tester", DateTimeOffset.UnixEpoch, null, null, null) };
         // Delivery has no renderer registration at all, proving that it cannot rerender.
         return new(store, adapter, new([new Definition()], [], formatters, [adapter]));
+    }
+
+    [Fact]
+    public async Task Repeated_output_occurrences_from_separate_render_requests_deliver_with_one_scoped_material_read()
+    {
+        var h = await Prepare(separateRequests: true);
+        using var associations = JsonDocument.Parse(h.Store.Artifact.Revision.OutputAssociations);
+        Assert.Equal(2, associations.RootElement.GetArrayLength());
+        Assert.True(associations.RootElement[0].GetRawText() == associations.RootElement[1].GetRawText());
+        var before = ConfigurationDocumentCodec.Encode(h.Store.Artifact.Revision);
+        using var result = await h.Run();
+        Assert.Equal(ConfigurationDeliveryStatus.Delivered, result.Status);
+        Assert.Equal(1, h.Store.Resolutions); Assert.Equal(2, h.Adapter.Calls);
+        using var json = JsonDocument.Parse(result.Json);
+        Assert.True(json.RootElement.GetProperty("value"u8).GetString() == json.RootElement.GetProperty("second"u8).GetString());
+        Assert.True(before == ConfigurationDocumentCodec.Encode(h.Store.Artifact.Revision));
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("extra")]
+    [InlineData("attempt")]
+    [InlineData("payload")]
+    [InlineData("key")]
+    [InlineData("producer")]
+    public async Task Repeated_request_evidence_requires_exact_multiplicity_and_attempt_output_agreement_before_material(string mode)
+    {
+        var h = await Prepare(separateRequests: true);
+        var revision = h.Store.Artifact.Revision;
+        var associations = JsonNode.Parse(revision.OutputAssociations)!.AsArray();
+        switch (mode)
+        {
+            case "missing": associations.RemoveAt(1); break;
+            case "extra": associations.Add(associations[0]!.DeepClone()); break;
+            case "attempt": associations[1]![1] = Guid.CreateVersion7().ToString(); break;
+            case "payload": associations[1]![4] = "conflicting-output"; break;
+            case "key": associations[1]![3] = "foreign-key"; break;
+            case "producer": associations[1]![0] = "foreign-producer"; break;
+        }
+        h.Store.Artifact = h.Store.Artifact with { Revision = revision with { OutputAssociations = associations.ToJsonString() } };
+        using var result = await h.Run(); Assert.Equal(ConfigurationDeliveryStatus.InputUnavailable, result.Status); Assert.True(result.Json.IsEmpty);
+        Assert.Equal(0, h.Store.Resolutions); Assert.Equal(0, h.Adapter.Calls);
     }
 
     [Fact]

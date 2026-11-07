@@ -57,27 +57,34 @@ public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConf
             if (associations.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
             var outputs = associations.RootElement.EnumerateArray().Select(a =>
             {
-                if (a.ValueKind != JsonValueKind.Array || a.GetArrayLength() != 5 || !Guid.TryParse(a[1].GetString(), out _)) throw new InvalidDataException();
-                return (Producer: a[0].GetString(), Output: new ExternalOperationOutput(a[2].GetString()!, a[3].GetString()!, a[4].GetString()!));
+                if (a.ValueKind != JsonValueKind.Array || a.GetArrayLength() != 5 || !Guid.TryParse(a[1].GetString(), out var attempt)) throw new InvalidDataException();
+                return (Producer: a[0].GetString(), Attempt: attempt, Output: new ExternalOperationOutput(a[2].GetString()!, a[3].GetString()!, a[4].GetString()!));
             }).ToArray();
             var authorized = new Dictionary<string, (ConfigurationRenderPin Pin, ConfigurationDeferredValue Value, SecretDefinition Definition, SecretRef Reference, IConfigurationResolutionBinding Adapter)>(StringComparer.Ordinal);
-            var consumed = new HashSet<int>();
+            var nextOutput = 0;
+            var confirmed = new Dictionary<(string Producer, string Contract, string Key), (Guid Attempt, ExternalOperationOutput Output)>();
             for (var i = 0; i < layout.BindingRequests.Count; i++)
             {
                 var request = layout.BindingRequests[i];
                 var projections = request.Projections.Where(x => x.Document == revision.Metadata.Target.Document).ToArray();
                 if (projections.Length == 0) continue;
                 var pin = frozen.RenderPins.Single(x => x.Component == layout.Component && x.Request == i);
-                var matching = outputs.Select((x, index) => (x, index)).Where(x => x.x.Producer == pin.Producer.Value &&
-                    x.x.Output.Contract == pin.OutputContract && x.x.Output.Key == pin.OutputKey).ToArray();
-                if (matching.Length != 1) throw new InvalidDataException();
-                consumed.Add(matching[0].index);
+                // Composition saves one occurrence per participating request, in frozen
+                // request order. Reuse is valid only with the same confirmed evidence.
+                if (nextOutput >= outputs.Length) throw new InvalidDataException();
+                var output = outputs[nextOutput++];
+                if (output.Producer != pin.Producer.Value || output.Output.Contract != pin.OutputContract || output.Output.Key != pin.OutputKey)
+                    throw new InvalidDataException();
+                var key = (pin.Producer.Value, pin.OutputContract, pin.OutputKey);
+                if (confirmed.TryGetValue(key, out var prior) && (prior.Attempt != output.Attempt || prior.Output != output.Output))
+                    throw new InvalidDataException();
+                confirmed[key] = (output.Attempt, output.Output);
                 var adapters = bindings.Where(x => x.Formatter == pin.Formatter && x.Implementation == pin.FormatterImplementation).ToArray();
                 if (adapters.Length != 1 || !rendering.SupportsDeliveryFormatter(pin)) throw new InvalidDataException();
                 foreach (var projection in projections)
                 {
                     if (At(revision.Tree, projection.Path) is not ConfigurationDeferredValue deferred) throw new InvalidDataException();
-                    var bound = adapters[0].Bind(pin, matching[0].x.Output, deferred) ?? throw new InvalidDataException();
+                    var bound = adapters[0].Bind(pin, output.Output, deferred) ?? throw new InvalidDataException();
                     if (bound.Purpose != SecretPurpose.ApplicationLogin) throw new InvalidDataException();
                     var references = References(deferred.Arguments).ToArray();
                     if (references.Length != 1 || references[0] != bound.Reference) throw new InvalidDataException();
@@ -85,7 +92,7 @@ public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConf
                         revision.Metadata.Revision.ApplicationRecordId, pin.ResourceLocalId)), bound.Purpose), bound.Reference, adapters[0]));
                 }
             }
-            if (consumed.Count != outputs.Length) throw new InvalidDataException();
+            if (nextOutput != outputs.Length) throw new InvalidDataException();
             // Validate every confidential node before resolving even the first SecretRef.
             Validate(revision.Tree, "");
             long expansionBudget = ConfigurationDocumentCodec.MaxBytes;
