@@ -11,7 +11,8 @@ public sealed partial class ManifestOperatorService(ManifestContractCatalog cata
     IDurableDeploymentPlanner planner, DescribeDurablePlan descriptions, IEnvironmentQuery environments, IDurableDesiredStateCommitter committer,
     IDurableOperationExecutor executor, DurableGenerationRunner generationRunner, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
     ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess,
-    ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions) : ManifestOperator.ManifestOperatorBase
+    ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions,
+    IConfigurationDocumentStore configurationDocuments) : ManifestOperator.ManifestOperatorBase
 {
     public override Task<ValidateReply> Validate(EnvelopeRequest request, ServerCallContext context)
     {

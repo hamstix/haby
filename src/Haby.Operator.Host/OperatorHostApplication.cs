@@ -66,7 +66,7 @@ public static class OperatorHostApplication
             listen.Protocols = HttpProtocols.Http2;
             if (tlsEnabled) listen.UseHttps(certificate!);
         }));
-        builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = MaxReceiveBytes);
+        builder.Services.AddGrpc(options => { options.MaxReceiveMessageSize = MaxReceiveBytes; options.MaxSendMessageSize = 8 * 1024 * 1024; });
         builder.Services.AddGrpcReflection();
         builder.Services.AddSingleton(PostgreSqlConnectionRendering.CreateCatalog());
         builder.Services.AddSingleton(PostgreSqlConnectionRendering.FormatterCatalog());
@@ -74,6 +74,8 @@ public static class OperatorHostApplication
             [new(OutputContractId.Create(PostgreSqlApplicationConnectionContract.Contract), PostgreSqlConsumerOptions.Schema)],
             [new(PostgreSqlConnectionRendering.Renderer)]));
         builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<ComposeConfigurationDocument>();
+        builder.Services.AddSingleton<IConfigurationDocumentStore, PostgreSqlConfigurationDocumentStore>();
         builder.Services.AddSingleton<ImportApplicationManifest>();
         builder.Services.AddSingleton<ImportConfigurationProfile>();
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();

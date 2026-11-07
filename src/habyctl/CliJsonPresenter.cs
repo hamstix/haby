@@ -34,6 +34,7 @@ internal sealed record CliCurrentContextData([property: JsonIgnore(Condition = J
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, WriteIndented = false)]
 [JsonSerializable(typeof(CliEnvelope<CliProfileData>))]
+[JsonSerializable(typeof(CliEnvelope<CliConfigurationDocumentData>))]
 [JsonSerializable(typeof(CliEnvelope<CliAssignmentData>))]
 [JsonSerializable(typeof(CliEnvelope<CliProviderAccessData>))]
 [JsonSerializable(typeof(CliEnvelope<CliProviderData>))]

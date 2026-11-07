@@ -73,7 +73,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         await new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection).ExecuteNonQueryAsync();
         return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name, Pooling = false }.ConnectionString;
     }
-    private async Task<Scenario> Prepare(bool full = false, bool render = false)
+    private async Task<Scenario> Prepare(bool full = false, bool render = false, string? renderingProfile = null)
     {
         var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("login_catalog_")));
         var name = "login_target_" + Guid.NewGuid().ToString("N");
@@ -100,7 +100,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
                 envelope["manifest"]!["spec"]!["components"]![component]!["bindings"]!["storage"]!["configurationSlot"] = "main-database";
             envelope["manifest"]!["spec"]!["components"]!["api"]!["bindings"]!["storage"]!["options"] = System.Text.Json.Nodes.JsonNode.Parse("{\"timeout\":200}"u8);
             var profile = Assert.IsType<ImportConfigurationProfileResult.Succeeded>(await new ImportConfigurationProfile(
-                services.GetRequiredService<IConfigurationProfileImportStore>(), TimeProvider.System).ExecuteAsync(Encoding.UTF8.GetBytes(RenderingProfile), "tester"));
+                services.GetRequiredService<IConfigurationProfileImportStore>(), TimeProvider.System).ExecuteAsync(Encoding.UTF8.GetBytes(renderingProfile ?? RenderingProfile), "tester"));
             var environmentMetadata = (await services.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("pilot"), default))!;
             var targetScope = new ProfileAssignmentTarget.Environment();
             Assert.Equal(AssignmentOutcome.Created, (await services.GetRequiredService<IProfileAssignmentStore>().ApplyAsync(environmentMetadata,

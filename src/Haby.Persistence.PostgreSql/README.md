@@ -1,5 +1,11 @@
 # PostgreSQL manifest catalog
 
+The current catalog also stores immutable unresolved ConfigurationDocumentRevisions.
+See [materialization and preview](../../docs/development/146-configuration-materialization-preview.md)
+for the additive current-catalog migration, exact target uniqueness, bounded generic
+codec, concurrent acceptance and renderer-free restart/restore reads. The store
+does not resolve material or deliver configuration.
+
 The catalog also stores installation-scoped immutable Configuration Profile
 revisions through `IConfigurationProfileImportStore` and
 `IConfigurationProfileRevisionQuery`. See the [Profile persistence contract](../../docs/development/132-profile-revision-persistence.md)

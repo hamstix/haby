@@ -1,7 +1,9 @@
 # PostgreSQL connection rendering primitives
 
 Issue #144 implements ADR-040's pure renderer/formatter and planning readiness.
-It does not expose rendered configuration through the operator API.
+It does not itself expose rendered configuration through the operator API.
+The subsequent [materialization slice](146-configuration-materialization-preview.md)
+adds immutable unresolved documents and stored redacted operator preview.
 
 ## Declare the consumers
 

@@ -38,6 +38,10 @@ public sealed class CliCommandTests
 
     private sealed class FakeClient : IRegistryClient
     {
+        public Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ConfigurationDocumentReply> GetConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ConfigurationDocumentReply> PreviewConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken token) => throw new NotSupportedException();
+
         public Task<ProfileReply> ValidateProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProfileReply> ImportProfileAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProfileAssignmentReply> ValidateProfileAssignmentAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();

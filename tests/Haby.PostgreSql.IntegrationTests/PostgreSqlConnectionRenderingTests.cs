@@ -28,7 +28,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var scenario = await Prepare(full: true, render: true);
         await using (var arrange = Context(scenario.Connection))
             await arrange.Database.ExecuteSqlRawAsync("""
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%PinConfigurationRendering';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%PinConfigurationRendering' OR "MigrationId" LIKE '%MaterializeConfigurationDocuments';
                 """);
         await using (var services = OwnerServices(scenario))
         {

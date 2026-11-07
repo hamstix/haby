@@ -4,6 +4,9 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc MaterializeConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
+  rpc GetConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
+  rpc PreviewConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
   rpc ValidateProfileAssignment(ProfilePayloadRequest) returns (ProfileAssignmentReply);
   rpc ApplyProfileAssignment(ApplyProfileAssignmentRequest) returns (ProfileAssignmentReply);
   rpc GetProfileAssignment(GetProfileAssignmentRequest) returns (ProfileAssignmentReply);
@@ -695,4 +698,56 @@ message ProfileAssignmentReply {
   repeated ProfileDiagnostic diagnostics = 4;
   int32 error_count = 5;
   bool diagnostics_truncated = 6;
+}
+
+// Name selection is resolved once by the server. No secret or unresolved tree is exposed.
+message ConfigurationDocumentRequest {
+  string environment = 1;
+  string application_id = 2;
+  string component_id = 3;
+  string document_id = 4;
+  optional int64 generation = 5;
+}
+enum ConfigurationDocumentStatus {
+  CONFIGURATION_DOCUMENT_STATUS_UNSPECIFIED = 0;
+  CONFIGURATION_DOCUMENT_STATUS_CREATED = 1;
+  CONFIGURATION_DOCUMENT_STATUS_EXISTING = 2;
+  CONFIGURATION_DOCUMENT_STATUS_FOUND = 3;
+  CONFIGURATION_DOCUMENT_STATUS_NOT_FOUND = 4;
+  CONFIGURATION_DOCUMENT_STATUS_INVALID_REQUEST = 5;
+  CONFIGURATION_DOCUMENT_STATUS_NOT_APPLIED = 6;
+  CONFIGURATION_DOCUMENT_STATUS_INPUT_UNAVAILABLE = 7;
+  CONFIGURATION_DOCUMENT_STATUS_INTEGRITY_CONFLICT = 8;
+  CONFIGURATION_DOCUMENT_STATUS_LIMIT_EXCEEDED = 9;
+  CONFIGURATION_DOCUMENT_STATUS_STORAGE_UNAVAILABLE = 10;
+  CONFIGURATION_DOCUMENT_STATUS_INPUT_CORRUPT = 11;
+}
+message ConfigurationDocumentIdentity {
+  string deployment_id = 1;
+  int64 generation = 2;
+  string component_id = 3;
+  string document_id = 4;
+}
+message ConfigurationDocumentMetadata {
+  string revision_id = 1;
+  ConfigurationDocumentIdentity target = 2;
+  string environment = 3;
+  string application_id = 4;
+  RevisionReference source_revision = 5;
+  string plan_id = 6;
+  string file_name = 7;
+  string format = 8;
+  string serializer = 9;
+  string fingerprint = 10;
+  string frozen_input_fingerprint = 11;
+  string technical_actor_id = 12;
+  string created_at_utc = 13;
+}
+message ConfigurationDocumentReply {
+  ConfigurationDocumentStatus status = 1;
+  ConfigurationDocumentRequest selector = 2;
+  ConfigurationDocumentIdentity target = 3;
+  ConfigurationDocumentMetadata artifact = 4;
+  // Bounded object-valued {document, redactedPaths}; only for successful preview.
+  bytes preview_json = 5;
 }
