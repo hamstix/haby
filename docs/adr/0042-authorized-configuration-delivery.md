@@ -10,6 +10,16 @@
 ### One request, one exact document revision
 
 Add a separate generated ConfigurationDelivery service/RPC on the existing Host.
+Its independent contract lives in src/Haby.Configuration.Contracts with
+configuration_delivery.proto, protobuf package haby.configuration.v1alpha1 and
+C# namespace Haby.Configuration.Contracts. It does not import operator.proto or
+reference Haby.Operator.Contracts, Host, persistence, Domain or Application.
+Runtime consumers reference only the delivery contracts and their gRPC runtime.
+Use a dedicated service implementation, not a new method on ManifestOperator or
+its partial implementation. The Host explicitly composes/maps both services.
+Access-grant administration stays in the operator contract. Shared hosting/address
+is a deployment choice, not shared service/message identity or authorization.
+This slice requires no public NuGet SDK packaging or package publication.
 One call authenticates a static bearer credential, authorizes its exact document
 revision and returns fully prepared JSON. No login/exchange request is required.
 Operator configuration get/preview keep their existing safe behavior and never
