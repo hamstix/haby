@@ -88,6 +88,7 @@ public sealed class PostgreSqlProviderRevisionPreflightTests
     private sealed class InterruptingSecretStore(Exception? error = null) : ISecretStore
     {
         public bool ResolveCalled { get; private set; }
+        public ValueTask<SecretMaterial?> ResolveBoundedAsync(SecretDefinition definition, SecretRef reference, int maximumBytes, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id,
             CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask CreateAsync(SecretDefinition definition, SecretRef reference, byte[] material,

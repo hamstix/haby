@@ -114,6 +114,31 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
         return await ResolveAsync(context, definition, reference, cancellationToken);
     }
 
+    public async ValueTask<SecretMaterial?> ResolveBoundedAsync(SecretDefinition definition, SecretRef reference, int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        try { return await ResolveDeliveryAsync(definition, reference, maximumBytes, cancellationToken); }
+        catch (System.Data.Common.DbException) { throw new ConfigurationDeliveryStorageException(); }
+    }
+
+    private async ValueTask<SecretMaterial?> ResolveDeliveryAsync(SecretDefinition definition, SecretRef reference, int maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        if (!definition.IsSupported || maximumBytes < 1) throw new ArgumentException("Invalid scoped secret request.");
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        var secretId = Guid.Parse(reference.SecretId.ToString());
+        var versionId = Guid.Parse(reference.SecretVersionId.ToString());
+        var metadata = await (from secret in context.Secrets.AsNoTracking()
+                              join version in context.SecretVersions on secret.Id equals version.SecretId
+                              join payload in context.SecretPayloads on version.Id equals payload.SecretVersionId
+                              where secret.Id == secretId && version.Id == versionId
+                              select new { Secret = secret, Length = payload.Bytes.Length, version.ProtectionFormat, version.FormatVersion }).SingleOrDefaultAsync(cancellationToken);
+        if (metadata is null || !SecretRowMapping.Matches(definition, metadata.Secret)) return null;
+        if (metadata.Length > maximumBytes) throw new ConfigurationDocumentLimitException();
+        PlaintextProtectionFormat.ValidateForRead(metadata.ProtectionFormat, metadata.FormatVersion);
+        return await ResolveAsync(context, definition, reference, cancellationToken);
+    }
+
     // Administrative acceptance already owns a transaction and its connection. Reuse it for the
     // exact-version read so retries also work with a one-connection pool and retain one boundary.
     internal async ValueTask<SecretMaterial?> ResolveAsync(ManifestCatalogDbContext context,

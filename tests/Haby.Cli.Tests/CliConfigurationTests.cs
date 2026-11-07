@@ -46,6 +46,9 @@ public sealed class CliConfigurationTests
 
     private sealed class Client : IRegistryClient
     {
+        public Task<ConfigurationAccessReply> CreateConfigurationAccessAsync(CreateConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ConfigurationAccessReply> GetConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ConfigurationAccessReply> RevokeConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<ConfigurationDocumentReply> GetConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<ConfigurationDocumentReply> PreviewConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken token) => throw new NotSupportedException();

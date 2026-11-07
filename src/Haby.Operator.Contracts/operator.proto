@@ -4,6 +4,9 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc CreateConfigurationAccess(CreateConfigurationAccessRequest) returns (ConfigurationAccessReply);
+  rpc GetConfigurationAccess(ConfigurationAccessRequest) returns (ConfigurationAccessReply);
+  rpc RevokeConfigurationAccess(ConfigurationAccessRequest) returns (ConfigurationAccessReply);
   rpc MaterializeConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
   rpc GetConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
   rpc PreviewConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
@@ -46,6 +49,34 @@ service ManifestOperator {
   rpc GetOperation(OperationRequest) returns (OperationReply);
   rpc InspectOperationRecovery(OperationRequest) returns (RecoveryReply);
   rpc AssignExistingOperation(AssignExistingOperationRequest) returns (RecoveryReply);
+}
+
+// Trusted operator access administration; runtime delivery has an independent contract.
+message CreateConfigurationAccessRequest { ConfigurationDocumentRequest selector = 1; optional string expires_at_utc = 2; }
+message ConfigurationAccessRequest { string grant_id = 1; }
+enum ConfigurationAccessStatus {
+  CONFIGURATION_ACCESS_STATUS_UNSPECIFIED = 0;
+  CONFIGURATION_ACCESS_STATUS_CREATED = 1;
+  CONFIGURATION_ACCESS_STATUS_FOUND = 2;
+  CONFIGURATION_ACCESS_STATUS_REVOKED = 3;
+  CONFIGURATION_ACCESS_STATUS_NOT_FOUND = 4;
+  CONFIGURATION_ACCESS_STATUS_INVALID_REQUEST = 5;
+  CONFIGURATION_ACCESS_STATUS_STORAGE_UNAVAILABLE = 6;
+}
+message ConfigurationAccessMetadata {
+  string grant_id = 1;
+  ConfigurationDocumentMetadata document = 2;
+  string actor = 3;
+  string created_at_utc = 4;
+  optional string expires_at_utc = 5;
+  optional string revoked_by = 6;
+  optional string revoked_at_utc = 7;
+}
+// Credential is present only on successful one-time creation. Never log this message.
+message ConfigurationAccessReply {
+  ConfigurationAccessStatus status = 1;
+  ConfigurationAccessMetadata grant = 2;
+  optional string credential = 3;
 }
 
 message ApplyProviderRequest {

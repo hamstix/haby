@@ -8,6 +8,7 @@ internal static class ConfigurationCommands
     internal static Command Create(CliCommandContext context)
     {
         var group = new Command("configuration", "Materialize unresolved documents and inspect saved redacted artifacts.");
+        group.Subcommands.Add(ConfigurationAccessCommands.Create(context));
         group.SetAction(_ => context.MissingSubcommand());
         foreach (var name in new[] { "materialize", "get", "preview" })
         {

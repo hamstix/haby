@@ -117,9 +117,10 @@ The full unfiltered measured gate, existing restore/race/provisioning cases and
 required Linux/Windows Native AOT jobs remain mandatory. Actual run results belong
 in the PR handoff, separately from these test descriptions.
 
-There is no production material resolver, reveal/delivery endpoint, materialized
-ConfigurationDocumentRevision store or rendered-preview command. Authorization,
-document selection and confidential transport remain separate accepted slices.
+Issue #144 itself introduced no production resolver or delivery endpoint. The
+subsequent [materialization slice](146-configuration-materialization-preview.md)
+adds saved unresolved revisions and preview, and [authorized delivery](148-authorized-configuration-delivery.md)
+adds exact scoped grants and transient runtime resolution in a closed pilot.
 Direct Profile secret projections, Liquid/parameters/YAML execution, certificate
 distribution, rotation/recovery, generation updates and multi-Application admission
 are also deferred.

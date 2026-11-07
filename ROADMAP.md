@@ -78,7 +78,9 @@ with its generated credentials, without manual assembly of connection settings.
 Evidence: [issue #124](https://github.com/hamstix/haby/issues/124),
 merged [PR #125](https://github.com/hamstix/haby/pull/125) and the
 [composition contract](docs/architecture/configuration-composition-v1.md).
-Stored operator preview is delivered by issue #146 below; confidential delivery remains pending.
+Stored operator preview is delivered by issue #146 below; scoped confidential
+delivery is available in the closed pilot through issue #148. Operator-admin
+authentication remains the immediate next slice.
 
 ### Next slices
 
@@ -96,7 +98,7 @@ Stored operator preview is delivered by issue #146 below; confidential delivery 
 - [x] Implement atomic/idempotent unresolved ConfigurationDocumentRevisions, exact output provenance and strict bounded codecs; no secret material or completed connection strings: [issue #146](docs/development/146-configuration-materialization-preview.md).
 - [x] Expose name-based configuration materialize/get/preview through the operator Host and habyctl, resolving current fully applied desired generation once and supporting explicit-generation automation: [operator runbook](docs/development/146-configuration-materialization-preview.md).
 - [x] Accept exact-document static delivery grants (non-expiring unless explicitly limited), one shared configurable Host endpoint and transient bounded secret resolution/formatting under [ADR-042](docs/adr/0042-authorized-configuration-delivery.md).
-- [ ] Implement authorized exact-revision delivery, access grant administration and the real client connection rehearsal; ordinary operator get/preview stay redacted/metadata-only.
+- [x] Implement authorized exact-revision delivery, access grant administration and the real client connection rehearsal; ordinary operator get/preview stay redacted/metadata-only: [pilot boundary and runbook](docs/development/148-authorized-configuration-delivery.md).
 - [ ] Immediately follow delivery with static operator-admin tokens and selected registry/context credentials in habyctl, before broader real use; agree initial issuance/transition first, without OAuth or complex RBAC.
 - [ ] Run the full operator-to-application rehearsal: bootstrap -> provisioning -> configuration -> client authentication and application use.
 

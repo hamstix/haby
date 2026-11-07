@@ -5,6 +5,9 @@ An operator can materialize one document, inspect its metadata and read its stor
 redacted preview. This does not deliver application-ready configuration: the
 connection-string value remains a typed confidential DeferredValue containing an
 exact SecretRef. No secret material is read and no formatter is invoked.
+The separate [authorized delivery path](148-authorized-configuration-delivery.md)
+uses scoped credentials and transient resolution; operator get/preview keep the
+same safe boundaries.
 
 ## Prepare the generation
 

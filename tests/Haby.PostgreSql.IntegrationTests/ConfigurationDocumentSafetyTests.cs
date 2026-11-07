@@ -64,13 +64,14 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var scenario = await Prepare(full: true, render: true);
         await using (var arrange = Context(scenario.Connection))
             await arrange.Database.ExecuteSqlRawAsync("""
+                DROP TABLE configuration_access_grants;
                 DROP TABLE configuration_document_revisions;
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess';
                 """);
         await using (var act = OwnerServices(scenario)) await act.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         await using var verify = Context(scenario.Connection);
         Assert.Equal(scenario.Plan.Inputs.Configuration, ConfigurationPlanningSnapshotCodec.Decode((await verify.DeploymentGenerations.AsNoTracking().SingleAsync()).ConfigurationJson, scenario.Plan.Inputs.Revision));
-        Assert.Equal(22, (await verify.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(23, (await verify.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
     }

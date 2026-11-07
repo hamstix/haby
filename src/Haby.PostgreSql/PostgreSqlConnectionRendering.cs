@@ -76,16 +76,42 @@ public sealed class PostgreSqlConnectionRenderer : IConfigurationRenderer
     {
         var connection = PostgreSqlApplicationConnectionContract.Decode(confirmedOutput);
         if (connection is null || PostgreSqlConsumerOptions.Parse(settings) is null) return null;
-        return new(new ConfigurationDeferredValue(PostgreSqlConnectionRendering.Formatter, new(new Dictionary<string, ConfigurationValue>
-        {
-            ["host"] = new ConfigurationString(connection.Host),
-            ["port"] = ConfigurationNumber.Parse(connection.Port.ToString(CultureInfo.InvariantCulture)),
-            ["database"] = new ConfigurationString(connection.DatabaseName),
-            ["schema"] = new ConfigurationString(connection.Schema),
-            ["username"] = new ConfigurationString(connection.UserName),
-            ["password"] = new ConfigurationSecretReference(connection.Password),
-            ["settings"] = settings
-        })));
+        return new(new ConfigurationDeferredValue(PostgreSqlConnectionRendering.Formatter, Arguments(connection, settings)));
+    }
+    internal static ConfigurationObject Arguments(PostgreSqlApplicationConnection connection, ConfigurationObject settings) => new(new Dictionary<string, ConfigurationValue>
+    {
+        ["host"] = new ConfigurationString(connection.Host),
+        ["port"] = ConfigurationNumber.Parse(connection.Port.ToString(CultureInfo.InvariantCulture)),
+        ["database"] = new ConfigurationString(connection.DatabaseName),
+        ["schema"] = new ConfigurationString(connection.Schema),
+        ["username"] = new ConfigurationString(connection.UserName),
+        ["password"] = new ConfigurationSecretReference(connection.Password),
+        ["settings"] = settings
+    });
+}
+
+/// <summary>Pure output-derived authority; no renderer, Provider lookup or material I/O.</summary>
+public sealed class PostgreSqlConnectionResolutionBinding : IConfigurationResolutionBinding
+{
+    public bool ValidateMaterial(ReadOnlySpan<char> material)
+    {
+        if (material.Length != 43) return false;
+        foreach (var c in material)
+            if (!(c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-')) return false;
+        return "AEIMQUYcgkosw048".Contains(material[^1], StringComparison.Ordinal);
+    }
+    public ConfigurationFormatterId Formatter => PostgreSqlConnectionRendering.Formatter;
+    public ManifestLocalId Implementation => PostgreSqlConnectionRendering.Implementation;
+    public SecretResolutionReference? Bind(ConfigurationRenderPin pin, ExternalOperationOutput output, ConfigurationDeferredValue value)
+    {
+        if (pin.Renderer != PostgreSqlConnectionRendering.Renderer || pin.RendererImplementation != Implementation ||
+            pin.Formatter != Formatter || pin.FormatterImplementation != Implementation || value.Formatter != Formatter ||
+            pin.Resource != PostgreSqlApplicationLoginContract.Id || pin.OutputContract != PostgreSqlApplicationConnectionContract.Contract ||
+            pin.OutputKey != PostgreSqlApplicationConnectionContract.Key || pin.Producer != OperationId.Create("app-login-access") ||
+            pin.ProducerAction != PostgreSqlApplicationAccessAction.RegistrationKey || !PostgreSqlConsumerOptions.Validate(pin.Options, true) ||
+            !PostgreSqlConnectionFormatter.Valid(value.Arguments) || PostgreSqlApplicationConnectionContract.Decode(output) is not { } connection ||
+            !value.Arguments.Equals(PostgreSqlConnectionRenderer.Arguments(connection, pin.Options))) return null;
+        return new(connection.Password, SecretPurpose.ApplicationLogin);
     }
 }
 

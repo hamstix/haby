@@ -8,6 +8,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
+using Grpc.Core;
+using Grpc.Net.Client;
+using Haby.Operator.Contracts;
+using Haby.Configuration.Contracts;
+using Haby.Operator.Host;
+using System.Text.Json;
+using ConfigurationDocumentStatus = Haby.Application.ConfigurationDocumentStatus;
+using ProfileAssignmentTarget = Haby.Domain.ProfileAssignmentTarget;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
@@ -25,7 +33,8 @@ public sealed partial class ExactActionAdmissionTests
     }
     private sealed record QueueFormatDefinition() : ConfigurationFormatterContract(QueueFormatter)
     {
-        public override bool ValidateArguments(ConfigurationObject arguments) => arguments.Members.Count == 1 && arguments.Members["receipt"] is ConfigurationString;
+        public override bool ValidateArguments(ConfigurationObject arguments) => arguments.Members.Count is 1 or 2 && arguments.Members["receipt"] is ConfigurationString &&
+            (arguments.Members.Count == 1 || arguments.Members.GetValueOrDefault("credential") is ConfigurationSecretReference);
     }
     private sealed class QueueDocumentRenderer : IConfigurationRenderer
     {
@@ -38,8 +47,10 @@ public sealed partial class ExactActionAdmissionTests
         {
             var count = Interlocked.Increment(ref Count);
             var output = QueueEvidenceContract.Decode(confirmedOutput) ?? throw new InvalidDataException();
-            return new(new ConfigurationDeferredValue(QueueFormatter, new(new Dictionary<string, ConfigurationValue>
-            { ["receipt"] = new ConfigurationString(output.Receipt + new string('a', Padding) + (Inconsistent ? count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "")) })));
+            var arguments = new Dictionary<string, ConfigurationValue>
+            { ["receipt"] = new ConfigurationString(output.Receipt + new string('a', Padding) + (Inconsistent ? count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "")) };
+            if (output.CredentialSecretId is { } secret) arguments.Add("credential", new ConfigurationSecretReference(new(SecretId.Parse(secret), SecretVersionId.Parse(output.CredentialVersionId!))));
+            return new(new ConfigurationDeferredValue(QueueFormatter, new(arguments)));
         }
     }
     private sealed class QueueNeverFormatter : IConfigurationFormatter
@@ -51,9 +62,10 @@ public sealed partial class ExactActionAdmissionTests
     private static ConfigurationFormatterCatalog QueueFormatting() => new([new QueueFormatDefinition()], [new(QueueImplementation, QueueFormatter)]);
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Configuration_document_second_typed_family_crosses_common_composer_store_and_detects_inconsistent_concurrent_content(bool inconsistent)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Configuration_document_second_typed_family_crosses_common_composer_store_and_detects_inconsistent_concurrent_content(bool inconsistent, bool delivery)
     {
         var database = "document_queue_" + Guid.NewGuid().ToString("N");
         await using (var admin = new NpgsqlConnection(fixture.ConnectionString))
@@ -89,6 +101,12 @@ public sealed partial class ExactActionAdmissionTests
                 """);
             var manifestCatalog = new ManifestContractCatalog([new ResourceTypeDefinition(QueueContract, "{\"type\":\"object\"}")], [], [], [new(QueueRenderer)]);
             var revision = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(services.GetRequiredService<IManifestImportStore>(), manifestCatalog, TimeProvider.System).ExecuteAsync(payload, "tester")).ManifestRevisionRef;
+            if (delivery)
+            {
+                var generated = await services.GetRequiredService<IGeneratedCredentialSlots>().GetOrCreateAsync(new(new(environment, revision.ApplicationRecordId, ManifestLocalId.Create("jobs")),
+                    GeneratedCredentialSlot.ApplicationPassword), GeneratedCredentialSlot.RandomPasswordV1, default);
+                Assert.Equal(GeneratedCredentialOutcome.Created, generated.Outcome); boundary.DeliveryCredential = generated.Reference!;
+            }
             var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
             var change = (await planner.CreateChangeSetAsync(environment, revision.ApplicationRecordId, revision, new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).ChangeSet!;
             var planned = await planner.CreatePlanAsync(change.Id, "tester", default);
@@ -130,8 +148,60 @@ public sealed partial class ExactActionAdmissionTests
             renderer.Padding = 0;
             Assert.Equal(ConfigurationDocumentStatus.Created, (await store.MaterializeAsync(target, "restored-test-artifact", default)).Status);
         }
-        await using var verify = OutputContext(connection);
-        Assert.Equal(1, await verify.ConfigurationDocuments.AsNoTracking().CountAsync()); Assert.Equal(1, await verify.OperationOutputs.AsNoTracking().CountAsync());
+        await using (var verify = OutputContext(connection))
+        { Assert.Equal(1, await verify.ConfigurationDocuments.AsNoTracking().CountAsync()); Assert.Equal(1, await verify.OperationOutputs.AsNoTracking().CountAsync()); }
+        if (delivery) await QueueAuthorizedDelivery(connection, renderer);
+    }
+
+    private sealed class QueueDeliveryFormatter : IConfigurationFormatter, IConfigurationResolutionBinding
+    {
+        public ConfigurationFormatterId Contract => QueueFormatter;
+        public ConfigurationFormatterId Formatter => QueueFormatter;
+        public ManifestLocalId Identity => QueueImplementation;
+        public ManifestLocalId Implementation => QueueImplementation;
+        public int Calls;
+        public bool ValidateMaterial(ReadOnlySpan<char> material) => material.Length > 0;
+        public SecretResolutionReference? Bind(ConfigurationRenderPin pin, ExternalOperationOutput output, ConfigurationDeferredValue value)
+        {
+            if (pin.Renderer != QueueRenderer || pin.RendererImplementation != QueueImplementation || pin.Formatter != QueueFormatter ||
+                pin.Producer != QueueEvidenceProducerId || pin.ProducerAction != Key || pin.Resource != QueueContract ||
+                value.Formatter != QueueFormatter || !new QueueFormatDefinition().ValidateArguments(value.Arguments) ||
+                QueueEvidenceContract.Decode(output) is not { CredentialSecretId: { } secret, CredentialVersionId: { } version } evidence ||
+                value.Arguments.Members["receipt"] is not ConfigurationString receipt || receipt.Value != evidence.Receipt ||
+                value.Arguments.Members.GetValueOrDefault("credential") is not ConfigurationSecretReference reference ||
+                reference.Reference != new SecretRef(SecretId.Parse(secret), SecretVersionId.Parse(version))) return null;
+            return new(reference.Reference, SecretPurpose.ApplicationLogin);
+        }
+        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
+        {
+            Calls++;
+            return new("queue://" + ((ConfigurationString)arguments.Members["receipt"]).Value + "/" + material.ToString());
+        }
+    }
+    private static async Task QueueAuthorizedDelivery(string connection, QueueDocumentRenderer renderer)
+    {
+        var formatter = new QueueDeliveryFormatter();
+        // No renderer at delivery time. Actual production grant/store/Host are reused.
+        var catalog = new ConfigurationRenderingCatalog([new QueueRenderDefinition()], [], QueueFormatting(), [formatter]);
+        var count = renderer.Count;
+        await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
+            s => s.AddSingleton(catalog).AddSingleton(QueueFormatting()).AddSingleton<IConfigurationResolutionBinding>(formatter));
+        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+        var admin = new ManifestOperator.ManifestOperatorClient(channel); var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+        var grant = await admin.CreateConfigurationAccessAsync(new() { Selector = new() { Environment = "pilot", ApplicationId = "queue-app", ComponentId = "worker", DocumentId = "settings" } });
+        Assert.Equal(ConfigurationAccessStatus.Created, grant.Status);
+        for (var i = 0; i < 2; i++)
+        {
+            var reply = await runtime.DeliverAsync(new() { RevisionId = grant.Grant.Document.RevisionId }, new Metadata { { "authorization", "Bearer " + grant.Credential } });
+            using var json = JsonDocument.Parse(reply.Json.Memory);
+            Assert.True(json.RootElement.GetProperty("Queues"u8).GetProperty("First"u8).GetString() == json.RootElement.GetProperty("Queues"u8).GetProperty("Second"u8).GetString());
+            Assert.True(json.RootElement.GetProperty("ordinary"u8).GetBoolean()); Assert.Equal(2 * (i + 1), formatter.Calls);
+        }
+        Assert.Equal(count, renderer.Count);
+        await admin.RevokeConfigurationAccessAsync(new() { GrantId = grant.Grant.GrantId });
+        var failure = await Assert.ThrowsAsync<RpcException>(async () => await runtime.DeliverAsync(new() { RevisionId = grant.Grant.Document.RevisionId }, new Metadata { { "authorization", "Bearer " + grant.Credential } }));
+        Assert.Equal(StatusCode.PermissionDenied, failure.StatusCode);
+        await host.StopAsync();
     }
     private sealed class QueueRenderBarrier(IConfigurationOutputEvidence inner) : IConfigurationOutputEvidence
     {

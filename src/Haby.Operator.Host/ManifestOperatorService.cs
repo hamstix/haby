@@ -12,7 +12,7 @@ public sealed partial class ManifestOperatorService(ManifestContractCatalog cata
     IDurableOperationExecutor executor, DurableGenerationRunner generationRunner, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
     ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess,
     ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions,
-    IConfigurationDocumentStore configurationDocuments) : ManifestOperator.ManifestOperatorBase
+    IConfigurationDocumentStore configurationDocuments, IConfigurationAccessStore configurationAccess) : ManifestOperator.ManifestOperatorBase
 {
     public override Task<ValidateReply> Validate(EnvelopeRequest request, ServerCallContext context)
     {
