@@ -156,6 +156,7 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
     public sealed record QueueCreateInput(string QueueName, int Units = 1);
     private sealed class QueueBoundary
     {
+        public SecretRef? DeliveryCredential;
         public bool Graph;
         public bool Generated;
         public bool ExternalEvidence;

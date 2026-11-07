@@ -306,6 +306,7 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
 
     private sealed class SlowSecretStore(string connectionString) : ISecretStore
     {
+        public ValueTask<SecretMaterial?> ResolveBoundedAsync(SecretDefinition definition, SecretRef reference, int maximumBytes, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id,
             CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask CreateAsync(SecretDefinition definition, SecretRef reference, byte[] material,

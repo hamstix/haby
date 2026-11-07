@@ -73,7 +73,8 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         await new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection).ExecuteNonQueryAsync();
         return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name, Pooling = false }.ConnectionString;
     }
-    private async Task<Scenario> Prepare(bool full = false, bool render = false, string? renderingProfile = null)
+    private async Task<Scenario> Prepare(bool full = false, bool render = false, string? renderingProfile = null,
+        Action<System.Text.Json.Nodes.JsonNode>? configureManifest = null)
     {
         var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("login_catalog_")));
         var name = "login_target_" + Guid.NewGuid().ToString("N");
@@ -107,8 +108,13 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
                 new(targetScope, [new ProfileDecision.Use(profile.Revision.Reference)]), new AssignmentPrecondition.ExpectedAbsence(),
                 new("tester", DateTimeOffset.UtcNow, null), default)).Outcome);
         }
+        configureManifest?.Invoke(envelope);
+        var importCatalog = render ? new ManifestContractCatalog(
+            [PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [],
+            [new(OutputContractId.Create(PostgreSqlApplicationConnectionContract.Contract), PostgreSqlConsumerOptions.Schema)],
+            [new(PostgreSqlConnectionRendering.Renderer)]) : PostgreSqlPairPlanningTests.Catalog;
         var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(
-            services.GetRequiredService<IManifestImportStore>(), PostgreSqlPairPlanningTests.Catalog, TimeProvider.System)
+            services.GetRequiredService<IManifestImportStore>(), importCatalog, TimeProvider.System)
             .ExecuteAsync(PostgreSqlPairPlanningTests.Bytes(envelope), "tester"));
         var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
         var change = (await planner.CreateChangeSetAsync(environment, imported.ManifestRevisionRef.ApplicationRecordId,

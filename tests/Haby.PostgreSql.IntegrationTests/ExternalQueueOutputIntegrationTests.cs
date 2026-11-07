@@ -16,7 +16,7 @@ public sealed partial class ExactActionAdmissionTests
     private static readonly OperationId QueueEvidenceConsumerId = OperationId.Create("20-subscribe");
     private static readonly DurableActionExecutionKey QueueSubscribeKey = new(Key.Admission, OperationContractId.Create("sample.queue.subscribe/v1"));
     private static OperationOutputRef QueueEvidenceSelector => new(QueueEvidenceProducerId, QueueEvidenceContract.Contract, "receipt");
-    public sealed record QueueEvidence(string QueueName, string BrokerTarget, string Receipt);
+    public sealed record QueueEvidence(string QueueName, string BrokerTarget, string Receipt, string? CredentialSecretId = null, string? CredentialVersionId = null);
     public sealed record QueueSubscribeInput(string QueueName);
 
     private sealed class QueueEvidenceContract(IProviderConfigurationStore configurations, QueueBoundary boundary) : IExternalOperationOutputContract
@@ -41,7 +41,9 @@ public sealed partial class ExactActionAdmissionTests
                 accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken);
             return !boundary.RejectAcceptedOutput && Validate(accepted.Node, output) &&
                 accepted.Spec.Resources[accepted.Node.ResourceId].Type == QueueContract &&
-                Decode(output)?.BrokerTarget == configuration?.Configuration.Target;
+                Decode(output)?.BrokerTarget == configuration?.Configuration.Target &&
+                Decode(output)?.CredentialSecretId == boundary.DeliveryCredential?.SecretId.ToString() &&
+                Decode(output)?.CredentialVersionId == boundary.DeliveryCredential?.SecretVersionId.ToString();
         }
     }
 
@@ -89,7 +91,8 @@ public sealed partial class ExactActionAdmissionTests
             if (boundary.OutputContractRegistrations == 1)
                 Assert.False(await journal.TryRecordSuccessAsync(operation.Key, started.AttemptId, DateTimeOffset.UtcNow, token));
             boundary.Create(input);
-            var evidence = new QueueEvidence(input.QueueName, config.Target, "accepted-" + boundary.Calls);
+            var evidence = new QueueEvidence(input.QueueName, config.Target, "accepted-" + boundary.Calls,
+                boundary.DeliveryCredential?.SecretId.ToString(), boundary.DeliveryCredential?.SecretVersionId.ToString());
             boundary.Effects.Add("create:" + evidence.Receipt);
             var completed = false;
             try { completed = await outputs.CompleteAsync(operation.Key, started.AttemptId, QueueEvidenceContract.Encode(evidence), DateTimeOffset.UtcNow, token); }
@@ -115,7 +118,7 @@ public sealed partial class ExactActionAdmissionTests
             catch (InvalidOperationException) { output = null; }
             if (output is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var evidence = QueueEvidenceContract.Decode(output);
-            Assert.Equal(new QueueEvidence("jobs", "queue-broker", "accepted-1"), evidence);
+            Assert.Equal(new QueueEvidence("jobs", "queue-broker", "accepted-1", boundary.DeliveryCredential?.SecretId.ToString(), boundary.DeliveryCredential?.SecretVersionId.ToString()), evidence);
             var started = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(operation.Key, DateTimeOffset.UtcNow, token));
             Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(operation.Key, started.AttemptId, DateTimeOffset.UtcNow, token));
             boundary.Effects.Add("subscribe:" + evidence!.Receipt);

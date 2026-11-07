@@ -3,6 +3,7 @@
     <PackageReference Include="Grpc.AspNetCore.Server" />
     <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
     <ProjectReference Include="..\Haby.Operator.Contracts\Haby.Operator.Contracts.csproj" />
+    <ProjectReference Include="..\Haby.Configuration.Contracts\Haby.Configuration.Contracts.csproj" />
     <ProjectReference Include="..\Haby.Persistence.PostgreSql\Haby.Persistence.PostgreSql.csproj" />
     <ProjectReference Include="..\Haby.PostgreSql\Haby.PostgreSql.csproj" />
     <InternalsVisibleTo Include="Haby.PostgreSql.IntegrationTests" />

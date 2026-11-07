@@ -139,7 +139,7 @@ public static class ConfigurationDocumentCodec
 
 public sealed class ConfigurationDocumentLimitException() : IOException("Configuration document exceeds the supported limits.");
 
-internal sealed class ConfigurationBoundedStream(int limit) : MemoryStream
+internal sealed class ConfigurationBoundedStream(int limit, bool reserve = false) : MemoryStream(reserve ? limit : 0)
 {
     public override void Write(byte[] buffer, int offset, int count)
     {
@@ -150,6 +150,7 @@ internal sealed class ConfigurationBoundedStream(int limit) : MemoryStream
     {
         if (Length + buffer.Length > limit) throw new ConfigurationDocumentLimitException();
         var bytes = buffer.ToArray();
-        base.Write(bytes, 0, bytes.Length);
+        try { base.Write(bytes, 0, bytes.Length); }
+        finally { Array.Clear(bytes); }
     }
 }

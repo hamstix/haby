@@ -17,6 +17,9 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ConfigurationAccessReply> CreateConfigurationAccessAsync(CreateConfigurationAccessRequest request, CancellationToken cancellationToken);
+    Task<ConfigurationAccessReply> GetConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken);
+    Task<ConfigurationAccessReply> RevokeConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken);
     Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
     Task<ConfigurationDocumentReply> GetConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
     Task<ConfigurationDocumentReply> PreviewConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
@@ -82,6 +85,12 @@ internal sealed class GrpcRegistryClientFactory : IRegistryClientFactory
 
 internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? configurationChannel = null) : IRegistryClient
 {
+    public async Task<ConfigurationAccessReply> CreateConfigurationAccessAsync(CreateConfigurationAccessRequest request, CancellationToken cancellationToken) =>
+        await _client.CreateConfigurationAccessAsync(request, cancellationToken: cancellationToken);
+    public async Task<ConfigurationAccessReply> GetConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) =>
+        await _client.GetConfigurationAccessAsync(request, cancellationToken: cancellationToken);
+    public async Task<ConfigurationAccessReply> RevokeConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) =>
+        await _client.RevokeConfigurationAccessAsync(request, cancellationToken: cancellationToken);
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
     private readonly ManifestOperator.ManifestOperatorClient _configurationClient = new(configurationChannel ?? channel);
     public async Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken) =>

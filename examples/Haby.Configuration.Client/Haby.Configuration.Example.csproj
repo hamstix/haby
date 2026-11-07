@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../../src/Haby.Configuration.Client/Haby.Configuration.Client.csproj" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+</Project>

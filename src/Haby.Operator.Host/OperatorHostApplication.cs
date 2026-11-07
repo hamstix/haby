@@ -41,14 +41,18 @@ public static class OperatorHostApplication
         // when the application catches a bounded failure. Keep them outside the operator log surface.
         builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.None);
         builder.Logging.AddFilter("Npgsql", LogLevel.None);
+        builder.Logging.AddFilter("Grpc", LogLevel.None);
+        builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.None);
 
         var connection = builder.Configuration["Haby:PostgreSql:ConnectionString"];
         var tlsEnabledText = builder.Configuration["Haby:Tls:Enabled"];
         var certificatePath = builder.Configuration["Haby:Tls:CertificatePath"];
         var certificatePassword = builder.Configuration["Haby:Tls:CertificatePassword"];
         var portText = builder.Configuration["Haby:Port"];
+        var addressText = builder.Configuration["Haby:ListenAddress"] ?? "127.0.0.1";
 
         var invalid = new List<string>();
+        if (!IPAddress.TryParse(addressText, out var listenAddress)) invalid.Add("Haby:ListenAddress");
         if (string.IsNullOrWhiteSpace(connection)) invalid.Add("Haby:PostgreSql:ConnectionString");
         var tlsEnabled = true;
         if (tlsEnabledText is not null && !bool.TryParse(tlsEnabledText, out tlsEnabled))
@@ -61,7 +65,7 @@ public static class OperatorHostApplication
         var certificate = tlsEnabled
             ? X509CertificateLoader.LoadPkcs12FromFile(certificatePath!, certificatePassword)
             : null;
-        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port, listen =>
+        builder.WebHost.ConfigureKestrel(options => options.Listen(listenAddress!, port, listen =>
         {
             listen.Protocols = HttpProtocols.Http2;
             if (tlsEnabled) listen.UseHttps(certificate!);
@@ -76,6 +80,11 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ComposeConfigurationDocument>();
         builder.Services.AddSingleton<IConfigurationDocumentStore, PostgreSqlConfigurationDocumentStore>();
+        builder.Services.AddSingleton<PostgreSqlConfigurationAccessStore>();
+        builder.Services.AddSingleton<IConfigurationAccessStore>(p => p.GetRequiredService<PostgreSqlConfigurationAccessStore>());
+        builder.Services.AddSingleton<IConfigurationDeliveryDocumentStore>(p => p.GetRequiredService<PostgreSqlConfigurationAccessStore>());
+        builder.Services.AddSingleton<IConfigurationResolutionBinding, PostgreSqlConnectionResolutionBinding>();
+        builder.Services.AddSingleton<DeliverConfiguration>();
         builder.Services.AddSingleton<ImportApplicationManifest>();
         builder.Services.AddSingleton<ImportConfigurationProfile>();
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
@@ -124,6 +133,7 @@ public static class OperatorHostApplication
         _ = app.Services.GetRequiredService<ProviderPreflightRegistry>();
         _ = app.Services.GetRequiredService<DurableActionRegistry>();
         app.MapGrpcService<ManifestOperatorService>();
+        app.MapGrpcService<ConfigurationDeliveryService>();
         app.MapGrpcReflectionService();
 
         return app;
