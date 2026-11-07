@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../../src/Haby.Operator.Contracts/Haby.Operator.Contracts.csproj" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+</Project>

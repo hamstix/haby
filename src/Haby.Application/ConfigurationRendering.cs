@@ -128,6 +128,19 @@ public sealed class ConfigurationRenderingCatalog
         catch (Exception) { return null; }
     }
 
+    /// <summary>Delivery requires exact formatter and pure contract metadata, never a renderer instance.</summary>
+    public bool SupportsDeliveryFormatter(ConfigurationRenderPin pin) => _definitions.TryGetValue(pin.Renderer, out var d) &&
+        d.Formatter == pin.Formatter && d.Resource == pin.Resource && d.OutputContract == pin.OutputContract && d.OutputKey == pin.OutputKey &&
+        d.Producer == pin.Producer && d.ProducerAction == pin.ProducerAction && d.ValidateOptions(pin.Options, true) &&
+        _formatters.TryGetValue(pin.Formatter, out var f) && f.Identity == pin.FormatterImplementation;
+
+    public ConfidentialConfigurationString? FormatDelivery(ConfigurationRenderPin pin, ConfigurationDeferredValue value, ReadOnlySpan<char> material)
+    {
+        if (!SupportsDeliveryFormatter(pin) || value.Formatter != pin.Formatter || _contracts.Validate(value) is not null) return null;
+        try { return _formatters[pin.Formatter].Format(value.Arguments, material); }
+        catch (Exception) { return null; }
+    }
+
 }
 
 /// <summary>Exact accepted evidence selection. Implementations must check successful producer attempt/output atomically.</summary>

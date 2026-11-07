@@ -28,6 +28,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Haby.PostgreSql\Haby.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\examples\Haby.Configuration.Client\Haby.Configuration.Client.csproj" />
     <ProjectReference Include="..\..\src\Haby.Persistence.PostgreSql\Haby.Persistence.PostgreSql.csproj" />
     <ProjectReference Include="..\..\src\Haby.Operator.Host\Haby.Operator.Host.csproj" />
   </ItemGroup>

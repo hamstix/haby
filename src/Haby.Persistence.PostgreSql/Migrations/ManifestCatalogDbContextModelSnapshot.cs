@@ -124,6 +124,64 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ConfigurationAccessRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<byte[]>("CredentialHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("credential_hash");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Guid>("RevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<string>("RevokedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("revoked_by");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("scope");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RevisionId");
+
+                    b.ToTable("configuration_access_grants", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_configuration_access_expiry", "expires_at IS NULL OR expires_at > created_at");
+
+                            t.HasCheckConstraint("ck_configuration_access_hash", "octet_length(credential_hash) = 32");
+
+                            t.HasCheckConstraint("ck_configuration_access_revoke", "(revoked_at IS NULL) = (revoked_by IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ConfigurationDocumentRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1450,6 +1508,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
                         .WithOne()
                         .HasForeignKey("Haby.Persistence.PostgreSql.ChangeSetCommitRow", "DeploymentId", "Generation")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ConfigurationAccessRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ConfigurationDocumentRow", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

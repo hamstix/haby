@@ -36,6 +36,9 @@ public sealed class SecretMaterial : IDisposable
 /// <summary>Internal storage boundary. The trusted caller supplies explicit typed owner/purpose scope.</summary>
 public interface ISecretStore
 {
+    /// <summary>Delivery boundary: validate exact owner/purpose and size before fetching payload bytes.</summary>
+    ValueTask<SecretMaterial?> ResolveBoundedAsync(SecretDefinition definition, SecretRef reference, int maximumBytes,
+        CancellationToken cancellationToken);
     /// <summary>Compatibility helper: create-or-get metadata only. Prefer EnvironmentAdministration for explicit administration.</summary>
     ValueTask<EnvironmentRecordId> CreateEnvironmentAsync(EnvironmentId id, CancellationToken cancellationToken);
     ValueTask CreateAsync(SecretDefinition definition, SecretRef reference, byte[] material,
