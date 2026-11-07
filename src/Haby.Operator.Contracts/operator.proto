@@ -51,12 +51,7 @@ service ManifestOperator {
   rpc AssignExistingOperation(AssignExistingOperationRequest) returns (RecoveryReply);
 }
 
-// Separate runtime surface. The bearer credential is Authorization metadata, never request data.
-service ConfigurationDelivery {
-  rpc Deliver(DeliverConfigurationRequest) returns (DeliverConfigurationReply);
-}
-message DeliverConfigurationRequest { string revision_id = 1; }
-message DeliverConfigurationReply { string revision_id = 1; string source_fingerprint = 2; bytes json = 3; }
+// Trusted operator access administration; runtime delivery has an independent contract.
 message CreateConfigurationAccessRequest { ConfigurationDocumentRequest selector = 1; optional string expires_at_utc = 2; }
 message ConfigurationAccessRequest { string grant_id = 1; }
 enum ConfigurationAccessStatus {

@@ -2,7 +2,7 @@ using Google.Protobuf;
 using Grpc.Core;
 using Haby.Application;
 using Haby.Domain;
-using Haby.Operator.Contracts;
+using Haby.Configuration.Contracts;
 
 namespace Haby.Operator.Host;
 

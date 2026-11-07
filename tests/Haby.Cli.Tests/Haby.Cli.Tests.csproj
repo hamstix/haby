@@ -17,6 +17,8 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\examples\Haby.Configuration.Client\Haby.Configuration.Example.csproj" />
+    <ProjectReference Include="..\..\src\Haby.Configuration.Contracts\Haby.Configuration.Contracts.csproj" />
     <ProjectReference Include="..\..\src\habyctl\habyctl.csproj" />
   </ItemGroup>
 </Project>

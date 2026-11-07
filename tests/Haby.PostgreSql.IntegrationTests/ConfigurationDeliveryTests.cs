@@ -5,6 +5,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Haby.Application;
 using Haby.Configuration.Client;
+using Haby.Configuration.Contracts;
 using Haby.Domain;
 using Haby.Operator.Contracts;
 using Haby.Operator.Host;

@@ -11,6 +11,7 @@ using Xunit;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Haby.Operator.Contracts;
+using Haby.Configuration.Contracts;
 using Haby.Operator.Host;
 using System.Text.Json;
 using ConfigurationDocumentStatus = Haby.Application.ConfigurationDocumentStatus;

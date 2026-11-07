@@ -1,0 +1,11 @@
+syntax = "proto3";
+option csharp_namespace = "Haby.Configuration.Contracts";
+package haby.configuration.v1alpha1;
+
+// Independent runtime contract. Bearer credentials use Authorization metadata only.
+service ConfigurationDelivery {
+  rpc Deliver(DeliverConfigurationRequest) returns (DeliverConfigurationReply);
+}
+message DeliverConfigurationRequest { string revision_id = 1; }
+// Complete transient JSON; safe identity refers only to the unresolved source artifact.
+message DeliverConfigurationReply { string revision_id = 1; string source_fingerprint = 2; bytes json = 3; }

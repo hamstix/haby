@@ -7,6 +7,13 @@ The generated unary ConfigurationDelivery RPC authenticates, authorizes and
 prepares the whole document in one request. There is no login exchange or CLI
 command to dump resolved configuration.
 
+Delivery is declared independently in `src/Haby.Configuration.Contracts/configuration_delivery.proto`,
+with package `haby.configuration.v1alpha1` and C# namespace `Haby.Configuration.Contracts`.
+It imports no operator contract and references no Domain/Application/Host/persistence
+assembly. The dedicated `ConfigurationDeliveryService` implements this service;
+ManifestOperator retains only trusted access-grant administration and safe operator
+reads. Both services are mapped explicitly on the same Host endpoint.
+
 ## Interim trusted contour
 
 One Host/listener serves both ManifestOperator and ConfigurationDelivery.
@@ -88,6 +95,11 @@ sends Authorization Bearer metadata on the generated RPC, loads JSON as in-memor
 It creates/inserts/reads a small `public.haby_runtime_probe` table and prints only
 revision/current_user/current_database/success. Errors omit exception/driver text.
 It performs no automatic RPC retry and writes no configuration file.
+Its transport is `src/Haby.Configuration.Client`, which references only the
+independent delivery contracts and gRPC runtime. Configuration loading and Npgsql
+remain in the executable example (`Haby.Configuration.Example`); they are not
+transport-client dependencies. Neither client project references operator contracts
+or server layers, and no SDK package publication is introduced.
 
 For an explicitly isolated HTTP pilot, loopback HTTP works; non-loopback HTTP in
 the example additionally requires `HABY_RUNTIME_ALLOW_INSECURE_HTTP=1`. TLS uses
@@ -155,6 +167,10 @@ foreign key, metadata-only scope, verifier and creation/optional-expiry/revocati
 audit. It is additive for an admitted ADR-040/041 catalog. No artifact format change,
 authority backfill or reset is required. Earlier incompatible catalogs retain the
 existing explicit ADR-033 admission rules. Never silently reset persistent data.
+The ADR-042 contract clarification changes the runtime RPC identity to
+`haby.configuration.v1alpha1.ConfigurationDelivery/Deliver`; rebuild runtime clients
+against the independent contract. There is no alias for the superseded operator
+package route. Listener settings and persisted grants/artifacts are unchanged.
 
 Current-build restart and real pg_dump/pg_restore retain verifier, exact scope,
 audit, expiry/revocation and unresolved artifacts. Restored validation requires the

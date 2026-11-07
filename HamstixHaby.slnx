@@ -1,6 +1,6 @@
 <Solution>
   <Folder Name="/examples/">
-    <Project Path="examples/Haby.Configuration.Client/Haby.Configuration.Client.csproj" />
+    <Project Path="examples/Haby.Configuration.Client/Haby.Configuration.Example.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
@@ -13,6 +13,8 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Haby.Application/Haby.Application.csproj" />
+    <Project Path="src/Haby.Configuration.Client/Haby.Configuration.Client.csproj" />
+    <Project Path="src/Haby.Configuration.Contracts/Haby.Configuration.Contracts.csproj" />
     <Project Path="src/Haby.Domain/Haby.Domain.csproj" />
     <Project Path="src/Haby.Manifest/Haby.Manifest.csproj" />
     <Project Path="src/Haby.Operator.Contracts/Haby.Operator.Contracts.csproj" />
