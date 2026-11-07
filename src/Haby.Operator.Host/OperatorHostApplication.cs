@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using Haby.Application;
+using Haby.Domain;
 using Haby.Manifest;
 using Haby.PostgreSql;
 using Haby.Persistence.PostgreSql;
@@ -67,7 +68,11 @@ public static class OperatorHostApplication
         }));
         builder.Services.AddGrpc(options => options.MaxReceiveMessageSize = MaxReceiveBytes);
         builder.Services.AddGrpcReflection();
-        builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [], [], []));
+        builder.Services.AddSingleton(PostgreSqlConnectionRendering.CreateCatalog());
+        builder.Services.AddSingleton(PostgreSqlConnectionRendering.FormatterCatalog());
+        builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [],
+            [new(OutputContractId.Create(PostgreSqlApplicationConnectionContract.Contract), PostgreSqlConsumerOptions.Schema)],
+            [new(PostgreSqlConnectionRendering.Renderer)]));
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ImportApplicationManifest>();
         builder.Services.AddSingleton<ImportConfigurationProfile>();

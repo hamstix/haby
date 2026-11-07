@@ -58,7 +58,8 @@ internal static class PlanningPresentation
                 "profile.binding.unsupported" or "profile.component.duplicate" or "profile.contribution.duplicate" or
                 "profile.document.duplicate" or "profile.document.file-conflict" or "profile.document.invalid-file-name" or
                 "profile.document.not-found" or "profile.document.unsupported" or "profile.revision.not-found" or
-                "profile.rule.duplicate" or "profile.secret-projections.unsupported" or "profile.selection.duplicate" or
+                "render.renderer.unknown" or "render.renderer.unavailable" or "render.formatter.unavailable" or
+                "render.output.incompatible" or "render.options.invalid" or "profile.rule.duplicate" or "profile.secret-projections.unsupported" or "profile.selection.duplicate" or
                 "profile.slot.ambiguous" or "profile.slot.duplicate" or "profile.slot.not-found" or "profile.value.unsupported" or
                 "render.projection.invalid-path" or "render.projection.template-collision" or "render.projection.path-conflict")))
             throw new InvalidDataException("Invalid configuration refusal metadata.");

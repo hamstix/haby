@@ -7,16 +7,17 @@ namespace Haby.Application;
 public sealed record ConfigurationPlanningScope(ProfileAssignmentTarget Target, AssignmentToken? Token,
     ConfigurationProfileAssignment Declaration);
 
-/// <summary>Frozen structural preparation only; grants no renderer, option-policy or secret-delivery permission.</summary>
+/// <summary>Frozen structural layouts and exact renderer readiness; grants no secret resolution or delivery permission.</summary>
 public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlanningSnapshot>
 {
     private ConfigurationPlanningSnapshot(ManifestRevisionRef revision, NormalizedApplicationManifest manifest,
         ImmutableArray<ConfigurationPlanningScope> scopes, ImmutableArray<ConfigurationProfileRevision> profiles,
-        IReadOnlyList<EffectiveComponentLayout> layouts)
+        IReadOnlyList<EffectiveComponentLayout> layouts, IReadOnlyList<ConfigurationRenderPin> pins)
     {
-        Revision = revision; Manifest = manifest; Scopes = scopes; Profiles = profiles; Layouts = layouts;
+        Revision = revision; Manifest = manifest; Scopes = scopes; Profiles = profiles; Layouts = layouts; RenderPins = pins;
     }
 
+    public IReadOnlyList<ConfigurationRenderPin> RenderPins { get; }
     public ManifestRevisionRef Revision { get; }
     public NormalizedApplicationManifest Manifest { get; }
     public IReadOnlyList<ConfigurationPlanningScope> Scopes { get; }
@@ -30,7 +31,13 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
 
     public static (ConfigurationPlanningSnapshot? Snapshot, ProfileExpansionResult Expansion) Prepare(
         ManifestRevisionRef revision, NormalizedApplicationManifest manifest,
-        IEnumerable<ConfigurationPlanningScope> scopes, IEnumerable<ConfigurationProfileRevision> profiles)
+        IEnumerable<ConfigurationPlanningScope> scopes, IEnumerable<ConfigurationProfileRevision> profiles,
+        ConfigurationRenderingCatalog? rendering = null) => PrepareCore(revision, manifest, scopes, profiles, rendering);
+
+    internal static (ConfigurationPlanningSnapshot? Snapshot, ProfileExpansionResult Expansion) PrepareCore(
+        ManifestRevisionRef revision, NormalizedApplicationManifest manifest,
+        IEnumerable<ConfigurationPlanningScope> scopes, IEnumerable<ConfigurationProfileRevision> profiles,
+        ConfigurationRenderingCatalog? rendering = null, IReadOnlyList<ConfigurationRenderPin>? frozenPins = null)
     {
         var targets = Targets(manifest);
         var local = scopes.ToImmutableArray();
@@ -50,7 +57,30 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
                 var target = (ProfileAssignmentTarget.Component)x.Target;
                 return new ProfileComponentInput(target.ComponentRef, manifest.Spec.Components[target.ComponentRef], x.Declaration.Decisions);
             }));
-        return (result.IsSuccess ? new(revision, manifest, local, content, result.Layouts!) : null, result);
+        if (!result.IsSuccess) return (null, result);
+        var pins = new List<ConfigurationRenderPin>();
+        var errors = new List<ProfileExpansionDiagnostic>();
+        foreach (var layout in result.Layouts!)
+            for (var i = 0; i < layout.BindingRequests.Count; i++)
+            {
+                var request = layout.BindingRequests[i];
+                if (frozenPins is not null)
+                {
+                    var pin = frozenPins.SingleOrDefault(x => x.Component == layout.Component && x.Request == i)
+                        ?? throw new InvalidDataException();
+                    ConfigurationRenderPinCodec.ValidateFrozen(pin, request, manifest.Spec);
+                    pins.Add(pin);
+                }
+                else
+                {
+                    var resolved = (rendering ?? ConfigurationRenderingCatalog.Empty).Prepare(layout.Component, i, request, manifest.Spec);
+                    if (resolved.Pin is { } pin) pins.Add(pin);
+                    else errors.Add(new(resolved.Error!, layout.Component.Value, "", "", request.BindingId.Value));
+                }
+            }
+        if (frozenPins is not null && frozenPins.Count != pins.Count) throw new InvalidDataException();
+        if (errors.Count != 0) return (null, new([], errors));
+        return (new(revision, manifest, local, content, result.Layouts!, pins.ToImmutableArray()), result);
     }
 
     public bool Equals(ConfigurationPlanningSnapshot? other) => other is not null &&

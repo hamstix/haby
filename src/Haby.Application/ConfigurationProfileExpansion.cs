@@ -24,7 +24,7 @@ public sealed class ConfigurationProfileCatalog
 }
 
 public enum ProfileSelectionScope { Environment, Application, Component }
-public enum ProfileOptionScope { Profile, Binding }
+public enum ProfileOptionScope { Profile, Binding, RendererDefault }
 public sealed record EffectiveProfileDecision(ProfileDecision Decision, ProfileSelectionScope Scope);
 public sealed record ConfigurationLayoutOrigin(ProfileRevisionRef? Profile, ManifestLocalId Source);
 public sealed record ProfileExpansionDiagnostic(string Code, string Component, string Document, string Path, string Source);
@@ -60,13 +60,14 @@ public sealed record EffectiveStaticContribution(ProfileStaticContribution Contr
 public sealed class ProfileBindingRenderRequest
 {
     internal ProfileBindingRenderRequest(ManifestLocalId bindingId, NormalizedBinding binding, ManifestLocalId? slot,
-        ConfigurationRendererId renderer, ConfigurationObject options, IEnumerable<ProfileProjection> projections,
+        ConfigurationRendererId renderer, ConfigurationObject options, ConfigurationObject profileOptions, IEnumerable<ProfileProjection> projections,
         ConfigurationLayoutOrigin origin, IEnumerable<KeyValuePair<string, ProfileOptionScope>> optionOrigins)
     {
-        BindingId = bindingId; Binding = binding; Slot = slot; Renderer = renderer; Options = options;
+        ProfileOptions = profileOptions; BindingId = bindingId; Binding = binding; Slot = slot; Renderer = renderer; Options = options;
         Projections = projections.OrderBy(x => x.Document.Value, StringComparer.Ordinal).ThenBy(x => x.Path, StringComparer.Ordinal).ToImmutableArray();
         Origin = origin; OptionOrigins = optionOrigins.ToImmutableDictionary(StringComparer.Ordinal);
     }
+    public ConfigurationObject ProfileOptions { get; }
     public ManifestLocalId BindingId { get; }
     public NormalizedBinding Binding { get; }
     public ManifestLocalId? Slot { get; }
@@ -235,7 +236,7 @@ public sealed class ConfigurationProfileExpander(ConfigurationProfileCatalog cat
                 var options = defaults.Members.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
                 var origins = defaults.Members.ToDictionary(x => x.Key, _ => ProfileOptionScope.Profile, StringComparer.Ordinal);
                 foreach (var (key, value) in binding.Options.Members) { options[key] = value; origins[key] = ProfileOptionScope.Binding; }
-                requests.Add(new(id, binding, slot, renderer, new(options), projections, origin, origins));
+                requests.Add(new(id, binding, slot, renderer, new(options), defaults, projections, origin, origins));
             }
         }
         return new(layouts, errors);

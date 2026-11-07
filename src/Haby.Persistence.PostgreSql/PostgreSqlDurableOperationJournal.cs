@@ -412,6 +412,7 @@ public static class DurableOperationJournalServiceCollectionExtensions
     {
         services.TryAddSingleton<PostgreSqlDurableOperationJournal>();
         services.TryAddSingleton<IExternalOperationOutputs, PostgreSqlExternalOperationOutputs>();
+        services.TryAddSingleton<IConfigurationOutputEvidence, PostgreSqlExternalOperationOutputs>();
         services.TryAddSingleton<IDurableOperationJournal>(provider =>
             provider.GetRequiredService<PostgreSqlDurableOperationJournal>());
         services.TryAddSingleton<IDurableOperationQuery>(provider =>

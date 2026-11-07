@@ -71,7 +71,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [Fact]
     public async Task Final_action_uses_pinned_endpoint_after_alias_moves_and_supports_a_single_catalog_connection_pool()
     {
-        var scenario = await Prepare(full: true);
+        var scenario = await Prepare(full: true, render: true);
         await using (var services = OwnerServices(scenario))
         {
             var providers = services.GetRequiredService<IProviderConfigurationStore>();
@@ -98,6 +98,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var attempt = Assert.Single(await servicesAfter.GetRequiredService<IDurableOperationJournal>().FindAttemptsAsync(scenario.Key("app-login-access"), default)).AttemptId;
         Assert.True(await outputs.CompleteAsync(scenario.Key("app-login-access"), attempt, PostgreSqlApplicationConnectionContract.Encode(output), DateTimeOffset.UtcNow, default));
         Assert.False(await outputs.CompleteAsync(scenario.Key("app-login-access"), attempt, PostgreSqlApplicationConnectionContract.Encode(output with { Host = "wrong" }), DateTimeOffset.UtcNow, default));
+        var renderer = new ConfigurationOutputRenderer(PostgreSqlConnectionRendering.CreateCatalog(), servicesAfter.GetRequiredService<IConfigurationOutputEvidence>());
+        var fragment = (await renderer.RenderAsync(scenario.Plan.Inputs.Configuration!.RenderPins[0], scenario.Commit.DeploymentId,
+            scenario.Commit.Generation, scenario.Owner, default))!;
+        Assert.Equal(new ConfigurationString(output.Host), Assert.IsType<ConfigurationDeferredValue>(fragment.Value).Arguments.Members["host"]);
         await AssertComplete(scenario);
         _catalogPools.Dispose();
     }

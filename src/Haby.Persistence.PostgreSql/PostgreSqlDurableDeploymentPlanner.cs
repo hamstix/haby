@@ -14,9 +14,10 @@ namespace Haby.Persistence.PostgreSql;
 public sealed class PostgreSqlDurableDeploymentPlanner(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IManifestRevisionQuery revisions,
     IProviderAliasResolver aliases, IEnumerable<IProviderConfigurationCodec> codecs,
-    DurableActionAdmission admission, TimeProvider clock)
+    DurableActionAdmission admission, TimeProvider clock, ConfigurationRenderingCatalog? rendering = null)
     : IDurableDeploymentPlanner
 {
+    private readonly ConfigurationRenderingCatalog _rendering = rendering ?? ConfigurationRenderingCatalog.Empty;
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
     private readonly IProviderConfigurationCodec[] _codecs = codecs.ToArray();
 
@@ -110,7 +111,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         try
         {
             var configuration = await ConfigurationPlanningCapture.CaptureAsync(context,
-                new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken);
+                new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering);
             if (configuration.Snapshot is null) return new(DurablePlanStatus.ConfigurationRefused, ConfigurationReport: configuration.Expansion);
             inputs = inputs with { Configuration = configuration.Snapshot };
         }
@@ -266,13 +267,16 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             new(environmentId, inputs.EnvironmentKey), frozen.Manifest, cancellationToken);
         if (!ConfigurationPlanningCapture.SameScopes(scopes, frozen.Scopes)) return (DurablePlanStatus.Planned, inputs);
         if (!manifest.Declaration.Equals(frozen.Manifest)) return (DurablePlanStatus.PlanInputUnavailable, null);
+        if (frozen.RenderPins.Any(p => !_rendering.Supports(p))) return (DurablePlanStatus.PlanInputUnavailable, null);
         var captured = await ConfigurationPlanningCapture.CaptureAsync(context,
-            new(environmentId, inputs.EnvironmentKey), revision, manifest.Declaration, cancellationToken);
+            new(environmentId, inputs.EnvironmentKey), revision, manifest.Declaration, cancellationToken, _rendering, frozen.RenderPins);
         if (captured.Snapshot is null || !captured.Snapshot.Equals(frozen)) return (DurablePlanStatus.PlanInputUnavailable, null);
         inputs = inputs with { Configuration = frozen };
         var admitted = await AdmitAsync(context, manifest.Declaration.Spec, providerRevision, inputs, cancellationToken);
         return (admitted, admitted == DurablePlanStatus.Planned ? inputs : null);
     }
+
+    internal bool SupportsRendering(ConfigurationPlanningSnapshot snapshot) => snapshot.RenderPins.All(_rendering.Supports);
 
     // The caller owns the context and transaction. Commit passes its already-loaded exact
     // revision, retaining its row/advisory locks through all admission and persistence.

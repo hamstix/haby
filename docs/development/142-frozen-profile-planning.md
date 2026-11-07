@@ -1,5 +1,10 @@
 # Frozen structural configuration planning
 
+The [#144 renderer slice](144-postgresql-connection-rendering.md) extends the
+structural-only baseline below with exact renderer/formatter readiness and pinned
+defaults/options. Its current format and catalog boundary supersede the format
+notes below. Materialization and confidential delivery remain separate.
+
 Issue #142 connects persisted scoped assignments and the existing Profile expander
 to durable Plan creation, freshness checks and atomic desired-state commit.
 Use matching current-alpha Host and Native AOT CLI builds and the existing

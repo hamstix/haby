@@ -15,6 +15,36 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
+    [Fact]
+    public async Task Changed_available_defaults_do_not_rewrite_saved_plan_check_commit_or_generation()
+    {
+        var setup = await PrepareConfigurationAsync();
+        ConfigurationRenderingCatalog CatalogWith(string value) => Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1",
+            new(new Dictionary<string, ConfigurationValue> { ["rendererValue"] = new ConfigurationString(value) }));
+        DurablePlan plan;
+        await using (var original = Services(setup.Connection, setup.Time, rendering: CatalogWith("original")))
+            plan = await ConfigurationPlan(setup, original);
+        await using (var unavailable = Services(setup.Connection, setup.Time, rendering: ConfigurationRenderingCatalog.Empty))
+        {
+            Assert.Equal(plan, await unavailable.GetRequiredService<IDurableDeploymentPlanner>().FindPlanAsync(plan.Id, default));
+            Assert.Equal(DurablePlanCurrentStatus.PlanInputUnavailable, await unavailable.GetRequiredService<IDurableDeploymentPlanner>().CheckPlanAsync(plan.Id, default));
+            Assert.IsType<DurableCommitResult.PlanInputUnavailable>(await unavailable.GetRequiredService<IDurableDesiredStateCommitter>()
+                .CommitAsync(plan.ChangeSetId, plan.Id, "operator", default));
+        }
+        await using var changed = Services(setup.Connection, setup.Time, rendering: CatalogWith("changed"));
+        Assert.Equal(DurablePlanCurrentStatus.Current, await changed.GetRequiredService<IDurableDeploymentPlanner>().CheckPlanAsync(plan.Id, default));
+        var committed = Assert.IsType<DurableCommitResult.Committed>(await changed.GetRequiredService<IDurableDesiredStateCommitter>()
+            .CommitAsync(plan.ChangeSetId, plan.Id, "operator", default)).Commit;
+        var generation = (await changed.GetRequiredService<IDurableDesiredStateCommitter>().FindGenerationAsync(committed.DeploymentId, committed.Generation, default))!;
+        Assert.Equal(plan.Inputs, generation.Inputs);
+        Assert.All(generation.Inputs.Configuration!.RenderPins, p =>
+        {
+            Assert.Equal(new ConfigurationString("original"), p.Defaults.Members["rendererValue"]);
+            Assert.Equal(new ConfigurationString("original"), p.Options.Members["rendererValue"]);
+            Assert.Equal(ProfileOptionScope.RendererDefault, p.OptionOrigins["rendererValue"]);
+        });
+    }
+
     private static readonly ProfileAssignmentTarget ConfigEnvironment = new ProfileAssignmentTarget.Environment();
     private static ProfileDecision ConfigDisable(string name = "irrelevant") => new ProfileDecision.Disable(ProfileId.Create(name));
     private sealed record ConfigSetup(string Connection, AdjustableTimeProvider Time, EnvironmentMetadata Environment,
@@ -294,7 +324,7 @@ public sealed partial class DurableDeploymentPlanningTests
         await using var corrupt = new NpgsqlConnection(setup.Connection);
         await corrupt.OpenAsync();
         await new NpgsqlCommand("SET session_replication_role = replica", corrupt).ExecuteNonQueryAsync();
-        foreach (var json in new[] { "", "{}", ConfigurationPlanningSnapshotCodec.Encode(plan.Inputs.Configuration!).Replace("\"format\":1", "\"format\":999", StringComparison.Ordinal) })
+        foreach (var json in new[] { "", "{}", ConfigurationPlanningSnapshotCodec.Encode(plan.Inputs.Configuration!).Replace("\"format\":2", "\"format\":999", StringComparison.Ordinal) })
         {
             await using var command = new NpgsqlCommand("UPDATE deployment_plans SET configuration_json = @json WHERE id = @id", corrupt);
             command.Parameters.AddWithValue("json", json); command.Parameters.AddWithValue("id", Guid.Parse(plan.Id.ToString()));
@@ -316,7 +346,7 @@ public sealed partial class DurableDeploymentPlanningTests
             await arrange.Database.ExecuteSqlRawAsync("""
                 ALTER TABLE deployment_plans DROP COLUMN configuration_json;
                 ALTER TABLE application_deployment_generations DROP COLUMN configuration_json;
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%FreezeConfigurationPlanning';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%FreezeConfigurationPlanning' OR "MigrationId" LIKE '%PinConfigurationRendering';
                 """);
         await using (var act = Services(setup.Connection, setup.Time))
         {

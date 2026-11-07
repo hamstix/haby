@@ -111,7 +111,8 @@ public sealed partial class CliLoopbackTests
             if (request.ChangeSetId == "refused")
             {
                 var refusal = new PlanningReply { Status = PlanningStatus.ConfigurationRefused };
-                refusal.ConfigurationErrorCodes.Add("profile.secret-projections.unsupported");
+                refusal.ConfigurationErrorCodes.AddRange(new[] { "profile.secret-projections.unsupported", "render.renderer.unknown",
+                    "render.renderer.unavailable", "render.formatter.unavailable", "render.output.incompatible", "render.options.invalid" });
                 return Task.FromResult(refusal);
             }
             if (request.ChangeSetId == "unavailable") return Task.FromResult(new PlanningReply { Status = PlanningStatus.PlanInputUnavailable });
@@ -203,6 +204,7 @@ public sealed partial class CliLoopbackTests
                     void Verify(string text)
                     {
                         Assert.Contains(outcome, text);
+                        if (outcome == "configurationRefused") Assert.Contains("render.options.invalid", text);
                         if (command.StartsWith("plan", StringComparison.Ordinal) && outcome is not ("planNotFound" or "configurationRefused" or "planInputUnavailable"))
                         {
                             Assert.Contains("sample_db", text);

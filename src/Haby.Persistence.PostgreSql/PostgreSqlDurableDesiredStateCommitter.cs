@@ -130,11 +130,11 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
         if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
 
-        if (!declaration.Equals(inputs.Configuration.Manifest)) return new DurableCommitResult.PlanInputUnavailable();
+        if (!planner.SupportsRendering(inputs.Configuration) || !declaration.Equals(inputs.Configuration.Manifest)) return new DurableCommitResult.PlanInputUnavailable();
         try
         {
             var captured = await ConfigurationPlanningCapture.CaptureAsync(context,
-                new(inputs.Environment, inputs.EnvironmentKey), inputs.Revision, declaration, cancellationToken);
+                new(inputs.Environment, inputs.EnvironmentKey), inputs.Revision, declaration, cancellationToken, ConfigurationRenderingCatalog.Empty, inputs.Configuration.RenderPins);
             if (captured.Snapshot is null || !captured.Snapshot.Equals(inputs.Configuration)) return new DurableCommitResult.PlanInputUnavailable();
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }

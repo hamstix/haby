@@ -1,8 +1,8 @@
 # PostgreSQL connection renderer contract
 
 Status: accepted design under [ADR-040](../adr/0040-postgresql-connection-rendering-and-consumer-options.md).
-Implementation is a subsequent P2 slice; this document does not claim a working
-configuration delivery endpoint.
+Pure primitives and exact planning are implemented by [issue #144](../development/144-postgresql-connection-rendering.md).
+This document does not claim a working configuration delivery endpoint.
 
 ## Exact contracts
 

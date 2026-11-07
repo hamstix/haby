@@ -7,7 +7,7 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Atomic external evidence, exact attempt closure and aggregate completion.</summary>
 public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    IEnumerable<IExternalOperationOutputContract> contracts) : IExternalOperationOutputs
+    IEnumerable<IExternalOperationOutputContract> contracts) : IExternalOperationOutputs, IConfigurationOutputEvidence
 {
     public async ValueTask<AcceptedOperation?> FindAcceptedAsync(DurableOperationKey key, CancellationToken cancellationToken)
     {
@@ -115,6 +115,29 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             contract = contracts.Single(c => c.Producer == producerAccepted.Node.Action);
         }
         return await contract.ValidateAcceptedAsync(consumer with { OperationId = selector.ProducerOperationId }, producerAccepted, output, cancellationToken) ? output : null;
+    }
+
+    public async ValueTask<ExternalOperationOutput?> ReadAsync(DurableOperationKey producer, ManagedResourceKey owner,
+        DurableActionExecutionKey action, string contract, string key, CancellationToken cancellationToken)
+    {
+        await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        await using var transaction = await context.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
+        try
+        {
+            var accepted = await AcceptedAsync(context, producer, cancellationToken);
+            if (accepted is null || accepted.Inputs.Environment != owner.EnvironmentRecordId ||
+                accepted.Inputs.Revision.ApplicationRecordId != owner.ApplicationRecordId || accepted.Node.ResourceId != owner.ResourceLocalId ||
+                accepted.Node.Action != action || !accepted.Spec.Resources.TryGetValue(owner.ResourceLocalId, out var resource) ||
+                resource.Type != action.Admission.ResourceContract) return null;
+            var row = await OutputAsync(context, producer, contract, key, cancellationToken);
+            if (row is null) return null;
+            var output = new ExternalOperationOutput(row.Contract, row.Key, row.Payload);
+            var operation = await context.DurableOperations.AsNoTracking().SingleOrDefaultAsync(r =>
+                r.DeploymentId == row.DeploymentId && r.Generation == row.Generation && r.OperationId == row.OperationId, cancellationToken);
+            return operation?.CurrentAttemptId is { } attempt &&
+                await ConfirmAsync(context, producer, attempt, output, cancellationToken, validateAccepted: false) ? output : null;
+        }
+        catch (InvalidDataException) { return null; }
     }
 
     private async Task<bool> ConfirmAsync(ManifestCatalogDbContext context, DurableOperationKey key, Guid attempt,
