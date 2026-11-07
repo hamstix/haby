@@ -293,10 +293,15 @@ public sealed partial class PostgreSqlApplicationLoginTests
     private sealed class PayloadReads : DbCommandInterceptor
     {
         public int Count;
+        public bool Unavailable;
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
             InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
         {
-            if (command.CommandText.Contains("secret_payloads", StringComparison.Ordinal) && !command.CommandText.Contains("length(", StringComparison.OrdinalIgnoreCase)) Count++;
+            if (command.CommandText.Contains("secret_payloads", StringComparison.Ordinal) && !command.CommandText.Contains("length(", StringComparison.OrdinalIgnoreCase))
+            {
+                Count++;
+                if (Unavailable) throw new Npgsql.NpgsqlException("private-storage-material-sentinel");
+            }
             return ValueTask.FromResult(result);
         }
     }
@@ -345,7 +350,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             using var refused = await scopedSecrets.ResolveBoundedAsync(wrong, reference, DeliverConfiguration.MaxSecretBytes, default);
             Assert.Null(refused); Assert.Equal(priorReads, reads.Count);
         }
-        foreach (var mode in new[] { "missing", "utf8", "nul", "format", "oversize", "formatter" })
+        foreach (var mode in new[] { "missing", "utf8", "nul", "format", "oversize", "unavailable", "formatter" })
         {
             await using (var arrange = Context(scenario.Connection))
             {
@@ -364,9 +369,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 await corrupt.CommitAsync();
             }
             formatter.Enabled = mode == "formatter";
+            reads.Unavailable = mode == "unavailable";
             var priorReads = reads.Count; var priorFormatting = formatter.Count;
             var failure = await Assert.ThrowsAsync<RpcException>(async () => await runtime.DeliverAsync(new() { RevisionId = document.Artifact.RevisionId }, Bearer(grant.Credential)));
-            Assert.Equal(mode == "oversize" ? StatusCode.ResourceExhausted : StatusCode.FailedPrecondition, failure.StatusCode);
+            Assert.Equal(mode == "oversize" ? StatusCode.ResourceExhausted : mode == "unavailable" ? StatusCode.Unavailable : StatusCode.FailedPrecondition, failure.StatusCode);
             Assert.False(failure.ToString().Contains("private-formatter-material-sentinel", StringComparison.Ordinal));
             if (mode is "oversize" or "missing") Assert.Equal(priorReads, reads.Count);
             if (mode != "formatter") Assert.Equal(priorFormatting, formatter.Count);
@@ -388,6 +394,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         var captured = string.Join('\n', logs.Lines);
         Assert.False(captured.Contains(grant.Credential, StringComparison.Ordinal)); Assert.False(captured.Contains("private-formatter-material-sentinel", StringComparison.Ordinal));
+        Assert.False(captured.Contains("private-storage-material-sentinel", StringComparison.Ordinal));
         Array.Clear(payload.Bytes);
         await host.StopAsync();
     }

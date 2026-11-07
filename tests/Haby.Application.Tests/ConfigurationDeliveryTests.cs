@@ -83,7 +83,7 @@ public sealed class ConfigurationDeliveryTests
             Resolutions++; Assert.Equal(new SecretOwner.Resource(new(Artifact.Environment, Artifact.Revision.Metadata.Revision.ApplicationRecordId, ManifestLocalId.Create("resource"))), definition.Owner);
             Assert.Equal(SecretPurpose.ApplicationLogin, definition.Purpose); Assert.Equal(65536, maximumBytes);
             if (Cancel) throw new OperationCanceledException();
-            if (Throw) throw new IOException("private-secret-diagnostic");
+            if (Throw) throw new ConfigurationDeliveryStorageException();
             LastMaterial = Missing ? null : new(Bytes);
             CancelAfterRead?.Cancel();
             return ValueTask.FromResult(LastMaterial);
@@ -204,7 +204,7 @@ public sealed class ConfigurationDeliveryTests
         h.Store.Missing = mode == "missing"; h.Store.Throw = mode == "unavailable"; h.Adapter.Throw = mode == "formatter";
         if (mode == "utf8") h.Store.Bytes = [0xc3, 0x28];
         if (mode == "nul") h.Store.Bytes = [65, 0, 66];
-        using var result = await h.Run(); Assert.Equal(ConfigurationDeliveryStatus.InputUnavailable, result.Status); Assert.True(result.Json.IsEmpty);
+        using var result = await h.Run(); Assert.Equal(mode == "unavailable" ? ConfigurationDeliveryStatus.StorageUnavailable : ConfigurationDeliveryStatus.InputUnavailable, result.Status); Assert.True(result.Json.IsEmpty);
         if (h.Store.LastMaterial is not null) Assert.Throws<ObjectDisposedException>(() => h.Store.LastMaterial.CopyBytes());
     }
 
