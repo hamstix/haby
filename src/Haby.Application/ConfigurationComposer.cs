@@ -48,10 +48,15 @@ public sealed class ConfigurationComposer(ConfigurationFormatterCatalog formatte
             if (Decode(projection.Path) is not null)
                 ValidateTree(projection.Fragment.Value, projection.Path, projection.Source.Value, errors);
         if (errors.Count != 0) return new(null, errors);
-        var result = template;
-        foreach (var projection in inputs.OrderBy(x => x.Path, StringComparer.Ordinal))
-            result = Insert((ConfigurationObject)result, Decode(projection.Path)!, 0, projection.Fragment.Value);
-        return new(result, []);
+        if (inputs.Length == 0) return new(template, []);
+        var root = new ProjectionNode();
+        foreach (var projection in inputs)
+        {
+            var node = root;
+            foreach (var segment in Decode(projection.Path)!) node = node.Child(segment);
+            node.Value = projection.Fragment.Value;
+        }
+        return new(InsertBatch((ConfigurationObject)template, root), []);
     }
     /// <summary>Validate reserved paths without producing placeholder values or a document.</summary>
     internal static IReadOnlyList<ConfigurationRenderDiagnostic> ValidateStructure(ConfigurationValue template,
@@ -69,11 +74,24 @@ public sealed class ConfigurationComposer(ConfigurationFormatterCatalog formatte
                 if (Collides(template, segments)) errors.Add(new("render.projection.template-collision", path, source));
             }
         }
-        for (var i = 0; i < valid.Count; i++)
-            for (var j = i + 1; j < valid.Count; j++)
-                if (Prefix(valid[i].Segments, valid[j].Segments) || Prefix(valid[j].Segments, valid[i].Segments))
-                    foreach (var candidate in new[] { valid[i], valid[j] })
-                        errors.Add(new("render.projection.path-conflict", candidate.Path, candidate.Source));
+        // A trie detects all conflicting participants without pairwise comparison or
+        // quadratic diagnostic allocation. Identical final diagnostics stay set-like.
+        var root = new ProjectionNode();
+        foreach (var item in valid)
+        {
+            var node = root;
+            foreach (var segment in item.Segments) node = node.Child(segment);
+            node.Targets.Add((item.Path, item.Source));
+        }
+        var pending = new Stack<(ProjectionNode Node, bool Ancestor)>();
+        pending.Push((root, false));
+        while (pending.TryPop(out var item))
+        {
+            var (node, ancestor) = item;
+            if (ancestor || node.Targets.Count > 1 || node.Children.Count > 0)
+                foreach (var target in node.Targets) errors.Add(new("render.projection.path-conflict", target.Path, target.Source));
+            foreach (var child in node.Children.Values) pending.Push((child, ancestor || node.Targets.Count != 0));
+        }
         return errors;
     }
     private void ValidateTree(ConfigurationValue value, string path, string source, List<ConfigurationRenderDiagnostic> errors)
@@ -104,7 +122,6 @@ public sealed class ConfigurationComposer(ConfigurationFormatterCatalog formatte
         }
         return segments;
     }
-    private static bool Prefix(string[] a, string[] b) => a.Length <= b.Length && a.SequenceEqual(b.Take(a.Length), StringComparer.Ordinal);
     private static bool Collides(ConfigurationValue root, string[] segments)
     {
         var current = root;
@@ -117,12 +134,25 @@ public sealed class ConfigurationComposer(ConfigurationFormatterCatalog formatte
         }
         return false;
     }
-    private static ConfigurationObject Insert(ConfigurationObject root, string[] segments, int index, ConfigurationValue value)
+    // Freeze each affected Object once, rather than copying the entire accumulating
+    // document for every projection. This keeps bounded materialization proportional
+    // to the tree and path inputs while retaining the existing collision semantics.
+    private static ConfigurationObject InsertBatch(ConfigurationObject root, ProjectionNode node)
     {
         var members = root.Members.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
-        var key = segments[index];
-        members[key] = index == segments.Length - 1 ? value : Insert(
-            members.TryGetValue(key, out var child) ? (ConfigurationObject)child : new ConfigurationObject([]), segments, index + 1, value);
+        foreach (var (key, projection) in node.Children)
+            members[key] = projection.Value ?? InsertBatch(members.TryGetValue(key, out var child) ? (ConfigurationObject)child : new ConfigurationObject([]), projection);
         return new(members);
+    }
+    private sealed class ProjectionNode
+    {
+        public ConfigurationValue? Value;
+        public Dictionary<string, ProjectionNode> Children { get; } = new(StringComparer.Ordinal);
+        public List<(string Path, string Source)> Targets { get; } = [];
+        public ProjectionNode Child(string segment)
+        {
+            if (!Children.TryGetValue(segment, out var child)) Children.Add(segment, child = new());
+            return child;
+        }
     }
 }

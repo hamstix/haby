@@ -346,7 +346,7 @@ public sealed partial class DurableDeploymentPlanningTests
             await arrange.Database.ExecuteSqlRawAsync("""
                 ALTER TABLE deployment_plans DROP COLUMN configuration_json;
                 ALTER TABLE application_deployment_generations DROP COLUMN configuration_json;
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%FreezeConfigurationPlanning' OR "MigrationId" LIKE '%PinConfigurationRendering';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%FreezeConfigurationPlanning' OR "MigrationId" LIKE '%PinConfigurationRendering' OR "MigrationId" LIKE '%MaterializeConfigurationDocuments';
                 """);
         await using (var act = Services(setup.Connection, setup.Time))
         {

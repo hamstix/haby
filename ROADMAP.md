@@ -78,7 +78,7 @@ with its generated credentials, without manual assembly of connection settings.
 Evidence: [issue #124](https://github.com/hamstix/haby/issues/124),
 merged [PR #125](https://github.com/hamstix/haby/pull/125) and the
 [composition contract](docs/architecture/configuration-composition-v1.md).
-The in-process preview is not yet an operator endpoint or confidential delivery.
+Stored operator preview is delivered by issue #146 below; confidential delivery remains pending.
 
 ### Next slices
 
@@ -93,8 +93,8 @@ The in-process preview is not yet an operator endpoint or confidential delivery.
 - [x] Accept the first PostgreSQL renderer/formatter and closed timeout/commandTimeout/sslMode contract under [ADR-040](docs/adr/0040-postgresql-connection-rendering-and-consumer-options.md).
 - [x] Implement adapter-owned Resource-output rendering, frozen typed consumer settings and pure deferred formatting for the confirmed PostgreSQL application-login output; [implementation and catalog boundary](docs/development/144-postgresql-connection-rendering.md). Production material resolution/delivery remains separate.
 - [x] Accept immutable document materialization and stored redacted preview with name-based operator selection and optional explicit generation under [ADR-041](docs/adr/0041-configuration-document-materialization-and-preview.md).
-- [ ] Implement atomic/idempotent unresolved ConfigurationDocumentRevisions, exact output provenance and strict bounded codecs; no secret material or completed connection strings.
-- [ ] Expose name-based configuration materialize/get/preview through the operator Host and habyctl, resolving current fully applied desired generation once and supporting explicit-generation automation.
+- [x] Implement atomic/idempotent unresolved ConfigurationDocumentRevisions, exact output provenance and strict bounded codecs; no secret material or completed connection strings: [issue #146](docs/development/146-configuration-materialization-preview.md).
+- [x] Expose name-based configuration materialize/get/preview through the operator Host and habyctl, resolving current fully applied desired generation once and supporting explicit-generation automation: [operator runbook](docs/development/146-configuration-materialization-preview.md).
 - [ ] Agree exact document selection, minimal authorization, transport and response-handling policy for confidential retrieval.
 - [ ] Implement scoped retrieval and deferred secret resolution/formatting through that separately authorized boundary.
 - [ ] Run the full operator-to-application rehearsal: bootstrap -> provisioning -> configuration -> client authentication and application use.

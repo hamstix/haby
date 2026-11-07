@@ -17,6 +17,9 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
+    Task<ConfigurationDocumentReply> GetConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
+    Task<ConfigurationDocumentReply> PreviewConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
     Task<ProfileAssignmentReply> ValidateProfileAssignmentAsync(ProfilePayloadRequest request, CancellationToken cancellationToken);
     Task<ProfileAssignmentReply> GetProfileAssignmentAsync(GetProfileAssignmentRequest request, CancellationToken cancellationToken);
     Task<ProfileAssignmentReply> ApplyProfileAssignmentAsync(ApplyProfileAssignmentRequest request, CancellationToken cancellationToken);
@@ -68,13 +71,25 @@ internal sealed class GrpcRegistryClientFactory : IRegistryClientFactory
         var channel = skipTlsValidation && address.Scheme == Uri.UriSchemeHttps
             ? GrpcChannel.ForAddress(address, new GrpcChannelOptions { HttpHandler = CliApplication.CreateHttpHandler(true) })
             : GrpcChannel.ForAddress(address);
-        return new GrpcRegistryClient(channel);
+        var configurationChannel = GrpcChannel.ForAddress(address, new GrpcChannelOptions
+        {
+            MaxReceiveMessageSize = 8 * 1024 * 1024,
+            HttpHandler = CliApplication.CreateHttpHandler(skipTlsValidation && address.Scheme == Uri.UriSchemeHttps)
+        });
+        return new GrpcRegistryClient(channel, configurationChannel);
     }
 }
 
-internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
+internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? configurationChannel = null) : IRegistryClient
 {
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
+    private readonly ManifestOperator.ManifestOperatorClient _configurationClient = new(configurationChannel ?? channel);
+    public async Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken) =>
+        await _configurationClient.MaterializeConfigurationAsync(request, cancellationToken: cancellationToken);
+    public async Task<ConfigurationDocumentReply> GetConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken) =>
+        await _configurationClient.GetConfigurationAsync(request, cancellationToken: cancellationToken);
+    public async Task<ConfigurationDocumentReply> PreviewConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken) =>
+        await _configurationClient.PreviewConfigurationAsync(request, cancellationToken: cancellationToken);
     public async Task<ProfileAssignmentReply> ValidateProfileAssignmentAsync(ProfilePayloadRequest request, CancellationToken cancellationToken) =>
         await _client.ValidateProfileAssignmentAsync(request, cancellationToken: cancellationToken);
     public async Task<ProfileAssignmentReply> GetProfileAssignmentAsync(GetProfileAssignmentRequest request, CancellationToken cancellationToken) =>
@@ -162,7 +177,7 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel) : IRegistryClient
         await _client.GetProviderAsync(request, cancellationToken: cancellationToken);
     public async Task<ListProvidersReply> ListProvidersAsync(ListProvidersRequest request, CancellationToken cancellationToken) =>
         await _client.ListProvidersAsync(request, cancellationToken: cancellationToken);
-    public void Dispose() => channel.Dispose();
+    public void Dispose() { configurationChannel?.Dispose(); channel.Dispose(); }
     public async Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken) =>
         await _client.CheckProviderAsync(request, cancellationToken: cancellationToken);
     public async Task<ProviderAccessReply> GetProviderAliasAsync(GetProviderAliasRequest request, CancellationToken cancellationToken) =>

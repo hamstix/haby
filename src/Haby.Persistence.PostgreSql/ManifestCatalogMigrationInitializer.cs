@@ -16,7 +16,8 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
         if (applied.Length > 0 && (currentBaseLength == 0 || applied.Length < currentBaseLength ||
             applied.Length > expected.Length || !applied.SequenceEqual(expected.Take(applied.Length))))
             throw new InvalidOperationException("Unsupported catalog schema. Explicitly initialize a fresh catalog; external resources remain unchanged.");
-        if (applied.Length >= currentBaseLength && applied.Length < expected.Length &&
+        var frozenBaseLength = Array.IndexOf(expected, "20261107101422_PinConfigurationRendering") + 1;
+        if (applied.Length >= currentBaseLength && applied.Length < frozenBaseLength &&
             (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
                 await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
             throw new InvalidOperationException("Older durable planning inputs require an explicitly initialized fresh catalog; external resources remain unchanged.");

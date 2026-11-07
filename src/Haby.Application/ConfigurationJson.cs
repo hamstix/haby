@@ -44,7 +44,8 @@ public static class ConfigurationJson
     public static ConfigurationJsonPreview Preview(ConfigurationValue value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        using var stream = new MemoryStream();
+        ConfigurationDocumentCodec.ValidateTree(value);
+        using var stream = new ConfigurationBoundedStream(ConfigurationDocumentCodec.MaxBytes);
         var paths = new List<string>();
         using (var writer = Writer(stream))
         {
@@ -59,7 +60,7 @@ public static class ConfigurationJson
         return new(Encoding.UTF8.GetString(stream.ToArray()), paths);
     }
 
-    private static Utf8JsonWriter Writer(Stream stream) => new(stream, new JsonWriterOptions { Encoder = JavaScriptEncoder.Default });
+    private static Utf8JsonWriter Writer(Stream stream) => new(stream, new JsonWriterOptions { Encoder = JavaScriptEncoder.Default, MaxDepth = 512 });
     private static bool Confidential(ConfigurationValue value) => value switch
     {
         ConfigurationSecretReference or ConfigurationDeferredValue => true,

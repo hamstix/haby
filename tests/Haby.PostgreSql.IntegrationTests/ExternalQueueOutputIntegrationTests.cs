@@ -69,7 +69,7 @@ public sealed partial class ExactActionAdmissionTests
             }];
         }
         public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-            spec.Resources.Count == 1 && spec.Components.Count == 0 && spec.Resources.TryGetValue(resource, out var declared) &&
+            spec.Resources.Count == 1 && spec.Components.Values.All(x => x.Workloads.Count == 0) && spec.Resources.TryGetValue(resource, out var declared) &&
             Validate(declared, inputs) && configuration.ProviderKindId == "sample/v1" && configuration.ShapeId == "sample.configuration/v1" &&
             configuration.ImplementationId == "sample.impl/v1";
         public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,

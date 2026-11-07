@@ -1,5 +1,10 @@
 # PostgreSQL checkpoint integration tests
 
+[Configuration document materialization](146-configuration-materialization-preview.md)
+adds actual Host/generated-client/published CLI, immutable concurrent acceptance,
+exact-generation selection, codec/size gates, renderer-free reads and current-build
+restart/dump/restore evidence. Confidential delivery remains pending.
+
 For full-suite per-case timing, safe CI artifacts, repeatable measurement commands
 and source-bound performance evidence, see [issue #140 measurements](140-postgresql-integration-performance.md).
 

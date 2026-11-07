@@ -108,9 +108,9 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
         Assert.Equal(1, boundary.Calls);
     }
 
-    private static ServiceProvider Services(string connection, QueueBoundary boundary, bool installed = true, bool codec = true)
+    private static ServiceProvider Services(string connection, QueueBoundary boundary, bool installed = true, bool codec = true, ConfigurationRenderingCatalog? rendering = null)
     {
-        var services = new ServiceCollection().AddSingleton<TimeProvider>(new QueueClock())
+        var services = new ServiceCollection().AddSingleton<TimeProvider>(new QueueClock()).AddSingleton(rendering ?? ConfigurationRenderingCatalog.Empty)
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore().AddSingleton<IProviderRevisionPreflight, AcceptPreflight>()
             .AddPostgreSqlProviderAliasStore().AddPostgreSqlDurableDesiredStateCommitter()
