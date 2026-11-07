@@ -23,6 +23,8 @@ public sealed class ConfigurationFormatterCatalog
 {
     private readonly ImmutableDictionary<ConfigurationFormatterId, ConfigurationFormatterContract> _definitions;
     private readonly ImmutableHashSet<ConfigurationFormatterId> _active;
+    private readonly ImmutableDictionary<ConfigurationFormatterId, ManifestLocalId> _identities;
+    public bool Supports(ConfigurationFormatterId contract, ManifestLocalId identity) => _identities.TryGetValue(contract, out var actual) && actual == identity;
     public ConfigurationFormatterCatalog(IEnumerable<ConfigurationFormatterContract> definitions,
         IEnumerable<ConfigurationFormatterImplementation> implementations)
     {
@@ -48,6 +50,7 @@ public sealed class ConfigurationFormatterCatalog
         }
         if (registrations.GroupBy(item => item.Contract).Any(group => group.Count() > 1))
             throw new ArgumentException("Ambiguous active formatter implementations.", nameof(implementations));
+        _identities = registrations.ToImmutableDictionary(x => x.Contract, x => x.Identity);
         _active = registrations.Select(item => item.Contract).ToImmutableHashSet();
     }
     internal string? Validate(ConfigurationDeferredValue value)

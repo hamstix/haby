@@ -4,10 +4,10 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
-/// <summary>Closed current structural-planning format, with explicit content and a checked saved layout.</summary>
+/// <summary>Closed current planning format, with explicit frozen capability inputs and a checked saved layout.</summary>
 internal static class ConfigurationPlanningSnapshotCodec
 {
-    internal const int Version = 1;
+    internal const int Version = 2;
     internal static string Encode(ConfigurationPlanningSnapshot snapshot)
     {
         using var stream = new MemoryStream();
@@ -29,7 +29,7 @@ internal static class ConfigurationPlanningSnapshotCodec
             }
             w.WriteEndArray(); w.WriteStartArray("profiles"u8);
             foreach (var profile in snapshot.Profiles) Canonical(w, ProfileSnapshotCodec.Encode(profile));
-            w.WriteEndArray(); w.WritePropertyName("layouts"u8); WriteLayouts(w, snapshot.Layouts); w.WriteEndObject();
+            w.WriteEndArray(); w.WritePropertyName("renderPins"u8); ConfigurationRenderPinCodec.Write(w, snapshot.RenderPins); w.WritePropertyName("layouts"u8); WriteLayouts(w, snapshot.Layouts); w.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
     }
@@ -40,7 +40,7 @@ internal static class ConfigurationPlanningSnapshotCodec
         {
             using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 160 });
             var root = doc.RootElement;
-            Exact(root, "format", "applicationRecord", "revision", "manifest", "scopes", "profiles", "layouts");
+            Exact(root, "format", "applicationRecord", "revision", "manifest", "scopes", "profiles", "layouts", "renderPins");
             if (root.GetProperty("format"u8).GetInt32() != Version || root.GetProperty("applicationRecord"u8).GetString() != expected.ApplicationRecordId.ToString() ||
                 root.GetProperty("revision"u8).GetInt64() != expected.RevisionNumber.Value) throw new InvalidDataException();
             var m = root.GetProperty("manifest"u8);
@@ -61,7 +61,7 @@ internal static class ConfigurationPlanningSnapshotCodec
             });
             var profiles = root.GetProperty("profiles"u8).EnumerateArray().Select(p => ProfileSnapshotCodec.Decode(p.GetRawText(),
                 p.GetProperty("id"u8).GetString()!, p.GetProperty("revision"u8).GetInt32(), ProfileSnapshotCodec.FormatVersion, ProfileSnapshotCodec.ModelVersion));
-            var result = ConfigurationPlanningSnapshot.Prepare(expected, manifest, scopes, profiles).Snapshot ?? throw new InvalidDataException();
+            var result = ConfigurationPlanningSnapshot.PrepareCore(expected, manifest, scopes, profiles, frozenPins: ConfigurationRenderPinCodec.Read(root.GetProperty("renderPins"u8))).Snapshot ?? throw new InvalidDataException();
             // Admission is based exclusively on frozen content. Unknown members, duplicate keys,
             // malformed layouts and a layout that disagrees with its exact inputs all refuse.
             using var canonical = new MemoryStream();

@@ -54,7 +54,7 @@ internal static class ConfigurationPlanningCapture
 
     internal static async Task<(ConfigurationPlanningSnapshot? Snapshot, ProfileExpansionResult Expansion)> CaptureAsync(
         ManifestCatalogDbContext context, EnvironmentMetadata environment, ManifestRevisionRef revision,
-        NormalizedApplicationManifest manifest, CancellationToken token)
+        NormalizedApplicationManifest manifest, CancellationToken token, ConfigurationRenderingCatalog rendering, IReadOnlyList<ConfigurationRenderPin>? frozenPins = null)
     {
         var scopes = await ReadScopesAsync(context, environment, manifest, token);
         var profiles = new List<ConfigurationProfileRevision>();
@@ -66,7 +66,7 @@ internal static class ConfigurationPlanningCapture
             if (row is null) throw new InvalidDataException("Selected Profile revision is unavailable.");
             profiles.Add(ProfileSnapshotCodec.Decode(row.Snapshot, row.ProfileId, row.Revision, row.SnapshotFormatVersion, row.ModelVersion));
         }
-        return ConfigurationPlanningSnapshot.Prepare(revision, manifest, scopes, profiles);
+        return ConfigurationPlanningSnapshot.PrepareCore(revision, manifest, scopes, profiles, rendering, frozenPins);
     }
 
     internal static bool SameScopes(IReadOnlyList<ConfigurationPlanningScope> left, IReadOnlyList<ConfigurationPlanningScope> right) =>

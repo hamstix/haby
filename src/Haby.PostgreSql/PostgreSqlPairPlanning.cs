@@ -23,7 +23,7 @@ public static class PostgreSqlApplicationLoginContract
          "properties":{"databaseRef":{"type":"string","pattern":"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$","maxLength":63},
          "schema":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,62}$","not":{"anyOf":[{"pattern":"^pg_"},{"enum":["public","information_schema"]}]}},
          "privilegePolicy":{"const":"database-owner/v1"}}}
-        """, """{"type":"object","additionalProperties":false}""");
+        """, PostgreSqlConsumerOptions.Schema);
 
     public static PostgreSqlApplicationLoginProperties? Parse(ConfigurationObject properties)
     {

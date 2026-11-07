@@ -22,6 +22,11 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
         if (output.Contract != Contract || output.Key != Key) return null;
         try
         {
+            using var document = JsonDocument.Parse(output.Payload);
+            var members = document.RootElement.EnumerateObject().ToArray();
+            if (members.Length != 6 || members.Select(x => x.Name).Distinct(StringComparer.Ordinal).Count() != 6 ||
+                !document.RootElement.TryGetProperty("password"u8, out var password) || password.ValueKind != JsonValueKind.Object ||
+                password.EnumerateObject().Count() != 2 || password.EnumerateObject().Select(x => x.Name).Distinct(StringComparer.Ordinal).Count() != 2) return null;
             var value = JsonSerializer.Deserialize(output.Payload, PostgreSqlConnectionJsonContext.Default.PostgreSqlConnectionDocument);
             if (value is null || string.IsNullOrWhiteSpace(value.Host) || value.Host.Length > 255 || Uri.CheckHostName(value.Host) == UriHostNameType.Unknown ||
                 value.Port is < 1 or > 65535 || value.Password is null || value.DatabaseName is null ||
@@ -30,7 +35,7 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
             return new(value.Host, value.Port, value.DatabaseName, value.Schema, value.UserName,
                 new(SecretId.Parse(value.Password.SecretId), SecretVersionId.Parse(value.Password.SecretVersionId)));
         }
-        catch (Exception e) when (e is JsonException or ArgumentException or FormatException) { return null; }
+        catch (Exception e) when (e is JsonException or ArgumentException or FormatException or InvalidOperationException) { return null; }
     }
     public bool Validate(DurableOperationNode node, ExternalOperationOutput output) =>
         PostgreSqlApplicationAccessAction.Decode(node) is { } input && Decode(output) is { } value &&

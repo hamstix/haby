@@ -42,9 +42,10 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
             new DurableOperationGraph(spec.Resources.SelectMany(r => new Prefix(r.Value.Type).Plan(spec, r.Key, inputs, configuration))).Equals(graph);
     }
-    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null)
+    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null)
     {
         var services = new ServiceCollection().AddSingleton(TimeProvider.System)
+            .AddSingleton(PostgreSqlConnectionRendering.CreateCatalog())
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore().AddPostgreSqlProviderAliasStore()
             .AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
@@ -53,6 +54,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
             .AddPostgreSqlDurableOperationExecution().AddPostgreSqlDatabaseRecoveryJournal().AddPostgreSqlDatabaseRecovery()
             .AddSingleton<IGeneratedCredentialOperations, PostgreSqlGeneratedCredentialOperations>()
             .AddPostgreSqlDatabaseRestrict().AddPostgreSqlProviderResourceReservations().AddPostgreSqlApplicationLogin();
+        if (queryTrap is not null) services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(queryTrap));
         services.RemoveAll<IDurableActionAdmissionHandler>();
         foreach (var contract in new[] { PostgreSqlDatabaseContract.Id, PostgreSqlApplicationLoginContract.Id })
             services.AddSingleton<IDurableActionAdmissionHandler>(full ? new PostgreSqlPairResourceAdmission(contract) : new Prefix(contract));
@@ -71,7 +73,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         await new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection).ExecuteNonQueryAsync();
         return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name, Pooling = false }.ConnectionString;
     }
-    private async Task<Scenario> Prepare(bool full = false)
+    private async Task<Scenario> Prepare(bool full = false, bool render = false)
     {
         var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("login_catalog_")));
         var name = "login_target_" + Guid.NewGuid().ToString("N");
@@ -92,16 +94,30 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
             ProviderAlias.Create("postgresql.primary"), null, new(instance, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
         var envelope = PostgreSqlPairPlanningTests.Example();
         envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = name;
+        if (render)
+        {
+            foreach (var component in new[] { "api", "worker" })
+                envelope["manifest"]!["spec"]!["components"]![component]!["bindings"]!["storage"]!["configurationSlot"] = "main-database";
+            envelope["manifest"]!["spec"]!["components"]!["api"]!["bindings"]!["storage"]!["options"] = System.Text.Json.Nodes.JsonNode.Parse("{\"timeout\":200}"u8);
+            var profile = Assert.IsType<ImportConfigurationProfileResult.Succeeded>(await new ImportConfigurationProfile(
+                services.GetRequiredService<IConfigurationProfileImportStore>(), TimeProvider.System).ExecuteAsync(Encoding.UTF8.GetBytes(RenderingProfile), "tester"));
+            var environmentMetadata = (await services.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("pilot"), default))!;
+            var targetScope = new ProfileAssignmentTarget.Environment();
+            Assert.Equal(AssignmentOutcome.Created, (await services.GetRequiredService<IProfileAssignmentStore>().ApplyAsync(environmentMetadata,
+                new(targetScope, [new ProfileDecision.Use(profile.Revision.Reference)]), new AssignmentPrecondition.ExpectedAbsence(),
+                new("tester", DateTimeOffset.UtcNow, null), default)).Outcome);
+        }
         var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(
             services.GetRequiredService<IManifestImportStore>(), PostgreSqlPairPlanningTests.Catalog, TimeProvider.System)
             .ExecuteAsync(PostgreSqlPairPlanningTests.Bytes(envelope), "tester"));
         var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
         var change = (await planner.CreateChangeSetAsync(environment, imported.ManifestRevisionRef.ApplicationRecordId,
             imported.ManifestRevisionRef, new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).ChangeSet!;
-        var plan = (await planner.CreatePlanAsync(change.Id, "tester", default)).Plan!;
+        var planned = (await planner.CreatePlanAsync(change.Id, "tester", default)).Plan!;
+        var plan = (await planner.FindPlanAsync(planned.Id, default))!;
         Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(plan.Id, default));
         var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
-        return new(connection, name, commit, plan);
+        return new(connection, name, (await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(change.Id, default))!, plan);
     }
     private static async Task<DurableExecutionResult> Execute(Scenario scenario, string id, IPostgreSqlLoginFaultHooks? fault = null, CancellationToken token = default)
     {

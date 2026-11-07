@@ -628,9 +628,10 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
     }
 
     private static ServiceProvider Services(string connection, TimeProvider clock, bool registerCodec = true,
-        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null)
+        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null, ConfigurationRenderingCatalog? rendering = null)
     {
         var services = new ServiceCollection()
+            .AddSingleton(rendering ?? Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1"))
             .AddSingleton(clock)
             .AddPostgreSqlManifestCatalog(connection)
             .AddPostgreSqlPlaintextSecretStore()

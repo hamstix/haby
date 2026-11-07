@@ -239,3 +239,10 @@ Earlier success histories are not backfilled from name lookups. Startup refuses
 earlier migration sets; never reset persistent data automatically. Explicit
 standalone manual assignment remains successful without database output and
 cannot authorize restrict. See [the slice contract](../../docs/development/114-postgresql-restrict.md).
+
+## Connection rendering planning boundary
+
+[Issue #144](../../docs/development/144-postgresql-connection-rendering.md) adds
+format-2 configuration inputs and the PinConfigurationRendering admission marker.
+Prior durable Plans/generations require explicit fresh-catalog initialization.
+No Provider-specific columns or automatic reset/backfill are introduced.

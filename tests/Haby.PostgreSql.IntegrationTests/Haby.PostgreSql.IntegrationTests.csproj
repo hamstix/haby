@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\ProfileDeclarationBoundarySamples.cs" Link="ProfileDeclarationBoundarySamples.cs" />
+    <Compile Include="..\ConfigurationRenderingSamples.cs" Link="ConfigurationRenderingSamples.cs" />
     <Compile Include="..\ProfilePersistenceSamples.cs" Link="ProfilePersistenceSamples.cs" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>

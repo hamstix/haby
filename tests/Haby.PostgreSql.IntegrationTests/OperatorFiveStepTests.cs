@@ -87,6 +87,8 @@ public sealed partial class OperatorHostIntegrationTests
                 }
                 var layout = Haby.Tests.ProfilePersistenceSamples.Node(false);
                 layout["spec"]!["bindingRules"]!["connection"]!["documentProjections"]!.AsArray().RemoveAt(1);
+                layout["spec"]!["bindingRules"]!["connection"]!["rendererRef"] = PostgreSqlConnectionRendering.Renderer.Value;
+                layout["spec"]!["bindingRules"]!["connection"]!["options"] = System.Text.Json.Nodes.JsonNode.Parse("{\"sslMode\":\"disable\"}"u8);
                 Assert.Equal(ProfileStatus.Created, (await client.ImportProfileAsync(new()
                 { Payload = ByteString.CopyFrom(Haby.Tests.ProfilePersistenceSamples.Bytes(layout)) })).Status);
                 var initialAssignment = await client.ApplyProfileAssignmentAsync(new()
@@ -101,6 +103,7 @@ public sealed partial class OperatorHostIntegrationTests
                 {
                     component.Value!["bindings"]!["storage"]!["configurationSlot"] = "main";
                 }
+                envelope["manifest"]!["spec"]!["components"]!["api"]!["bindings"]!["storage"]!["options"] = System.Text.Json.Nodes.JsonNode.Parse("{\"timeout\":200}"u8);
                 envelope["manifest"]!["metadata"]!["id"] = "operator.pair";
                 envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = target;
                 var bytes = PostgreSqlPairPlanningTests.Bytes(envelope);
