@@ -95,8 +95,9 @@ Stored operator preview is delivered by issue #146 below; confidential delivery 
 - [x] Accept immutable document materialization and stored redacted preview with name-based operator selection and optional explicit generation under [ADR-041](docs/adr/0041-configuration-document-materialization-and-preview.md).
 - [x] Implement atomic/idempotent unresolved ConfigurationDocumentRevisions, exact output provenance and strict bounded codecs; no secret material or completed connection strings: [issue #146](docs/development/146-configuration-materialization-preview.md).
 - [x] Expose name-based configuration materialize/get/preview through the operator Host and habyctl, resolving current fully applied desired generation once and supporting explicit-generation automation: [operator runbook](docs/development/146-configuration-materialization-preview.md).
-- [ ] Agree exact document selection, minimal authorization, transport and response-handling policy for confidential retrieval.
-- [ ] Implement scoped retrieval and deferred secret resolution/formatting through that separately authorized boundary.
+- [x] Accept exact-document static delivery grants (non-expiring unless explicitly limited), one shared configurable Host endpoint and transient bounded secret resolution/formatting under [ADR-042](docs/adr/0042-authorized-configuration-delivery.md).
+- [ ] Implement authorized exact-revision delivery, access grant administration and the real client connection rehearsal; ordinary operator get/preview stay redacted/metadata-only.
+- [ ] Immediately follow delivery with static operator-admin tokens and selected registry/context credentials in habyctl, before broader real use; agree initial issuance/transition first, without OAuth or complex RBAC.
 - [ ] Run the full operator-to-application rehearsal: bootstrap -> provisioning -> configuration -> client authentication and application use.
 
 Exit evidence:

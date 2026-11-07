@@ -351,9 +351,13 @@ consistent during a rollout. Restarting a Pod from an old ReplicaSet cannot
 silently load a configuration produced for a newer container or ManagedWorkload
 generation.
 
-`ConfigurationSnapshot` belongs to the later delivery contract and is not part
-of the M2 Runtime Identity authenticator. The delivery milestone must define its
-transport representation, secret materialization rules and digest semantics.
+`ConfigurationSnapshot` belongs to the later Kubernetes delivery contract and is
+not part of the M2 Runtime Identity authenticator. Its transport representation,
+materialization rules and safe digest semantics require that later contract.
+[ADR-042](../adr/0042-authorized-configuration-delivery.md) first implements a
+separate pilot path using a scoped static credential for one exact document over
+gRPC on the shared Host. It requires neither Runtime Identity nor a workload
+snapshot; it does not change the future Kubernetes mapping described here.
 
 ### Single-request pull flow
 

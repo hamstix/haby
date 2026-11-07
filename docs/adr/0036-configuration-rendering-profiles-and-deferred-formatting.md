@@ -202,7 +202,11 @@ Confidential retrieval is a separate API boundary. Before enabling it, accept
 exact document-revision selection, minimal authorization/scope, transport and
 secret-bearing response handling. Deferring Kubernetes Runtime Identity/general
 operator auth never permits unrestricted configuration retrieval. No reveal
-endpoint is authorized by this ADR.
+endpoint is authorized by this ADR alone.
+[ADR-042](0042-authorized-configuration-delivery.md) now accepts scoped static
+exact-document tokens, transient formatting and one shared configurable Host
+endpoint. Delivery authorization is separate from the still-trusted operator
+surface; static operator-admin tokens are the immediately following slice.
 
 ## Required evidence
 
