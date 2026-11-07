@@ -27,7 +27,10 @@ Select an exact ApplicationDeploymentId, generation, ComponentId and DocumentId.
 The initial pilot requires the requested generation to be fully applied, with
 all mandatory operations successful and AppliedGeneration equal to that generation.
 No latest selection, current alias lookup, external Provider call or provisioning
-occurs during rendering.
+occurs during rendering. [ADR-041](0041-configuration-document-materialization-and-preview.md)
+adds name-based operator selectors and one-time server resolution of the current
+fully applied desired generation into this exact internal target. It defines
+materialization, stored revisions, redacted preview and their limits.
 
 Consume confirmed outputs from the containing accepted graph. Only explicitly
 bound Resources with Document projections may contribute fragments. Initially

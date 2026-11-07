@@ -92,8 +92,9 @@ The in-process preview is not yet an operator endpoint or confidential delivery.
 - [x] Integrate frozen structural layouts/options, exact scoped assignment inputs and provenance into durable Plans/generations, with coherent capture and atomic freshness checks: [operator path and catalog implications](docs/development/142-frozen-profile-planning.md). Renderer compatibility, defaults, materialization and delivery remain pending.
 - [x] Accept the first PostgreSQL renderer/formatter and closed timeout/commandTimeout/sslMode contract under [ADR-040](docs/adr/0040-postgresql-connection-rendering-and-consumer-options.md).
 - [x] Implement adapter-owned Resource-output rendering, frozen typed consumer settings and pure deferred formatting for the confirmed PostgreSQL application-login output; [implementation and catalog boundary](docs/development/144-postgresql-connection-rendering.md). Production material resolution/delivery remains separate.
-- [ ] Materialize immutable unresolved ConfigurationDocumentRevisions from exact applied-generation inputs, with idempotency, provenance and no secret-bearing strings in ordinary storage/results.
-- [ ] Expose redacted preview through the operator Host and habyctl.
+- [x] Accept immutable document materialization and stored redacted preview with name-based operator selection and optional explicit generation under [ADR-041](docs/adr/0041-configuration-document-materialization-and-preview.md).
+- [ ] Implement atomic/idempotent unresolved ConfigurationDocumentRevisions, exact output provenance and strict bounded codecs; no secret material or completed connection strings.
+- [ ] Expose name-based configuration materialize/get/preview through the operator Host and habyctl, resolving current fully applied desired generation once and supporting explicit-generation automation.
 - [ ] Agree exact document selection, minimal authorization, transport and response-handling policy for confidential retrieval.
 - [ ] Implement scoped retrieval and deferred secret resolution/formatting through that separately authorized boundary.
 - [ ] Run the full operator-to-application rehearsal: bootstrap -> provisioning -> configuration -> client authentication and application use.
