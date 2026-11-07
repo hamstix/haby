@@ -58,7 +58,8 @@ public sealed partial class ExactActionAdmissionTests
         var database = "document_queue_" + Guid.NewGuid().ToString("N");
         await using (var admin = new NpgsqlConnection(fixture.ConnectionString))
         { await admin.OpenAsync(); await new NpgsqlCommand($"CREATE DATABASE \"{database}\"", admin).ExecuteNonQueryAsync(); }
-        var connection = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = database }.ConnectionString;
+        using var pools = new TestCatalogPools();
+        var connection = pools.Register(new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = database });
         var renderer = new QueueDocumentRenderer { Inconsistent = inconsistent };
         var catalog = new ConfigurationRenderingCatalog([new QueueRenderDefinition()], [renderer], QueueFormatting(), [new QueueNeverFormatter()]);
         var boundary = new QueueBoundary { ExternalEvidence = true };

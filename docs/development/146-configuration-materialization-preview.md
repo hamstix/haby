@@ -133,7 +133,8 @@ from current defaults.
 `ConfigurationDocumentCodecTests` measures exact/one-over encoded budgets, Unicode,
 escaping, 64/65 levels, exact numbers, all node kinds, magic objects and invalid
 internal formats. `ConfigurationDocumentLoopbackTests` runs managed and published
-Native AOT clients, exact 4 MiB preview transport, object-valued JSON, overrides,
+Native AOT clients, exact 4 MiB preview transport and 8 MiB CLI envelope (including
+the platform newline), one-byte-over refusal, object-valued JSON, overrides,
 refusal exits and malformed/foreign replies before output.
 
 The disposable PostgreSQL suite exercises actual generated client/Host five-step

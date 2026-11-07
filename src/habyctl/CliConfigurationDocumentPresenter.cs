@@ -118,7 +118,8 @@ internal sealed partial class CliCommandContext
             // Serialize and size-check the entire envelope before touching stdout.
             var envelope = new CliEnvelope<CliConfigurationDocumentData>(1, "configuration " + command, checkedReply.Outcome, checkedReply.Data, []);
             var json = JsonSerializer.Serialize(envelope, CliOutputJsonContext.Default.CliEnvelopeCliConfigurationDocumentData);
-            if (Encoding.UTF8.GetByteCount(json) + 1 > 8 * 1024 * 1024) throw new InvalidDataException("Oversized configuration response.");
+            if (Encoding.UTF8.GetByteCount(json) + Encoding.UTF8.GetByteCount(output.NewLine) > 8 * 1024 * 1024)
+                throw new InvalidDataException("Oversized configuration response.");
             if (jsonOutput()) output.WriteLine(json);
             else
             {

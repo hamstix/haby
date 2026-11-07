@@ -67,6 +67,24 @@ public sealed partial class CliLoopbackTests
                     const string prefix = "{\"document\":\"Ж\\u003C"; const string suffix = "\",\"redactedPaths\":[]}";
                     var padding = 4 * 1024 * 1024 - Encoding.UTF8.GetByteCount(prefix + suffix);
                     reply.PreviewJson = ByteString.CopyFromUtf8(prefix + new string('a', padding) + suffix); break;
+                case "outer-boundary":
+                case "outer-over":
+                    reply.PreviewJson = ByteString.CopyFromUtf8("{\"document\":\"\",\"redactedPaths\":[]}");
+                    var data = ConfigurationDocumentPresentation.Check("preview", request, reply).Data;
+                    var baseline = JsonSerializer.Serialize(new CliEnvelope<CliConfigurationDocumentData>(1, "configuration preview", "found", data, []),
+                        CliOutputJsonContext.Default.CliEnvelopeCliConfigurationDocumentData);
+                    var extra = 8 * 1024 * 1024 - Encoding.UTF8.GetByteCount(baseline) - Encoding.UTF8.GetByteCount(Environment.NewLine) + (Mode == "outer-over" ? 1 : 0);
+                    // Each raw '<' costs six bytes after the CLI's required escaping.
+                    reply.PreviewJson = ByteString.CopyFromUtf8("{\"document\":\"" + new string('<', extra / 6) + new string('a', extra % 6) + "\",\"redactedPaths\":[]}");
+                    break;
+                case "wire-boundary":
+                case "wire-over":
+                    reply.PreviewJson = ByteString.Empty;
+                    var desiredWireBytes = 8 * 1024 * 1024 + (Mode == "wire-over" ? 1 : 0);
+                    // One field tag and a four-byte length prefix at this size.
+                    reply.PreviewJson = ByteString.CopyFrom(new byte[desiredWireBytes - reply.CalculateSize() - 5]);
+                    Assert.Equal(desiredWireBytes, reply.CalculateSize());
+                    break;
                 case "not-found": reply.Status = ConfigurationDocumentStatus.NotFound; reply.Artifact = null; reply.PreviewJson = ByteString.Empty; break;
             }
             return Task.FromResult(reply);
@@ -76,6 +94,10 @@ public sealed partial class CliLoopbackTests
     [Theory]
     [InlineData("good", 0)]
     [InlineData("boundary", 0)]
+    [InlineData("outer-boundary", 0)]
+    [InlineData("outer-over", 2)]
+    [InlineData("wire-boundary", 2)]
+    [InlineData("wire-over", 3)]
     [InlineData("not-found", 1)]
     [InlineData("foreign-selector", 2)]
     [InlineData("foreign-generation", 2)]
@@ -91,7 +113,9 @@ public sealed partial class CliLoopbackTests
         var registry = new DocumentRegistry { Mode = mode };
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
-        builder.Services.AddGrpc(o => o.MaxSendMessageSize = 8 * 1024 * 1024); builder.Services.AddSingleton(registry);
+        // Permit a one-over fake reply here to prove the configuration client's receive
+        // limit independently of the production Host's matching send limit.
+        builder.Services.AddGrpc(o => o.MaxSendMessageSize = mode == "wire-over" ? 9 * 1024 * 1024 : 8 * 1024 * 1024); builder.Services.AddSingleton(registry);
         await using var host = builder.Build(); host.MapGrpcService<DocumentRegistry>(); await host.StartAsync();
         var config = Path.Combine(Path.GetTempPath(), "haby-document-cli-" + Guid.NewGuid().ToString("N") + ".yaml");
         await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: wrong\ninstances:\n  selected:\n    endpoint: {host.Urls.Single()}\ncontexts:\n  wrong:\n    instance: selected\n    environmentId: wrong\n  selected:\n    instance: selected\n    environmentId: selected\n");
@@ -125,7 +149,7 @@ public sealed partial class CliLoopbackTests
         void Verify(string stdout, string stderr, string format)
         {
             Assert.DoesNotContain("private-sentinel", stdout + stderr);
-            if (expected == 2) { Assert.Equal("", stdout); Assert.NotEqual("", stderr); return; }
+            if (expected >= 2) { Assert.Equal("", stdout); Assert.NotEqual("", stderr); return; }
             Assert.Equal("", stderr); Assert.Contains(expected == 0 ? "found" : "notFound", stdout);
             if (format == "json")
             {
@@ -133,6 +157,7 @@ public sealed partial class CliLoopbackTests
                 Assert.Equal(3, data.GetProperty("target").GetProperty("generation").GetInt64());
                 if (expected == 0) Assert.Equal(JsonValueKind.Object, data.GetProperty("preview").ValueKind);
                 Assert.True(Encoding.UTF8.GetByteCount(stdout) <= 8 * 1024 * 1024);
+                if (mode == "outer-boundary") Assert.Equal(8 * 1024 * 1024, Encoding.UTF8.GetByteCount(stdout));
             }
         }
     }

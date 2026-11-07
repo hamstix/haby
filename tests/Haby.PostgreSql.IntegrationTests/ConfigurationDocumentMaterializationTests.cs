@@ -76,7 +76,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var values = decoded.Select(x => Assert.IsType<ConfigurationDeferredValue>(Assert.IsType<ConfigurationObject>(Assert.IsType<ConfigurationObject>(
                 Assert.IsType<ConfigurationObject>(x.Tree).Members["PostgreSQL"]).Members["DefaultConnection"]).Members["ConnectionString"])).ToArray();
             Assert.Equal(values[0].Arguments.Members["password"], values[1].Arguments.Members["password"]);
-            Assert.NotEqual(Assert.IsType<ConfigurationObject>(values[0].Arguments.Members["settings"]).Members["timeout"], Assert.IsType<ConfigurationObject>(values[1].Arguments.Members["settings"]).Members["timeout"]);
+            Assert.Equal(decoded[0].OutputAssociations, decoded[1].OutputAssociations);
+            Assert.Equal(ConfigurationNumber.Parse("200"), Assert.IsType<ConfigurationObject>(values[0].Arguments.Members["settings"]).Members["timeout"]);
+            Assert.Equal(ConfigurationNumber.Parse("15"), Assert.IsType<ConfigurationObject>(values[1].Arguments.Members["settings"]).Members["timeout"]);
             Assert.All(decoded, x => { Assert.Equal(scenario.Plan.Inputs.Configuration, ConfigurationPlanningSnapshotCodec.Decode(x.FrozenInputs, scenario.Plan.Inputs.Revision)); Assert.Contains("app-login-access", x.OutputAssociations); });
             await host.StopAsync();
         }
