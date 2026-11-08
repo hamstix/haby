@@ -9,12 +9,12 @@ public sealed class CliGuardTests
 {
     [Theory]
     [InlineData("http://example.com:7443")]
-    [InlineData("https://example.com:7443")]
-    [InlineData("https://0.0.0.0:7443")]
+    [InlineData("ftp://example.com:7443")]
+    [InlineData("http://0.0.0.0:7443")]
     [InlineData("http://user:secret@localhost:7443")]
     [InlineData("http://localhost:7443/?token=secret")]
     [InlineData("http://localhost:7443/tenant")]
-    public void Endpoint_must_use_loopback(string address) => Assert.Null(CliApplication.ParseEndpoint(address));
+    public void Endpoint_rejects_unsafe_transport_or_authority(string address) => Assert.Null(CliApplication.ParseEndpoint(address));
 
     [Theory]
     [InlineData("https://localhost:7443")]

@@ -25,7 +25,7 @@ public sealed partial class OperatorHostIntegrationTests
         { BeforeSuccess = _ => throw new IOException("Test-only lost confirmation.") }))
         {
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             if (pair)
             {
                 var envelope = PostgreSqlPairPlanningTests.Example();
@@ -52,7 +52,7 @@ public sealed partial class OperatorHostIntegrationTests
         {
             await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var operation = await client.GetOperationAsync(request);
             var attempt = Assert.Single(operation.Attempts);
             Assert.Equal(OperationAttemptOutcome.Uncertain, attempt.Outcome);

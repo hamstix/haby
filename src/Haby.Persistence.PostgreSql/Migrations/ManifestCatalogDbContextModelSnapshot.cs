@@ -827,6 +827,66 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.OperatorAccessRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<byte[]>("CredentialHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("credential_hash");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("display_name");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("purpose");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<string>("RevokedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("revoked_by");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("operator_access_grants", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_operator_access_expiry", "expires_at IS NULL OR expires_at > created_at");
+
+                            t.HasCheckConstraint("ck_operator_access_hash", "octet_length(credential_hash) = 32");
+
+                            t.HasCheckConstraint("ck_operator_access_purpose", "purpose = 'operator-admin/v1'");
+
+                            t.HasCheckConstraint("ck_operator_access_revoke", "(revoked_at IS NULL) = (revoked_by IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.PostgreSqlDatabaseRecoveryDecisionRow", b =>
                 {
                     b.Property<Guid>("Id")

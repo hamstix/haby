@@ -82,7 +82,7 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Same(host.Services.GetRequiredService<IDurableOperationExecutor>(),
                     host.Services.GetRequiredService<IDurableOperationExecutor>());
                 using var channel = Channel(host, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(Envelope("durable-commit")) });
                 var reference = imported.Created.Revision.Reference;
                 async Task<string> Change() => (await client.CreateChangeSetAsync(new CreateChangeSetRequest
@@ -154,7 +154,7 @@ public sealed partial class OperatorHostIntegrationTests
                 original = accepted.Commit;
                 retryPlan = original.ChangeSetId == first ? firstAlternative : competingAlternative;
                 Assert.Equal(1, original.Generation);
-                Assert.Equal(OperatorHostApplication.TechnicalActorId, original.TechnicalActorId);
+                Assert.StartsWith("operator-grant:", original.TechnicalActorId);
                 Assert.DoesNotContain(material, accepted.ToString());
                 // Ignore the initial response as a client would after losing it; retry different Plans concurrently.
                 var retries = await Task.WhenAll(Commit(original.ChangeSetId, original.PlanId), Commit(original.ChangeSetId, retryPlan));
@@ -179,7 +179,7 @@ public sealed partial class OperatorHostIntegrationTests
             await using (var restarted = await StartAsync(restricted, certificatePath))
             {
                 using var channel = Channel(restarted, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 Assert.Equal(original, (await client.GetCommitAsync(new ChangeSetRequest { ChangeSetId = original.ChangeSetId })).Commit);
                 Assert.Equal(generation, (await client.GetGenerationAsync(new GenerationRequest { DeploymentId = original.DeploymentId, Generation = 1 })).DesiredGeneration);
                 Assert.Equal(CommitStatus.GenerationNotFound, (await client.GetGenerationAsync(new GenerationRequest { DeploymentId = original.DeploymentId, Generation = 2 })).Status);
@@ -251,9 +251,9 @@ public sealed partial class OperatorHostIntegrationTests
                 using var accepted = await Run("changeset", "commit", id, "--plan", plan);
                 Assert.Equal("committed", accepted.RootElement.GetProperty("outcome"u8).GetString());
                 using var channel = Channel(host, certificate);
-                commit = (await new ManifestOperator.ManifestOperatorClient(channel).GetCommitAsync(new ChangeSetRequest { ChangeSetId = id })).Commit;
+                commit = (await OperatorTestCredentials.Client(channel).GetCommitAsync(new ChangeSetRequest { ChangeSetId = id })).Commit;
                 Assert.Equal(plan, commit.PlanId);
-                Assert.Equal(OperatorHostApplication.TechnicalActorId, commit.TechnicalActorId);
+                Assert.StartsWith("operator-grant:", commit.TechnicalActorId);
             }
             await using (var restarted = await StartAsync(connection, certificatePath))
                 await NativeCommitSmoke(restarted.Urls.Single(), commit, plan, material);
@@ -291,6 +291,7 @@ public sealed partial class OperatorHostIntegrationTests
             instances:
               local:
                 endpoint: {endpoint}
+                token: {OperatorTestCredentials.Credential(endpoint)}
             contexts:
               pilot:
                 instance: local
@@ -330,6 +331,7 @@ public sealed partial class OperatorHostIntegrationTests
             instances:
               local:
                 endpoint: {endpoint}
+                token: {OperatorTestCredentials.Credential(endpoint)}
             contexts:
               pilot:
                 instance: local

@@ -27,7 +27,7 @@ public sealed class CliCommandTests
     {
         public int Created { get; private set; }
         public FakeClient Client { get; } = new();
-        public IRegistryClient Create(Uri address, bool skipTlsValidation)
+        public IRegistryClient Create(Uri address, bool skipTlsValidation, string? credential = null)
         {
             Assert.Equal("localhost", address.Host);
             Assert.False(skipTlsValidation);
@@ -38,6 +38,11 @@ public sealed class CliCommandTests
 
     private sealed class FakeClient : IRegistryClient
     {
+        public Task<OperatorAccessReply> CreateOperatorAccessAsync(CreateOperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<OperatorAccessReply> GetOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ListOperatorAccessReply> ListOperatorAccessAsync(ListOperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<OperatorAccessReply> RevokeOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+
         public Task<ConfigurationAccessReply> CreateConfigurationAccessAsync(CreateConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ConfigurationAccessReply> GetConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ConfigurationAccessReply> RevokeConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -334,7 +339,7 @@ public sealed class CliCommandTests
         using var output = new StringWriter();
         using var error = new StringWriter();
         Assert.Equal(CliApplication.UsageError,
-            await Create(factory, output, error, "https://remote.example").RunAsync(["manifest", "revision", "get", "id", "1"]));
+            await Create(factory, output, error, "http://remote.example").RunAsync(["manifest", "revision", "get", "id", "1"]));
         Assert.Equal(0, factory.Created);
         Assert.Contains("loopback", error.ToString());
     }

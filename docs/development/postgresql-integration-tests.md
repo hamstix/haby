@@ -1,5 +1,13 @@
 # PostgreSQL checkpoint integration tests
 
+[Operator authentication](150-operator-access-tokens.md) adds complete registered
+method denial, actual Host-process first issuance, concurrent local recovery,
+server-derived actors, purpose isolation, protected/disabled reflection,
+restart/dump/restore and published Native AOT credential/lifecycle evidence.
+Real Host fixtures explicitly issue and retain credentials through the production
+port; no anonymous Host switch is available. Existing measured unfiltered gates
+and safe artifact allowlists remain unchanged.
+
 [Configuration document materialization](146-configuration-materialization-preview.md)
 adds actual Host/generated-client/published CLI, immutable concurrent acceptance,
 exact-generation selection, codec/size gates, renderer-free reads and current-build

@@ -4,7 +4,7 @@
 - Date: 2026-11-08
 - Scope: P2 administrative authentication, Host bootstrap and CLI credentials
 - Extends: ADR-026/027/028/033/035/042
-- Implementation: issue #150; acceptance does not mean implementation is complete
+- Implementation: issue #150; [operator runbook](../development/150-operator-access-tokens.md)
 
 ## Context
 
@@ -30,8 +30,8 @@ There is no anonymous compatibility mode, including loopback or Development.
 Host may start without operator tokens, but administrative RPCs then fail closed.
 Add authentication storage without resetting the existing catalog. Never generate
 an initial token automatically during normal startup or print credentials in logs.
-Until issue #150 is implemented, ADR-042's documented interim boundary remains
-the actual runtime behavior.
+Issue #150 implements this transition; see the operator runbook for the actual
+local command, transport and safe configuration-write policy.
 
 ### Explicit local issuance and recovery
 
@@ -119,6 +119,17 @@ TLS stays the default on the shared endpoint. Permit remote CLI endpoints throug
 HTTPS; HTTP is limited to loopback or an explicit isolated-contour opt-in. Never
 silently disable certificate validation. Preserve and document any explicitly
 selected existing pilot certificate-bypass behavior as an explicit exception.
+
+### Narrow credential configuration write policy
+
+Credential setup writes a separately named, new normalized configuration file,
+only with explicit `--new-config-file` and `--normalize` options. The original
+configuration remains untouched as the operator's backup (including comments and
+formatting). Preserve every validated instance/context/transport setting; change
+only the named instance credential. Refuse existing destinations and write through
+a user-only new temporary file, flush, then rename without overwrite. Do not silently
+switch the selected configuration path. Operators explicitly select the new file.
+Input is a token-file reference or explicit stdin; no literal token argument.
 
 ### Reflection is enabled and administrative
 

@@ -186,8 +186,8 @@ public sealed partial class ExactActionAdmissionTests
         var count = renderer.Count;
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
             s => s.AddSingleton(catalog).AddSingleton(QueueFormatting()).AddSingleton<IConfigurationResolutionBinding>(formatter));
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var admin = new ManifestOperator.ManifestOperatorClient(channel); var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+        var admin = OperatorTestCredentials.Client(channel); var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
         var grant = await admin.CreateConfigurationAccessAsync(new() { Selector = new() { Environment = "pilot", ApplicationId = "queue-app", ComponentId = "worker", DocumentId = "settings" } });
         Assert.Equal(ConfigurationAccessStatus.Created, grant.Status);
         for (var i = 0; i < 2; i++)

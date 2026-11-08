@@ -27,7 +27,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await StartAsync(scenario.Connection, scenario.CertificatePath))
         {
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             request = await CommitExecutionAsync(client, scenario.Database);
             if (state == OperationState.Succeeded)
                 Assert.Equal(OperationStatus.Succeeded, (await client.ExecuteOperationAsync(request)).Status);
@@ -58,9 +58,9 @@ public sealed partial class OperatorHostIntegrationTests
             services.AddSingleton<IPostgreSqlDatabaseCreateTarget>(noCalls);
         }))
         {
-            await missing.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(missing);
             using var channel = Channel(missing, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(before, await client.GetOperationAsync(request));
             var expected = state switch
             {
@@ -108,7 +108,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var restored = await StartAsync(scenario.Connection, scenario.CertificatePath))
         {
             using var channel = Channel(restored, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var result = await client.ExecuteOperationAsync(request);
             Assert.Equal(state switch
             {

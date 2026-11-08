@@ -182,7 +182,7 @@ and transition/bootstrap rules before implementing that slice.
 [ADR-043](0043-operator-access-tokens-and-bootstrap.md) now accepts those rules,
 including explicit local issuance/recovery and operator-protected reflection.
 Its implementation in issue #150 replaces the interim anonymous operator boundary;
-accepting the ADR alone does not change current runtime behavior.
+see the [current operator runbook](../development/150-operator-access-tokens.md).
 
 ### Audit and delivery evidence
 

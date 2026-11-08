@@ -25,7 +25,7 @@ public sealed partial class ManifestOperatorService
         var environment = await environments.FindAsync(key, context.CancellationToken);
         if (environment is null) return Result(PlanningStatus.EnvironmentNotFound);
         var result = await planner.CreateChangeSetAsync(environment, reference.ApplicationRecordId, reference,
-            new DeploymentPrecondition.ExpectedAbsence(), OperatorHostApplication.TechnicalActorId, context.CancellationToken);
+            new DeploymentPrecondition.ExpectedAbsence(), Actor, context.CancellationToken);
         return new PlanningReply
         {
             Status = result.Status switch
@@ -59,7 +59,7 @@ public sealed partial class ManifestOperatorService
         DeploymentChangeSetId id;
         try { id = DeploymentChangeSetId.Parse(request.ChangeSetId); }
         catch (ArgumentException) { return Result(PlanningStatus.InvalidRequest); }
-        var result = await planner.CreatePlanAsync(id, OperatorHostApplication.TechnicalActorId, context.CancellationToken);
+        var result = await planner.CreatePlanAsync(id, Actor, context.CancellationToken);
         var reply = new PlanningReply
         {
             Status = result.Status switch
@@ -106,7 +106,7 @@ public sealed partial class ManifestOperatorService
         try { plan = await planner.FindPlanAsync(id, context.CancellationToken); }
         catch (InvalidDataException) { return Result(PlanningStatus.PlanInputUnavailable); }
         var status = close
-            ? (await planner.ClosePlanAsync(id, OperatorHostApplication.TechnicalActorId, context.CancellationToken)) switch
+            ? (await planner.ClosePlanAsync(id, Actor, context.CancellationToken)) switch
             {
                 DurablePlanCloseStatus.Closed => PlanningStatus.Closed,
                 DurablePlanCloseStatus.AlreadyClosed => PlanningStatus.AlreadyClosed,

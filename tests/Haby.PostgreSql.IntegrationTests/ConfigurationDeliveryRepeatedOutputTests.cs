@@ -39,8 +39,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var catalog = new ConfigurationRenderingCatalog([new PostgreSqlConnectionRendererContract()], [new PostgreSqlConnectionRenderer()], PostgreSqlConnectionRendering.FormatterCatalog(), [formatter]);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
             services => services.AddSingleton(catalog).AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(reads)));
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var admin = new ManifestOperator.ManifestOperatorClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+        var admin = OperatorTestCredentials.Client(channel);
         Assert.Equal(GenerationExecutionStatus.Succeeded, (await admin.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = 1 })).Status);
         var document = await admin.MaterializeConfigurationAsync(DocumentRequest(scenario));
         Assert.Equal(Haby.Operator.Contracts.ConfigurationDocumentStatus.Created, document.Status);

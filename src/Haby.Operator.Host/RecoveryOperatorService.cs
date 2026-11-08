@@ -29,7 +29,7 @@ public sealed partial class ManifestOperatorService
             };
         return await OperationCall(async () =>
         {
-            try { return await recovery.RecoverAsync(key!, assignment, context.CancellationToken); }
+            try { return await recovery.RecoverAsync(key!, assignment, Actor, context.CancellationToken); }
             catch (ArgumentException) { return new RecoveryReply { Status = RecoveryStatus.InvalidRequest }; }
         }, context);
     }
@@ -42,7 +42,7 @@ public sealed class OperationRecoveryAdapter(IDurableOperationQuery operations,
     PostgreSqlOperationRecoveryAdapter postgreSql)
 {
     public async ValueTask<RecoveryReply> RecoverAsync(DurableOperationKey key,
-        AssignExistingOperationRequest? assignment, CancellationToken cancellationToken)
+        AssignExistingOperationRequest? assignment, string actor, CancellationToken cancellationToken)
     {
         var operation = await operations.FindAsync(key, cancellationToken);
         if (operation is null) return new() { Status = RecoveryStatus.OperationNotFound };
@@ -51,7 +51,7 @@ public sealed class OperationRecoveryAdapter(IDurableOperationQuery operations,
             return new() { Status = RecoveryStatus.UnsupportedRecoveryAction };
         return assignment is null
             ? await postgreSql.InspectAsync(operation, cancellationToken)
-            : await postgreSql.AssignAsync(key, assignment, cancellationToken);
+            : await postgreSql.AssignAsync(key, assignment, actor, cancellationToken);
     }
 }
 
@@ -86,14 +86,14 @@ public sealed class PostgreSqlOperationRecoveryAdapter(IPostgreSqlDatabaseRecove
     }
 
     public async ValueTask<RecoveryReply> AssignAsync(DurableOperationKey key,
-        AssignExistingOperationRequest request, CancellationToken cancellationToken)
+        AssignExistingOperationRequest request, string actor, CancellationToken cancellationToken)
     {
         if (request.Reason != RecoveryReason.OperatorAcceptedExistingDatabase ||
             !Guid.TryParseExact(request.ExpectedAttemptId, "D", out var attempt) || attempt == Guid.Empty)
             return new() { Status = RecoveryStatus.InvalidRequest };
         var result = await recovery.AssignExistingDatabaseAsync(new AssignExistingPostgreSqlDatabase(key,
             EnvironmentRecordId.Parse(request.EnvironmentRecordId), attempt, request.Acknowledged,
-            PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, request.Note, OperatorHostApplication.TechnicalActorId),
+            PostgreSqlRecoveryReason.OperatorAcceptedExistingDatabase, request.Note, actor),
             cancellationToken);
         return new()
         {

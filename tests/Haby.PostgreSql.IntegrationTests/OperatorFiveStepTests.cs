@@ -55,7 +55,7 @@ public sealed partial class OperatorHostIntegrationTests
             {
                 native.Endpoint = host.Urls.Single();
                 using var channel = Channel(host, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 if (native.Available) await native.Run(["environment", "create", "pilot"]);
                 var environmentResult = await client.GetEnvironmentAsync(new() { Name = "pilot" });
                 if (!native.Available) Assert.Equal(EnvironmentStatus.Created, (await client.CreateEnvironmentAsync(new() { Name = "pilot" })).Status);
@@ -206,10 +206,10 @@ public sealed partial class OperatorHostIntegrationTests
                 });
                 await using (host)
                 {
-                    await host.StartAsync();
+                    await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
                     native.Endpoint = host.Urls.Single();
                     using var channel = Channel(host, certificate);
-                    var client = new ManifestOperator.ManifestOperatorClient(channel);
+                    var client = OperatorTestCredentials.Client(channel);
                     if (mode == "retry")
                     {
                         var stopped = await client.ExecuteGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 });
@@ -257,7 +257,7 @@ public sealed partial class OperatorHostIntegrationTests
             {
                 native.Endpoint = restarted.Urls.Single();
                 using var channel = Channel(restarted, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var owner = new ManagedResourceKey(EnvironmentRecordId.Parse(plan.EnvironmentRecordId), ApplicationRecordId.Parse(plan.Reference.ApplicationRecordId), ManifestLocalId.Create("app-login"));
                 using var material = await restarted.Services.GetRequiredService<ISecretStore>().ResolveAsync(new(new SecretOwner.Resource(owner), SecretPurpose.ApplicationLogin), password, default);
                 Assert.NotNull(material);
@@ -497,6 +497,7 @@ public sealed partial class OperatorHostIntegrationTests
                 instances:
                   local:
                     endpoint: {Endpoint}
+                    token: {OperatorTestCredentials.Credential(Endpoint)}
                 contexts:
                   pilot:
                     instance: local

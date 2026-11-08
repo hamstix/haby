@@ -30,9 +30,9 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         await using (var host = OperatorHostApplication.Build(args, s => RegisterFake(s, fake)))
         {
             await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             await client.CreateEnvironmentAsync(new() { Name = "pilot" });
             await client.CreateEnvironmentAsync(new() { Name = "other" });
             var admin = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
@@ -92,9 +92,9 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         }
         await using (var restarted = OperatorHostApplication.Build(args, s => RegisterFake(s, new FakeEvidence())))
         {
-            await restarted.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(restarted);
             using var channel = GrpcChannel.ForAddress(restarted.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(ProviderPreflightStatus.Ready, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 2 })).Preflight);
             Assert.Equal(1, (await client.GetProviderAliasAsync(new() { Environment = "pilot", Alias = "sample.primary" })).Binding.Revision);
             await restarted.StopAsync();
@@ -103,9 +103,9 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         await using (var missing = OperatorHostApplication.Build(args, s => s.AddSingleton<CredentialSampleCodec>()
             .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<CredentialSampleCodec>())))
         {
-            await missing.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(missing);
             using var channel = GrpcChannel.ForAddress(missing.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(sampleId, (await client.GetProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Provider.InstanceId);
             Assert.Equal(2, (await client.ListProvidersAsync(new() { Environment = "pilot" })).Items.Count);
             Assert.Equal(sampleId, (await client.GetProviderAliasAsync(new() { Environment = "pilot", Alias = "sample.saved" })).Binding.InstanceId);
@@ -121,9 +121,9 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         var connection = await NewDatabaseAsync();
         var args = new[] { "--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0" };
         await using var host = await OperatorHostApplication.BuildMigratedAsync(args);
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         await client.CreateEnvironmentAsync(new() { Name = "pilot" });
         var admin = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
         await client.CreateSecretAsync(new() { Environment = "pilot", Name = "admin", RequestId = Guid.NewGuid().ToString(), Material = ByteString.CopyFromUtf8(admin.Password!) });
@@ -293,7 +293,7 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         var config = Path.GetTempFileName();
         try
         {
-            await File.WriteAllTextAsync(config, $"formatVersion: 1\ninstances: {{}}\ncontexts: {{}}\n");
+            await OperatorTestCredentials.WriteConfigAsync(config, endpoint);
             foreach (var format in new[] { "text", "json" })
                 foreach (var command in new[] {
                     new[] { "provider", "check", "pg-main", "--revision", "1", "--environment", "pilot" },

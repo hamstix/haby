@@ -37,6 +37,7 @@ internal sealed partial class CliApplication(
             new CliJsonPresenter(output), output, error, configuration,
             () => (parsed!.GetValue(configFile), parsed.GetValue(contextName)),
             () => parsed!.GetValue(outputFormat) == "json", secretTerminal ?? new SecretTerminal());
+        root.Subcommands.Add(Commands.OperatorAccessCommands.Create(commands));
         root.Subcommands.Add(ManifestCommands.Create(commands));
         root.Subcommands.Add(Commands.Configuration.ConfigurationCommands.Create(commands));
         root.Subcommands.Add(Commands.Profiles.ProfileCommands.Create(commands));

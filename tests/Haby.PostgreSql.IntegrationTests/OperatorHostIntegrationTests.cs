@@ -40,7 +40,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
             await using (var host = await StartAsync(source, path))
             {
                 using var channel = Channel(host, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var payload = Encoding.UTF8.GetString(Envelope("restore-example"))
                     .Replace("sample_db", targetName, StringComparison.Ordinal);
                 var imported = await client.ImportAsync(new EnvelopeRequest
@@ -66,7 +66,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
             await using (var fresh = await StartAsync(restored, path))
             {
                 using var channel = Channel(fresh, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var found = await client.GetRevisionAsync(new GetRevisionRequest { Reference = reference });
                 Assert.Equal(GetRevisionReply.OutcomeOneofCase.Found, found.OutcomeCase);
                 Assert.Equal(originalRevision, found.Found);
@@ -142,7 +142,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
             await using (var host = await StartAsync(catalogConnection, path))
             {
                 using var channel = Channel(host, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var payload = Encoding.UTF8.GetString(Envelope("preview-example"))
                     .Replace("sample_db", targetName, StringComparison.Ordinal);
                 var imported = await client.ImportAsync(new EnvelopeRequest
@@ -152,7 +152,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
             await using (var restarted = await StartAsync(catalogConnection, path))
             {
                 using var channel = Channel(restarted, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var request = new PreviewDatabaseRequest { Reference = reference, EnvironmentId = "test" };
                 request.Providers.Add(new PreviewProviderSelection
                 {
@@ -237,7 +237,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
             {
                 using var channel = Channel(development, certificate);
                 var client = new ServerReflection.ServerReflectionClient(channel);
-                using var call = client.ServerReflectionInfo();
+                using var call = client.ServerReflectionInfo(OperatorTestCredentials.Headers(channel.Target));
                 await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
                 Assert.True(await call.ResponseStream.MoveNext());
                 Assert.Contains(call.ResponseStream.Current.ListServicesResponse.Service,
@@ -247,7 +247,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
             {
                 using var channel = Channel(production, certificate);
                 var client = new ServerReflection.ServerReflectionClient(channel);
-                using var call = client.ServerReflectionInfo();
+                using var call = client.ServerReflectionInfo(OperatorTestCredentials.Headers(channel.Target));
                 await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
                 Assert.True(await call.ResponseStream.MoveNext());
                 Assert.Contains(call.ResponseStream.Current.ListServicesResponse.Service,
@@ -276,7 +276,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
                         new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(Envelope("operator-example")) }));
                 }
                 using var channel = Channel(host, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var payload = Envelope("operator-example");
                 var valid = await client.ValidateAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(payload) });
                 Assert.Equal(ValidateReply.OutcomeOneofCase.Valid, valid.OutcomeCase);
@@ -313,7 +313,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
                 var created = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(payload) });
                 Assert.Equal(ImportReply.OutcomeOneofCase.Created, created.OutcomeCase);
                 reference = created.Created.Revision.Reference;
-                Assert.Equal(OperatorHostApplication.TechnicalActorId, created.Created.Revision.TechnicalActorId);
+                Assert.StartsWith("operator-grant:", created.Created.Revision.TechnicalActorId);
                 Assert.Equal("manifest.resource.unused", Assert.Single(created.Created.Revision.HistoricalWarnings.Diagnostics).Code);
                 var repeat = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(payload) });
                 Assert.Equal(ImportReply.OutcomeOneofCase.ExistingEquivalent, repeat.OutcomeCase);
@@ -331,11 +331,11 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
             await using (var restarted = await StartAsync(connection, path))
             {
                 using var channel = Channel(restarted, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var found = await client.GetRevisionAsync(new GetRevisionRequest { Reference = reference });
                 Assert.Equal(GetRevisionReply.OutcomeOneofCase.Found, found.OutcomeCase);
                 Assert.Equal("manifest.resource.unused", Assert.Single(found.Found.HistoricalWarnings.Diagnostics).Code);
-                Assert.Equal(OperatorHostApplication.TechnicalActorId, found.Found.TechnicalActorId);
+                Assert.StartsWith("operator-grant:", found.Found.TechnicalActorId);
                 var absent = await client.GetRevisionAsync(new GetRevisionRequest
                 {
                     Reference = new RevisionReference
@@ -428,7 +428,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
     {
         using var timing = TestTiming.HostStartMigrate();
         var app = await OperatorHostApplication.BuildMigratedAsync(Arguments(connection, path, environment));
-        await app.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(app);
         return app;
     }
 

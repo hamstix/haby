@@ -37,7 +37,7 @@ public sealed class CliConfigurationTests
     private sealed class Factory : IRegistryClientFactory
     {
         public List<Uri> Addresses { get; } = [];
-        public IRegistryClient Create(Uri address, bool skipTlsValidation)
+        public IRegistryClient Create(Uri address, bool skipTlsValidation, string? credential = null)
         {
             Addresses.Add(address);
             return new Client();
@@ -46,6 +46,11 @@ public sealed class CliConfigurationTests
 
     private sealed class Client : IRegistryClient
     {
+        public Task<OperatorAccessReply> CreateOperatorAccessAsync(CreateOperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<OperatorAccessReply> GetOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ListOperatorAccessReply> ListOperatorAccessAsync(ListOperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<OperatorAccessReply> RevokeOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+
         public Task<ConfigurationAccessReply> CreateConfigurationAccessAsync(CreateConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ConfigurationAccessReply> GetConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ConfigurationAccessReply> RevokeConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -120,7 +125,7 @@ public sealed class CliConfigurationTests
     [InlineData("formatVersion: 1\ninstances: []\ncontexts: {}")]
     [InlineData("formatVersion: 1\ncurrentContext: absent\ninstances: {}\ncontexts: {}")]
     [InlineData("formatVersion: 1\ninstances: {}\ncontexts: {bad: {instance: absent, environmentId: dev}}")]
-    [InlineData("formatVersion: 1\ninstances: {bad: {endpoint: https://remote.example}}\ncontexts: {}")]
+    [InlineData("formatVersion: 1\ninstances: {bad: {endpoint: http://remote.example}}\ncontexts: {}")]
     [InlineData("formatVersion: 1\ninstances: {bad: {endpoint: http://localhost:1, extra: secret}}\ncontexts: {}")]
     [InlineData("formatVersion: 1\ninstances: {}\ncontexts: {bad: {instance: true, environmentId: dev}}")]
     [InlineData("formatVersion: 1\ninstances: {}\ncontexts: {bad: {instance: 42, environmentId: dev}}")]

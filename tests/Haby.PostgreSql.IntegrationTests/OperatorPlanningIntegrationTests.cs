@@ -98,7 +98,7 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.IsType<ExactProviderRevisionPreflight>(host.Services.GetRequiredService<IProviderRevisionPreflight>());
                 Assert.NotNull(host.Services.GetService<IDurableDesiredStateCommitter>());
                 using var channel = Channel(host, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFromUtf8(Encoding.UTF8.GetString(Envelope("durable-operator")).Replace("\"id\":\"durable-operator\"", "\"id\":\"durable-operator\",\"displayName\":\"unrelated-secret-sentinel\"", StringComparison.Ordinal)) });
                 var reference = imported.Created.Revision.Reference;
                 var create = new CreateChangeSetRequest
@@ -119,7 +119,7 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(PlanningStatus.InvalidRequest, (await client.CreateChangeSetAsync(invalidRevision)).Status);
                 change = (await client.CreateChangeSetAsync(create)).ChangeSet;
                 Assert.NotNull(change);
-                Assert.Equal(OperatorHostApplication.TechnicalActorId, change.TechnicalActorId);
+                Assert.StartsWith("operator-grant:", change.TechnicalActorId);
                 var changeRequest = new ChangeSetRequest { ChangeSetId = change.ChangeSetId };
                 Assert.Equal(change, (await client.GetChangeSetAsync(changeRequest)).ChangeSet);
                 Assert.Equal(PlanningStatus.AliasNotResolved, (await client.CreatePlanAsync(changeRequest)).Status);
@@ -195,13 +195,13 @@ public sealed partial class OperatorHostIntegrationTests
             await using (var restarted = await StartExecutionLoggedHost(restricted, certificatePath, logs))
             {
                 using var channel = Channel(restarted, certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 Assert.Equal(change, (await client.GetChangeSetAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId })).ChangeSet);
                 var closed = await client.GetPlanAsync(new PlanRequest { PlanId = original.PlanId });
                 Assert.Equal(PlanningStatus.Closed, closed.Status);
                 Assert.True(closed.Plan.HasClosedAtUtc);
                 Assert.Equal(original, WithoutClosure(closed.Plan));
-                Assert.Equal(OperatorHostApplication.TechnicalActorId, closed.Plan.ClosedByTechnicalActorId);
+                Assert.StartsWith("operator-grant:", closed.Plan.ClosedByTechnicalActorId);
                 Assert.Equal(replacement, (await client.GetPlanAsync(new PlanRequest { PlanId = replacement.PlanId })).Plan);
                 var expiredRequest = new PlanRequest { PlanId = expired.Id.ToString() };
                 var expiredRead = await client.GetPlanAsync(expiredRequest);
@@ -299,6 +299,7 @@ public sealed partial class OperatorHostIntegrationTests
             instances:
               local:
                 endpoint: {endpoint}
+                token: {OperatorTestCredentials.Credential(endpoint)}
             contexts:
               pilot:
                 instance: local

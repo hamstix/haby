@@ -46,9 +46,7 @@ public sealed class OperatorHostConfigurationTests
         var client = new ServerReflection.ServerReflectionClient(channel);
         using var call = client.ServerReflectionInfo();
         await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
-        Assert.True(await call.ResponseStream.MoveNext(CancellationToken.None));
-        Assert.Contains(call.ResponseStream.Current.ListServicesResponse.Service,
-            service => service.Name == "haby.operator.v1alpha1.ManifestOperator");
+        Assert.Equal(Grpc.Core.StatusCode.Unauthenticated, (await Assert.ThrowsAsync<Grpc.Core.RpcException>(async () => await call.ResponseStream.MoveNext(CancellationToken.None))).StatusCode);
     }
 
     [Theory]

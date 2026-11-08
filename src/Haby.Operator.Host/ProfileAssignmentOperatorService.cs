@@ -44,7 +44,7 @@ public sealed partial class ManifestOperatorService
             catch (ArgumentException) { return new() { Status = ProfileAssignmentStatus.InvalidContext }; }
             return AssignmentReply(await assignments.ApplyAsync(request.Payload.Memory, request.Environment,
                 request.HasApplicationVersion ? request.ApplicationVersion : null, precondition,
-                OperatorHostApplication.TechnicalActorId, context.CancellationToken));
+                Actor, context.CancellationToken));
         }, context.CancellationToken);
 
     private static Target ReadAssignmentTarget(WireTarget? target) => target switch

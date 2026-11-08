@@ -23,9 +23,9 @@ public sealed partial class OperatorHostIntegrationTests
         string recordId;
         await using (var host = await OperatorHostApplication.BuildMigratedAsync(args))
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = Grpc.Net.Client.GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(EnvironmentStatus.NotFound, (await client.GetEnvironmentAsync(new() { Name = "pilot" })).Status);
             Assert.Empty((await client.ListEnvironmentsAsync(new())).Items);
             foreach (var name in new[] { "INVALID", "", new string('a', 65), "bad--name" })
@@ -58,9 +58,9 @@ public sealed partial class OperatorHostIntegrationTests
 
         await using (var restarted = await OperatorHostApplication.BuildMigratedAsync(args))
         {
-            await restarted.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(restarted);
             using var channel = Grpc.Net.Client.GrpcChannel.ForAddress(restarted.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var found = await client.GetEnvironmentAsync(new() { Name = "pilot" });
             Assert.Equal(EnvironmentStatus.Found, found.Status);
             Assert.Equal(recordId, found.Environment.RecordId);
@@ -101,9 +101,9 @@ public sealed partial class OperatorHostIntegrationTests
         var connection = await NewDatabaseAsync();
         var args = new[] { "--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0" };
         await using var host = await OperatorHostApplication.BuildMigratedAsync(args);
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = Grpc.Net.Client.GrpcChannel.ForAddress(host.Urls.Single());
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var names = new[] { "z", "b", "a0", "a-1", "a", new string('c', 64) }.Concat(Enumerable.Range(0, 100).Select(i => $"page-{i:d3}")).ToArray();
         var identities = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in names)
@@ -160,6 +160,7 @@ public sealed partial class OperatorHostIntegrationTests
                 instances:
                   local:
                     endpoint: {host.Urls.Single()}
+                    token: {OperatorTestCredentials.Credential(host.Urls.Single())}
                 contexts:
                   absent:
                     instance: local

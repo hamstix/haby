@@ -1,5 +1,10 @@
 # Five-step operator rehearsal
 
+For the current Host, first complete [operator credential setup](150-operator-access-tokens.md).
+All administrative calls now require operator-admin; older rehearsal evidence below
+records its original slice. Historical audit is preserved; new audit uses the verified
+grant identity.
+
 Issue #120 activates the accepted ADR-034 path in the production Operator Host.
 The database admission explicitly composes standalone and pair shapes under one
 exact key; the login has one separate admission. Real Create, restrict, local
@@ -23,7 +28,7 @@ a developer's persistent database/role/catalog. Record the unique container and
 catalog names and who owns cleanup before starting. Use a configured SUPERUSER
 Provider; restricted administration is deferred. Keep untrusted clients away
 throughout bootstrap: CREATE DATABASE precedes PUBLIC restriction and has an
-initial PUBLIC-access window. Do not expose this unauthenticated API remotely.
+initial PUBLIC-access window. Use TLS and an explicitly configured operator credential.
 
 Follow [local Host/TLS setup](alpha-operator-local.md#native-aot-publish-and-loopback-smoke-gate) using
 secret-manager supplied process environment for the catalog connection and PFX

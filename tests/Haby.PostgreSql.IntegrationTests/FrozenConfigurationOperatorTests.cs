@@ -27,9 +27,9 @@ public sealed partial class DurableDeploymentPlanningTests
             "--Haby:Tls:Enabled=false", "--Haby:Port=0"], services =>
             services.AddSingleton(Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1"))
                 .AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(trap)));
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var env = new Haby.Operator.Contracts.ProfileAssignmentTarget { Kind = "environment" };
         var app = new Haby.Operator.Contracts.ProfileAssignmentTarget { Kind = "application", ApplicationId = "operator-example" };
         var worker = new Haby.Operator.Contracts.ProfileAssignmentTarget { Kind = "component", ApplicationId = "operator-example", ComponentRef = "worker" };
@@ -136,7 +136,7 @@ public sealed partial class DurableDeploymentPlanningTests
             if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
             if (binary is null) return;
             var config = Path.Combine(Path.GetTempPath(), "haby-config-planning-" + Guid.NewGuid().ToString("N") + ".yaml");
-            await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {host.Urls.Single()}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
+            await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {host.Urls.Single()}\n    token: {OperatorTestCredentials.Credential(host.Urls.Single())}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
             try
             {
                 foreach (var format in new[] { "text", "json" })

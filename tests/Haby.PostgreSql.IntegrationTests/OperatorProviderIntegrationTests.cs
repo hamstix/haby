@@ -52,9 +52,9 @@ public sealed partial class OperatorHostIntegrationTests
         Haby.Operator.Contracts.ProviderMetadata original;
         await using (var host = await OperatorHostApplication.BuildMigratedAsync(args))
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             await client.CreateEnvironmentAsync(new() { Name = "pilot" });
             await client.CreateSecretAsync(new() { Environment = "pilot", Name = "admin", RequestId = Guid.NewGuid().ToString(), Material = ByteString.CopyFromUtf8("protected-material") });
             var request = new ApplyProviderRequest { Declaration = ByteString.CopyFromUtf8(ProviderDeclarationTests.Declaration) };
@@ -70,9 +70,9 @@ public sealed partial class OperatorHostIntegrationTests
         }
         await using (var host = await OperatorHostApplication.BuildMigratedAsync(args))
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(original, (await client.GetProviderAsync(new() { Environment = "pilot", Name = "pg-main", Revision = 1 })).Provider);
             var first = await client.ApplyProviderAsync(new() { Declaration = ByteString.CopyFromUtf8(ProviderDeclarationTests.Declaration) });
             Assert.Equal(ProviderStatus.ExistingEquivalent, first.Status);
@@ -89,7 +89,7 @@ public sealed partial class OperatorHostIntegrationTests
                 try
                 {
                     await File.WriteAllTextAsync(file, ProviderDeclarationTests.Declaration);
-                    await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: wrong-env\ninstances:\n  local:\n    endpoint: {host.Urls.Single()}\ncontexts:\n  wrong-env:\n    instance: local\n    environmentId: other\n");
+                    await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: wrong-env\ninstances:\n  local:\n    endpoint: {host.Urls.Single()}\n    token: {OperatorTestCredentials.Credential(host.Urls.Single())}\ncontexts:\n  wrong-env:\n    instance: local\n    environmentId: other\n");
                     foreach (var format in new[] { "text", "json" })
                         foreach (var command in new[] { "apply", "get", "list", "revision" })
                         {
@@ -139,9 +139,9 @@ public sealed partial class OperatorHostIntegrationTests
             services.RemoveAll<IProviderPreflightHandler>();
         }))
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(original, (await client.GetProviderAsync(new() { Environment = "pilot", Name = "pg-main", Revision = 1 })).Provider);
             Assert.Single((await client.ListProvidersAsync(new() { Environment = "pilot" })).Items);
             Assert.Equal(ProviderStatus.UnsupportedConfiguration, (await client.ApplyProviderAsync(new()

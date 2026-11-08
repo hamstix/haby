@@ -27,7 +27,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await StartExecutionLoggedHost(scenario.Connection, scenario.CertificatePath, logs))
         {
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var before = await RecoveryCatalog(scenario);
             var dispatching = await client.InspectOperationRecoveryAsync(request);
             Assert.Equal(RecoveryStatus.Found, dispatching.Status);
@@ -52,7 +52,7 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.All(concurrent, r => Assert.Contains(r.Status, new[] { RecoveryStatus.Assigned, RecoveryStatus.AlreadyAssigned }));
             original = concurrent[0].Receipt;
             Assert.Equal(original, concurrent[1].Receipt);
-            Assert.Equal(OperatorHostApplication.TechnicalActorId, original.TechnicalActor);
+            Assert.StartsWith("operator-grant:", original.TechnicalActor);
             Assert.DoesNotContain(RecoveryNote, string.Join("", concurrent.Select(r => r.ToString())));
         }
         await AssertRecoveredCatalog(scenario);
@@ -60,7 +60,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var restarted = await StartRecoveryWithoutManifest(scenario))
         {
             using var channel = Channel(restarted, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var preview = await client.InspectOperationRecoveryAsync(request);
             Assert.Equal(OperationState.Succeeded, preview.Preview.Operation.State);
             Assert.Equal(original, preview.Receipt);
@@ -83,7 +83,7 @@ public sealed partial class OperatorHostIntegrationTests
         using var logs = new ExecutionLogs();
         await using var host = await StartExecutionLoggedHost(scenario.Connection, scenario.CertificatePath, logs);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
         var assignment = RecoveryAssignment(await client.InspectOperationRecoveryAsync(key));
         var before = await RecoveryCatalog(scenario);
@@ -123,7 +123,7 @@ public sealed partial class OperatorHostIntegrationTests
         var key = await UncertainRecoveryOperation(scenario, created: false);
         await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
         var assignment = RecoveryAssignment(await client.InspectOperationRecoveryAsync(key));
         var before = await RecoveryCatalog(scenario);
@@ -141,7 +141,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using var scenario = await ExecutionScenarioAsync();
         await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var key = await CommitExecutionAsync(client, scenario.Database);
         await ExecutionSql(scenario.Connection, $"CREATE DATABASE \"{scenario.Database}\"");
         Assert.Equal(OperationStatus.Failed, (await client.ExecuteOperationAsync(key)).Status);
@@ -165,9 +165,9 @@ public sealed partial class OperatorHostIntegrationTests
                 sp.GetRequiredService<IDurableOperationJournal>())));
         await using (host)
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
             var before = await RecoveryCatalog(scenario);
             var preview = await client.InspectOperationRecoveryAsync(key);
@@ -202,9 +202,9 @@ public sealed partial class OperatorHostIntegrationTests
                 sp.GetRequiredService<IDurableOperationJournal>())));
         await using (host)
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
             var actual = (await client.GetOperationAsync(key)).Operation;
             var preview = (await client.InspectOperationRecoveryAsync(key)).Preview;
@@ -238,7 +238,7 @@ public sealed partial class OperatorHostIntegrationTests
     {
         var host = OperatorHostApplication.Build(Arguments(scenario.Connection, scenario.CertificatePath), services =>
             services.AddSingleton<IManifestRevisionQuery, UnavailableRecoveryManifest>());
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         return host;
     }
 
@@ -249,7 +249,7 @@ public sealed partial class OperatorHostIntegrationTests
         var key = await UncertainRecoveryOperation(scenario, created: true);
         await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
         var assignment = RecoveryAssignment(await client.InspectOperationRecoveryAsync(key));
         // Like the retained-history test, relax only the pilot generation CHECKs in this disposable
@@ -285,7 +285,7 @@ public sealed partial class OperatorHostIntegrationTests
         using var logs = new ExecutionLogs();
         await using var host = await StartExecutionLoggedHost(restricted, scenario.CertificatePath, logs);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
         var assignment = RecoveryAssignment(await client.InspectOperationRecoveryAsync(key));
         var before = await RecoveryCatalog(scenario);
@@ -318,7 +318,7 @@ public sealed partial class OperatorHostIntegrationTests
                 await using var host = restart == 0 ? await StartAsync(scenario.Connection, scenario.CertificatePath)
                     : await StartRecoveryWithoutManifest(scenario);
                 using var channel = Channel(host, scenario.Certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 if (restart == 0)
                 {
                     Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(key)).Status);
@@ -343,6 +343,7 @@ public sealed partial class OperatorHostIntegrationTests
                 {
                     var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
                     foreach (var arg in new[] { "operation", "recovery" }.Concat(args).Concat(["-o", format, "--config", config])) start.ArgumentList.Add(arg);
+                    await OperatorTestCredentials.WriteConfigAsync(config, host.Urls.Single());
                     start.Environment["HABY_OPERATOR_URL"] = host.Urls.Single();
                     start.Environment["HABY_OPERATOR_SKIP_TLS_VALIDATION"] = "true";
                     using var process = Process.Start(start)!;
@@ -368,7 +369,7 @@ public sealed partial class OperatorHostIntegrationTests
             ? await StartExecutionFaultHost(scenario, new ExecutionHooks { BeforeSuccess = _ => throw new IOException("test-only crash") })
             : await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var request = await CommitExecutionAsync(client, scenario.Database);
         if (created)
             await Assert.ThrowsAsync<RpcException>(async () => await client.ExecuteOperationAsync(request));

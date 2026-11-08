@@ -14,7 +14,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using var scenario = await ExecutionScenarioAsync();
         await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var operation = await CommitExecutionAsync(client, scenario.Database);
         foreach (var (id, gen, status) in new[]
         {
@@ -52,7 +52,7 @@ public sealed partial class OperatorHostIntegrationTests
         var hooks = new ExecutionHooks { AfterMarker = async token => { entered.SetResult(); await release.Task.WaitAsync(token); } };
         await using var host = await StartExecutionFaultHost(scenario, hooks);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var operation = await CommitExecutionAsync(client, scenario.Database);
         var request = new GenerationRequest { DeploymentId = operation.DeploymentId, Generation = 1 };
         var snapshot = await client.GetGenerationAsync(request);
@@ -103,7 +103,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await StartExecutionFaultHost(scenario, hooks))
         {
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             operation = await CommitExecutionAsync(client, scenario.Database);
             using var cancel = new CancellationTokenSource();
             using var call = client.ExecuteGenerationAsync(new() { DeploymentId = operation.DeploymentId, Generation = 1 }, cancellationToken: cancel.Token);
@@ -116,7 +116,7 @@ public sealed partial class OperatorHostIntegrationTests
         }
         await using var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var nextChannel = Channel(restarted, scenario.Certificate);
-        var next = new ManifestOperator.ManifestOperatorClient(nextChannel);
+        var next = OperatorTestCredentials.Client(nextChannel);
         var request = new GenerationRequest { DeploymentId = operation.DeploymentId, Generation = 1 };
         var before = await next.GetGenerationAsync(request);
         Assert.Equal(OperationState.Dispatching, Assert.Single(before.Progress.Nodes).Operation.State);

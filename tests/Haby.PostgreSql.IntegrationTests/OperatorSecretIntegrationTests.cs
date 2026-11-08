@@ -25,9 +25,9 @@ public sealed partial class OperatorHostIntegrationTests
         SecretRef generatedReference;
         await using (var host = await OperatorHostApplication.BuildMigratedAsync(args))
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = Grpc.Net.Client.GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var request = new CreateSecretRequest { Environment = "pilot", Name = "admin", RequestId = requestId, Material = ByteString.CopyFrom(bytes) };
             Assert.Equal(SecretStatus.EnvironmentNotFound, (await client.CreateSecretAsync(request)).Status);
             Assert.Equal(EnvironmentStatus.NotFound, (await client.GetEnvironmentAsync(new() { Name = "pilot" })).Status);
@@ -59,9 +59,9 @@ public sealed partial class OperatorHostIntegrationTests
         }
         await using (var host = await OperatorHostApplication.BuildMigratedAsync(args))
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = Grpc.Net.Client.GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var retry = await client.CreateSecretAsync(new()
             { Environment = "pilot", Name = "admin", RequestId = requestId, Material = ByteString.CopyFrom(bytes) });
             Assert.Equal(SecretStatus.ExistingEquivalent, retry.Status);
@@ -95,6 +95,9 @@ public sealed partial class OperatorHostIntegrationTests
                         arguments.AddRange(["--environment", "pilot", "-o", format]);
                         if (verb == "create") arguments.AddRange(["--stdin", "--request-id", requestId]);
                         foreach (var argument in arguments) start.ArgumentList.Add(argument);
+                        var credentialConfig = Path.GetTempFileName();
+                        await OperatorTestCredentials.WriteConfigAsync(credentialConfig, host.Urls.Single());
+                        start.ArgumentList.Add("--config"); start.ArgumentList.Add(credentialConfig);
                         start.Environment["HABY_OPERATOR_URL"] = host.Urls.Single();
                         using var process = Process.Start(start)!;
                         var stdout = process.StandardOutput.ReadToEndAsync();
@@ -104,6 +107,7 @@ public sealed partial class OperatorHostIntegrationTests
                         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                         try { await process.WaitForExitAsync(timeout.Token); }
                         catch { process.Kill(entireProcessTree: true); throw; }
+                        File.Delete(credentialConfig);
                         Assert.Equal(0, process.ExitCode);
                         Assert.Empty(await stderr);
                         var text = await stdout;

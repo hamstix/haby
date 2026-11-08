@@ -14,26 +14,19 @@ assembly. The dedicated `ConfigurationDeliveryService` implements this service;
 ManifestOperator retains only trusted access-grant administration and safe operator
 reads. Both services are mapped explicitly on the same Host endpoint.
 
-## Interim trusted contour
+## Shared authenticated Host
 
 One Host/listener serves both ManifestOperator and ConfigurationDelivery.
 `Haby:ListenAddress` defaults to `127.0.0.1`; `Haby:Port` selects its port.
-An explicit IP address, including a closed network interface, selects that shared
-listener. `Haby:Tls:Enabled` defaults to true; certificate path/password configure
-TLS once for both services. Explicit TLS disable is for isolated pilot contours.
+`Haby:Tls:Enabled` defaults to true; certificate path/password configure TLS once.
+Explicit TLS disable is for isolated pilot contours.
 
-Every delivery requires its bearer credential, including on loopback. Existing
-operator RPCs still have trusted administrative authority without authentication.
-Network reachability of that surface is therefore the interim security boundary:
-restrict the entire endpoint to trusted operators and runtime clients in a closed
-contour. A delivery credential is not an operator credential. Static operator-admin
-tokens, selected context credentials and agreed first issuance/transition rules
-are the immediately following slice, before broader usage. This delivery pilot
-does not provide a general production authentication boundary or Kubernetes identity.
-The existing habyctl registry parser still accepts loopback endpoints only. A Host
-bound solely to a non-loopback interface can be administered through the generated
-operator client inside that trusted contour; remote CLI policy belongs with the
-operator-authentication follow-up.
+Issue #150 replaces the interim anonymous operator boundary with mandatory
+operator-admin authentication, including on loopback. Complete
+[local first issuance and registry credential setup](150-operator-access-tokens.md)
+before the administrative commands below. The runtime still uses its exact,
+independent document-scoped credential. Remote habyctl endpoints require HTTPS,
+or an explicit isolated HTTP instance setting; no implicit certificate bypass.
 
 ## Issue and retain a credential
 

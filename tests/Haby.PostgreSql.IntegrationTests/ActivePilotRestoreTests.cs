@@ -41,7 +41,7 @@ public sealed partial class OperatorHostIntegrationTests
             });
             {
                 using var channel = Channel(source, scenario.Certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 foreach (var state in new[] { "pending", "dispatching", "attention", "confirmed", "assigned" })
                 {
                     var database = "restore_" + Guid.NewGuid().ToString("N");
@@ -92,7 +92,7 @@ public sealed partial class OperatorHostIntegrationTests
                         var assigned = await client.AssignExistingOperationAsync(assignment);
                         Assert.Equal(RecoveryStatus.Assigned, assigned.Status);
                         receipt = assigned.Receipt;
-                        Assert.Equal(OperatorHostApplication.TechnicalActorId, receipt.TechnicalActor);
+                        Assert.StartsWith("operator-grant:", receipt.TechnicalActor);
                         Assert.NotEmpty(receipt.DecisionId);
                         Assert.NotEmpty(receipt.DecidedAtUtc);
                     }
@@ -133,11 +133,11 @@ public sealed partial class OperatorHostIntegrationTests
             });
             {
                 await fresh.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-                await fresh.StartAsync();
+                await OperatorTestCredentials.StartWithIssuedOperatorAsync(fresh);
                 Assert.Equal(0, trap.Calls);
                 Assert.Equal(original, await RestoreCatalogDigests(restored));
                 using var channel = Channel(fresh, scenario.Certificate);
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 for (var repeat = 0; repeat < 2; repeat++)
                     foreach (var history in histories)
                     {

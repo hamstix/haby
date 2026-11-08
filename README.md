@@ -1,7 +1,8 @@
 # Haby
 
 For the single-instance internal alpha operator path, see the
-[local host and `habyctl` workflow](docs/development/alpha-operator-local.md).
+[local host and `habyctl` workflow](docs/development/alpha-operator-local.md) and
+[operator token issuance, recovery and configuration](docs/development/150-operator-access-tokens.md).
 
 Haby is an open source project for describing application configuration and
 provisioning resources. It is under active development. The repository currently

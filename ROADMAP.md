@@ -80,7 +80,7 @@ merged [PR #125](https://github.com/hamstix/haby/pull/125) and the
 [composition contract](docs/architecture/configuration-composition-v1.md).
 Stored operator preview is delivered by issue #146 below; scoped confidential
 delivery is available in the closed pilot through issue #148. Operator-admin
-authentication remains the immediate next slice.
+authentication and explicit local issuance are implemented in issue #150 below.
 
 ### Next slices
 
@@ -100,7 +100,7 @@ authentication remains the immediate next slice.
 - [x] Accept exact-document static delivery grants (non-expiring unless explicitly limited), one shared configurable Host endpoint and transient bounded secret resolution/formatting under [ADR-042](docs/adr/0042-authorized-configuration-delivery.md).
 - [x] Implement authorized exact-revision delivery, access grant administration and the real client connection rehearsal; ordinary operator get/preview stay redacted/metadata-only: [pilot boundary and runbook](docs/development/148-authorized-configuration-delivery.md).
 - [x] Accept static operator-admin tokens, explicit Host issuance/recovery (including temporary tokens and policy-selected Kubernetes exec/Job), registry credentials and protected default-on reflection under [ADR-043](docs/adr/0043-operator-access-tokens-and-bootstrap.md).
-- [ ] Implement operator authentication and selected registry credentials before broader real use, without OAuth or complex RBAC: [issue #150](https://github.com/hamstix/haby/issues/150).
+- [x] Implement operator-admin authentication, explicit local issuance/recovery, selected registry credentials and protected reflection without OAuth or complex RBAC: [issue #150 runbook](docs/development/150-operator-access-tokens.md).
 - [ ] Run the full operator-to-application rehearsal: bootstrap -> provisioning -> configuration -> client authentication and application use.
 
 Exit evidence:

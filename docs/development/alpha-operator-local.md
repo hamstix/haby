@@ -1,5 +1,11 @@
 # Local alpha operator workflow
 
+Current authentication prerequisite: follow [operator tokens](150-operator-access-tokens.md)
+for local first issuance/recovery and selected-registry credential setup before
+running any administrative commands below. Anonymous operator/reflection calls
+are denied after upgrade, including on loopback. The examples below omit
+credentials; add the instance's `tokenFile` or use the safe config setup command.
+
 For installation-scoped Configuration Profile validation/import and exact safe
 revision metadata, use the [Profile administration runbook](134-profile-operator-path.md).
 This path performs no assignment, rendering or secret delivery.
@@ -118,12 +124,11 @@ The `environmentId` is the logical EnvironmentId from ADR-016: a registry-local,
 unique lowercase kebab-case key of at most 64 ASCII characters, such as `pilot`.
 It is not the persisted UUIDv7 EnvironmentRecordId or a display name. The server
 resolves it to an existing persisted Environment for `changeset create`; it never
-creates one or selects a default. Manifest RPCs do not receive this context field. The configuration contains no
-credentials, tokens or private keys. Both endpoints must be HTTP or HTTPS
-loopback addresses with no user information, path, query or fragment. HTTPS
-certificate validation remains enabled unless the local debug setting below is
-explicitly set. The alpha API is unauthenticated; do not forward it to a remote
-or broadly reachable address.
+creates one or selects a default. Manifest RPCs do not receive this context field. The configuration supports redacted instance `token` or `tokenFile` credentials.
+HTTPS endpoints may be remote; HTTP requires loopback or explicit instance
+`allowInsecureHttp: true` for an isolated contour. No user information, path,
+query or fragment is allowed. TLS validation remains enabled unless the explicit
+local pilot exception below is selected.
 
 The file path order is `--config`, then `HABYCTL_CONFIG`, then the per-user
 default at `%APPDATA%\habyctl\config.yaml` on Windows or
@@ -281,9 +286,9 @@ $env:Haby__Port = '7443'
 dotnet run --project .\src\Haby.Operator.Host
 ```
 
-The host serves gRPC reflection on the same loopback endpoint in all
-environments, including Production. Reflection reveals the service and message
-contracts to local clients.
+The host serves operator-authenticated gRPC reflection on the same shared endpoint
+in all environments, including Production. It describes both service contracts.
+Set `Haby__Reflection__Enabled=false` to disable it; generated clients do not need it.
 
 For local debugging without TLS, set `Haby__Tls__Enabled=false` before starting
 the host. `Haby__Tls__CertificatePath` and `Haby__Tls__CertificatePassword` may
@@ -634,7 +639,7 @@ Do not edit journal rows or delete/recreate an operation to bypass the barrier.
 The [active-pilot catalog restore rehearsal](active-pilot-restore-rehearsal.md)
 covers operation, attempt and recovery history through a fresh Host after real
 pg_dump/pg_restore. Broader pilot readiness remains separate. TLS/loopback isolation, one instance,
-no authentication and technical rather than human attribution remain unchanged.
+operator authentication and server-derived grant attribution follow ADR-043.
 
 ### Explicit recovery of one uncertain operation
 

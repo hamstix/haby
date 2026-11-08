@@ -34,7 +34,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await ProfileHost(args, logs, commands))
         {
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var validationCommands = commands.Count;
             foreach (var declaration in new[] { source, Node(false) })
             {
@@ -93,7 +93,7 @@ public sealed partial class OperatorHostIntegrationTests
             original = await client.ImportProfileAsync(Payload(source));
             Assert.Equal(ProfileStatus.Created, original.Status);
             Assert.True(commands.Count > validationCommands);
-            Assert.Equal(OperatorHostApplication.TechnicalActorId, original.Metadata.TechnicalActorId);
+            Assert.StartsWith("operator-grant:", original.Metadata.TechnicalActorId);
             SafeProfileReply(original);
             var secretReads = commands.SecretReads;
             var firstRead = await client.GetProfileRevisionAsync(original.Reference);
@@ -105,7 +105,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await ProfileHost(args, logs))
         {
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var found = await client.GetProfileRevisionAsync(original.Reference);
             Assert.Equal(ProfileStatus.Found, found.Status);
             Assert.Equal(original.Metadata, found.Metadata);
@@ -193,7 +193,7 @@ public sealed partial class OperatorHostIntegrationTests
             {
                 await using var host = await ProfileHost(args, logs, gate);
                 using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-                var client = new ManifestOperator.ManifestOperatorClient(channel);
+                var client = OperatorTestCredentials.Client(channel);
                 for (var i = 0; i < sources.Length; i++)
                 {
                     var payload = ByteString.CopyFromUtf8(sources[i]);
@@ -241,6 +241,7 @@ public sealed partial class OperatorHostIntegrationTests
             instances:
               registry:
                 endpoint: {host.Urls.Single()}
+                token: {OperatorTestCredentials.Credential(host.Urls.Single())}
             contexts:
               selected:
                 instance: registry
@@ -269,7 +270,7 @@ public sealed partial class OperatorHostIntegrationTests
                     var extracted = ByteString.CopyFromUtf8(declaration.GetRawText());
                     Assert.True(extracted.Length <= Encoding.UTF8.GetByteCount(source));
                     using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-                    var reimport = await new ManifestOperator.ManifestOperatorClient(channel).ImportProfileAsync(new() { Payload = extracted });
+                    var reimport = await OperatorTestCredentials.Client(channel).ImportProfileAsync(new() { Payload = extracted });
                     Assert.Equal(ProfileStatus.ExistingEquivalent, reimport.Status);
                     Assert.Equal(audit, reimport.Metadata);
                     if (canImport)
@@ -305,7 +306,7 @@ public sealed partial class OperatorHostIntegrationTests
         var gate = new ProfileQueryGate();
         await using var host = await ProfileHost(args, new ProfileLog(), gate);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         foreach (var import in new[] { false, true })
         {
             gate.Arm();
@@ -331,7 +332,8 @@ public sealed partial class OperatorHostIntegrationTests
         public override System.Data.Common.DbCommand CommandInitialized(Microsoft.EntityFrameworkCore.Diagnostics.CommandEndEventData eventData,
             System.Data.Common.DbCommand result)
         {
-            Interlocked.Increment(ref _count);
+            // Authentication may read its verifier table; validation must still touch no business persistence.
+            if (!result.CommandText.Contains("operator_access_grants", StringComparison.Ordinal)) Interlocked.Increment(ref _count);
             if (result.CommandText.Contains("FROM secrets", StringComparison.Ordinal) || result.CommandText.Contains("FROM secret_", StringComparison.Ordinal)) SecretReads++;
             return result;
         }
@@ -388,7 +390,7 @@ public sealed partial class OperatorHostIntegrationTests
         try
         {
             await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             return host;
         }
         catch { await host.DisposeAsync(); throw; }
@@ -434,6 +436,7 @@ public sealed partial class OperatorHostIntegrationTests
                     endpoint: http://localhost:1
                   local:
                     endpoint: {host.Urls.Single()}
+                    token: {OperatorTestCredentials.Credential(host.Urls.Single())}
                 contexts:
                   bad:
                     instance: bad
@@ -484,13 +487,13 @@ public sealed partial class OperatorHostIntegrationTests
                             Assert.Equal(JsonValueKind.Object, declaration.ValueKind);
                             Assert.Equal(Parse(source), ProfilePayloadParser.ParseProfile(Encoding.UTF8.GetBytes(declaration.GetRawText())).Declaration);
                             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-                            var reimport = await new ManifestOperator.ManifestOperatorClient(channel).ImportProfileAsync(new()
+                            var reimport = await OperatorTestCredentials.Client(channel).ImportProfileAsync(new()
                             { Payload = ByteString.CopyFromUtf8(declaration.GetRawText()) });
                             Assert.Equal(ProfileStatus.ExistingEquivalent, reimport.Status);
                         }
                         if (outcome is "created" or "found" or "existingEquivalent")
                         {
-                            Assert.Equal(OperatorHostApplication.TechnicalActorId, json.RootElement.GetProperty("data"u8).GetProperty("technicalActorId"u8).GetString());
+                            Assert.StartsWith("operator-grant:", json.RootElement.GetProperty("data"u8).GetProperty("technicalActorId"u8).GetString());
                             var data = json.RootElement.GetProperty("data"u8);
                             var reference = data.GetProperty("reference"u8);
                             var persisted = await host.Services.GetRequiredService<IConfigurationProfileRevisionQuery>().FindAsync(
