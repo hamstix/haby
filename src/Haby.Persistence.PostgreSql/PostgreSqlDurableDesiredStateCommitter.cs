@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.Persistence.PostgreSql;
 
-/// <summary>Accepts only an initial desired generation; external Provider work is separate.</summary>
+/// <summary>Atomically accepts initial or bounded reuse-only desired state; execution remains explicit.</summary>
 public sealed class PostgreSqlDurableDesiredStateCommitter(
     IDbContextFactory<ManifestCatalogDbContext> contexts,
     PostgreSqlDurableDeploymentPlanner planner,
@@ -53,12 +53,18 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         if (clock.GetUtcNow() >= plan.ExpiresAt) return new DurableCommitResult.Expired();
         if (await context.DurablePlanClosures.AsNoTracking().AnyAsync(row => row.PlanId == requestedPlanId,
             cancellationToken)) return new DurableCommitResult.Closed();
-        if (!change.ExpectedAbsence) return new DurableCommitResult.UnsupportedPrecondition();
         var actual = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(row =>
             row.EnvironmentRecordId == change.EnvironmentRecordId &&
             row.ApplicationRecordId == change.ApplicationRecordId, cancellationToken);
+        if (!PostgreSqlDurableDeploymentPlanner.Matches(change, actual))
+            return new DurableCommitResult.ChangeSetStale(actual is null ? null : DeploymentGeneration.Create(actual.DesiredGeneration));
         if (actual is not null)
-            return new DurableCommitResult.ChangeSetStale(DeploymentGeneration.Create(actual.DesiredGeneration));
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {actual.Id} FOR UPDATE", cancellationToken);
+            actual = await context.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == actual.Id, cancellationToken);
+            if (actual.AppliedGeneration != actual.DesiredGeneration) return new DurableCommitResult.PlanInputUnavailable();
+            await ResourceContinuity.LockAsync(context, actual.Id, cancellationToken);
+        }
 
         // FOR SHARE conflicts with the alias store's UPDATE. If a switch wins,
         // this read sees the new binding; if commit wins, the switch waits until
@@ -96,6 +102,9 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             graph = DurableOperationGraphCodec.Decode(plan.GraphJson); graph.ValidateReferences(inputs);
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
+        if (actual is null ? graph.Baseline is not null : graph.Baseline is not { } baseline ||
+            baseline.Deployment.ToString() != actual.Id.ToString() || baseline.Generation != actual.DesiredGeneration)
+            return new DurableCommitResult.PlanInputUnavailable();
         if (plan.EnvironmentRecordId != change.EnvironmentRecordId ||
             plan.ApplicationRecordId != change.ApplicationRecordId || plan.RevisionNumber != change.RevisionNumber ||
             plan.EnvironmentKey != inputs.EnvironmentKey.Value ||
@@ -142,27 +151,43 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         try
         {
             if (!await planner.ValidateGraphAsync(context, spec, revision, inputs, graph, cancellationToken))
-                return new DurableCommitResult.PlanInputUnavailable();
+                return graph.Baseline is null ? new DurableCommitResult.PlanInputUnavailable() : new DurableCommitResult.PlanStale();
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var deploymentId = ApplicationDeploymentId.New();
+        var deploymentId = actual is null ? ApplicationDeploymentId.New() : ApplicationDeploymentId.Parse(actual.Id.ToString());
         var deploymentGuid = Guid.Parse(deploymentId.ToString());
         var committedAt = clock.GetUtcNow();
-        context.ApplicationDeployments.Add(new ApplicationDeploymentRow
+        var generation = actual is null ? 1 : checked(actual.DesiredGeneration + 1);
+        var unchanged = false;
+        if (actual is not null)
         {
-            Id = deploymentGuid,
-            EnvironmentRecordId = change.EnvironmentRecordId,
-            ApplicationRecordId = change.ApplicationRecordId,
-            DesiredGeneration = 1,
-            AppliedGeneration = null,
-            ConcurrencyToken = 1
-        });
-        context.DeploymentGenerations.Add(new DeploymentGenerationRow
+            var previous = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == actual.Id && x.Generation == actual.DesiredGeneration, cancellationToken);
+            unchanged = previous.RevisionNumber == plan.RevisionNumber && previous.ConfigurationJson == plan.ConfigurationJson &&
+                previous.ProviderInstanceId == plan.ProviderInstanceId && previous.ConfigurationRevisionNumber == plan.ConfigurationRevisionNumber && previous.ImplementationId == plan.ImplementationId;
+            if (unchanged) generation = actual.DesiredGeneration;
+            else
+            {
+                var changed = await context.ApplicationDeployments.Where(x => x.Id == actual.Id && x.DesiredGeneration == actual.DesiredGeneration && x.AppliedGeneration == actual.DesiredGeneration)
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.DesiredGeneration, generation).SetProperty(x => x.ConcurrencyToken, x => x.ConcurrencyToken + 1), cancellationToken);
+                if (changed != 1) return new DurableCommitResult.ChangeSetStale(DeploymentGeneration.Create(actual.DesiredGeneration));
+            }
+        }
+        if (actual is null)
+            context.ApplicationDeployments.Add(new ApplicationDeploymentRow
+            {
+                Id = deploymentGuid,
+                EnvironmentRecordId = change.EnvironmentRecordId,
+                ApplicationRecordId = change.ApplicationRecordId,
+                DesiredGeneration = 1,
+                AppliedGeneration = null,
+                ConcurrencyToken = 1
+            });
+        if (!unchanged) context.DeploymentGenerations.Add(new DeploymentGenerationRow
         {
             DeploymentId = deploymentGuid,
-            Generation = 1,
+            Generation = generation,
             Presence = nameof(DesiredPresence.Present),
             ChangeSetId = changeId,
             PlanId = requestedPlanId,
@@ -185,19 +210,29 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             ChangeSetId = changeId,
             PlanId = requestedPlanId,
             DeploymentId = deploymentGuid,
-            Generation = 1,
+            Generation = generation,
             CommittedAt = committedAt,
             ActorId = actorId
         };
         context.ChangeSetCommits.Add(commit);
-        foreach (var node in graph.Nodes)
+        if (!unchanged) foreach (var node in graph.Nodes)
             context.DurableOperations.Add(new DurableOperationRow
             {
                 DeploymentId = deploymentGuid,
-                Generation = 1,
+                Generation = generation,
                 OperationId = node.Id.Value,
                 State = nameof(DurableOperationState.Pending),
                 CreatedAt = committedAt
+            });
+        if (actual is null) foreach (var resource in spec.Resources.Keys)
+            context.ResourceManagement.Add(new()
+            {
+                Id = Guid.CreateVersion7(),
+                Environment = change.EnvironmentRecordId,
+                Application = change.ApplicationRecordId,
+                Resource = resource.Value,
+                Deployment = deploymentGuid,
+                SourceGeneration = generation
             });
         await context.SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();

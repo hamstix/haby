@@ -36,8 +36,9 @@ public sealed class DescribeDurablePlan(IManifestRevisionQuery revisions, IEnume
         catch (InvalidDataException) { return new(PlanDescriptionStatus.InputCorrupt); }
         if (revision is null) return new(PlanDescriptionStatus.RevisionNotFound);
         if (revision.Reference != plan.Inputs.Revision) return new(PlanDescriptionStatus.PinnedInputMismatch);
+        if (plan.Graph?.Baseline is not null) return new(PlanDescriptionStatus.OperationGraph);
         var matches = _describers.Where(item => item.ImplementationId == plan.Inputs.ImplementationId).Take(2).ToArray();
         if (matches.Length != 1) return new(PlanDescriptionStatus.ActionDescriberUnavailable);
-        return matches[0].Describe(revision, plan.Inputs, plan.Graph);
+        return matches[0].Describe(revision, plan.Inputs, plan.Graph!);
     }
 }

@@ -20,12 +20,16 @@ public sealed partial class ManifestOperatorService
                 ManifestRevisionNumber.Create(request.Reference.RevisionNumber));
         }
         catch (ArgumentException) { return Result(PlanningStatus.InvalidRequest); }
-        if (request.Precondition != PlanningPrecondition.ExpectedAbsence)
-            return Result(PlanningStatus.UnsupportedPrecondition);
+        DeploymentPrecondition precondition;
+        if (request.Precondition == PlanningPrecondition.ExpectedAbsence && !request.HasExpectedGeneration)
+            precondition = new DeploymentPrecondition.ExpectedAbsence();
+        else if (request.Precondition == PlanningPrecondition.ExpectedGeneration && request.HasExpectedGeneration && request.ExpectedGeneration > 0)
+            precondition = new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(request.ExpectedGeneration));
+        else return Result(PlanningStatus.InvalidRequest);
         var environment = await environments.FindAsync(key, context.CancellationToken);
         if (environment is null) return Result(PlanningStatus.EnvironmentNotFound);
         var result = await planner.CreateChangeSetAsync(environment, reference.ApplicationRecordId, reference,
-            new DeploymentPrecondition.ExpectedAbsence(), Actor, context.CancellationToken);
+            precondition, Actor, context.CancellationToken);
         return new PlanningReply
         {
             Status = result.Status switch
@@ -135,15 +139,20 @@ public sealed partial class ManifestOperatorService
 
     private static PlanningReply Result(PlanningStatus status) => new() { Status = status };
 
-    private static DurableChangeSetSummary Summary(DeploymentChangeSet value) => new()
+    private static DurableChangeSetSummary Summary(DeploymentChangeSet value)
     {
-        ChangeSetId = value.Id.ToString(),
-        EnvironmentRecordId = value.EnvironmentRecordId.ToString(),
-        Reference = Reference(value.Member.ManifestRevisionRef),
-        Precondition = PlanningPrecondition.ExpectedAbsence,
-        CreatedAtUtc = Utc(value.CreatedAt),
-        TechnicalActorId = value.ActorId
-    };
+        var result = new DurableChangeSetSummary
+        {
+            ChangeSetId = value.Id.ToString(),
+            EnvironmentRecordId = value.EnvironmentRecordId.ToString(),
+            Reference = Reference(value.Member.ManifestRevisionRef),
+            Precondition = value.Member.Precondition is DeploymentPrecondition.ExpectedAbsence ? PlanningPrecondition.ExpectedAbsence : PlanningPrecondition.ExpectedGeneration,
+            CreatedAtUtc = Utc(value.CreatedAt),
+            TechnicalActorId = value.ActorId
+        };
+        if (value.Member.Precondition is DeploymentPrecondition.ExpectedGeneration expected) result.ExpectedGeneration = expected.Generation.Value;
+        return result;
+    }
 
     private async Task<DurablePlanSummary> PlanSummaryAsync(DurablePlan plan, CancellationToken cancellationToken)
     {
@@ -194,6 +203,8 @@ public sealed partial class ManifestOperatorService
             TechnicalActorId = value.ActorId
         };
         result.Operations.AddRange(OperationSummaries(value.Graph));
+        result.ReusedResources.AddRange(value.Graph.ReusedResources.Select(x => new ReusedResourceSummary
+        { ResourceId = x.Resource.Value, ManagementId = x.ManagementId.ToString(), SourceGeneration = x.SourceGeneration }));
         if (value.ClosedAt is { } closed) result.ClosedAtUtc = Utc(closed);
         if (value.ClosedByActorId is { } actor) result.ClosedByTechnicalActorId = actor;
         return result;

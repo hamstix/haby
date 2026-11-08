@@ -118,8 +118,10 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             await using (var read = await contexts.CreateDbContextAsync(token))
                 foreach (var output in composed.Outputs)
                 {
+                    var key = await ResourceContinuity.ResolveAsync(read, new(target.Deployment, target.Generation, output.Pin.Producer), output.Pin.ResourceLocalId, token);
+                    if (key is null) return new(ConfigurationDocumentStatus.InputUnavailable, Target: target);
                     var operation = await read.DurableOperations.AsNoTracking().SingleAsync(x => x.DeploymentId == inputs.DeploymentId &&
-                        x.Generation == inputs.Generation && x.OperationId == output.Pin.Producer.Value, token);
+                        x.Generation == key.Generation.Value && x.OperationId == output.Pin.Producer.Value, token);
                     if (operation.State != nameof(DurableOperationState.Succeeded) || operation.CurrentAttemptId is not { } attempt)
                         return new(ConfigurationDocumentStatus.InputUnavailable, Target: target);
                     associations.Add((output, attempt));
@@ -153,9 +155,11 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             if (!await Eligible(db, current, token)) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
             foreach (var (output, attempt) in associations)
             {
-                if (!await db.OperationOutputs.AsNoTracking().AnyAsync(x => x.DeploymentId == inputs.DeploymentId && x.Generation == inputs.Generation &&
+                var key = await ResourceContinuity.ResolveAsync(db, new(target.Deployment, target.Generation, output.Pin.Producer), output.Pin.ResourceLocalId, token);
+                if (key is null) return new(ConfigurationDocumentStatus.InputUnavailable, Target: target);
+                if (!await db.OperationOutputs.AsNoTracking().AnyAsync(x => x.DeploymentId == inputs.DeploymentId && x.Generation == key.Generation.Value &&
                     x.OperationId == output.Pin.Producer.Value && x.Contract == output.Output.Contract && x.Key == output.Output.Key && x.Payload == output.Output.Payload, token) ||
-                    !await db.DurableOperations.AsNoTracking().AnyAsync(x => x.DeploymentId == inputs.DeploymentId && x.Generation == inputs.Generation &&
+                    !await db.DurableOperations.AsNoTracking().AnyAsync(x => x.DeploymentId == inputs.DeploymentId && x.Generation == key.Generation.Value &&
                     x.OperationId == output.Pin.Producer.Value && x.State == nameof(DurableOperationState.Succeeded) && x.CurrentAttemptId == attempt, token))
                     return new(ConfigurationDocumentStatus.InputUnavailable, Target: target);
             }
@@ -216,10 +220,11 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         return await query.SingleOrDefaultAsync(token);
     }
     private static async Task<bool> Eligible(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) =>
-        await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.AppliedGeneration == source.Generation, token) && await Complete(db, source, token);
+        await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.AppliedGeneration >= source.Generation, token) && await Complete(db, source, token);
     private static async Task<bool> Complete(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        if (graph.Baseline is not null) return await ResourceContinuity.ValidateAsync(db, source.DeploymentId, graph, token);
         var rows = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation).ToArrayAsync(token);
         return rows.Length == graph.Nodes.Count && graph.Nodes.All(n => rows.Any(x => x.OperationId == n.Id.Value && x.State == nameof(DurableOperationState.Succeeded)));
     }

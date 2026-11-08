@@ -3,11 +3,14 @@ using Haby.Operator.Contracts;
 namespace Haby.Cli;
 
 internal sealed record CliChangeSet(string ChangeSetId, string EnvironmentRecordId, CliReference Reference,
-    string Precondition, string CreatedAtUtc, string TechnicalActorId);
+    string Precondition, string CreatedAtUtc, string TechnicalActorId)
+{ public long? ExpectedGeneration { get; init; } }
 internal sealed record CliPlan(string PlanId, string ChangeSetId, string EnvironmentRecordId, string EnvironmentId,
     CliReference Reference, string ProviderAlias, string ProviderInstanceId, long ConfigurationRevision,
     string ImplementationId, string Fingerprint, string CreatedAtUtc, string ExpiresAtUtc,
-    string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork, CliPlannedOperation[] Operations);
+    string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork, CliPlannedOperation[] Operations)
+{ public CliReusedResource[] ReusedResources { get; init; } = []; }
+internal sealed record CliReusedResource(string ResourceId, string ManagementId, long SourceGeneration);
 internal sealed record CliPlannedOperation(string OperationId, string ResourceId, string ActionContract, string[] Dependencies);
 internal sealed record CliPlanDescription(string Status, CliIntendedAction? Action);
 internal sealed record CliIntendedAction(string Kind, string ResourceId, string ResourceType,
@@ -74,14 +77,20 @@ internal static class PlanningPresentation
         reply.ChangeSet is not { } change ? null : new CliChangeSet(change.ChangeSetId, change.EnvironmentRecordId,
             new CliReference(change.Reference.ApplicationRecordId, change.Reference.RevisionNumber),
             change.Precondition == PlanningPrecondition.ExpectedAbsence ? "expectedAbsence"
-                : throw new InvalidDataException("Unsupported server precondition."), change.CreatedAtUtc, change.TechnicalActorId),
+                : change.Precondition == PlanningPrecondition.ExpectedGeneration && change.HasExpectedGeneration && change.ExpectedGeneration > 0 ? "expectedGeneration"
+                : throw new InvalidDataException("Unsupported server precondition."), change.CreatedAtUtc, change.TechnicalActorId)
+        { ExpectedGeneration = change.HasExpectedGeneration ? change.ExpectedGeneration : null },
         reply.Plan is not { } plan ? null : new CliPlan(plan.PlanId, plan.ChangeSetId, plan.EnvironmentRecordId,
             plan.EnvironmentId, new CliReference(plan.Reference.ApplicationRecordId, plan.Reference.RevisionNumber),
             plan.ProviderAlias, plan.ProviderInstanceId, plan.ConfigurationRevision, plan.ImplementationId,
             plan.Fingerprint, plan.CreatedAtUtc, plan.ExpiresAtUtc, plan.TechnicalActorId,
             plan.HasClosedAtUtc ? plan.ClosedAtUtc : null,
-            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations)))
+            plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations))
+        { ReusedResources = Reuse(plan.ReusedResources) })
     { ConfigurationErrorCodes = reply.ConfigurationErrorCodes.ToArray() };
+
+    internal static CliReusedResource[] Reuse(IEnumerable<ReusedResourceSummary> reuse) =>
+        reuse.Select(r => new CliReusedResource(r.ResourceId, r.ManagementId, r.SourceGeneration)).ToArray();
 
     internal static CliPlannedOperation[] Operations(IEnumerable<PlannedOperationSummary> operations) =>
         operations.Select(n => new CliPlannedOperation(n.OperationId, n.ResourceId, n.ActionContract, n.Dependencies.ToArray())).ToArray();
@@ -149,6 +158,8 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"Revision: {plan.Reference.ApplicationRecordId} {plan.Reference.RevisionNumber}");
             foreach (var node in plan.Operations)
                 _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}");
+            foreach (var resource in plan.ReusedResources)
+                _output.WriteLine($"Reuse Resource: {resource.ResourceId}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
             _output.WriteLine($"Provider: {plan.ProviderAlias} -> {plan.ProviderInstanceId} revision {plan.ConfigurationRevision}; implementation: {plan.ImplementationId}");
             _output.WriteLine("Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.");
             if (plan.IntendedWork.Action is { } action)

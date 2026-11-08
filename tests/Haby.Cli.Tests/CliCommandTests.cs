@@ -8,6 +8,19 @@ namespace Haby.Cli.Tests;
 
 public sealed class CliCommandTests
 {
+    [Theory]
+    [InlineData("")]
+    [InlineData("--expected-generation 0")]
+    [InlineData("--expected-generation -1")]
+    [InlineData("--expected-absence --expected-generation 1")]
+    public async Task Update_preconditions_are_positive_explicit_and_exclusive_before_client_creation(string flags)
+    {
+        var factory = new FakeFactory(); using var output = new StringWriter(); using var error = new StringWriter();
+        var cli = new CliApplication(new Endpoint(null), factory, output, error);
+        var args = new[] { "changeset", "create", "019a2b70-1234-7123-8123-123456789abc", "1" }.Concat(flags.Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToArray();
+        Assert.Equal(CliApplication.UsageError, await cli.RunAsync(args)); Assert.Equal(0, factory.Created);
+    }
+
     private sealed class Endpoint(string? address) : IEndpointSource
     {
         public string? GetAddress() => address;

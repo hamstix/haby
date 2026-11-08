@@ -17,7 +17,6 @@ public sealed partial class ManifestOperatorService
             generation = DeploymentGeneration.Create(request.Generation);
         }
         catch (ArgumentException) { return new() { Status = GenerationExecutionStatus.InvalidRequest }; }
-        if (generation.Value != 1) return new() { Status = GenerationExecutionStatus.UnsupportedGeneration };
         // The real runner owns the shared generation gate and calls the exact executor without reacquiring it.
         var result = await OperationCall(() => generationRunner.RunAsync(deployment, generation, context.CancellationToken), context);
         var reply = new GenerationExecutionReply
@@ -33,8 +32,8 @@ public sealed partial class ManifestOperatorService
                     DurableExecutionOutcome.InputUnavailable => GenerationExecutionStatus.InputUnavailable,
                     DurableExecutionOutcome.HandlerUnavailable => GenerationExecutionStatus.HandlerUnavailable,
                     DurableExecutionOutcome.OperationNotFound => GenerationExecutionStatus.NotFound,
-                    null when result.Progress.Total > 0 && result.Progress.Completed == result.Progress.Total &&
-                        result.Progress.AppliedGeneration == generation.Value => GenerationExecutionStatus.Succeeded,
+                    null when (result.Progress.Total > 0 || result.Progress.Reused > 0) && result.Progress.Completed == result.Progress.Total &&
+                        result.Progress.AppliedGeneration >= generation.Value => GenerationExecutionStatus.Succeeded,
                     null => GenerationExecutionStatus.Blocked,
                     _ => throw new InvalidOperationException("Unknown generation outcome.")
                 },
@@ -53,7 +52,8 @@ public sealed partial class ManifestOperatorService
             Generation = value.Generation.Value,
             DesiredGeneration = value.DesiredGeneration,
             Completed = value.Completed,
-            Total = value.Total
+            Total = value.Total,
+            ReusedResources = value.Reused
         };
         if (value.AppliedGeneration is { } applied) progress.AppliedGeneration = applied;
         if (value.StoppedAt is { } stopped) progress.StoppedOperationId = stopped.Operation.Key.OperationId.Value;

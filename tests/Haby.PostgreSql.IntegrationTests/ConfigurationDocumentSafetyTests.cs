@@ -67,12 +67,15 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 DROP TABLE operator_access_grants;
                 DROP TABLE configuration_access_grants;
                 DROP TABLE configuration_document_revisions;
+                DROP TABLE resource_management;
+                ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
         await using (var act = OwnerServices(scenario)) await act.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         await using var verify = Context(scenario.Connection);
         Assert.Equal(scenario.Plan.Inputs.Configuration, ConfigurationPlanningSnapshotCodec.Decode((await verify.DeploymentGenerations.AsNoTracking().SingleAsync()).ConfigurationJson, scenario.Plan.Inputs.Revision));
-        Assert.Equal(24, (await verify.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(25, (await verify.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
     }

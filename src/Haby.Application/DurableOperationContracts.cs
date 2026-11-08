@@ -95,6 +95,9 @@ public abstract record DurableMarkerResult
 /// </summary>
 public interface IDurableOperationJournal
 {
+    ValueTask<bool> TryCompleteReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+        CancellationToken cancellationToken) => new(false);
+
     ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment,
         DeploymentGeneration generation, CancellationToken cancellationToken);
     ValueTask<DurableOperation?> FindAsync(DurableOperationKey key, CancellationToken cancellationToken);

@@ -113,11 +113,12 @@ After the current P2 runtime/diagnostic, Profile discovery and Application-wide
 materialization slices, implement a bounded sequential update path between
 Application generations before starting Workload implementation.
 [ADR-045](docs/adr/0045-application-generation-updates-and-resource-continuity.md)
-accepts the update/Resource-continuity contracts; implementation remains planned,
-not currently supported.
+accepts the update/Resource-continuity contracts. The first unchanged-Resource
+reuse slice is implemented in [issue #158](docs/development/158-resource-reuse-generation-updates.md);
+the broader mutation checkpoint below remains incomplete.
 
-- [ ] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and execution of the next generation. Separate Plan/Commit/Execute commands are sufficient; deferred apply is not a prerequisite.
-- [ ] Preserve stable identities and confirmed management of unchanged database/login Resources. Reuse the existing database, role and generated credential; observing an external name alone is not proof of Haby ownership. Application-version-only updates must not repeat Resource creation, credential generation or privilege work without a required change.
+- [x] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and explicit execution of a reuse-only next generation from a fully applied baseline. Deferred apply remains separate.
+- [x] Preserve stable identities and confirmed management of unchanged database/login Resources with the exact same Provider configuration revision. Reuse the existing database, role and credential through original confirmed evidence, without repeating creation, generation or privilege work. Catalogs without management records are not backfilled.
 - [ ] Add new Resources of admitted contracts during an update, with explicit dependency planning, normal conflict checks and creation of only the new effects. Do not implicitly adopt existing external objects.
 - [ ] Support adding/removing Components and Bindings in the new declaration and its configuration layout. New Components/Bindings receive configuration; removed ones do not participate in the new generation. Kubernetes object creation/removal remains P3 work.
 - [ ] Allow removal of Resource declarations without external deletion: retain the existing database/role and explicit management/ownership records. Validate remaining references; do not silently lose ownership, treat a rename as an in-place identity change or grant automatic later adoption. Agree retained-resource reintroduction semantics before implementation.
@@ -130,7 +131,8 @@ Implement the checkpoint sequentially: first reuse unchanged Resources across
 generations, then Resource additions and Component/Binding changes with retained
 removals, then configuration-only generations, and finally P3 image rollout and
 credential/configuration transfer. Detailed contracts require accepted ADRs before
-implementation; the current execution profile is still generation 1.
+implementation. The current update profile admits only unchanged managed pair
+reuse with stable Component/Binding identities and a new ManifestRevision.
 
 This checkpoint supplies the update foundation for P3 rollout; it does not claim
 arbitrary Resource evolution, destructive Application/data deletion, automatic

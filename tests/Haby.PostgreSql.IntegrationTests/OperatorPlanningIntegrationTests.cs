@@ -108,7 +108,7 @@ public sealed partial class OperatorHostIntegrationTests
                     Precondition = PlanningPrecondition.ExpectedAbsence
                 };
                 foreach (var precondition in new[] { PlanningPrecondition.Unspecified, PlanningPrecondition.ExpectedGeneration, (PlanningPrecondition)999 })
-                    Assert.Equal(PlanningStatus.UnsupportedPrecondition, (await client.CreateChangeSetAsync(WithPrecondition(create, precondition))).Status);
+                    Assert.Equal(PlanningStatus.InvalidRequest, (await client.CreateChangeSetAsync(WithPrecondition(create, precondition))).Status);
                 var missingEnvironment = create.Clone(); missingEnvironment.EnvironmentId = "missing";
                 Assert.Equal(PlanningStatus.EnvironmentNotFound, (await client.CreateChangeSetAsync(missingEnvironment)).Status);
                 var invalidEnvironment = create.Clone(); invalidEnvironment.EnvironmentId = environment.ToString();

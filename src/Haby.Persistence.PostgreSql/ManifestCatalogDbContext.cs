@@ -34,6 +34,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        ConfigureResourceManagement(modelBuilder);
         ConfigureOperatorAccess(modelBuilder);
         ConfigureConfigurationAccess(modelBuilder);
         ConfigureConfigurationDocuments(modelBuilder);
@@ -264,13 +265,15 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         });
         modelBuilder.Entity<DurableChangeSetRow>(entity =>
         {
-            entity.ToTable("deployment_change_sets");
+            entity.ToTable("deployment_change_sets", t => t.HasCheckConstraint("CK_deployment_change_sets_precondition",
+                "(expected_absence AND expected_generation IS NULL) OR (NOT expected_absence AND expected_generation > 0 AND expected_generation IS NOT NULL)"));
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
             entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
             entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
             entity.Property(row => row.ExpectedAbsence).HasColumnName("expected_absence");
+            entity.Property(row => row.ExpectedGeneration).HasColumnName("expected_generation");
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
             entity.HasOne<EnvironmentRow>().WithMany().HasForeignKey(row => row.EnvironmentRecordId).OnDelete(DeleteBehavior.Restrict);
@@ -319,7 +322,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         });
         modelBuilder.Entity<ApplicationDeploymentRow>(entity =>
         {
-            entity.ToTable("application_deployments", table => table.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND (applied_generation IS NULL OR applied_generation = 1)"));
+            entity.ToTable("application_deployments", table => table.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation > 0 AND (applied_generation IS NULL OR (applied_generation > 0 AND applied_generation <= desired_generation))"));
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
@@ -333,7 +336,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         });
         modelBuilder.Entity<DeploymentGenerationRow>(entity =>
         {
-            entity.ToTable("application_deployment_generations", table => table.HasCheckConstraint("CK_deployment_generations_first", "generation = 1 AND presence = 'Present'"));
+            entity.ToTable("application_deployment_generations", table => table.HasCheckConstraint("CK_deployment_generations_first", "generation > 0 AND presence = 'Present'"));
             entity.HasKey(row => new { row.DeploymentId, row.Generation });
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
             entity.Property(row => row.Generation).HasColumnName("generation");
@@ -365,7 +368,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         });
         modelBuilder.Entity<ChangeSetCommitRow>(entity =>
         {
-            entity.ToTable("change_set_commits", table => table.HasCheckConstraint("CK_change_set_commits_first", "generation = 1"));
+            entity.ToTable("change_set_commits", table => table.HasCheckConstraint("CK_change_set_commits_first", "generation > 0"));
             entity.HasKey(row => row.ChangeSetId);
             entity.Property(row => row.ChangeSetId).HasColumnName("change_set_id");
             entity.Property(row => row.PlanId).HasColumnName("plan_id");
@@ -375,7 +378,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
             entity.HasOne<DurableChangeSetRow>().WithOne().HasForeignKey<ChangeSetCommitRow>(row => row.ChangeSetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<DurablePlanRow>().WithMany().HasForeignKey(row => row.PlanId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<DeploymentGenerationRow>().WithOne().HasForeignKey<ChangeSetCommitRow>(row => new { row.DeploymentId, row.Generation })
+            entity.HasOne<DeploymentGenerationRow>().WithMany().HasForeignKey(row => new { row.DeploymentId, row.Generation })
                 .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<DurableOperationRow>(entity =>
@@ -535,6 +538,7 @@ internal sealed class DurableChangeSetRow
     public Guid ApplicationRecordId { get; set; }
     public long RevisionNumber { get; set; }
     public bool ExpectedAbsence { get; set; }
+    public long? ExpectedGeneration { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public required string ActorId { get; set; }
 }
