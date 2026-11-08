@@ -99,7 +99,8 @@ authentication remains the immediate next slice.
 - [x] Expose name-based configuration materialize/get/preview through the operator Host and habyctl, resolving current fully applied desired generation once and supporting explicit-generation automation: [operator runbook](docs/development/146-configuration-materialization-preview.md).
 - [x] Accept exact-document static delivery grants (non-expiring unless explicitly limited), one shared configurable Host endpoint and transient bounded secret resolution/formatting under [ADR-042](docs/adr/0042-authorized-configuration-delivery.md).
 - [x] Implement authorized exact-revision delivery, access grant administration and the real client connection rehearsal; ordinary operator get/preview stay redacted/metadata-only: [pilot boundary and runbook](docs/development/148-authorized-configuration-delivery.md).
-- [ ] Immediately follow delivery with static operator-admin tokens and selected registry/context credentials in habyctl, before broader real use; agree initial issuance/transition first, without OAuth or complex RBAC.
+- [x] Accept static operator-admin tokens, explicit Host issuance/recovery (including temporary tokens and policy-selected Kubernetes exec/Job), registry credentials and protected default-on reflection under [ADR-043](docs/adr/0043-operator-access-tokens-and-bootstrap.md).
+- [ ] Implement operator authentication and selected registry credentials before broader real use, without OAuth or complex RBAC: [issue #150](https://github.com/hamstix/haby/issues/150).
 - [ ] Run the full operator-to-application rehearsal: bootstrap -> provisioning -> configuration -> client authentication and application use.
 
 Exit evidence:

@@ -178,8 +178,11 @@ Immediately next, before broader real use, implement static operator tokens with
 one operator-admin permission: creation/revocation/hash storage, no OAuth or fine
 RBAC. habyctl will use credentials of the selected registry/context, with delivery
 and operator credentials validated as different purposes. Define first issuance
-and transition/bootstrap rules before implementing that slice. This ADR records
-that ordering; it does not authorize inventing bootstrap behavior in delivery work.
+and transition/bootstrap rules before implementing that slice.
+[ADR-043](0043-operator-access-tokens-and-bootstrap.md) now accepts those rules,
+including explicit local issuance/recovery and operator-protected reflection.
+Its implementation in issue #150 replaces the interim anonymous operator boundary;
+accepting the ADR alone does not change current runtime behavior.
 
 ### Audit and delivery evidence
 
