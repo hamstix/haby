@@ -15,7 +15,9 @@ immediately denies anonymous operator clients, including on loopback/Development
 The Host may run with zero operator grants; ordinary startup never issues one.
 
 Supply the same `Haby:PostgreSql:ConnectionString` configuration used by the Host
-through protected process environment or deployment configuration. Do not put
+through protected process environment or deployment configuration. Local issuance
+uses the web Host configuration precedence, including `ASPNETCORE_ENVIRONMENT`
+and environment-specific appsettings. Do not put
 credential-bearing connection strings in shell arguments/history or logs. Invoke
 the explicit local administrative command, independently of ordinary startup:
 

@@ -43,24 +43,26 @@ public static class LocalOperatorIssuance
                 expiry = parsed;
             }
             // Configuration is shared with ordinary Host startup; no listener/TLS settings are needed.
-            var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(settings.ToArray());
-            builder.Logging.ClearProviders();
-            var connection = builder.Configuration["Haby:PostgreSql:ConnectionString"];
+            // Use the web Host's configuration precedence (including ASPNETCORE_ENVIRONMENT),
+            // but never build its service provider, web Host or listener for local administration.
+            using var configuration = WebApplication.CreateBuilder(settings.ToArray()).Configuration;
+            var connection = configuration["Haby:PostgreSql:ConnectionString"];
             if (string.IsNullOrWhiteSpace(connection)) throw new ArgumentException();
-            builder.Services.AddDbContextFactory<ManifestCatalogDbContext>(o => o.UseNpgsql(connection));
-            builder.Services.AddSingleton<ManifestCatalogMigrationInitializer>();
-            builder.Services.AddSingleton(TimeProvider.System);
-            builder.Services.AddSingleton<IOperatorAccessStore, PostgreSqlOperatorAccessStore>();
-            using var services = builder.Build();
+            var registrations = new ServiceCollection();
+            registrations.AddDbContextFactory<ManifestCatalogDbContext>(o => o.UseNpgsql(connection));
+            registrations.AddSingleton<ManifestCatalogMigrationInitializer>();
+            registrations.AddSingleton(TimeProvider.System);
+            registrations.AddSingleton<IOperatorAccessStore, PostgreSqlOperatorAccessStore>();
+            using var services = registrations.BuildServiceProvider();
             if (file is not null)
             {
                 var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, Options = FileOptions.Asynchronous };
                 if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
                 destination = new FileStream(file, options);
             }
-            await services.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync(token);
+            await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync(token);
             attempted = true;
-            var created = await services.Services.GetRequiredService<IOperatorAccessStore>().CreateAsync(name, LocalActor, expiry, token);
+            var created = await services.GetRequiredService<IOperatorAccessStore>().CreateAsync(name, LocalActor, expiry, token);
             grantId = created.Grant.Id.ToString();
             if (destination is not null)
             {

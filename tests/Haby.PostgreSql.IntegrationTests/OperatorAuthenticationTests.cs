@@ -196,6 +196,34 @@ public sealed partial class OperatorHostIntegrationTests
         }
         finally { Directory.Delete(folder, true); await fixture.RunClientUtilityAsync("rm", "-f", dump); }
     }
+    [Fact]
+    public async Task Operator_local_command_uses_the_web_Host_environment_catalog_configuration()
+    {
+        var connection = await NewDatabaseAsync();
+        var folder = Path.Combine(Path.GetTempPath(), "operator-environment-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(folder);
+        var destination = Path.Combine(folder, "operator.token");
+        var environment = "OperatorIssuanceTest";
+        await File.WriteAllTextAsync(Path.Combine(folder, "appsettings." + environment + ".json"),
+            "{\"Haby\":{\"PostgreSql\":{\"ConnectionString\":\"" + JsonEncodedText.Encode(connection) + "\"}}}");
+        try
+        {
+            var start = new ProcessStartInfo("dotnet") { WorkingDirectory = folder, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var arg in new[] { typeof(OperatorHostApplication).Assembly.Location, "operator-token-issue", "--token-output-file", destination }) start.ArgumentList.Add(arg);
+            start.Environment.Remove("DOTNET_ENVIRONMENT"); start.Environment.Remove("Haby__PostgreSql__ConnectionString");
+            start.Environment["ASPNETCORE_ENVIRONMENT"] = environment;
+            using var process = Process.Start(start)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+            Assert.Equal(0, process.ExitCode); Assert.Empty(await stderr);
+            var credential = (await File.ReadAllTextAsync(destination)).TrimEnd();
+            Assert.DoesNotContain(credential, await stdout);
+            await using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
+            var grant = Assert.Single(await db.OperatorAccess.AsNoTracking().ToArrayAsync());
+            Assert.True(OperatorCredential.Verify(credential, grant.CredentialHash)); Assert.Equal(LocalOperatorIssuance.LocalActor, grant.Actor);
+        }
+        finally { Directory.Delete(folder, true); }
+    }
+
     private sealed class OperatorClock : TimeProvider
     {
         public DateTimeOffset Now = DateTimeOffset.UtcNow;
