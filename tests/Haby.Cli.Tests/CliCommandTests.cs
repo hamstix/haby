@@ -40,6 +40,8 @@ public sealed class CliCommandTests
     {
         public Task<OperatorAccessReply> CreateOperatorAccessAsync(CreateOperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<OperatorAccessReply> GetOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ListProfilesReply> ListProfilesAsync(ListProfilesRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ListProfileRevisionsReply> ListProfileRevisionsAsync(ListProfileRevisionsRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<ListOperatorAccessReply> ListOperatorAccessAsync(ListOperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<OperatorAccessReply> RevokeOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
 

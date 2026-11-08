@@ -17,6 +17,8 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ListProfilesReply> ListProfilesAsync(ListProfilesRequest request, CancellationToken token);
+    Task<ListProfileRevisionsReply> ListProfileRevisionsAsync(ListProfileRevisionsRequest request, CancellationToken token);
     Task<OperatorAccessReply> CreateOperatorAccessAsync(CreateOperatorAccessRequest request, CancellationToken token);
     Task<OperatorAccessReply> GetOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token);
     Task<ListOperatorAccessReply> ListOperatorAccessAsync(ListOperatorAccessRequest request, CancellationToken token);
@@ -89,6 +91,8 @@ internal sealed class GrpcRegistryClientFactory : IRegistryClientFactory
 
 internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? configurationChannel = null, string? credential = null) : IRegistryClient
 {
+    public async Task<ListProfilesReply> ListProfilesAsync(ListProfilesRequest request, CancellationToken token) => await _client.ListProfilesAsync(request, headers, cancellationToken: token);
+    public async Task<ListProfileRevisionsReply> ListProfileRevisionsAsync(ListProfileRevisionsRequest request, CancellationToken token) => await _client.ListProfileRevisionsAsync(request, headers, cancellationToken: token);
     private readonly Grpc.Core.Metadata? headers = credential is null ? null : new() { { "authorization", "Bearer " + credential } };
     public async Task<OperatorAccessReply> CreateOperatorAccessAsync(CreateOperatorAccessRequest request, CancellationToken token) => await _client.CreateOperatorAccessAsync(request, headers, cancellationToken: token);
     public async Task<OperatorAccessReply> GetOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => await _client.GetOperatorAccessAsync(request, headers, cancellationToken: token);

@@ -13,7 +13,7 @@ public sealed partial class ManifestOperatorService(ManifestContractCatalog cata
     ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess,
     ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions,
     IConfigurationDocumentStore configurationDocuments, IConfigurationAccessStore configurationAccess,
-    IOperatorAccessStore operatorAccess, IHttpContextAccessor httpContext) : ManifestOperator.ManifestOperatorBase
+    IOperatorAccessStore operatorAccess, IHttpContextAccessor httpContext, IProfileDiscoveryQuery profileDiscovery) : ManifestOperator.ManifestOperatorBase
 {
     private string Actor => httpContext.HttpContext?.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
         ?? throw new InvalidOperationException("Authenticated operator identity is required.");

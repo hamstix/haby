@@ -132,6 +132,56 @@ and content explicitly. There is no client retry loop. Confirmed import uses the
 store's original audit and commit semantics. Corrupt/unavailable storage fails
 with a fixed safe Internal status, never not-found or a repaired declaration.
 
+## Profile discovery and revision history
+
+Authenticated operators can read one bounded metadata page without selecting an
+Environment. Selected registry credentials and context routing still apply:
+
+```powershell
+habyctl profile list --config config.yaml --context pilot
+habyctl profile list --page-size 1 --after-profile-id logging -o json
+habyctl profile revision list operator-layout --page-size 50 -o json
+habyctl profile revision list operator-layout --page-size 1 --after-revision 2
+```
+
+Both commands return outcome `listed`, including an empty catalog or an unknown
+valid Profile ID. JSON `data.items` contains only `reference` (`profileId`,
+`revision`), `technicalActorId` and `importedAtUtc`. Profile-list continuation is
+optional `data.nextAfterProfileId`; revision-list continuation is optional
+`data.nextAfterRevision`, alongside `data.profileId`. Text shows the same concise
+identity/audit columns and the next cursor when present. No declaration, template,
+options, secret selector, payload hash or material is loaded or returned.
+
+Profile list selects the **maximum imported numeric revision** of each identity
+and that exact row's original import audit. This is discovery only: assignments,
+Plans and generations continue to require exact ProfileId + revision. Import
+order, audit timestamps, assignments and deployments do not select this maximum.
+Availability in a list does not establish rendering or delivery eligibility.
+Exact revision get retains its complete declaration behavior.
+
+Page size is 1..100, default 50. Profile identities use ordinal ascending order
+and exclusive `--after-profile-id`; history uses positive numeric ascending order
+and exclusive `--after-revision`. One invocation requests one page. A full final
+page can return a cursor whose next page is empty. Pages are independent live
+reads, not a snapshot: concurrent imports can change maxima or add revisions
+between calls; completeness across concurrent writes is not promised. Stable
+existing rows do not repeat. Invalid selectors fail before CLI transport or Host
+query. Required corrupt metadata fails safely, without fallback to an older row;
+listing does not decode or validate declaration payloads.
+
+The implementation uses one bounded asynchronous server-side EF query per page,
+projects identity/audit columns only, joins each maximum revision to its audit
+before identity paging, and uses PostgreSQL `C` collation for both identity order
+and cursor filtering. No migrations, new dependencies or catalog reset are needed.
+Both RPCs require operator-admin; delivery credentials cannot list Profiles.
+
+`ProfileDiscoveryTests` covers real Host/PostgreSQL/restart and published CLI,
+out-of-order/gapped imports, inverted audit timestamps, ordinal/numeric paging,
+invalid selectors, corrupt audit, unreadable payloads, query shape/count and
+authentication. CLI loopback tests reject malformed, duplicate, out-of-order,
+foreign-scope and invalid-continuation replies before output in text and generated
+JSON, including the published Native AOT executable.
+
 ## Evidence and limits
 
 `OperatorProfileIntegrationTests` exercises generated client -> actual Host ->
@@ -169,7 +219,7 @@ CONTRIBUTING and the disposable PostgreSQL suite; Windows can use
 `scripts/test-postgresql-wslc.ps1` with the same Native AOT environment variables.
 
 [Scoped assignment administration](136-scoped-profile-assignments.md) is now implemented separately. [Structural planning integration](142-frozen-profile-planning.md) is now implemented separately. Renderers, document
-materialization, secret resolution/distribution/delivery, list/search/export,
+materialization, secret resolution/distribution/delivery, general search/export,
 updates/deletion and UI remain deferred. Persisted secret-bearing Profiles still
 fail effective expansion with `profile.secret-projections.unsupported` and no
 partial layout. This slice adds no packages, migrations, reset or public API
