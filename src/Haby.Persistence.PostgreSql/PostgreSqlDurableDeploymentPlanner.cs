@@ -437,6 +437,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
                 source.ImplementationId != inputs.ImplementationId) throw new InvalidDataException();
             var evidence = await ResourceContinuity.EvidenceAsync(db, managed, token) ?? throw new InvalidDataException();
             var original = DurableOperationGraphCodec.Decode(source.GraphJson);
+            // Missing registrations cannot turn a lost mandatory terminal output into
+            // an action that supposedly never required confirmed evidence.
+            if (!admission.Supports(original)) throw new InvalidDataException();
             if (!await ValidateGraphAsync(db, target, provider, inputs, original, token)) throw new InvalidDataException();
             reuse.Add(new(resource, managed.Id, managed.SourceGeneration, evidence));
         }

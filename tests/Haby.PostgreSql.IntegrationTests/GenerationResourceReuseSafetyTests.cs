@@ -5,7 +5,9 @@ using Haby.Domain;
 using Haby.Operator.Contracts;
 using Haby.Operator.Host;
 using Haby.Persistence.PostgreSql;
+using Haby.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
 
@@ -88,6 +90,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [InlineData("wrong-contract", false)]
     [InlineData("missing-slot", false)]
     [InlineData("missing-source", false)]
+    [InlineData("missing-registration-and-output", false)]
     [InlineData("missing-management", true)]
     [InlineData("foreign-management", true)]
     [InlineData("missing-output", true)]
@@ -103,7 +106,13 @@ public sealed partial class PostgreSqlApplicationLoginTests
     public async Task Resource_reuse_missing_corrupt_and_foreign_original_evidence_never_advances(string fault, bool afterCommit)
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
-        await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
+        await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
+            services =>
+            {
+                if (fault == "missing-registration-and-output")
+                    foreach (var registration in services.Where(x => x.ServiceType == typeof(IExternalOperationOutputContract) &&
+                        x.ImplementationType == typeof(PostgreSqlApplicationConnectionContract)).ToArray()) services.Remove(registration);
+            });
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         var revision = await ImportUpdate(client, UpdateEnvelope(scenario, 2));
         DurablePlanSummary? plan = afterCommit ? await UpdatePlan(client, revision, 1) : null;
@@ -112,7 +121,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         {
             "missing-management" => "DELETE FROM resource_management WHERE resource_local_id = 'app-login'",
             "foreign-management" => "UPDATE resource_management SET environment_record_id = '00000000-0000-0000-0000-000000000001' WHERE resource_local_id = 'app-login'",
-            "missing-output" => "DELETE FROM operation_outputs WHERE operation_id = 'app-login-access'",
+            "missing-output" or "missing-registration-and-output" => "DELETE FROM operation_outputs WHERE operation_id = 'app-login-access'",
             "corrupt-output" => "UPDATE operation_outputs SET payload = '{}' WHERE operation_id = 'app-login-access'",
             "missing-attempt" => "DELETE FROM durable_create_operation_attempts WHERE operation_id = 'app-login-access'",
             "manual-success" => "UPDATE durable_create_operation_attempts SET outcome = 'Uncertain' WHERE operation_id = 'db-create'",

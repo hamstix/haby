@@ -59,6 +59,8 @@ they never follow latest. Receipt does not imply hot reload of a running process
 - Missing/corrupt/foreign management or confirmed evidence is unavailable, never
   proof of external absence or permission to regenerate. Manual database recovery
   without confirmed original output cannot authorize pair reuse.
+  Original action/output support must remain registered; a missing validator never
+  turns a lost mandatory output into an optional one.
 - Exact already accepted effective state is a successful no-op at the current
   generation. A same-revision configuration-only change is refused, not silently
   accepted as a no-op. No-op does not create a generation or rewrite its audit.
