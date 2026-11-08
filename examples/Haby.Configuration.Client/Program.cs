@@ -2,14 +2,21 @@ using Haby.Configuration.Client;
 
 try
 {
+    var expectations = RuntimeSettingExpectations.Parse(Environment.GetEnvironmentVariable("HABY_RUNTIME_EXPECT_TIMEOUT"),
+        Environment.GetEnvironmentVariable("HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT"), Environment.GetEnvironmentVariable("HABY_RUNTIME_EXPECT_SSL_MODE"));
     var endpoint = new Uri(Environment.GetEnvironmentVariable("HABY_RUNTIME_ENDPOINT") ?? throw new InvalidOperationException());
     var revision = Environment.GetEnvironmentVariable("HABY_RUNTIME_REVISION") ?? throw new InvalidOperationException();
     var path = Environment.GetEnvironmentVariable("HABY_RUNTIME_TOKEN_FILE") ?? throw new InvalidOperationException();
     if (endpoint.Scheme != "https" && !(endpoint.Scheme == "http" && (endpoint.IsLoopback ||
         Environment.GetEnvironmentVariable("HABY_RUNTIME_ALLOW_INSECURE_HTTP") == "1"))) throw new InvalidOperationException();
-    var identity = await RuntimeConfigurationClient.ConnectAsync(endpoint, revision, path, CancellationToken.None);
+    var identity = await RuntimeConfigurationClient.ConnectAsync(endpoint, revision, path, CancellationToken.None, expectations);
     Console.WriteLine($"Configuration accepted; revision={revision}; user={identity.User}; database={identity.Database}; operation=ok");
     return 0;
+}
+catch (RuntimeSettingExpectationException)
+{
+    Console.Error.WriteLine("Runtime setting expectations are invalid or received settings did not match. Details withheld.");
+    return 1;
 }
 catch
 {

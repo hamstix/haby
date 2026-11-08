@@ -76,7 +76,7 @@ public static class ManifestPayloadParser
             var typedManifest = JsonSerializer.Deserialize(manifestBytes, Context.ApplicationManifest);
             if (typedManifest is null)
                 return Invalid([Diagnostic("manifest.schema.type-mismatch", "", "The manifest must be an object.", ("expectedType", "object"))]);
-            var semantic = ManifestSemanticValidator.Validate(typedManifest).ToArray();
+            var semantic = ManifestSemanticValidator.Validate(typedManifest, catalog).ToArray();
             var report = CreateReport(semantic.Any(diagnostic => diagnostic.Severity == ManifestDiagnosticSeverity.Error)
                 ? semantic
                 : semantic.Concat(ManifestExtensionValidator.Validate(typedManifest, catalog)));

@@ -23,7 +23,7 @@ public static class PostgreSqlApplicationLoginContract
          "properties":{"databaseRef":{"type":"string","pattern":"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$","maxLength":63},
          "schema":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,62}$","not":{"anyOf":[{"pattern":"^pg_"},{"enum":["public","information_schema"]}]}},
          "privilegePolicy":{"const":"database-owner/v1"}}}
-        """, PostgreSqlConsumerOptions.Schema);
+        """, PostgreSqlConsumerOptions.Schema, new("databaseRef", PostgreSqlDatabaseContract.Id));
 
     public static PostgreSqlApplicationLoginProperties? Parse(ConfigurationObject properties)
     {
@@ -104,10 +104,22 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         PostgreSqlApplicationLoginProperties Properties, string Administrator);
     private static Pair? TryPair(NormalizedManifestSpec spec, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
     {
-        if (!HasSingleOwner(spec) || spec.Resources.Count != 2 || spec.Exports.Count != 0 || spec.Parameters.Count != 0 ||
-            configuration.ProviderKindId != Provider.ProviderKind || configuration.ShapeId != Provider.ConfigurationContract ||
+        if (configuration.ProviderKindId != Provider.ProviderKind || configuration.ShapeId != Provider.ConfigurationContract ||
             configuration.ImplementationId != Provider.ImplementationId || inputs.ImplementationId != Provider.ImplementationId ||
-            configuration.PayloadFormatVersion != 1 || spec.Resources.Values.Any(r => r.ProviderRef != inputs.Alias)) return null;
+            configuration.PayloadFormatVersion != 1) return null;
+        try
+        {
+            var snapshot = JsonSerializer.Deserialize(configuration.PayloadJson, PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot);
+            return snapshot is null || snapshot.ImplementationId != inputs.ImplementationId ? null : TryShape(spec, inputs, snapshot.AdministratorUserName);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static Pair? TryShape(NormalizedManifestSpec spec, DurablePlanningInputs inputs, string administrator)
+    {
+        if (!HasSingleOwner(spec) || spec.Resources.Count != 2 || spec.Exports.Count != 0 || spec.Parameters.Count != 0 ||
+            inputs.ImplementationId != Provider.ImplementationId || string.IsNullOrWhiteSpace(administrator) ||
+            spec.Resources.Values.Any(r => r.ProviderRef != inputs.Alias)) return null;
         var databases = spec.Resources.Where(r => r.Value.Type == PostgreSqlDatabaseContract.Id).ToArray();
         var logins = spec.Resources.Where(r => r.Value.Type == PostgreSqlApplicationLoginContract.Id).ToArray();
         if (databases.Length != 1 || logins.Length != 1 || PostgreSqlDatabaseCreateValidation.Name(databases[0].Value) is not { } name ||
@@ -116,19 +128,33 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         foreach (var component in spec.Components.Values)
             if (component.Workloads.Count != 0 || component.Bindings.Values.Any(b =>
                 b.Target is not NormalizedLocalResourceTarget target || target.ResourceRef != logins[0].Key)) return null;
+        return new(databases[0].Key, logins[0].Key, name, properties, administrator);
+    }
+
+    internal static PlanDescriptionStatus DescribeGraph(NormalizedManifestSpec spec, DurablePlanningInputs inputs, DurableOperationGraph? graph)
+    {
+        if (graph is null || graph.Nodes.Count != 5) return PlanDescriptionStatus.UnsupportedShape;
+        var restrict = graph.Nodes.SingleOrDefault(n => n.Id.Value == "db-restrict");
+        if (restrict?.Input.Format != "haby.postgresql.database-restrict/v1") return PlanDescriptionStatus.UnsupportedShape;
         try
         {
-            var snapshot = JsonSerializer.Deserialize(configuration.PayloadJson, PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot);
-            return snapshot is null || snapshot.ImplementationId != inputs.ImplementationId || string.IsNullOrWhiteSpace(snapshot.AdministratorUserName)
-                ? null : new(databases[0].Key, logins[0].Key, name, properties, snapshot.AdministratorUserName);
+            var frozen = JsonSerializer.Deserialize(restrict.Input.Json, PostgreSqlPairJsonContext.Default.PostgreSqlDatabaseRestrictInput);
+            if (frozen is null) return PlanDescriptionStatus.InputCorrupt;
+            var pair = TryShape(spec, inputs, frozen.ExpectedOwnerUserName);
+            if (pair is null) return PlanDescriptionStatus.UnsupportedShape;
+            var expected = spec.Resources.SelectMany(r => new PostgreSqlPairResourceAdmission(r.Value.Type).Plan(r.Key, inputs, pair));
+            return new DurableOperationGraph(expected).Equals(graph) ? PlanDescriptionStatus.OperationGraph : PlanDescriptionStatus.PinnedInputMismatch;
         }
-        catch (JsonException) { return null; }
+        catch (JsonException) { return PlanDescriptionStatus.InputCorrupt; }
+        catch (Exception e) when (e is ArgumentException or InvalidDataException) { return PlanDescriptionStatus.PinnedInputMismatch; }
     }
 
     public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource,
-        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        Plan(resource, inputs, TryPair(spec, inputs, configuration) ?? throw new InvalidDataException("Unsupported PostgreSQL pair."));
+
+    private IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resource, DurablePlanningInputs inputs, Pair pair)
     {
-        var pair = TryPair(spec, inputs, configuration) ?? throw new InvalidDataException("Unsupported PostgreSQL pair.");
         var references = new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId);
         DurableOperationNode Node<T>(string id, string action, string format, T input, JsonTypeInfo<T> metadata,
             string[] dependencies, params OperationOutputRefDocument[] outputs) =>

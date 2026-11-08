@@ -8,10 +8,10 @@ public sealed class PostgreSqlPlanActionDescriber : IPlanActionDescriber
 {
     public string ImplementationId => PostgreSqlDatabaseCheckpointCapability.ImplementationId;
 
-    public DurablePlanDescription Describe(ManifestRevision revision, DurablePlanningInputs inputs)
+    public DurablePlanDescription Describe(ManifestRevision revision, DurablePlanningInputs inputs, DurableOperationGraph graph)
     {
         if (!CheckpointDatabaseShape.IsSupported(revision.Declaration.Spec))
-            return new(PlanDescriptionStatus.UnsupportedShape);
+            return new(PostgreSqlPairResourceAdmission.DescribeGraph(revision.Declaration.Spec, inputs, graph));
         var resource = revision.Declaration.Spec.Resources.Single();
         if (resource.Value.ProviderRef != inputs.Alias || inputs.ImplementationId != ImplementationId)
             return new(PlanDescriptionStatus.PinnedInputMismatch);

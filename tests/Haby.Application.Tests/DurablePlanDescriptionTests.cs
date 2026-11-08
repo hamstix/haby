@@ -104,7 +104,7 @@ public sealed class DurablePlanDescriptionTests
     private sealed class TopicActionDescriber : IPlanActionDescriber
     {
         public string ImplementationId => "example.queue/v1";
-        public DurablePlanDescription Describe(ManifestRevision revision, DurablePlanningInputs inputs)
+        public DurablePlanDescription Describe(ManifestRevision revision, DurablePlanningInputs inputs, DurableOperationGraph graph)
         {
             var resource = revision.Declaration.Spec.Resources.Single();
             var detail = new TopicActionDetail(((ConfigurationString)resource.Value.Properties.Members["name"]).Value);

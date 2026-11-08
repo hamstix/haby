@@ -156,6 +156,7 @@ public sealed partial class ManifestOperatorService
                 Application.PlanDescriptionStatus.Available => Contracts.PlanDescriptionStatus.Available,
                 Application.PlanDescriptionStatus.RevisionNotFound => Contracts.PlanDescriptionStatus.RevisionNotFound,
                 Application.PlanDescriptionStatus.InputCorrupt => Contracts.PlanDescriptionStatus.InputCorrupt,
+                Application.PlanDescriptionStatus.OperationGraph => Contracts.PlanDescriptionStatus.OperationGraph,
                 Application.PlanDescriptionStatus.UnsupportedShape => Contracts.PlanDescriptionStatus.UnsupportedShape,
                 Application.PlanDescriptionStatus.PinnedInputMismatch => Contracts.PlanDescriptionStatus.PinnedInputMismatch,
                 Application.PlanDescriptionStatus.ActionDescriberUnavailable => Contracts.PlanDescriptionStatus.ActionDescriberUnavailable,

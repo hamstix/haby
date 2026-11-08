@@ -4,7 +4,7 @@ namespace Haby.Application;
 
 public enum PlanDescriptionStatus
 {
-    Available, RevisionNotFound, InputCorrupt, UnsupportedShape, PinnedInputMismatch, ActionDescriberUnavailable
+    Available, RevisionNotFound, InputCorrupt, UnsupportedShape, PinnedInputMismatch, ActionDescriberUnavailable, OperationGraph
 }
 public enum IntendedActionKind { Create }
 
@@ -19,7 +19,7 @@ public sealed record DurablePlanDescription(PlanDescriptionStatus Status, Intend
 public interface IPlanActionDescriber
 {
     string ImplementationId { get; }
-    DurablePlanDescription Describe(ManifestRevision revision, DurablePlanningInputs inputs);
+    DurablePlanDescription Describe(ManifestRevision revision, DurablePlanningInputs inputs, DurableOperationGraph graph);
 }
 
 /// <summary>Reads the exact revision from trusted immutable storage and dispatches by the pinned implementation.
@@ -38,6 +38,6 @@ public sealed class DescribeDurablePlan(IManifestRevisionQuery revisions, IEnume
         if (revision.Reference != plan.Inputs.Revision) return new(PlanDescriptionStatus.PinnedInputMismatch);
         var matches = _describers.Where(item => item.ImplementationId == plan.Inputs.ImplementationId).Take(2).ToArray();
         if (matches.Length != 1) return new(PlanDescriptionStatus.ActionDescriberUnavailable);
-        return matches[0].Describe(revision, plan.Inputs);
+        return matches[0].Describe(revision, plan.Inputs, plan.Graph);
     }
 }

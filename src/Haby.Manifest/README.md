@@ -60,3 +60,11 @@ parser's original codes, paths and reports.
 returns only typed identity and warnings on success; it does not expose the
 candidate or access a catalog repository.
 Fingerprints, persistence and import orchestration remain separate work.
+
+Resource definitions may declare one explicit top-level `ResourceDependencyDefinition`
+(property name and exact target Resource contract). Only schema-valid properties
+of that registered exact contract are interpreted. Local existence/type checks and
+unused warnings remain deterministic and require no Environment or Provider access.
+Opaque properties, nested objects and coincidentally named fields are ordinary data.
+Conflicting dependency metadata refuses catalog construction. Historical revision
+warnings are immutable; this metadata affects new validation/import candidates.

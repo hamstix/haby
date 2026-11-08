@@ -32,6 +32,69 @@ public sealed class PostgreSqlPairPlanningTests
         ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), ProviderAlias.Create("postgresql.primary"),
         ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), Provider.ImplementationId);
 
+    [Fact]
+    public async Task Pair_description_uses_operation_graph_instead_of_unsupported_single_action()
+    {
+        var candidate = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Bytes(Example()), Catalog)).Candidate;
+        var inputs = Inputs();
+        var store = new InMemoryManifestImportStore();
+        var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(store, Catalog, TimeProvider.System).ExecuteAsync(Bytes(Example()), "actor"));
+        var revision = store.Find(imported.ManifestRevisionRef)!;
+        inputs = inputs with { Revision = revision.Reference };
+        var description = new PostgreSqlPlanActionDescriber().Describe(revision, inputs, Admission().Plan(candidate.Declaration.Spec, Provider, inputs, Configuration()));
+        Assert.Equal("OperationGraph", description.Status.ToString());
+        Assert.Null(description.Action);
+    }
+
+    [Theory]
+    [InlineData("payload", "InputCorrupt")]
+    [InlineData("name", "PinnedInputMismatch")]
+    [InlineData("references", "PinnedInputMismatch")]
+    [InlineData("unsupported", "UnsupportedShape")]
+    public async Task Pair_description_preserves_corrupt_inconsistent_and_unsupported_outcomes(string fault, string expected)
+    {
+        var store = new InMemoryManifestImportStore();
+        var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(store, Catalog, TimeProvider.System).ExecuteAsync(Bytes(Example()), "actor"));
+        var revision = store.Find(imported.ManifestRevisionRef)!;
+        var inputs = Inputs() with { Revision = revision.Reference };
+        var graph = Admission().Plan(revision.Declaration.Spec, Provider, inputs, Configuration());
+        graph = new DurableOperationGraph(graph.Nodes.Select(n => n.Id.Value != "db-restrict" && fault != "references" ? n : fault switch
+        {
+            "payload" => n with { Input = n.Input with { Json = "private-invalid-json" } },
+            "name" => n with { Input = n.Input with { Json = n.Input.Json.Replace("sample_app", "other_db", StringComparison.Ordinal) } },
+            "references" => n with { References = n.References with { ConfigurationRevision = ProviderConfigurationRevisionNumber.Create(2) } },
+            _ => n with { Input = n.Input with { Format = "unknown/v1" } }
+        }));
+        var result = new PostgreSqlPlanActionDescriber().Describe(revision, inputs, graph);
+        Assert.Equal(expected, result.Status.ToString());
+        Assert.Null(result.Action);
+        Assert.DoesNotContain("private-invalid-json", result.ToString());
+    }
+
+    [Fact]
+    public async Task Equivalent_import_and_read_preserve_preexisting_historical_dependency_warning()
+    {
+        var store = new InMemoryManifestImportStore();
+        var oldCatalog = new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition,
+            PostgreSqlApplicationLoginContract.Definition with { Dependency = null }], [], [], []);
+        var original = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(store, oldCatalog, TimeProvider.System).ExecuteAsync(Bytes(Example()), "original"));
+        var saved = store.Find(original.ManifestRevisionRef)!;
+        Assert.Equal("/spec/resources/db", Assert.Single(saved.HistoricalWarnings.Diagnostics).Path);
+        var repeat = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(store, Catalog, TimeProvider.System).ExecuteAsync(Bytes(Example()), "repeat"));
+        Assert.Equal(original.ManifestRevisionRef, repeat.ManifestRevisionRef);
+        Assert.Equal(saved, store.Find(original.ManifestRevisionRef));
+        Assert.Equal("/spec/resources/db", Assert.Single(store.Find(repeat.ManifestRevisionRef)!.HistoricalWarnings.Diagnostics).Path);
+    }
+
+    [Fact]
+    public void Recognized_login_dependency_is_used_but_a_true_orphan_is_warned()
+    {
+        var envelope = Example();
+        envelope["manifest"]!["spec"]!["resources"]!["orphan"] = envelope["manifest"]!["spec"]!["resources"]!["db"]!.DeepClone();
+        var candidate = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Bytes(envelope), Catalog)).Candidate;
+        Assert.Equal(new[] { "/spec/resources/orphan" }, candidate.Warnings.Diagnostics.Where(d => d.Code == "manifest.resource.unused").Select(d => d.Path));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
