@@ -41,6 +41,20 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
         PostgreSqlApplicationAccessAction.Decode(node) is { } input && Decode(output) is { } value &&
         input.DatabaseName == value.DatabaseName && input.Schema == value.Schema;
 
+    public ValueTask<bool> ValidateReuseAsync(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
+        IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration prepared, CancellationToken cancellationToken)
+    {
+        if (!Validate(accepted.Node, output) || accepted.Graph.Nodes.Count != 5 || !PostgreSqlPairExecution.IsSupported(accepted, prepared)) return new(false);
+        var configuration = codec.DecodeTyped(prepared.PayloadJson);
+        var input = PostgreSqlApplicationAccessAction.Decode(accepted.Node)!;
+        var selector = input.PasswordSource.ToReference();
+        var candidates = sources.Where(x => x.Producer == selector.ProducerOperationId && x.Output.Contract == selector.OutputContract && x.Output.Key == selector.OutputKey).ToArray();
+        if (candidates.Length != 1 || GeneratedCredentialOutputCodec.Decode(candidates[0].Output.Contract, candidates[0].Output.Payload) is not { } password) return new(false);
+        var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
+        return new(Decode(output) == new PostgreSqlApplicationConnection(configuration.Host, configuration.Port, input.DatabaseName,
+            input.Schema, PostgreSqlPairResourceAdmission.RoleName(owner), password.Reference));
+    }
+
     public async ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
         ExternalOperationOutput output, CancellationToken cancellationToken)
     {

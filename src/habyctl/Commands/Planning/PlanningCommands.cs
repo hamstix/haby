@@ -11,11 +11,18 @@ internal static class PlanningCommands
         group.SetAction(_ => context.MissingSubcommand());
         var application = new Argument<string>("application-record-id");
         var revision = new Argument<long>("revision-number");
-        var absence = new Option<bool>("--expected-absence") { Required = true, Description = "Require no existing deployment." };
+        var absence = new Option<bool>("--expected-absence") { Description = "Require no existing deployment." };
+        var expected = new Option<long?>("--expected-generation") { Description = "Require this exact fully applied desired generation." };
         var create = new Command("create", "Create intent for an exact revision in the selected Environment.")
-            { application, revision, absence };
+            { application, revision, absence, expected };
+        create.Validators.Add(result =>
+        {
+            if (result.GetValue(absence) == (result.GetValue(expected) is not null) || result.GetValue(expected) is <= 0)
+                result.AddError("Select --expected-absence or a positive --expected-generation, exclusively.");
+        });
         create.SetAction((parse, token) => context.ExecutePlanningAsync(async (client, environment, ct) =>
-            context.PrintPlanning("changeset create", await client.CreateChangeSetAsync(new CreateChangeSetRequest
+        {
+            var request = new CreateChangeSetRequest
             {
                 EnvironmentId = environment,
                 Reference = new RevisionReference
@@ -23,8 +30,11 @@ internal static class PlanningCommands
                     ApplicationRecordId = parse.GetRequiredValue(application),
                     RevisionNumber = parse.GetRequiredValue(revision)
                 },
-                Precondition = parse.GetValue(absence) ? PlanningPrecondition.ExpectedAbsence : PlanningPrecondition.Unspecified
-            }, ct)), token));
+                Precondition = parse.GetValue(absence) ? PlanningPrecondition.ExpectedAbsence : PlanningPrecondition.ExpectedGeneration
+            };
+            if (parse.GetValue(expected) is { } generation) request.ExpectedGeneration = generation;
+            return context.PrintPlanning("changeset create", await client.CreateChangeSetAsync(request, ct));
+        }, token));
         group.Subcommands.Add(create);
         group.Subcommands.Add(ForChangeSet("get", "changeset get", context,
             (client, request, ct) => client.GetChangeSetAsync(request, ct)));

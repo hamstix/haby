@@ -22,7 +22,7 @@ public sealed partial class OperatorHostIntegrationTests
             ("bad", 1L, GenerationExecutionStatus.InvalidRequest),
             (operation.DeploymentId, 0L, GenerationExecutionStatus.InvalidRequest),
             (operation.DeploymentId, -1L, GenerationExecutionStatus.InvalidRequest),
-            (operation.DeploymentId, 2L, GenerationExecutionStatus.UnsupportedGeneration),
+            (operation.DeploymentId, 2L, GenerationExecutionStatus.NotFound),
             (Haby.Domain.ApplicationDeploymentId.New().ToString(), 1L, GenerationExecutionStatus.NotFound)
         })
         {

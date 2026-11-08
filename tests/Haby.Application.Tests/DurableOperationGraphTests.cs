@@ -5,6 +5,24 @@ namespace Haby.Application.Tests;
 
 public sealed class DurableOperationGraphTests
 {
+    [Fact]
+    public void Reuse_is_separate_from_external_work_and_canonically_pins_original_source_and_baseline()
+    {
+        var baseline = new ResourceReuseBaseline(ApplicationDeploymentId.New(), 2, "v2:" + new string('A', 64));
+        var reused = new ResourceReuse(ManifestLocalId.Create("one-resource"), Guid.CreateVersion7(), 1, new string('B', 64));
+        var graph = new DurableOperationGraph([], [reused], baseline);
+        Assert.Empty(graph.Nodes); Assert.Equal(reused, Assert.Single(graph.ReusedResources));
+        var bytes = DurableOperationGraphCodec.Encode(graph);
+        Assert.Equal(graph, DurableOperationGraphCodec.Decode(bytes));
+        Assert.NotEqual(DurableOperationGraphCodec.Fingerprint(Inputs, graph), DurableOperationGraphCodec.Fingerprint(Inputs,
+            new([], [reused with { ManagementId = Guid.CreateVersion7() }], baseline)));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([Node("a")], [reused], baseline));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], [reused], null));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], [reused, reused], baseline));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], [reused with { SourceGeneration = 3 }], baseline));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], [reused with { EvidenceFingerprint = "corrupt" }], baseline));
+    }
+
     private static readonly DurablePlanningInputs Inputs = new(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
         ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), ProviderAlias.Create("sample.primary"),
         ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample.impl/v1");

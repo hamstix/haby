@@ -124,6 +124,9 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
         await using var transaction = await context.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
         try
         {
+            var resolved = await ResourceContinuity.ResolveAsync(context, producer, owner.ResourceLocalId, cancellationToken);
+            if (resolved is null) return null;
+            producer = resolved;
             var accepted = await AcceptedAsync(context, producer, cancellationToken);
             if (accepted is null || accepted.Inputs.Environment != owner.EnvironmentRecordId ||
                 accepted.Inputs.Revision.ApplicationRecordId != owner.ApplicationRecordId || accepted.Node.ResourceId != owner.ResourceLocalId ||

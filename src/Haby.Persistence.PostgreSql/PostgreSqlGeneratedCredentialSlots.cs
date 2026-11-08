@@ -115,7 +115,7 @@ public sealed class PostgreSqlGeneratedCredentialSlots(IDbContextFactory<Manifes
         error is DbUpdateException or NpgsqlException or InvalidOperationException or IOException or TimeoutException;
 
     internal static async Task<GeneratedCredentialResult?> ReadAsync(ManifestCatalogDbContext context,
-        GeneratedCredentialSlot slot, string profile, CancellationToken cancellationToken)
+        GeneratedCredentialSlot slot, string profile, CancellationToken cancellationToken, bool validateMaterial = true)
     {
         var env = Guid.Parse(slot.Owner.EnvironmentRecordId.ToString());
         var app = Guid.Parse(slot.Owner.ApplicationRecordId.ToString());
@@ -142,6 +142,9 @@ public sealed class PostgreSqlGeneratedCredentialSlots(IDbContextFactory<Manifes
             version.FormatVersion != PlaintextProtectionFormat.Version || audit is null ||
             audit.TechnicalActor != TechnicalActor || audit.CreatedAt != secret.CreatedAt || version.CreatedAt != secret.CreatedAt)
             return new(GeneratedCredentialOutcome.MaterialUnavailable);
+        if (!validateMaterial)
+            return await context.SecretPayloads.AsNoTracking().AnyAsync(x => x.SecretVersionId == row.VersionId && x.Bytes.Length == 43, cancellationToken)
+                ? new(GeneratedCredentialOutcome.Existing, Reference(row.SecretId, row.VersionId)) : new(GeneratedCredentialOutcome.MaterialUnavailable);
         var payload = await context.SecretPayloads.AsNoTracking().SingleOrDefaultAsync(x => x.SecretVersionId == row.VersionId, cancellationToken);
         if (payload is null) return new(GeneratedCredentialOutcome.MaterialUnavailable);
         try

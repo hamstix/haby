@@ -34,6 +34,11 @@ public sealed partial class ExactActionAdmissionTests
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => node.Action == Producer &&
             node.Input.Format == "sample.queue-create/v1" && Decode(output) is { QueueName: "jobs", BrokerTarget: "queue-broker", Receipt: { Length: > 0 } } &&
             JsonSerializer.Deserialize(node.Input.Json, QueueJsonContext.Default.QueueCreateInput)?.QueueName == "jobs";
+        public ValueTask<bool> ValidateReuseAsync(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
+            IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration, CancellationToken token) =>
+            new(!boundary.RejectAcceptedOutput && Validate(accepted.Node, output) && configuration.ImplementationId == "sample.impl/v1" &&
+                Decode(output)?.CredentialSecretId == boundary.DeliveryCredential?.SecretId.ToString() &&
+                Decode(output)?.CredentialVersionId == boundary.DeliveryCredential?.SecretVersionId.ToString());
         public async ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
             ExternalOperationOutput output, CancellationToken cancellationToken)
         {
@@ -50,8 +55,14 @@ public sealed partial class ExactActionAdmissionTests
     // Test-only adapter boundary: counted queue effects, never PostgreSQL database evidence or a production broker.
     private sealed class QueueEvidenceProducer(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
         IProviderConfigurationStore configurations, QueueBoundary boundary)
-        : DurableActionHandler<QueueCreateInput>, IDurableResourcePlanComposer
+        : DurableActionHandler<QueueCreateInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy
     {
+        public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+            Validate(accepted, resource, inputs, configuration) && Validate(target, resource, inputs, configuration) &&
+            accepted.Resources[resource].Properties.Equals(target.Resources[resource].Properties) &&
+            accepted.Resources[resource].DeletionPolicy == target.Resources[resource].DeletionPolicy;
+
         public override bool RequiresExternalOutput => true;
         public override DurableActionExecutionKey Key => ExactActionAdmissionTests.Key;
         public override string InputFormat => "sample.queue-create/v1";

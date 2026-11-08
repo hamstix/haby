@@ -553,12 +553,13 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             (await planner.CreateChangeSetAsync(environment, reference.ApplicationRecordId,
                 ManifestRevisionRef.Create(reference.ApplicationRecordId, ManifestRevisionNumber.Create(99)),
                 new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).Status);
-        Assert.Equal(DurableChangeSetCreateStatus.ExpectedGenerationUnsupported,
-            (await planner.CreateChangeSetAsync(environment, reference.ApplicationRecordId, reference,
-                new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(1)), "tester", default)).Status);
+        var update = await planner.CreateChangeSetAsync(environment, reference.ApplicationRecordId, reference,
+            new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(1)), "tester", default);
+        Assert.Equal(DurableChangeSetCreateStatus.Created, update.Status);
+        Assert.Equal(DurablePlanStatus.ChangeSetStale, (await planner.CreatePlanAsync(update.ChangeSet!.Id, "tester", default)).Status);
         await using var database = new NpgsqlConnection(connection);
         await database.OpenAsync();
-        Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM deployment_change_sets", database).ExecuteScalarAsync())!);
+        Assert.Equal(1L, (long)(await new NpgsqlCommand("SELECT count(*) FROM deployment_change_sets", database).ExecuteScalarAsync())!);
     }
 
     private static async Task AssertImmutableRejected(NpgsqlConnection database, string sql, Guid id)

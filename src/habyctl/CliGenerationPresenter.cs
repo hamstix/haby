@@ -4,7 +4,8 @@ namespace Haby.Cli;
 
 internal sealed record CliGenerationNode(CliOperation Operation, string[] BlockingDependencies, string? LastAttemptOutcome);
 internal sealed record CliGenerationProgress(string DeploymentId, long Generation, long DesiredGeneration,
-    long? AppliedGeneration, int Completed, int Total, CliGenerationNode[] Nodes, string? StoppedOperationId);
+    long? AppliedGeneration, int Completed, int Total, CliGenerationNode[] Nodes, string? StoppedOperationId)
+{ public int ReusedResources { get; init; } }
 internal sealed record CliGenerationExecutionData(CliGenerationProgress? Progress, string? StoppedOperationId, string? StopOutcome);
 
 internal static class GenerationPresentation
@@ -31,8 +32,8 @@ internal static class GenerationPresentation
         _ = Outcome(reply.Status);
         if (reply.Status == GenerationExecutionStatus.Succeeded)
         {
-            if (reply.Progress is not { Total: > 0 } p || p.Completed != p.Total ||
-                !p.HasAppliedGeneration || p.AppliedGeneration != p.Generation ||
+            if (reply.Progress is not { } p || (p.Total <= 0 && p.ReusedResources <= 0) || p.Completed != p.Total ||
+                !p.HasAppliedGeneration || p.AppliedGeneration < p.Generation ||
                 p.Nodes.Count != p.Total || p.Nodes.Any(n => n.Operation?.State != OperationState.Succeeded) ||
                 reply.HasStopOutcome || reply.HasStoppedOperationId)
                 throw new InvalidDataException("Incomplete generation success snapshot.");
@@ -52,7 +53,8 @@ internal static class GenerationPresentation
             OperationPresentation.Data(new OperationReply { Operation = n.Operation }).Operation
                 ?? throw new InvalidDataException("Missing operation snapshot."),
             [.. n.BlockingDependencies], n.HasLastAttemptOutcome ? OperationPresentation.AttemptOutcome(n.LastAttemptOutcome) : null))],
-        p.HasStoppedOperationId ? p.StoppedOperationId : null);
+        p.HasStoppedOperationId ? p.StoppedOperationId : null)
+    { ReusedResources = p.ReusedResources };
 }
 
 internal sealed partial class CliJsonPresenter
@@ -75,6 +77,7 @@ internal sealed partial class CliTextPresenter
     {
         if (p is null) return;
         _output.WriteLine($"Deployment: {p.DeploymentId}; generation: {p.Generation}; desired: {p.DesiredGeneration}; applied: {p.AppliedGeneration?.ToString() ?? "(none)"}; completed: {p.Completed}/{p.Total}");
+        if (p.ReusedResources > 0) _output.WriteLine($"Reused Resources: {p.ReusedResources}; external operations: {p.Total}");
         foreach (var n in p.Nodes)
             _output.WriteLine($"Operation: {n.Operation.Key.OperationId}; Resource: {n.Operation.ResourceId}; action: {n.Operation.ActionContract}; state: {n.Operation.State}; reason: {n.Operation.Reason ?? "(none)"}; last attempt: {n.LastAttemptOutcome ?? "(none)"}; blocking dependencies: {string.Join(", ", n.BlockingDependencies)}");
         if (p.StoppedOperationId is { } stopped) _output.WriteLine($"Persisted stop: {stopped}");

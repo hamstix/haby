@@ -58,7 +58,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.ToTable("application_deployments", null, t =>
                         {
-                            t.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation = 1 AND (applied_generation IS NULL OR applied_generation = 1)");
+                            t.HasCheckConstraint("CK_application_deployments_desired_generation", "desired_generation > 0 AND (applied_generation IS NULL OR (applied_generation > 0 AND applied_generation <= desired_generation))");
                         });
                 });
 
@@ -115,12 +115,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasIndex("PlanId");
 
-                    b.HasIndex("DeploymentId", "Generation")
-                        .IsUnique();
+                    b.HasIndex("DeploymentId", "Generation");
 
                     b.ToTable("change_set_commits", null, t =>
                         {
-                            t.HasCheckConstraint("CK_change_set_commits_first", "generation = 1");
+                            t.HasCheckConstraint("CK_change_set_commits_first", "generation > 0");
                         });
                 });
 
@@ -333,7 +332,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.ToTable("application_deployment_generations", null, t =>
                         {
-                            t.HasCheckConstraint("CK_deployment_generations_first", "generation = 1 AND presence = 'Present'");
+                            t.HasCheckConstraint("CK_deployment_generations_first", "generation > 0 AND presence = 'Present'");
                         });
                 });
 
@@ -366,6 +365,10 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("expected_absence");
 
+                    b.Property<long?>("ExpectedGeneration")
+                        .HasColumnType("bigint")
+                        .HasColumnName("expected_generation");
+
                     b.Property<long>("RevisionNumber")
                         .HasColumnType("bigint")
                         .HasColumnName("revision_number");
@@ -376,7 +379,10 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasIndex("ApplicationRecordId", "RevisionNumber");
 
-                    b.ToTable("deployment_change_sets", (string)null);
+                    b.ToTable("deployment_change_sets", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_deployment_change_sets_precondition", "(expected_absence AND expected_generation IS NULL) OR (NOT expected_absence AND expected_generation > 0 AND expected_generation IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableOperationAttemptRow", b =>
@@ -1349,6 +1355,50 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("provider_revision_secret_refs", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ResourceManagementRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("Application")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
+
+                    b.Property<Guid>("Deployment")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<Guid>("Environment")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("Resource")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("resource_local_id");
+
+                    b.Property<long>("SourceGeneration")
+                        .HasColumnType("bigint")
+                        .HasColumnName("source_generation");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Application");
+
+                    b.HasIndex("Deployment", "SourceGeneration");
+
+                    b.HasIndex("Environment", "Application", "Resource")
+                        .IsUnique();
+
+                    b.ToTable("resource_management", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_resource_management_identity", "source_generation > 0 AND length(resource_local_id) > 0");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.SecretCreationReceiptRow", b =>
                 {
                     b.Property<Guid>("EnvironmentRecordId")
@@ -1566,8 +1616,8 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .IsRequired();
 
                     b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
-                        .WithOne()
-                        .HasForeignKey("Haby.Persistence.PostgreSql.ChangeSetCommitRow", "DeploymentId", "Generation")
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -1846,6 +1896,27 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .WithMany()
                         .HasForeignKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
                         .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ResourceManagementRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
+                        .WithMany()
+                        .HasForeignKey("Application")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("Environment")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
+                        .WithMany()
+                        .HasForeignKey("Deployment", "SourceGeneration")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

@@ -10,11 +10,12 @@ using Npgsql;
 
 namespace Haby.Persistence.PostgreSql;
 
-/// <summary>Durable, side-effect-free single-action planning. It never accepts desired state.</summary>
+/// <summary>Durable, side-effect-free planning of initial work or bounded Resource reuse.</summary>
 public sealed class PostgreSqlDurableDeploymentPlanner(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IManifestRevisionQuery revisions,
     IProviderAliasResolver aliases, IEnumerable<IProviderConfigurationCodec> codecs,
-    DurableActionAdmission admission, TimeProvider clock, ConfigurationRenderingCatalog? rendering = null)
+    DurableActionAdmission admission, TimeProvider clock, ConfigurationRenderingCatalog? rendering = null,
+    IEnumerable<IExternalOperationOutputContract>? outputContracts = null)
     : IDurableDeploymentPlanner
 {
     private readonly ConfigurationRenderingCatalog _rendering = rendering ?? ConfigurationRenderingCatalog.Empty;
@@ -31,9 +32,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         ArgumentNullException.ThrowIfNull(precondition);
         ValidateActor(actorId);
         cancellationToken.ThrowIfCancellationRequested();
-        if (precondition is DeploymentPrecondition.ExpectedGeneration)
-            return new(DurableChangeSetCreateStatus.ExpectedGenerationUnsupported);
-        if (precondition is not DeploymentPrecondition.ExpectedAbsence)
+        if (precondition is not (DeploymentPrecondition.ExpectedAbsence or DeploymentPrecondition.ExpectedGeneration))
             throw new ArgumentException("Unsupported precondition.", nameof(precondition));
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var environmentId = Guid.Parse(environment.ToString());
@@ -53,7 +52,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             EnvironmentRecordId = environmentId,
             ApplicationRecordId = applicationId,
             RevisionNumber = revision.RevisionNumber.Value,
-            ExpectedAbsence = true,
+            ExpectedAbsence = precondition is DeploymentPrecondition.ExpectedAbsence,
+            ExpectedGeneration = (precondition as DeploymentPrecondition.ExpectedGeneration)?.Generation.Value,
             CreatedAt = createdAt,
             ActorId = actorId
         });
@@ -79,12 +79,13 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (row is null) return new(DurablePlanStatus.ChangeSetNotFound);
         if (await context.ChangeSetCommits.AsNoTracking().AnyAsync(item => item.ChangeSetId == changeId,
             cancellationToken)) return new(DurablePlanStatus.ChangeSetStale);
-        if (await context.ApplicationDeployments.AsNoTracking().AnyAsync(item =>
+        var baseline = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(item =>
             item.EnvironmentRecordId == row.EnvironmentRecordId &&
-            item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken))
+            item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken);
+        if (!Matches(row, baseline))
             return new(DurablePlanStatus.ChangeSetStale);
-        // Defensive until durable deployments and ExpectedGeneration are implemented.
-        if (!row.ExpectedAbsence) return new(DurablePlanStatus.ChangeSetStale);
+        if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
+            return new(DurablePlanStatus.PlanInputUnavailable);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
         var revision = await revisions.FindAsync(reference, cancellationToken);
@@ -119,8 +120,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
         if (admitted != DurablePlanStatus.Planned) return new(admitted);
         DurableOperationGraph graph;
-        try { graph = await PlanGraphAsync(context, spec, revisionRow, inputs, cancellationToken); }
-        catch (InvalidDataException) { return new(DurablePlanStatus.UnsupportedShape); }
+        try
+        {
+            graph = baseline is null ? await PlanGraphAsync(context, spec, revisionRow, inputs, cancellationToken) :
+                await ReuseGraphAsync(context, baseline, spec, revisionRow, inputs, cancellationToken)
+                    ?? throw new NotSupportedException();
+        }
+        catch (NotSupportedException) { return new(DurablePlanStatus.UnsupportedShape); }
+        catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         var id = DeploymentPlanId.New();
         var createdAt = clock.GetUtcNow();
         var planRow = new DurablePlanRow
@@ -220,7 +227,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         {
             return revisionRow is not null && manifest is not null &&
                 await ValidateGraphAsync(context, manifest.Declaration.Spec, revisionRow, plan.Inputs, plan.Graph, cancellationToken)
-                ? DurablePlanCurrentStatus.Current : DurablePlanCurrentStatus.PlanInputUnavailable;
+                ? DurablePlanCurrentStatus.Current : plan.Graph.Baseline is null ? DurablePlanCurrentStatus.PlanInputUnavailable : DurablePlanCurrentStatus.PlanStale;
         }
         catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
     }
@@ -234,11 +241,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         var row = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == Guid.Parse(id.ToString()), cancellationToken);
-        if (row is null || !row.ExpectedAbsence) return (DurablePlanStatus.ChangeSetStale, null);
-        if (await context.ApplicationDeployments.AsNoTracking().AnyAsync(item =>
+        if (row is null) return (DurablePlanStatus.ChangeSetStale, null);
+        var baseline = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(item =>
             item.EnvironmentRecordId == row.EnvironmentRecordId &&
-            item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken))
+            item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken);
+        if (!Matches(row, baseline))
             return (DurablePlanStatus.ChangeSetStale, null);
+        if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
+            return (DurablePlanStatus.PlanInputUnavailable, null);
         var revision = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
         var manifest = await revisions.FindAsync(revision, cancellationToken);
@@ -343,7 +353,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var revision = ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(row.RevisionNumber));
         return new(DeploymentChangeSetId.Parse(row.Id.ToString()),
             EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
-            new DeploymentChangeSetMember(application, revision, new DeploymentPrecondition.ExpectedAbsence()),
+            new DeploymentChangeSetMember(application, revision, row.ExpectedAbsence ? new DeploymentPrecondition.ExpectedAbsence() :
+                new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(row.ExpectedGeneration ?? throw new InvalidDataException()))),
             row.CreatedAt, row.ActorId);
     }
 
@@ -375,10 +386,63 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
     internal async Task<bool> ValidateGraphAsync(ManifestCatalogDbContext context, NormalizedManifestSpec spec,
         ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs, DurableOperationGraph graph, CancellationToken token)
     {
+        if (graph.Baseline is { } baseline)
+        {
+            var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == Guid.Parse(baseline.Deployment.ToString()), token);
+            return owner is not null && owner.EnvironmentRecordId == Guid.Parse(inputs.Environment.ToString()) && owner.ApplicationRecordId == Guid.Parse(inputs.Revision.ApplicationRecordId.ToString()) &&
+                owner.DesiredGeneration == baseline.Generation && owner.AppliedGeneration == baseline.Generation &&
+                (await ReuseGraphAsync(context, owner, spec, revision, inputs, token))?.Equals(graph) == true;
+        }
         var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(r => r.Id == revision.ProviderInstanceId, token);
         return instance is not null && admission.ValidateGraph(spec,
             new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs,
             PreparedConfiguration(instance.ProviderKindId, revision), graph);
+    }
+
+    internal static bool Matches(DurableChangeSetRow change, ApplicationDeploymentRow? actual) =>
+        change.ExpectedAbsence ? change.ExpectedGeneration is null && actual is null :
+        change.ExpectedGeneration is > 0 && actual?.DesiredGeneration == change.ExpectedGeneration;
+
+    internal async Task<DurableOperationGraph?> ReuseGraphAsync(ManifestCatalogDbContext db, ApplicationDeploymentRow owner,
+        NormalizedManifestSpec target, ProviderConfigurationRevisionRow provider, DurablePlanningInputs inputs, CancellationToken token)
+    {
+        var baseline = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == owner.Id && x.Generation == owner.DesiredGeneration, token)
+            ?? throw new InvalidDataException();
+        if (owner.AppliedGeneration != owner.DesiredGeneration || baseline.EnvironmentRecordId != owner.EnvironmentRecordId ||
+            baseline.ApplicationRecordId != owner.ApplicationRecordId) throw new InvalidDataException();
+        if (baseline.ProviderInstanceId != provider.ProviderInstanceId || baseline.ConfigurationRevisionNumber != provider.RevisionNumber ||
+            baseline.ImplementationId != inputs.ImplementationId) return null;
+        var accepted = ConfigurationPlanningSnapshotCodec.Decode(baseline.ConfigurationJson,
+            ManifestRevisionRef.Create(inputs.Revision.ApplicationRecordId, ManifestRevisionNumber.Create(baseline.RevisionNumber)));
+        _ = ResourceContinuity.Inputs(baseline);
+        var baselineGraph = DurableOperationGraphCodec.Decode(baseline.GraphJson);
+        if (baselineGraph.Baseline is not null && (!await ResourceContinuity.ValidateAsync(db, owner.Id, baselineGraph, token) ||
+            await db.DurableOperations.AnyAsync(x => x.DeploymentId == owner.Id && x.Generation == baseline.Generation, token))) throw new InvalidDataException();
+        if (!accepted.Manifest.Spec.Components.Keys.ToHashSet().SetEquals(target.Components.Keys) ||
+            target.Components.Any(c => !accepted.Manifest.Spec.Components[c.Key].Bindings.Keys.ToHashSet().SetEquals(c.Value.Bindings.Keys))) return null;
+        // Same-revision configuration-only intent is deliberately outside this slice.
+        if (baseline.RevisionNumber == inputs.Revision.RevisionNumber.Value && !accepted.Equals(inputs.Configuration)) return null;
+        var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);
+        if (!admission.CanReuse(accepted.Manifest.Spec, target, new(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId),
+            inputs, PreparedConfiguration(instance.ProviderKindId, provider))) return null;
+        var reuse = new List<ResourceReuse>();
+        foreach (var resource in target.Resources.Keys)
+        {
+            var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Environment == owner.EnvironmentRecordId &&
+                x.Application == owner.ApplicationRecordId && x.Resource == resource.Value, token);
+            if (managed is null || managed.Deployment != owner.Id) throw new InvalidDataException();
+            var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == owner.Id && x.Generation == managed.SourceGeneration, token)
+                ?? throw new InvalidDataException();
+            if (source.ProviderInstanceId != provider.ProviderInstanceId || source.ConfigurationRevisionNumber != provider.RevisionNumber ||
+                source.ImplementationId != inputs.ImplementationId) throw new InvalidDataException();
+            var evidence = await ResourceContinuity.EvidenceAsync(db, managed, token) ?? throw new InvalidDataException();
+            var original = DurableOperationGraphCodec.Decode(source.GraphJson);
+            if (!await ValidateGraphAsync(db, target, provider, inputs, original, token)) throw new InvalidDataException();
+            reuse.Add(new(resource, managed.Id, managed.SourceGeneration, evidence));
+        }
+        var result = new DurableOperationGraph([], reuse, new(ApplicationDeploymentId.Parse(owner.Id.ToString()), baseline.Generation, baseline.Fingerprint));
+        if (!await ResourceContinuity.ValidateOutputsAsync(db, owner.Id, result, outputContracts ?? [], _codecs, token)) throw new InvalidDataException();
+        return result;
     }
     internal async Task<DurableOperationGraph> PlanGraphAsync(ManifestCatalogDbContext context,
         NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs,

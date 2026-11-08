@@ -161,4 +161,20 @@ public sealed partial class CliLoopbackTests
         reply.Progress.Nodes[0].Operation.State = OperationState.Succeeded;
         Assert.Equal(0, GenerationPresentation.Exit(reply));
     }
+
+    [Fact]
+    public void Reuse_only_success_requires_explicit_reuse_and_an_applied_target_without_fake_nodes()
+    {
+        var reply = new GenerationExecutionReply
+        {
+            Status = GenerationExecutionStatus.Succeeded,
+            Progress = new() { Generation = 2, DesiredGeneration = 2, AppliedGeneration = 1, ReusedResources = 2 }
+        };
+        Assert.Throws<InvalidDataException>(() => GenerationPresentation.Exit(reply));
+        reply.Progress.AppliedGeneration = 2;
+        Assert.Equal(0, GenerationPresentation.Exit(reply));
+        Assert.Equal(2, GenerationPresentation.Progress(reply.Progress)!.ReusedResources);
+        reply.Progress.ReusedResources = 0;
+        Assert.Throws<InvalidDataException>(() => GenerationPresentation.Exit(reply));
+    }
 }

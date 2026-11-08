@@ -256,6 +256,7 @@ message CreateChangeSetRequest {
   string environment_id = 1;
   RevisionReference reference = 2;
   PlanningPrecondition precondition = 3;
+  optional int64 expected_generation = 4;
 }
 message ChangeSetRequest { string change_set_id = 1; }
 message PlanRequest { string plan_id = 1; }
@@ -266,6 +267,7 @@ message DurableChangeSetSummary {
   PlanningPrecondition precondition = 4;
   string created_at_utc = 5;
   string technical_actor_id = 6;
+  optional int64 expected_generation = 7;
 }
 message PlannedOperationSummary {
   string operation_id = 1;
@@ -291,6 +293,12 @@ message DurablePlanSummary {
   optional string closed_by_technical_actor_id = 15;
   PlanDescription intended_work = 16;
   repeated PlannedOperationSummary operations = 17;
+  repeated ReusedResourceSummary reused_resources = 18;
+}
+message ReusedResourceSummary {
+  string resource_id = 1;
+  string management_id = 2;
+  int64 source_generation = 3;
 }
 // Immutable intended work only: no Provider preflight, absence check or execution guarantee.
 enum PlanDescriptionStatus {
@@ -373,6 +381,7 @@ message DesiredGenerationSummary {
   int64 configuration_revision = 13;
   string implementation_id = 14;
   repeated PlannedOperationSummary operations = 15;
+  repeated ReusedResourceSummary reused_resources = 16;
 }
 message CommitReply {
   CommitStatus status = 1;
@@ -633,6 +642,7 @@ message GenerationProgress {
   int32 total = 6;
   repeated GenerationNodeProgress nodes = 7;
   optional string stopped_operation_id = 8;
+  int32 reused_resources = 9;
 }
 enum GenerationExecutionStatus {
   GENERATION_EXECUTION_STATUS_UNSPECIFIED = 0;

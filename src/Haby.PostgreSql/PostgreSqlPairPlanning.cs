@@ -74,8 +74,14 @@ public sealed record OperationOutputRefDocument(string ProducerOperationId, stri
 
 /// <summary>Pure PostgreSQL pair admission. The Host composes its database half with standalone admission.
 /// It owns exactly the nodes of its declared Resource; no executor or success placeholder is provided.</summary>
-public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer
+public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy
 {
+    public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
+        ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        TryPair(accepted, inputs, configuration) is not null && TryPair(target, inputs, configuration) is not null &&
+        accepted.Resources.TryGetValue(resource, out var before) && target.Resources.TryGetValue(resource, out var after) &&
+        before.Type == after.Type && before.ProviderRef == after.ProviderRef && before.Properties.Equals(after.Properties) && before.DeletionPolicy == after.DeletionPolicy;
+
     private static ProviderAdapterKey Provider => new("postgresql/v1", "haby.postgresql.connection/v1", PostgreSqlDatabaseCheckpointCapability.ImplementationId);
     public DurableActionExecutionKey Key { get; } = new(new(contract, Provider), OperationContractId.Create(
         contract == PostgreSqlDatabaseContract.Id ? "postgresql.database.create/v1alpha1" : "postgresql.application-login.create/v1alpha1"));

@@ -10,8 +10,12 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Haby.PostgreSql;
 
 /// <summary>One exact database admission, explicitly composing standalone and pair planning.</summary>
-public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer
+public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy
 {
+    public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
+        ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        pair.CanReuse(accepted, target, resource, inputs, configuration);
+
     public override DurableActionExecutionKey Key => PostgreSqlDatabaseCreateAction.RegistrationKey;
     public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
         PostgreSqlDatabaseCreateValidation.Name(resource) is { } name ? new(name) : null;

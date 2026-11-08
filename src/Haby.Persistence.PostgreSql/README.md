@@ -76,9 +76,10 @@ must restrict schema migration to one Haby instance.
 
 `AddPostgreSqlDurableDeploymentPlanner()` registers the asynchronous
 `IDurableDeploymentPlanner`. A ChangeSet pins one exact Manifest revision and
-ExpectedAbsence. Updates and generation 2 remain unsupported. Production planning
-accepts one PostgreSQL database Resource without Components/Workloads, exports or
-parameters. Exact registered planners emit the immutable operation graph and
+ExpectedAbsence for initial installs or exact ExpectedGeneration for bounded
+updates. Production planning accepts the standalone database and five-step pair;
+updates reuse an unchanged managed pair under the [issue #158 boundaries](../../docs/development/158-resource-reuse-generation-updates.md).
+Exact registered planners emit the immutable operation graph or explicit reuse requirements and
 versioned non-secret action inputs; no credentials or Provider configuration
 payload enter the Plan. Generic code validates identity/dependencies and exact
 references without interpreting database properties.
@@ -98,7 +99,7 @@ ADR-033; startup never rewrites or silently resets them. EF tooling uses
 
 ## First durable desired generation
 
-`IDurableDesiredStateCommitter` accepts only a persisted one-Application
+Initial `IDurableDesiredStateCommitter` acceptance uses a persisted one-Application
 `ExpectedAbsence` Plan. Acceptance stores one deployment, immutable
 generation-1 snapshot and one ChangeSetCommit. The snapshot contains exact
 Manifest and Provider identities, explicit `Present` presence, alias provenance

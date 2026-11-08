@@ -128,6 +128,13 @@ public sealed class DurableActionRegistry
 /// <summary>The same pure admission rule is used by durable Plan, Check and atomic Commit.</summary>
 public sealed class DurableActionAdmission(DurableActionRegistry registry)
 {
+    public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
+        ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        target.Resources.Count == accepted.Resources.Count && target.Resources.All(r =>
+            accepted.Resources.ContainsKey(r.Key) &&
+            registry.Find(new DurableActionAdmissionKey(r.Value.Type, provider)) is IDurableResourceReusePolicy policy &&
+            policy.CanReuse(accepted, target, r.Key, inputs, configuration));
+
     public static bool SupportsPilotShape(NormalizedManifestSpec spec) => spec.Resources.Count is > 0 and <= 256 &&
         spec.Exports.Count == 0 && spec.Parameters.Count == 0 && SupportsConfigurationComponents(spec);
 

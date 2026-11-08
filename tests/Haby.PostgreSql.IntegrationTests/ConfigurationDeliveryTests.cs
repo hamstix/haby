@@ -82,6 +82,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
             await arrange.Database.ExecuteSqlRawAsync("""
                 DROP TABLE operator_access_grants;
                 DROP TABLE configuration_access_grants;
+                DROP TABLE resource_management;
+                ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
         }
@@ -91,6 +94,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(verify.Database.GetMigrations(), await verify.Database.GetAppliedMigrationsAsync());
         var after = await verify.ConfigurationDocuments.AsNoTracking().SingleAsync(); Assert.Equal(saved.Payload, after.Payload); Assert.Equal(saved.Fingerprint, after.Fingerprint);
         Assert.Empty(await verify.ConfigurationAccess.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await verify.ResourceManagement.AsNoTracking().ToArrayAsync()); // Additive schema never manufactures ownership for an earlier install.
     }
     private sealed class DeliveryClock : TimeProvider
     {

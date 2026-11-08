@@ -1,5 +1,9 @@
 # Explicit generation execution
 
+Issue #158 adds [explicit reuse-only generation completion](158-resource-reuse-generation-updates.md)
+with zero external operations and separate reused-Resource progress. The initial
+execution and uncertainty behavior below remains unchanged.
+
 Issue #122 exposes the existing `DurableGenerationRunner` through internal alpha
 `ExecuteGeneration(GenerationRequest)` and:
 

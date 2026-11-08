@@ -124,6 +124,8 @@ public sealed partial class ManifestOperatorService
             ImplementationId = value.Inputs.ImplementationId
         };
         summary.Operations.AddRange(OperationSummaries(value.Graph));
+        summary.ReusedResources.AddRange(value.Graph.ReusedResources.Select(x => new ReusedResourceSummary
+        { ResourceId = x.Resource.Value, ManagementId = x.ManagementId.ToString(), SourceGeneration = x.SourceGeneration }));
         return summary;
     }
 }
