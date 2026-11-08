@@ -103,16 +103,18 @@ authentication and explicit local issuance are implemented in issue #150 below.
 - [x] Implement operator-admin authentication, explicit local issuance/recovery, selected registry credentials and protected reflection without OAuth or complex RBAC: [issue #150 runbook](docs/development/150-operator-access-tokens.md).
 - [x] Complete the core manual operator-to-application rehearsal at main b03058e: bootstrap, five-step provisioning, exact document delivery, real DDL/DML, authorization/revocation and restart. Runtime timeout assertions remain unperformed; the full checklist was PARTIAL, not a production-readiness claim.
 - [x] Accept ordered rehearsal follow-ups and explicit Application-wide materialization with per-document atomicity under [ADR-044](docs/adr/0044-p2-rehearsal-follow-ups-and-application-materialization.md).
-- [ ] Add safe receiving-client setting assertions and correct misleading supported-graph/Resource-use diagnostics: [issue #152](https://github.com/hamstix/haby/issues/152).
-- [ ] Add Profile discovery and exact Profile revision-history listing; do not change exact assignment/planning references.
+- [x] Add safe receiving-client setting assertions and correct misleading supported-graph/Resource-use diagnostics: [issue #152](https://github.com/hamstix/haby/issues/152), merged PR #153. The earlier manual runtime assertion remains unperformed; subsequent implementation/test evidence is separate.
+- [ ] Add Profile discovery and exact Profile revision-history listing; do not change exact assignment/planning references: [issue #154](https://github.com/hamstix/haby/issues/154).
 - [ ] Add one-request materialization of all Component documents for one server-selected Application generation, preserving per-document atomicity and idempotency. Keep invocation explicit; batch access issuance and automatic Workload credential distribution are deferred.
 
 ### Limited Application updates before P3
 
 After the current P2 runtime/diagnostic, Profile discovery and Application-wide
 materialization slices, implement a bounded sequential update path between
-Application generations before starting Workload implementation. Agree detailed
-contracts in an ADR before coding this path; it is planned, not currently supported.
+Application generations before starting Workload implementation.
+[ADR-045](docs/adr/0045-application-generation-updates-and-resource-continuity.md)
+accepts the update/Resource-continuity contracts; implementation remains planned,
+not currently supported.
 
 - [ ] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and execution of the next generation. Separate Plan/Commit/Execute commands are sufficient; deferred apply is not a prerequisite.
 - [ ] Preserve stable identities and confirmed management of unchanged database/login Resources. Reuse the existing database, role and generated credential; observing an external name alone is not proof of Haby ownership. Application-version-only updates must not repeat Resource creation, credential generation or privilege work without a required change.
@@ -167,6 +169,7 @@ Haby-managed configuration and the same durable state/operation model.
 - [ ] Support image/version updates through a new accepted desired generation, with observable completion and safe failure behavior.
 - [ ] Separate desired replicas from suspend/resume and temporary operational overrides.
 - [ ] Plan Application/Component removal and workload cleanup explicitly; apply Resource retain/orphan/delete policy only when that capability is implemented and authorized.
+- [ ] Implement explicit cleanup for removed Components/Bindings: remove only owned obsolete Workload objects and revoke superseded document grants after the accepted rollout/retirement boundary. Track partial failure/retry and protect still-running recipients; do not delete retained databases/roles or infer cleanup from a P2 declaration removal. No automatic cleanup is claimed before this path is implemented.
 - [ ] Prove install -> configure -> deploy -> update -> remove on a real disposable/test cluster, including restart and partial failure.
 
 Exit evidence: an operator can deploy, inspect, update and remove the chosen
