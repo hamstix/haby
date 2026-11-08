@@ -17,10 +17,10 @@ public sealed class PostgreSqlConnectionRenderingTests
     }
     private static ManifestCandidateResult Candidate(string options) => ManifestCandidatePipeline.Prepare(Encoding.UTF8.GetBytes("""
         {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{
-        "resources":{"app-login":{"type":"postgresql.application-login/v1alpha1","providerRef":"pg","properties":{"databaseRef":"db","schema":"app","privilegePolicy":"database-owner/v1"}}},
+        "resources":{"db":{"type":"postgresql.database/v1alpha1","providerRef":"pg","properties":{"name":"example_db"}},"app-login":{"type":"postgresql.application-login/v1alpha1","providerRef":"pg","properties":{"databaseRef":"db","schema":"app","privilegePolicy":"database-owner/v1"}}},
         "components":{"api":{"bindings":{"main":{"target":{"kind":"local-resource","resourceRef":"app-login"},"configurationSlot":"main","options":OPTIONS}}}}}}}
         """.Replace("OPTIONS", options, StringComparison.Ordinal)),
-        new([PostgreSqlApplicationLoginContract.Definition], [], [], []));
+        new([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [], [], []));
 
     [Theory]
     [InlineData("{}", true)]

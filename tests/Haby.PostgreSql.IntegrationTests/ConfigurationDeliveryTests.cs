@@ -211,12 +211,25 @@ public sealed partial class PostgreSqlApplicationLoginTests
                     generatedPassword = builder.Password;
                 }
                 await File.WriteAllTextAsync(credentialFile, revoked.Credential + "\n");
-                await RunRuntime(host.Urls.Single(), api.Artifact.RevisionId, credentialFile, scenario);
-                await RunRuntime(host.Urls.Single(), api.Artifact.RevisionId, credentialFile, scenario);
+                foreach (var wrong in new[] { new[] { "15", "30", "disable" }, new[] { "200", "31", "disable" },
+                    new[] { "200", "30", "require" }, new[] { "invalid-private-sentinel", "30", "disable" } })
+                    await RunRuntime(host.Urls.Single(), api.Artifact.RevisionId, credentialFile, scenario, wrong, 1);
+                await using (var independent = new Npgsql.NpgsqlConnection(new Npgsql.NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = scenario.Database, Pooling = false }.ConnectionString))
+                {
+                    await independent.OpenAsync();
+                    await using var absent = new Npgsql.NpgsqlCommand("SELECT to_regclass('public.haby_runtime_probe') IS NULL", independent);
+                    Assert.Equal(true, await absent.ExecuteScalarAsync()); // Negative runs performed no DDL.
+                }
+                await RunRuntime(host.Urls.Single(), api.Artifact.RevisionId, credentialFile, scenario); // Ordinary invocation and DDL/DML retained.
+                await RunRuntime(host.Urls.Single(), api.Artifact.RevisionId, credentialFile, scenario, ["200", "30", "disable"]);
                 var workerGrant = await admin.CreateConfigurationAccessAsync(new() { Selector = DocumentRequest(scenario, "worker") });
                 var workerDelivery = await runtime.DeliverAsync(new() { RevisionId = worker.Artifact.RevisionId }, Bearer(workerGrant.Credential));
                 using (var json = JsonDocument.Parse(workerDelivery.Json.Memory))
                     Assert.Equal(15, new Npgsql.NpgsqlConnectionStringBuilder(json.RootElement.GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8).GetString()).Timeout);
+                var workerFile = Path.Combine(folder, "worker.token");
+                await File.WriteAllTextAsync(workerFile, workerGrant.Credential);
+                await RunRuntime(host.Urls.Single(), worker.Artifact.RevisionId, workerFile, scenario, ["15", "30", "disable"]);
+                await RunRuntime(host.Urls.Single(), worker.Artifact.RevisionId, workerFile, scenario, ["200", "30", "disable"], 1);
                 await Denied(runtime, api.Artifact.RevisionId, workerGrant.Credential);
                 active = await admin.CreateConfigurationAccessAsync(new() { Selector = selection });
                 Assert.False(active.Credential == revoked.Credential);
@@ -401,16 +414,29 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await host.StopAsync();
     }
 
-    private static async Task RunRuntime(string endpoint, string revision, string path, Scenario scenario)
+    private static async Task RunRuntime(string endpoint, string revision, string path, Scenario scenario, string[]? expectations = null, int expectedExit = 0)
     {
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         start.ArgumentList.Add(typeof(RuntimeConfigurationClient).Assembly.Location);
         start.Environment["HABY_RUNTIME_ENDPOINT"] = endpoint; start.Environment["HABY_RUNTIME_REVISION"] = revision; start.Environment["HABY_RUNTIME_TOKEN_FILE"] = path;
+        foreach (var key in new[] { "HABY_RUNTIME_EXPECT_TIMEOUT", "HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT", "HABY_RUNTIME_EXPECT_SSL_MODE" }) start.Environment.Remove(key);
+        if (expectations is not null)
+        {
+            start.Environment["HABY_RUNTIME_EXPECT_TIMEOUT"] = expectations[0];
+            start.Environment["HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT"] = expectations[1];
+            start.Environment["HABY_RUNTIME_EXPECT_SSL_MODE"] = expectations[2];
+        }
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
-        Assert.Equal(0, process.ExitCode);
+        Assert.Equal(expectedExit, process.ExitCode);
+        if (expectedExit != 0)
+        {
+            Assert.Equal("", await stdout);
+            Assert.Equal("Runtime setting expectations are invalid or received settings did not match. Details withheld." + Environment.NewLine, await stderr);
+            return;
+        }
         Assert.Equal("", await stderr);
         var text = await stdout;
         Assert.Contains("user=" + scenario.Role, text); Assert.Contains("database=" + scenario.Database, text);

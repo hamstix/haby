@@ -95,6 +95,7 @@ internal static class PlanningPresentation
             PlanDescriptionStatus.Available => "available",
             PlanDescriptionStatus.RevisionNotFound => "revisionNotFound",
             PlanDescriptionStatus.InputCorrupt => "inputCorrupt",
+            PlanDescriptionStatus.OperationGraph => "operationGraph",
             PlanDescriptionStatus.UnsupportedShape => "unsupportedShape",
             PlanDescriptionStatus.PinnedInputMismatch => "pinnedInputMismatch",
             PlanDescriptionStatus.ActionDescriberUnavailable => "actionDescriberUnavailable",
@@ -152,6 +153,8 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine("Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.");
             if (plan.IntendedWork.Action is { } action)
                 _output.WriteLine($"Intended action: Create; Resource: {action.ResourceId}; type: {action.ResourceType}; target: {action.Target.Name}");
+            else if (plan.IntendedWork.Status == "operationGraph")
+                _output.WriteLine("Intended work: supported operation graph; single-action detail is not applicable. Review the operation graph above.");
             else
                 _output.WriteLine($"Single-action detail unavailable: {plan.IntendedWork.Status}. Review the operation graph above.");
             _output.WriteLine($"Fingerprint: {plan.Fingerprint}");

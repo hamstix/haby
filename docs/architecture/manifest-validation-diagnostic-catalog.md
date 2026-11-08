@@ -123,6 +123,7 @@ A duplicate JSON map member is a syntax error and therefore uses
 | Code | Required parameters | Meaning |
 | --- | --- | --- |
 | `manifest.reference.not-found` | `targetKind`, `reference` | A local reference cannot be resolved |
+| `manifest.reference.type-mismatch` | none | An explicitly declared Resource dependency resolves to an incompatible exact Resource contract |
 | `manifest.reference.kind-mismatch` | `expectedKind`, `actualKind` | A reference resolves to the wrong declaration kind |
 | `manifest.reference.invalid` | `referenceKind` | A reference form is not permitted at this location |
 | `manifest.type.unknown` | `contractKind`, `contractId` | No exact contract definition is registered |

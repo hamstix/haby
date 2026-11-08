@@ -88,6 +88,22 @@ public sealed class CliPlanningPresentationTests
         Assert.Equal(1, new CliJsonPresenter(output).PrintPlanning("plan check", reply));
     }
 
+    [Fact]
+    public void Supported_graph_is_truthful_in_text_and_JSON_without_fabricating_an_action()
+    {
+        var reply = DescriptionReply(new PlanDescription { Status = PlanDescriptionStatus.OperationGraph });
+        using var json = new StringWriter();
+        using var text = new StringWriter();
+        Assert.Equal(0, new CliJsonPresenter(json).PrintPlanning("plan get", reply));
+        Assert.Equal(0, new CliTextPresenter(text).PrintPlanning("plan get", reply));
+        using var document = JsonDocument.Parse(json.ToString());
+        var plan = document.RootElement.GetProperty("data"u8).GetProperty("plan"u8);
+        Assert.Equal("operationGraph", plan.GetProperty("intendedWork"u8).GetProperty("status"u8).GetString());
+        Assert.False(plan.GetProperty("intendedWork"u8).TryGetProperty("action"u8, out _));
+        Assert.Contains("supported operation graph; single-action detail is not applicable", text.ToString());
+        Assert.DoesNotContain("unsupported", text.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData(PlanDescriptionStatus.RevisionNotFound, "revisionNotFound")]
     [InlineData(PlanDescriptionStatus.InputCorrupt, "inputCorrupt")]

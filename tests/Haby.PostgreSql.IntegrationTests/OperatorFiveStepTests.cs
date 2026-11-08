@@ -125,8 +125,10 @@ public sealed partial class OperatorHostIntegrationTests
                     var planned = await native.Run(["plan", "create", changeId]);
                     var planId = planned.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("planId"u8).GetString()!;
                     plan = (await client.GetPlanAsync(new() { PlanId = planId })).Plan;
+                    Assert.Equal("operationGraph", planned.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("intendedWork"u8).GetProperty("status"u8).GetString());
                     AssertNativeGraph(planned.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("operations"u8), plan);
                     await native.Run(["plan", "get", planId], format: "text");
+                    Assert.Contains("supported operation graph; single-action detail is not applicable", native.LastText);
                     foreach (var node in plan.Operations)
                         Assert.Contains($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}", native.LastText);
                     var checkedPlan = await native.Run(["plan", "check", planId], outcome: "current");
@@ -163,7 +165,7 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.All(beforeProgress.Progress.Nodes, n => Assert.False(n.HasLastAttemptOutcome));
                 Assert.Equal(plan.Operations, (await client.GetGenerationAsync(new() { DeploymentId = commit.DeploymentId, Generation = 1 })).DesiredGeneration.Operations);
                 Assert.Null(plan.IntendedWork.Action); // The single-action detail is not a pair description.
-                Assert.Equal(Haby.Operator.Contracts.PlanDescriptionStatus.UnsupportedShape, plan.IntendedWork.Status);
+                Assert.Equal(Haby.Operator.Contracts.PlanDescriptionStatus.OperationGraph, plan.IntendedWork.Status);
                 var immutable = await PairSnapshot(connection);
                 await AssertPairCatalog(connection, 0, 0, 0, 0, applied: false);
                 await AssertPairExternalAbsent(target, role);

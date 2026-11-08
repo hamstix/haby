@@ -162,11 +162,24 @@ reservation, operation attempt or output; AppliedGeneration absent. Administrati
 bootstrap objects already exist. Do not infer absence from the Plan. The automated
 rehearsal performs these independent checks without revealing material.
 
-The generic graph is the complete review surface. The older **single-action
-detail** reports `unsupportedShape` for a pair; this is not a rejected Plan or
-a standalone-only description of the full workflow. A valid Plan/Check still
-reports planned/current, and text/JSON show all five nodes. No payload or password
-is included in these summaries.
+The generic graph is the complete review surface. For the supported pair,
+`intendedWork.status` is `operationGraph`, with no single `action`. Text explicitly
+reports a supported operation graph with single-action detail not applicable.
+The adapter checks the complete frozen graph against its exact pair composition;
+it does not read mutable Provider configuration. Description metadata never
+authorizes execution. Standalone description remains `available`; genuine
+`unsupportedShape`, `inputCorrupt`, `pinnedInputMismatch`, `revisionNotFound` and
+`actionDescriberUnavailable` outcomes remain distinct. Rebuild alpha clients for
+the new protobuf enum value under ADR-033. No payload or password is included.
+
+New validation/import recognizes the login contract's explicit `databaseRef`
+dependency, so `db` is used even without a direct binding/export. A real orphan
+still receives `manifest.resource.unused`. Exact registered Resource metadata
+owns the top-level dependency property and required target contract; ordinary
+opaque data is never scanned. Invalid properties are not interpreted as references.
+Import needs no Environment, Provider or credential. Existing immutable revision
+warnings remain unchanged on read and equivalent import; no catalog reset or
+historical warning rewrite is needed.
 
 ## Execute the committed generation
 

@@ -1,11 +1,13 @@
 using System.Text.Json;
+using System.Text;
+using Haby.Domain;
 
 namespace Haby.Manifest;
 
 /// <summary>Checks local v1alpha1 relationships after schema validation and DTO deserialization.</summary>
 internal static class ManifestSemanticValidator
 {
-    public static IEnumerable<ManifestDiagnostic> Validate(ApplicationManifest manifest)
+    public static IEnumerable<ManifestDiagnostic> Validate(ApplicationManifest manifest, ManifestContractCatalog catalog)
     {
         var resources = manifest.Spec.Resources;
         var usedResources = new HashSet<string>(StringComparer.Ordinal);
@@ -127,11 +129,24 @@ internal static class ManifestSemanticValidator
             }
         }
 
+        foreach (var (resourceId, resource) in resources)
+        {
+            if (!catalog.TryGet(ResourceTypeId.Create(resource.Type), out var definition) || definition.Dependency is not { } dependency ||
+                !catalog.GetSchema(definition.PropertiesSchema).Validate(Encoding.UTF8.GetBytes(resource.Properties.GetRawText()))) continue;
+            if (!resource.Properties.TryGetProperty(dependency.PropertyName, out var value) || value.ValueKind != JsonValueKind.String) continue;
+            var reference = value.GetString()!;
+            var path = "/spec/resources/" + Escape(resourceId) + "/properties/" + Escape(dependency.PropertyName);
+            if (!resources.TryGetValue(reference, out var target)) diagnostics.Add(Missing(path, "resource", reference));
+            else if (target.Type != dependency.TargetType.Value)
+                diagnostics.Add(Error("manifest.reference.type-mismatch", path, "A local resource dependency has an incompatible contract."));
+            else usedResources.Add(reference);
+        }
+
         foreach (var resourceId in resources.Keys)
         {
             if (!usedResources.Contains(resourceId))
                 diagnostics.Add(new("manifest.resource.unused", ManifestDiagnosticSeverity.Warning,
-                    "/spec/resources/" + Escape(resourceId), "The resource has no local binding or export.",
+                    "/spec/resources/" + Escape(resourceId), "The resource has no local binding, export or recognized dependency.",
                     Parameters(), []));
         }
 

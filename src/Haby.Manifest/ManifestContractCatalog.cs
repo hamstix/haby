@@ -6,8 +6,11 @@ using Haby.Domain;
 
 namespace Haby.Manifest;
 
+/// <summary>One explicitly declared top-level local Resource dependency, interpreted only after properties validation.</summary>
+public sealed record ResourceDependencyDefinition(string PropertyName, ResourceTypeId TargetType);
 /// <summary>Exact metadata used to validate manifests, independent of installed implementations.</summary>
-public sealed record ResourceTypeDefinition(ResourceTypeId Id, string PropertiesSchema, string? BindingOptionsSchema = null);
+public sealed record ResourceTypeDefinition(ResourceTypeId Id, string PropertiesSchema, string? BindingOptionsSchema = null,
+    ResourceDependencyDefinition? Dependency = null);
 public sealed record WorkloadTypeDefinition(WorkloadTypeId Id, string PropertiesSchema);
 public sealed record OutputContractDefinition(OutputContractId Id, string? BindingOptionsSchema = null);
 public sealed record ConfigurationRendererDefinition(ConfigurationRendererId Id);
@@ -57,10 +60,11 @@ public sealed class ManifestContractCatalog
 
         foreach (var definition in resources)
         {
+            if (definition.Dependency is { } dependency) ArgumentException.ThrowIfNullOrWhiteSpace(dependency.PropertyName);
             RequireSchema(definition.PropertiesSchema);
             if (definition.BindingOptionsSchema is not null) RequireSchema(definition.BindingOptionsSchema);
             Register(_resources, definition.Id, definition, (a, b) =>
-                Equivalent(a.PropertiesSchema, b.PropertiesSchema) && Equivalent(a.BindingOptionsSchema, b.BindingOptionsSchema));
+                Equivalent(a.PropertiesSchema, b.PropertiesSchema) && Equivalent(a.BindingOptionsSchema, b.BindingOptionsSchema) && a.Dependency == b.Dependency);
         }
         foreach (var definition in workloads)
         {

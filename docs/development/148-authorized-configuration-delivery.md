@@ -82,6 +82,34 @@ $env:HABY_RUNTIME_TOKEN_FILE = 'D:/protected-runtime/processor.token'
 dotnet run --project examples/Haby.Configuration.Client --no-build
 ```
 
+For an isolated rehearsal, optionally supply independent nonsecret expectations.
+Run each Component with its own exact revision and scoped credential file:
+
+```powershell
+# api: retain the endpoint/revision/token-file settings above for the api grant.
+$env:HABY_RUNTIME_EXPECT_TIMEOUT = '200'
+$env:HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT = '30'
+$env:HABY_RUNTIME_EXPECT_SSL_MODE = 'disable' # Explicit isolated pilot only.
+dotnet run --project examples/Haby.Configuration.Client --no-build
+# worker: select its exact revision and its separately retained worker token file.
+$env:HABY_RUNTIME_REVISION = '<worker document revisionId from grant metadata>'
+$env:HABY_RUNTIME_TOKEN_FILE = 'D:/protected-runtime/worker.token'
+$env:HABY_RUNTIME_EXPECT_TIMEOUT = '15'
+dotnet run --project examples/Haby.Configuration.Client --no-build
+# Remove all three HABY_RUNTIME_EXPECT_* settings for ordinary execution.
+```
+
+Each expectation is optional. Seconds use unsigned decimal integers in the
+accepted consumer ranges (timeout 1..300, command timeout 1..3600); SSL spellings
+are `disable`, `require`, `verify-full`. Empty/malformed values refuse with exit 1.
+Expectations are compared with typed Npgsql settings parsed from the authorized
+response after loading in-memory application configuration, before connecting or
+DDL/DML. A wrong timeout, command timeout or SSL mode returns exit 1 and a fixed
+safe message without received values, raw JSON, driver text or confidential data.
+No Plan inputs or production mapper are used as the expected-value oracle.
+These checks establish receiving-client settings, not elapsed timeout behavior
+or a full EF migration rehearsal. Ordinary execution still performs the probe.
+
 The example bounds its credential file to 512 bytes, reads it anew on startup,
 sends Authorization Bearer metadata on the generated RPC, loads JSON as in-memory
 .NET configuration and opens PostgreSQL using the delivered application login.
