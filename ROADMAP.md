@@ -115,13 +115,24 @@ Application generations before starting Workload implementation. Agree detailed
 contracts in an ADR before coding this path; it is planned, not currently supported.
 
 - [ ] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and execution of the next generation. Separate Plan/Commit/Execute commands are sufficient; deferred apply is not a prerequisite.
-- [ ] Preserve stable identities and confirmed management of unchanged database/login Resources. Reuse the existing database, role and generated credential; observing an external name alone is not proof of Haby ownership.
+- [ ] Preserve stable identities and confirmed management of unchanged database/login Resources. Reuse the existing database, role and generated credential; observing an external name alone is not proof of Haby ownership. Application-version-only updates must not repeat Resource creation, credential generation or privilege work without a required change.
+- [ ] Add new Resources of admitted contracts during an update, with explicit dependency planning, normal conflict checks and creation of only the new effects. Do not implicitly adopt existing external objects.
+- [ ] Support adding/removing Components and Bindings in the new declaration and its configuration layout. New Components/Bindings receive configuration; removed ones do not participate in the new generation. Kubernetes object creation/removal remains P3 work.
+- [ ] Allow removal of Resource declarations without external deletion: retain the existing database/role and explicit management/ownership records. Validate remaining references; do not silently lose ownership, treat a rename as an in-place identity change or grant automatic later adoption. Agree retained-resource reintroduction semantics before implementation.
 - [ ] Admit application-version and supported configuration changes; materialize exact new-generation document revisions while previous documents and grants remain scoped to their original revisions until explicit revocation.
-- [ ] Reject unsupported Resource rename/removal, database-name changes, Provider-instance changes, credential rotation and other unimplemented mutations during planning. Do not silently recreate, adopt, migrate or delete resources.
-- [ ] Prove v1 writes data -> v2 with changed configuration -> same database/role/credential and preserved data, exact new configuration, and continued old-document access. Cover repeat, restart and partial failure without blind external-effect replay.
+- [ ] Support configuration-only generations for the same ManifestRevision when explicitly accepting changed supported Profile/default inputs through a new Plan and Commit. Assignment/default changes alone never mutate accepted generations. Do not couple logging-profile changes to an Application release or promise hot reload in a running process; configuration delivery and P3 restart/rollout are separate concerns.
+- [ ] Reject unsupported existing-Resource mutations, including database-name changes, Provider-instance changes and credential rotation, during planning. Only explicitly supported adapter changes are admitted; no automatic data migration, replacement or destructive deprovisioning.
+- [ ] Prove v1 writes data -> v2 with changed configuration -> same database/role/credential and preserved data, exact new configuration, and continued old-document access. Cover Resource additions, Component/Binding changes, retained removals and configuration-only updates, with repeat, restart and partial-failure evidence and no blind external-effect replay.
+
+Implement the checkpoint sequentially: first reuse unchanged Resources across
+generations, then Resource additions and Component/Binding changes with retained
+removals, then configuration-only generations, and finally P3 image rollout and
+credential/configuration transfer. Detailed contracts require accepted ADRs before
+implementation; the current execution profile is still generation 1.
 
 This checkpoint supplies the update foundation for P3 rollout; it does not claim
-arbitrary Resource evolution, multi-Application orchestration or production readiness.
+arbitrary Resource evolution, destructive Application/data deletion, automatic
+credential rotation, multi-Application orchestration or production readiness.
 
 Exit evidence:
 
@@ -132,6 +143,7 @@ Exit evidence:
 - Ordinary preview, diagnostics, logs and metadata contain no credential material or completed confidential connection string.
 - An explicitly authorized client retrieves its exact configuration and connects to the real database.
 - Rendering/retrieval does not provision, regenerate credentials, silently advance generations or change accepted inputs.
+- Limited updates preserve existing data and credentials, create only admitted new Resources, retain external resources under explicit ownership when their declarations are removed, and accept configuration-only generations without changing ManifestRevision.
 
 P2's first executable path remains static JSON/local Bindings. Profile parameters,
 Liquid/parameter execution, YAML/text execution, selectors, broad rollout and
