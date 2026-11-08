@@ -151,7 +151,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var credentialFile = Path.Combine(folder, "retained.token");
         try
         {
-            await using (var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
+            await using (var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0", "--Haby:Reflection:Enabled=false"],
                 services => services.AddLogging(l => l.AddProvider(logs).SetMinimumLevel(LogLevel.Trace)).AddSingleton<TimeProvider>(clock).AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(trap))))
             {
                 await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
