@@ -50,7 +50,8 @@ generation remains current when received.
 
 The first acceptance returns `created`. Equivalent repeats return `existing` with
 the original revision identity, complete protected inputs/tree and actor/time.
-Different Component/documents use separate requests and transactions. Concurrent
+Single-document calls use separate requests and transactions. The explicit
+Application batch below shares one request while preserving separate transactions. Concurrent
 acceptance uses a per-document transaction lock, a declarative unique key and
 comparison with the complete winning artifact. Inconsistent candidates refuse
 with `integrityConflict`; nothing is overwritten.
@@ -78,6 +79,82 @@ materializes implicitly. Current omitted-generation reads still require the
 fully applied desired selection. Explicit-generation historical reads need only
 the stored generic codec/serializer, not an active renderer, formatter, SecretStore
 or external Provider connection.
+
+## Explicit Application materialization
+
+Issue #156 implements ADR-044's convenience slice:
+
+```powershell
+habyctl configuration materialize processor-service --all --environment pilot --output json
+# Exact retry after inspecting the returned target:
+habyctl configuration materialize processor-service --all --environment pilot --generation 1 --output json
+```
+
+`--all` is mutually exclusive with `--component` and `--document`; get/preview and
+single-document materialize retain their existing syntax. Context, Environment
+override and selected registry credentials work as above. There is exactly one
+generated `MaterializeApplicationConfiguration` operator-admin RPC per invocation.
+No CLI selector call, document loop or automatic retry is made.
+
+The server selects DeploymentId/generation once in a repeatable-read view and
+checks the existing complete/applied gate, including for an explicit generation
+and for an empty inventory. It enumerates every declared document from that saved
+effective layout, including static-only documents, ordered ordinally by ComponentId
+then DocumentId. Components without documents contribute nothing. Current Profile
+assignments, aliases and defaults cannot change this inventory. Missing, corrupt
+or ineligible selections refuse before processing and never fall back.
+
+Application orchestration uses `IConfigurationApplicationInventory` and the existing
+`IConfigurationDocumentStore`. It copies the selected inventory, preflights bounded
+existing metadata, then calls the same exact-target materializer sequentially.
+Each document retains its own eligibility/evidence checks, immutable key, original
+audit and transaction. Concurrent batch/batch or batch/single calls converge through
+the existing per-document acceptance rules. There is no batch lock, transaction,
+receipt, rollback or background continuation.
+
+A normally completed `succeeded` result contains `data.target`, `selectedCount` and
+the complete ordered `items` array. Each item has its exact target, `created` or
+`existing`, and the successful revision's safe metadata. An eligible zero-document
+inventory returns `succeeded` with count zero and no writes. The first refused item
+returns its bounded status, retains earlier successful artifacts and stops work;
+all remaining entries have `notAttempted` and no artifact. Top-level `failed` means
+the batch did not complete, including when the first item failed. Selection or
+preflight refusals have no item report. Exit 0 is complete success; 1 is refusal or
+partial failure; invalid replies/usage use 2 and transport failure uses 3.
+
+Cancellation is propagated through reads/rendering/acceptance. No subsequent item
+starts after cancellation, while the existing confirmed-commit boundary remains
+intact. Cancellation, deadline, process termination or response loss can leave an
+accepted prefix without a report. A missing reply never proves rollback. Inspect
+the catalog through exact document commands and explicitly repeat **the same
+generation**. The retry returns existing identities/original audit before attempting
+remaining documents in the same order. A fresh call without `--generation` may
+select a different current generation and is not an exact retry. There is no durable
+batch history to recover a lost report.
+
+The unary metadata-only contract permits at most **512 items**. Before any write,
+reserve **16 KiB + 12 KiB per item**, at most **6,307,840 bytes**, under the unchanged
+8 MiB configuration transport/output ceiling. All saved filenames and existing
+artifact metadata are bounded first: filename 255 and actor 256 UTF-16 code units,
+existing typed identity bounds, fixed fingerprints/serializer/format and UTC audit.
+The JSON item's string fields occupy fewer than 1,600 UTF-16 units; even six-byte
+escaping plus 1,024 bytes for member names, punctuation and numbers fits 12 KiB.
+The protobuf item has fewer than 1,800 string units; three-byte UTF-8 plus 1,024
+bytes for framing/numbers also fits 12 KiB. Fixed selector/target/envelope/newline
+space fits 16 KiB. The maximum-metadata CLI test independently encodes 512 items
+with worst-case escaping, maximum IDs/revision number and verifies the complete
+UTF-8 envelope against the reservation. Over-limit inventories refuse before
+writes; results are never truncated or paginated. Import/global budgets stay fixed.
+
+Before stdout, the CLI validates the selector, exact generation, complete count,
+unique ordinal pairs/revisions, target ownership, status sequence, metadata shape
+and complete encoded output budget. Malformed replies produce no partial JSON or
+text. The response contains no trees, previews, secret references/arguments/material
+or resolved connection strings.
+
+No schema migration, artifact format change or catalog reset is needed. The current
+production pilot remains generation 1. Generation updates under ADR-045, access
+issuance, secret resolution, post-execute hooks and Workloads remain separate work.
 
 ## Repeat, restart and restore proof
 
@@ -152,6 +229,6 @@ desired value; production generation admission is unchanged.
 
 Authorized confidential retrieval, transient material resolution/formatting,
 delivery endpoints, direct Profile secret projections, Liquid/parameters, YAML/text,
-batch materialization, automatic rollout/retry and document cleanup/history commands
+automatic rollout/retry and document cleanup/history commands
 remain separate work. CI and measured full-suite results must be reported for the
 actual final commit; these test descriptions alone are not execution evidence.

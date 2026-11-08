@@ -20,7 +20,7 @@ internal static class ConfigurationDocumentPresentation
     {
         var status = reply.Status;
         var success = status is ConfigurationDocumentStatus.Created or ConfigurationDocumentStatus.Existing or ConfigurationDocumentStatus.Found;
-        if (!Equals(reply.Selector, request) || reply.CalculateSize() > 8 * 1024 * 1024 || status == ConfigurationDocumentStatus.Unspecified ||
+        if (!Equals(reply.Selector, request) || reply.CalculateSize() > 8 * 1024 * 1024 || status is ConfigurationDocumentStatus.Unspecified or ConfigurationDocumentStatus.NotAttempted ||
             !Enum.IsDefined(status) || command == "materialize" && status == ConfigurationDocumentStatus.Found ||
             command != "materialize" && status is ConfigurationDocumentStatus.Created or ConfigurationDocumentStatus.Existing ||
             success != (reply.Artifact is not null) || success && reply.Target is null ||

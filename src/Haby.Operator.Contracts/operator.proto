@@ -11,6 +11,7 @@ service ManifestOperator {
   rpc CreateConfigurationAccess(CreateConfigurationAccessRequest) returns (ConfigurationAccessReply);
   rpc GetConfigurationAccess(ConfigurationAccessRequest) returns (ConfigurationAccessReply);
   rpc RevokeConfigurationAccess(ConfigurationAccessRequest) returns (ConfigurationAccessReply);
+  rpc MaterializeApplicationConfiguration(ConfigurationApplicationRequest) returns (ConfigurationApplicationReply);
   rpc MaterializeConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
   rpc GetConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
   rpc PreviewConfiguration(ConfigurationDocumentRequest) returns (ConfigurationDocumentReply);
@@ -763,6 +764,7 @@ enum ConfigurationDocumentStatus {
   CONFIGURATION_DOCUMENT_STATUS_LIMIT_EXCEEDED = 9;
   CONFIGURATION_DOCUMENT_STATUS_STORAGE_UNAVAILABLE = 10;
   CONFIGURATION_DOCUMENT_STATUS_INPUT_CORRUPT = 11;
+  CONFIGURATION_DOCUMENT_STATUS_NOT_ATTEMPTED = 12;
 }
 message ConfigurationDocumentIdentity {
   string deployment_id = 1;
@@ -810,3 +812,35 @@ message OperatorAccessMetadata {
 // Credential is returned only by successful creation. Never log this response.
 message OperatorAccessReply { OperatorAccessMetadata grant = 1; optional string credential = 2; }
 message ListOperatorAccessReply { repeated OperatorAccessMetadata grants = 1; optional string next_after_grant_id = 2; }
+
+// One explicit Application batch. No access issuance, secret resolution or implicit retry.
+message ConfigurationApplicationRequest {
+  string environment = 1;
+  string application_id = 2;
+  optional int64 generation = 3;
+}
+message ConfigurationApplicationIdentity { string deployment_id = 1; int64 generation = 2; }
+enum ConfigurationApplicationStatus {
+  CONFIGURATION_APPLICATION_STATUS_UNSPECIFIED = 0;
+  CONFIGURATION_APPLICATION_STATUS_SUCCEEDED = 1;
+  CONFIGURATION_APPLICATION_STATUS_FAILED = 2;
+  CONFIGURATION_APPLICATION_STATUS_INVALID_REQUEST = 3;
+  CONFIGURATION_APPLICATION_STATUS_NOT_FOUND = 4;
+  CONFIGURATION_APPLICATION_STATUS_NOT_APPLIED = 5;
+  CONFIGURATION_APPLICATION_STATUS_INPUT_CORRUPT = 6;
+  CONFIGURATION_APPLICATION_STATUS_STORAGE_UNAVAILABLE = 7;
+  CONFIGURATION_APPLICATION_STATUS_LIMIT_EXCEEDED = 8;
+}
+message ConfigurationApplicationItem {
+  ConfigurationDocumentIdentity target = 1;
+  ConfigurationDocumentStatus status = 2;
+  ConfigurationDocumentMetadata artifact = 3;
+}
+message ConfigurationApplicationReply {
+  ConfigurationApplicationStatus status = 1;
+  ConfigurationApplicationRequest selector = 2;
+  ConfigurationApplicationIdentity target = 3;
+  // Exact selected inventory length; never a truncated page.
+  int32 selected_count = 4;
+  repeated ConfigurationApplicationItem items = 5;
+}

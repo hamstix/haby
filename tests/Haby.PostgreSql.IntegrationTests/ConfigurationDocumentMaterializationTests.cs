@@ -117,6 +117,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 CheckPreview(await client.PreviewConfigurationAsync(request), original);
                 await NativeDocument(host.Urls.Single(), request, "preview", "found", 0);
             }
+            var batch = await client.MaterializeApplicationConfigurationAsync(BatchRequest(scenario, true));
+            Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, batch.Status);
+            Assert.Equal(2, batch.SelectedCount);
+            Assert.All(batch.Items, i => Assert.Equal(Status.Existing, i.Status));
+            Assert.Equal(new[] { api.Artifact, worker.Artifact }, batch.Items.Select(i => i.Artifact));
             await using var verify = Context(connection);
             var actual = await verify.ConfigurationDocuments.AsNoTracking().OrderBy(x => x.Component).ToArrayAsync();
             Assert.Equal(rows.Select(x => (x.Id, x.Payload, x.Fingerprint)), actual.Select(x => (x.Id, x.Payload, x.Fingerprint)));

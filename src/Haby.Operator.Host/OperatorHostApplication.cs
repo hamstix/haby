@@ -88,7 +88,10 @@ public static class OperatorHostApplication
             [new(PostgreSqlConnectionRendering.Renderer)]));
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ComposeConfigurationDocument>();
-        builder.Services.AddSingleton<IConfigurationDocumentStore, PostgreSqlConfigurationDocumentStore>();
+        builder.Services.AddSingleton<PostgreSqlConfigurationDocumentStore>();
+        builder.Services.AddSingleton<IConfigurationDocumentStore>(p => p.GetRequiredService<PostgreSqlConfigurationDocumentStore>());
+        builder.Services.AddSingleton<IConfigurationApplicationInventory>(p => p.GetRequiredService<PostgreSqlConfigurationDocumentStore>());
+        builder.Services.AddSingleton<MaterializeApplicationConfiguration>();
         builder.Services.AddSingleton<PostgreSqlConfigurationAccessStore>();
         builder.Services.AddSingleton<IConfigurationAccessStore>(p => p.GetRequiredService<PostgreSqlConfigurationAccessStore>());
         builder.Services.AddSingleton<IConfigurationDeliveryDocumentStore>(p => p.GetRequiredService<PostgreSqlConfigurationAccessStore>());
