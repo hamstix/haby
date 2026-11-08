@@ -120,6 +120,7 @@ public static class ManifestCatalogServiceCollectionExtensions
         services.AddSingleton<IProfileAssignmentScopeQuery, PostgreSqlProfileAssignmentScopeQuery>();
         services.AddSingleton<ProfileAssignmentAdministration>();
         services.AddSingleton<PostgreSqlConfigurationProfileStore>();
+        services.AddSingleton<IProfileDiscoveryQuery, PostgreSqlProfileDiscoveryQuery>();
         services.AddSingleton<IConfigurationProfileImportStore>(provider => provider.GetRequiredService<PostgreSqlConfigurationProfileStore>());
         services.AddSingleton<IConfigurationProfileRevisionQuery>(provider => provider.GetRequiredService<PostgreSqlConfigurationProfileStore>());
         services.AddSingleton<ManifestCatalogMigrationInitializer>();

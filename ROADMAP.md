@@ -104,7 +104,7 @@ authentication and explicit local issuance are implemented in issue #150 below.
 - [x] Complete the core manual operator-to-application rehearsal at main b03058e: bootstrap, five-step provisioning, exact document delivery, real DDL/DML, authorization/revocation and restart. Runtime timeout assertions remain unperformed; the full checklist was PARTIAL, not a production-readiness claim.
 - [x] Accept ordered rehearsal follow-ups and explicit Application-wide materialization with per-document atomicity under [ADR-044](docs/adr/0044-p2-rehearsal-follow-ups-and-application-materialization.md).
 - [x] Add safe receiving-client setting assertions and correct misleading supported-graph/Resource-use diagnostics: [issue #152](https://github.com/hamstix/haby/issues/152), merged PR #153. The earlier manual runtime assertion remains unperformed; subsequent implementation/test evidence is separate.
-- [ ] Add Profile discovery and exact Profile revision-history listing; do not change exact assignment/planning references: [issue #154](https://github.com/hamstix/haby/issues/154).
+- [x] Add Profile discovery and exact Profile revision-history listing; preserve exact assignment/planning references: [issue #154](https://github.com/hamstix/haby/issues/154), [operator runbook](docs/development/134-profile-operator-path.md).
 - [ ] Add one-request materialization of all Component documents for one server-selected Application generation, preserving per-document atomicity and idempotency. Keep invocation explicit; batch access issuance and automatic Workload credential distribution are deferred.
 
 ### Limited Application updates before P3

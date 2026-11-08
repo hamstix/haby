@@ -20,6 +20,8 @@ service ManifestOperator {
   rpc ValidateProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc ImportProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc GetProfileRevision(ProfileRevisionRequest) returns (ProfileReply);
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesReply);
+  rpc ListProfileRevisions(ListProfileRevisionsRequest) returns (ListProfileRevisionsReply);
   rpc CheckProvider (CheckProviderRequest) returns (ProviderAccessReply);
   rpc GetProviderAlias (GetProviderAliasRequest) returns (ProviderAccessReply);
   rpc SetProviderAlias (SetProviderAliasRequest) returns (ProviderAccessReply);
@@ -655,6 +657,10 @@ message GenerationExecutionReply {
 
 // Installation-scoped immutable configuration declaration administration only.
 message ProfilePayloadRequest { bytes payload = 1; }
+message ListProfilesRequest { optional int32 page_size = 1; optional string after_profile_id = 2; }
+message ListProfilesReply { repeated ProfileMetadata items = 1; optional string next_after_profile_id = 2; }
+message ListProfileRevisionsRequest { string profile_id = 1; optional int32 page_size = 2; optional int32 after_revision = 3; }
+message ListProfileRevisionsReply { string profile_id = 1; repeated ProfileMetadata items = 2; optional int32 next_after_revision = 3; }
 message ProfileRevisionRequest { string profile_id = 1; int32 revision = 2; }
 enum ProfileStatus {
   PROFILE_STATUS_UNSPECIFIED = 0;

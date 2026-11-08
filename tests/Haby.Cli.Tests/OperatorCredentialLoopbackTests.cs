@@ -26,6 +26,10 @@ public sealed partial class CliLoopbackTests
         }
         public override Task<ListEnvironmentsReply> ListEnvironments(ListEnvironmentsRequest request, ServerCallContext context)
         { Check(context); return Task.FromResult(new ListEnvironmentsReply { Status = EnvironmentStatus.Listed }); }
+        public override Task<ListProfilesReply> ListProfiles(ListProfilesRequest request, ServerCallContext context)
+        { Check(context); return Task.FromResult(new ListProfilesReply()); }
+        public override Task<ListProfileRevisionsReply> ListProfileRevisions(ListProfileRevisionsRequest request, ServerCallContext context)
+        { Check(context); return Task.FromResult(new ListProfileRevisionsReply { ProfileId = request.ProfileId }); }
         public override Task<ConfigurationDocumentReply> GetConfiguration(ConfigurationDocumentRequest request, ServerCallContext context)
         { Check(context); return new DocumentRegistry().GetConfiguration(request, context); }
     }
@@ -76,6 +80,12 @@ public sealed partial class CliLoopbackTests
                 foreach (var context in new[] { "first", "second" })
                 {
                     var list = await Run("environment", "list", "--context", context); Assert.Equal(0, list.Exit); Assert.Empty(list.Error);
+                    var selected = context == "first" ? firstRegistry : secondRegistry;
+                    var other = context == "first" ? secondRegistry : firstRegistry;
+                    var calls = selected.Calls; var otherCalls = other.Calls;
+                    Assert.Equal(0, (await Run("profile", "list", "--context", context)).Exit);
+                    Assert.Equal(0, (await Run("profile", "revision", "list", "layout", "--context", context)).Exit);
+                    Assert.Equal(calls + 2, selected.Calls); Assert.Equal(otherCalls, other.Calls);
                     var large = await Run("configuration", "get", "named-application", "--component", "api", "--document", "settings", "--generation", "3", "--context", context);
                     Assert.Equal(0, large.Exit); Assert.Empty(large.Error);
                 }
