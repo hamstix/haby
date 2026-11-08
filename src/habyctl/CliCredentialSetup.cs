@@ -33,6 +33,9 @@ internal sealed partial class CliCommandContext
             foreach (var pair in config.Instances) instances.Add(pair.Key, pair.Value);
             instances[instanceName] = instance with { Token = inline, TokenFile = tokenFile };
             var normalized = config with { Instances = instances };
+            var contents = NormalizedConfiguration(normalized);
+            if (Encoding.UTF8.GetByteCount(contents) > CliConfigurationService.MaxBytes) throw new InvalidDataException();
+            _ = CliConfigurationService.Parse(contents);
             // Write a new file. Never rewrite the original or silently select the result.
             var path = Path.GetFullPath(newConfigFile);
             if (File.Exists(path)) throw new IOException();
@@ -41,7 +44,7 @@ internal sealed partial class CliCommandContext
             if (!OperatingSystem.IsWindows()) settings.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
             await using (var stream = new FileStream(temporary, settings))
             {
-                var bytes = Encoding.UTF8.GetBytes(NormalizedConfiguration(normalized));
+                var bytes = Encoding.UTF8.GetBytes(contents);
                 try { await stream.WriteAsync(bytes, token); await stream.FlushAsync(token); stream.Flush(true); }
                 finally { Array.Clear(bytes); }
             }
