@@ -101,7 +101,11 @@ authentication and explicit local issuance are implemented in issue #150 below.
 - [x] Implement authorized exact-revision delivery, access grant administration and the real client connection rehearsal; ordinary operator get/preview stay redacted/metadata-only: [pilot boundary and runbook](docs/development/148-authorized-configuration-delivery.md).
 - [x] Accept static operator-admin tokens, explicit Host issuance/recovery (including temporary tokens and policy-selected Kubernetes exec/Job), registry credentials and protected default-on reflection under [ADR-043](docs/adr/0043-operator-access-tokens-and-bootstrap.md).
 - [x] Implement operator-admin authentication, explicit local issuance/recovery, selected registry credentials and protected reflection without OAuth or complex RBAC: [issue #150 runbook](docs/development/150-operator-access-tokens.md).
-- [ ] Run the full operator-to-application rehearsal: bootstrap -> provisioning -> configuration -> client authentication and application use.
+- [x] Complete the core manual operator-to-application rehearsal at main b03058e: bootstrap, five-step provisioning, exact document delivery, real DDL/DML, authorization/revocation and restart. Runtime timeout assertions remain unperformed; the full checklist was PARTIAL, not a production-readiness claim.
+- [x] Accept ordered rehearsal follow-ups and explicit Application-wide materialization with per-document atomicity under [ADR-044](docs/adr/0044-p2-rehearsal-follow-ups-and-application-materialization.md).
+- [ ] Add safe receiving-client setting assertions and correct misleading supported-graph/Resource-use diagnostics: [issue #152](https://github.com/hamstix/haby/issues/152).
+- [ ] Add Profile discovery and exact Profile revision-history listing; do not change exact assignment/planning references.
+- [ ] Add one-request materialization of all Component documents for one server-selected Application generation, preserving per-document atomicity and idempotency. Keep invocation explicit; batch access issuance and automatic Workload credential distribution are deferred.
 
 Exit evidence:
 
@@ -117,7 +121,7 @@ P2's first executable path remains static JSON/local Bindings. Profile parameter
 Liquid/parameter execution, YAML/text execution, selectors, broad rollout and
 cross-Application exports are later slices unless a concrete pilot requirement
 explicitly changes that scope. Kubernetes Runtime Identity is not required to
-prove the initial separately scoped retrieval route. The unauthenticated alpha
+prove the initial separately scoped retrieval route. The authenticated
 operator API must never become an unrestricted configuration-reveal endpoint.
 
 Authority: ADR-017/018/034/035/036/037.
