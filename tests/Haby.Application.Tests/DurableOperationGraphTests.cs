@@ -6,6 +6,17 @@ namespace Haby.Application.Tests;
 public sealed class DurableOperationGraphTests
 {
     [Fact]
+    public void Mixed_graph_roundtrips_new_work_and_direct_original_reuse_without_overlapping_owners()
+    {
+        var reused = new ResourceReuse(ManifestLocalId.Create("old-resource"), Guid.CreateVersion7(), 2, new string('B', 64));
+        var baseline = new ResourceReuseBaseline(ApplicationDeploymentId.New(), 3, "v2:" + new string('A', 64));
+        var graph = new DurableOperationGraph([Node("new-create")], [reused], baseline);
+        Assert.Equal(graph, DurableOperationGraphCodec.Decode(DurableOperationGraphCodec.Encode(graph)));
+        Assert.Single(graph.Nodes); Assert.Equal(2, Assert.Single(graph.ReusedResources).SourceGeneration);
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([Node("fake-create") with { ResourceId = reused.Resource }], [reused], baseline));
+    }
+
+    [Fact]
     public void Reuse_is_separate_from_external_work_and_canonically_pins_original_source_and_baseline()
     {
         var baseline = new ResourceReuseBaseline(ApplicationDeploymentId.New(), 2, "v2:" + new string('A', 64));

@@ -34,10 +34,10 @@ internal static class ResourceContinuity
 
     internal static async Task<bool> ValidateOutputsAsync(ManifestCatalogDbContext db, Guid deployment,
         DurableOperationGraph reuse, IEnumerable<IExternalOperationOutputContract> registrations,
-        IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token, bool validateMaterial = false)
+        IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token, bool validateMaterial = false, long? creationGeneration = null)
     {
         var contracts = registrations.ToArray();
-        foreach (var generation in reuse.ReusedResources.Select(x => x.SourceGeneration).Distinct())
+        foreach (var generation in reuse.ReusedResources.Select(x => x.SourceGeneration).Concat(creationGeneration is { } g ? [g] : []).Distinct())
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
             var inputs = Inputs(source);
@@ -80,7 +80,7 @@ internal static class ResourceContinuity
         return true;
     }
     internal static async Task<string?> EvidenceAsync(ManifestCatalogDbContext db, ResourceManagementRow management,
-        CancellationToken token)
+        CancellationToken token, bool requireApplied = true)
     {
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x =>
             x.DeploymentId == management.Deployment && x.Generation == management.SourceGeneration, token);
@@ -88,7 +88,11 @@ internal static class ResourceContinuity
             return null;
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
         _ = Inputs(source);
-        if (graph.Baseline is not null) return null; // Never follow another reuse generation.
+        // The creation generation may contain reused peers. Its aggregate must have
+        // completed; inspect this Resource's original nodes directly, never recurse.
+        if (requireApplied && !await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == management.Deployment &&
+            x.AppliedGeneration >= management.SourceGeneration, token)) return null;
+        if (graph.ReusedResources.Any(r => r.Resource.Value == management.Resource)) return null;
         var ids = graph.Nodes.Select(x => x.Id.Value).ToArray();
         if (await db.DurableOperations.CountAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token) != ids.Length ||
             await db.DurableOperations.AnyAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation &&
@@ -120,7 +124,7 @@ internal static class ResourceContinuity
     internal static async Task<bool> ValidateAsync(ManifestCatalogDbContext db, Guid deployment,
         DurableOperationGraph graph, CancellationToken token)
     {
-        if (graph.Baseline is not { } baseline || Guid.Parse(baseline.Deployment.ToString()) != deployment || graph.Nodes.Count != 0) return false;
+        if (graph.Baseline is not { } baseline || Guid.Parse(baseline.Deployment.ToString()) != deployment) return false;
         var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deployment, token);
         if (owner is null) return false;
         var previous = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x =>
@@ -150,7 +154,8 @@ internal static class ResourceContinuity
         if (graph.Baseline is null) return requested;
         if (!inputs.Configuration!.Manifest.Spec.Resources.ContainsKey(resource)) return null;
         var reuse = graph.ReusedResources.SingleOrDefault(x => x.Resource == resource);
-        return reuse is not null && await ValidateAsync(db, deployment, graph, token)
-            ? requested with { Generation = DeploymentGeneration.Create(reuse.SourceGeneration) } : null;
+        if (!await ValidateAsync(db, deployment, graph, token)) return null;
+        return reuse is not null ? requested with { Generation = DeploymentGeneration.Create(reuse.SourceGeneration) }
+            : graph.Nodes.Any(n => n.ResourceId == resource && n.Id == requested.OperationId) ? requested : null;
     }
 }

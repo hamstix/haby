@@ -7,6 +7,24 @@ namespace Haby.Cli.Tests;
 public sealed class CliPlanningPresentationTests
 {
     [Fact]
+    public void Mixed_plan_text_and_generated_JSON_expose_new_work_and_original_reuse_together()
+    {
+        var reply = DescriptionReply(new PlanDescription { Status = PlanDescriptionStatus.OperationGraph });
+        reply.Plan.Operations.Clear();
+        reply.Plan.Operations.Add(new PlannedOperationSummary { OperationId = "extra-create", ResourceId = "extra", ActionContract = "sample.create/v1" });
+        reply.Plan.ReusedResources.Add(new ReusedResourceSummary { ResourceId = "old", ManagementId = Guid.NewGuid().ToString(), SourceGeneration = 1 });
+        using var json = new StringWriter(); using var text = new StringWriter();
+        Assert.Equal(0, new CliJsonPresenter(json).PrintPlanning("plan get", reply));
+        Assert.Equal(0, new CliTextPresenter(text).PrintPlanning("plan get", reply));
+        using var document = JsonDocument.Parse(json.ToString());
+        var plan = document.RootElement.GetProperty("data"u8).GetProperty("plan"u8);
+        Assert.Equal("extra", Assert.Single(plan.GetProperty("operations"u8).EnumerateArray()).GetProperty("resourceId"u8).GetString());
+        Assert.Equal(1, Assert.Single(plan.GetProperty("reusedResources"u8).EnumerateArray()).GetProperty("sourceGeneration"u8).GetInt64());
+        Assert.Contains("Operation: extra-create", text.ToString()); Assert.Contains("Reuse Resource: old", text.ToString());
+        Assert.DoesNotContain("unsupported", text.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Plan_exposes_operation_identity_ownership_and_dependencies_without_payloads()
     {
         var reply = new PlanningReply

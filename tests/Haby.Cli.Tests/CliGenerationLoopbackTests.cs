@@ -163,6 +163,22 @@ public sealed partial class CliLoopbackTests
     }
 
     [Fact]
+    public void Mixed_completed_nodes_cannot_hide_missing_aggregate_reuse_completion()
+    {
+        var reply = new GenerationExecutionReply
+        {
+            Status = GenerationExecutionStatus.Succeeded,
+            Progress = new() { Generation = 2, DesiredGeneration = 2, AppliedGeneration = 1, ReusedResources = 2, Total = 1, Completed = 1 }
+        };
+        reply.Progress.Nodes.Add(new GenerationNodeProgress { Operation = CliOperationTests.Snapshot(OperationStatus.Succeeded, OperationState.Succeeded).Operation });
+        Assert.Throws<InvalidDataException>(() => GenerationPresentation.Exit(reply));
+        reply.Status = GenerationExecutionStatus.InputUnavailable;
+        Assert.Equal(1, GenerationPresentation.Exit(reply));
+        reply.Status = GenerationExecutionStatus.Succeeded; reply.Progress.AppliedGeneration = 2;
+        Assert.Equal(0, GenerationPresentation.Exit(reply));
+    }
+
+    [Fact]
     public void Reuse_only_success_requires_explicit_reuse_and_an_applied_target_without_fake_nodes()
     {
         var reply = new GenerationExecutionReply

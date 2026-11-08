@@ -15,6 +15,10 @@ internal static class DurableAggregateCompletion
         if (owner is null || owner.DesiredGeneration != generation) return false;
         if (await context.DurableOperations.AnyAsync(r => r.DeploymentId == deployment && r.Generation == generation &&
             r.State != nameof(DurableOperationState.Succeeded), cancellationToken)) return true;
+        var source = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == generation, cancellationToken);
+        // Mixed completion belongs to the runner's locked reuse + operation decision.
+        // Preserve confirmed new effects even if a reused peer subsequently becomes unavailable.
+        if (DurableOperationGraphCodec.Decode(source.GraphJson).ReusedResources.Count > 0) return true;
         if (owner.AppliedGeneration == generation) return true;
         return await context.ApplicationDeployments.Where(r => r.Id == deployment && r.DesiredGeneration == generation && r.AppliedGeneration == null)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.AppliedGeneration, generation)

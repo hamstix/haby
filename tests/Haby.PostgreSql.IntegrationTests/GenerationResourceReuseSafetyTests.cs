@@ -16,14 +16,16 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed partial class PostgreSqlApplicationLoginTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Resource_reuse_commit_revalidates_significant_continuity_and_missing_evidence_atomically(bool continuityChange)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Resource_reuse_commit_revalidates_significant_continuity_and_missing_evidence_atomically(bool continuityChange, bool mixed)
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
-        var revision = await ImportUpdate(client, UpdateEnvelope(scenario, 2)); var plan = await UpdatePlan(client, revision, 1);
+        var revision = await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_stale_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2)); var plan = await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
         await Sql(scenario.Connection, "SET session_replication_role = replica; " + (continuityChange
             ? "UPDATE resource_management SET id = '00000000-0000-0000-0000-000000000158' WHERE resource_local_id = 'app-login'"
             : "DELETE FROM operation_outputs WHERE operation_id = 'app-login-access'"));
@@ -39,6 +41,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [InlineData("database")]
     [InlineData("schema")]
     [InlineData("resource-add")]
+    [InlineData("login-add")]
+    [InlineData("pair-add")]
+    [InlineData("multiple-additions")]
     [InlineData("resource-rename")]
     [InlineData("resource-remove")]
     [InlineData("component-add")]
@@ -55,6 +60,16 @@ public sealed partial class PostgreSqlApplicationLoginTests
             case "database": spec["resources"]!["db"]!["properties"]!["name"] = "unsupported_replacement"; break;
             case "schema": spec["resources"]!["app-login"]!["properties"]!["schema"] = "other_schema"; break;
             case "resource-add": spec["resources"]!["other"] = spec["resources"]!["db"]!.DeepClone(); break;
+            case "login-add": spec["resources"]!["other-login"] = spec["resources"]!["app-login"]!.DeepClone(); break;
+            case "pair-add":
+                spec["resources"]!["other-db"] = spec["resources"]!["db"]!.DeepClone();
+                spec["resources"]!["other-db"]!["properties"]!["name"] = "unsupported_extra_pair";
+                spec["resources"]!["other-login"] = spec["resources"]!["app-login"]!.DeepClone();
+                spec["resources"]!["other-login"]!["properties"]!["databaseRef"] = "other-db"; break;
+            case "multiple-additions":
+                foreach (var id in new[] { "other", "another" })
+                { spec["resources"]![id] = spec["resources"]!["db"]!.DeepClone(); spec["resources"]![id]!["properties"]!["name"] = "unsupported_" + id; }
+                break;
             case "resource-rename":
                 spec["resources"]!["renamed"] = spec["resources"]!["db"]!.DeepClone();
                 spec["resources"]!.AsObject().Remove("db");
@@ -150,15 +165,17 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await host.StopAsync();
     }
 
-    [Fact]
-    public async Task Resource_reuse_competing_commits_wait_on_real_database_lock_then_have_one_atomic_winner()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Resource_reuse_competing_commits_wait_on_real_database_lock_then_have_one_atomic_winner(bool mixed)
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
         var history = await ReuseHistory(scenario.Connection);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
-        var revision = await ImportUpdate(client, UpdateEnvelope(scenario, 2));
-        var first = await UpdatePlan(client, revision, 1); var second = await UpdatePlan(client, revision, 1);
+        var revision = await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_race_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2));
+        var first = await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0); var second = await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
         var lockKey = $"haby-deployment:{Guid.Parse(scenario.Plan.Inputs.Environment.ToString()):N}:{Guid.Parse(scenario.Plan.Inputs.Revision.ApplicationRecordId.ToString()):N}";
         await using var blocker = new NpgsqlConnection(scenario.Connection); await blocker.OpenAsync(); await using var tx = await blocker.BeginTransactionAsync();
         await using (var hold = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", blocker, tx))
@@ -183,6 +200,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using var verify = Context(scenario.Connection);
         Assert.Equal(2, await verify.DeploymentGenerations.CountAsync()); Assert.Equal(2, await verify.ChangeSetCommits.CountAsync());
         var owner = await verify.ApplicationDeployments.AsNoTracking().SingleAsync(); Assert.Equal(2, owner.DesiredGeneration); Assert.Equal(1, owner.AppliedGeneration);
-        Assert.Equal(history, await ReuseHistory(scenario.Connection)); await host.StopAsync();
+        if (!mixed) Assert.Equal(history, await ReuseHistory(scenario.Connection));
+        Assert.Equal(mixed ? 6 : 5, await verify.DurableOperations.CountAsync());
+        Assert.Equal(5, await verify.DurableOperationAttempts.CountAsync());
+        Assert.Equal(mixed ? 3 : 2, await verify.ResourceManagement.CountAsync());
+        await host.StopAsync();
     }
 }

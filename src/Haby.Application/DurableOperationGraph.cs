@@ -54,13 +54,17 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
               .ThenBy(r => r.OutputContract, StringComparer.Ordinal).ThenBy(r => r.OutputKey, StringComparer.Ordinal).ToArray())
         }).ToArray();
         if ((ordered.Length == 0 && reuse.Length == 0) || ordered.Length > 256 ||
-            (ordered.Length > 0 && reuse.Length > 0) || ordered.Select(n => n.Id).Distinct().Count() != ordered.Length)
+            ordered.Any(n => reuse.Any(r => r.Resource == n.ResourceId)) ||
+            ordered.Select(n => n.Id).Distinct().Count() != ordered.Length)
             throw new InvalidDataException("Invalid graph identity set.");
         var ids = ordered.Select(n => n.Id).ToHashSet();
         foreach (var node in ordered)
         {
             if (node.Dependencies.Distinct().Count() != node.Dependencies.Count ||
-                node.Dependencies.Any(d => !ids.Contains(d)) || node.ResourceId is null ||
+                node.Dependencies.Any(d => !ids.Contains(d)) ||
+                node.OutputReferences.Distinct().Count() != node.OutputReferences.Count ||
+                node.OutputReferences.Any(o => !node.Dependencies.Contains(o.ProducerOperationId) ||
+                    string.IsNullOrWhiteSpace(o.OutputContract) || string.IsNullOrWhiteSpace(o.OutputKey)) || node.ResourceId is null ||
                 node.Action?.ActionContract is null || node.Action.Admission?.ResourceContract is null || node.Action.Admission.ProviderKind is null ||
                 node.Action.Admission.ConfigurationContract is null || node.Action.Admission.ImplementationId is null ||
                 node.References is null || node.Input is null || string.IsNullOrEmpty(node.Input.Format) ||

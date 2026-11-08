@@ -224,7 +224,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
     private static async Task<bool> Complete(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
-        if (graph.Baseline is not null) return await ResourceContinuity.ValidateAsync(db, source.DeploymentId, graph, token);
+        if (graph.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, source.DeploymentId, graph, token)) return false;
         var rows = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation).ToArrayAsync(token);
         return rows.Length == graph.Nodes.Count && graph.Nodes.All(n => rows.Any(x => x.OperationId == n.Id.Value && x.State == nameof(DurableOperationState.Succeeded)));
     }

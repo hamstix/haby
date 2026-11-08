@@ -35,18 +35,18 @@ public sealed partial class PostgreSqlApplicationLoginTests
         return result.Created?.Revision.Reference ?? result.ExistingEquivalent.Revision.Reference;
     }
 
-    private static async Task<DurablePlanSummary> UpdatePlan(ManifestOperator.ManifestOperatorClient client, RevisionReference revision, long expected, string? endpoint = null)
+    private static async Task<DurablePlanSummary> UpdatePlan(ManifestOperator.ManifestOperatorClient client, RevisionReference revision, long expected, string? endpoint = null, int created = 0, bool added = false)
     {
         var native = endpoint is null ? null : await NativeReuseCommand(endpoint, "changeset", "create", revision.ApplicationRecordId, revision.RevisionNumber.ToString(), "--expected-generation", expected.ToString());
-        var change = native is { } created ? await client.GetChangeSetAsync(new() { ChangeSetId = created.GetProperty("data"u8).GetProperty("changeSet"u8).GetProperty("changeSetId"u8).GetString()! }) : await client.CreateChangeSetAsync(new()
+        var change = native is { } nativeChange ? await client.GetChangeSetAsync(new() { ChangeSetId = nativeChange.GetProperty("data"u8).GetProperty("changeSet"u8).GetProperty("changeSetId"u8).GetString()! }) : await client.CreateChangeSetAsync(new()
         { EnvironmentId = "pilot", Reference = revision, Precondition = PlanningPrecondition.ExpectedGeneration, ExpectedGeneration = expected });
         Assert.Equal(native is null ? PlanningStatus.Created : PlanningStatus.Found, change.Status);
         Assert.Equal(expected, change.ChangeSet.ExpectedGeneration);
         var nativePlan = endpoint is null ? null : await NativeReuseCommand(endpoint, "plan", "create", change.ChangeSet.ChangeSetId);
         var planned = nativePlan is { } p ? await client.GetPlanAsync(new() { PlanId = p.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("planId"u8).GetString()! }) : await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
         Assert.NotNull(planned.Plan);
-        Assert.Empty(planned.Plan.Operations); Assert.Equal(2, planned.Plan.ReusedResources.Count);
-        Assert.All(planned.Plan.ReusedResources, x => Assert.Equal(1, x.SourceGeneration));
+        Assert.Equal(created, planned.Plan.Operations.Count); Assert.Equal(added ? 3 : 2, planned.Plan.ReusedResources.Count);
+        Assert.All(planned.Plan.ReusedResources, x => Assert.Equal(x.ResourceId == "extra" ? 2 : 1, x.SourceGeneration));
         Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new() { PlanId = planned.Plan.PlanId })).Status);
         return planned.Plan;
     }

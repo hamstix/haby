@@ -91,8 +91,18 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         throw new InvalidDataException("Pair context required.");
 
     public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        TryPair(spec, inputs, configuration) is not null && spec.Resources.TryGetValue(resource, out var declared) &&
-        declared.Type == Key.Admission.ResourceContract;
+        TryPair(spec, inputs, configuration) is { } pair && (resource == pair.Database || resource == pair.Login) &&
+        spec.Resources.TryGetValue(resource, out var declared) && declared.Type == Key.Admission.ResourceContract;
+
+    internal static bool SupportsShape(NormalizedManifestSpec spec, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        TryPair(spec, inputs, configuration) is not null;
+
+    internal static bool IsIndependentDatabase(NormalizedManifestSpec spec, ManifestLocalId resource) =>
+        spec.Resources.TryGetValue(resource, out var declared) && PostgreSqlDatabaseCreateValidation.Name(declared) is not null &&
+        spec.Resources.Values.Where(r => r.Type == PostgreSqlApplicationLoginContract.Id).All(r =>
+            PostgreSqlApplicationLoginContract.Parse(r.Properties) is { } p && p.DatabaseRef != resource.Value) &&
+        spec.Components.Values.SelectMany(c => c.Bindings.Values).All(b =>
+            b.Target is NormalizedLocalResourceTarget t && t.ResourceRef != resource);
 
     // A semantic invariant independent of one-pair admission and declaration order.
     internal static bool HasSingleOwner(NormalizedManifestSpec spec)
@@ -123,18 +133,21 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
 
     private static Pair? TryShape(NormalizedManifestSpec spec, DurablePlanningInputs inputs, string administrator)
     {
-        if (!HasSingleOwner(spec) || spec.Resources.Count != 2 || spec.Exports.Count != 0 || spec.Parameters.Count != 0 ||
+        if (!HasSingleOwner(spec) || spec.Resources.Count < 2 || spec.Exports.Count != 0 || spec.Parameters.Count != 0 ||
             inputs.ImplementationId != Provider.ImplementationId || string.IsNullOrWhiteSpace(administrator) ||
             spec.Resources.Values.Any(r => r.ProviderRef != inputs.Alias)) return null;
         var databases = spec.Resources.Where(r => r.Value.Type == PostgreSqlDatabaseContract.Id).ToArray();
         var logins = spec.Resources.Where(r => r.Value.Type == PostgreSqlApplicationLoginContract.Id).ToArray();
-        if (databases.Length != 1 || logins.Length != 1 || PostgreSqlDatabaseCreateValidation.Name(databases[0].Value) is not { } name ||
-            PostgreSqlApplicationLoginContract.Parse(logins[0].Value.Properties) is not { } properties ||
-            properties.DatabaseRef != databases[0].Key.Value) return null;
+        if (logins.Length != 1 || databases.Length + logins.Length != spec.Resources.Count ||
+            databases.Any(r => PostgreSqlDatabaseCreateValidation.Name(r.Value) is null) ||
+            databases.Select(r => PostgreSqlDatabaseCreateValidation.Name(r.Value)).Distinct(StringComparer.Ordinal).Count() != databases.Length ||
+            PostgreSqlApplicationLoginContract.Parse(logins[0].Value.Properties) is not { } properties) return null;
+        var database = databases.SingleOrDefault(r => r.Key.Value == properties.DatabaseRef);
+        if (database.Key is null || PostgreSqlDatabaseCreateValidation.Name(database.Value) is not { } name) return null;
         foreach (var component in spec.Components.Values)
             if (component.Workloads.Count != 0 || component.Bindings.Values.Any(b =>
                 b.Target is not NormalizedLocalResourceTarget target || target.ResourceRef != logins[0].Key)) return null;
-        return new(databases[0].Key, logins[0].Key, name, properties, administrator);
+        return new(database.Key, logins[0].Key, name, properties, administrator);
     }
 
     internal static PlanDescriptionStatus DescribeGraph(NormalizedManifestSpec spec, DurablePlanningInputs inputs, DurableOperationGraph? graph)

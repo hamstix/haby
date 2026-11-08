@@ -95,7 +95,7 @@ public sealed class PostgreSqlDatabaseRecovery(IDurableOperationJournal operatio
         // Progress reads the immutable accepted graph, not the current manifest or alias.
         // No-output manual assignment cannot satisfy a dependent evidence consumer.
         var progress = await operations.ProgressAsync(operation.Key.DeploymentId, operation.Key.Generation, cancellationToken);
-        return progress?.Nodes is [var only] && only.Operation.Key == operation.Key &&
+        return progress?.Reused == 0 && progress.Nodes is [var only] && only.Operation.Key == operation.Key &&
             only.Operation.Node.Action == PostgreSqlDatabaseCreateAction.RegistrationKey &&
             only.Operation.Node.Dependencies.Count == 0 && only.Operation.Node.OutputReferences.Count == 0;
     }
