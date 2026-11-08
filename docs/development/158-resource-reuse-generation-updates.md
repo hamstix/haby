@@ -130,6 +130,10 @@ retains the original pair's management IDs/source=1 and creates only the new
 management record (source=2) and Pending operation. A management record alone is
 not successful ownership/effect evidence.
 
+Exact operation get/execute now select positive committed generations as well;
+an absent generation or operation returns NotFound. Recovery still requires its
+existing action-specific eligibility, not merely a valid operation key.
+
 Explicit generation Execute validates every reuse requirement before new dispatch.
 The new operation uses its ordinary exact adapter, dispatch marker, confirmed
 output and attributable attempt. Final completion locks the aggregate/continuity

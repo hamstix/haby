@@ -419,7 +419,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (baselineGraph.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, owner.Id, baselineGraph, token)) throw new InvalidDataException();
         if (!accepted.Manifest.Spec.Components.Keys.ToHashSet().SetEquals(target.Components.Keys) ||
             target.Components.Any(c => !accepted.Manifest.Spec.Components[c.Key].Bindings.Keys.ToHashSet().SetEquals(c.Value.Bindings.Keys) ||
-                c.Value.Bindings.Any(b => !accepted.Manifest.Spec.Components[c.Key].Bindings[b.Key].Target.Equals(b.Value.Target)))) return null;
+                c.Value.Bindings.Any(b => accepted.Manifest.Spec.Components[c.Key].Bindings[b.Key].Target is not NormalizedLocalResourceTarget before ||
+                    b.Value.Target is not NormalizedLocalResourceTarget after || before.ResourceRef != after.ResourceRef))) return null;
         // Same-revision configuration-only intent is deliberately outside this slice.
         if (baseline.RevisionNumber == inputs.Revision.RevisionNumber.Value && !accepted.Equals(inputs.Configuration)) return null;
         var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);

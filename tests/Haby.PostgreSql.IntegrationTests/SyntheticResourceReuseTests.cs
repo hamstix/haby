@@ -51,6 +51,14 @@ public sealed partial class ExactActionAdmissionTests
                 new(scenario.Plan.Inputs.Environment, imported.ManifestRevisionRef.ApplicationRecordId, ManifestLocalId.Create("jobs")), Key,
                 QueueEvidenceContract.Contract, "receipt", default);
             Assert.Equal("accepted-1", QueueEvidenceContract.Decode(output!)!.Receipt);
+            if (mixed)
+            {
+                var added = await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(
+                    new(commit.Commit.DeploymentId, commit.Commit.Generation, OperationId.Create("extra-create")),
+                    new(scenario.Plan.Inputs.Environment, imported.ManifestRevisionRef.ApplicationRecordId, ManifestLocalId.Create("extra")),
+                    Key, QueueEvidenceContract.Contract, "receipt", default);
+                Assert.NotNull(added); Assert.Equal("accepted-2", QueueEvidenceContract.Decode(added)!.Receipt);
+            }
         }
         Assert.Equal(mixed ? 2 : 1, boundary.Calls); Assert.Equal(mixed ? ["create:accepted-1", "subscribe:accepted-1", "create:accepted-2"] : ["create:accepted-1", "subscribe:accepted-1"], boundary.Effects);
         await using var verify = OutputContext(scenario.Connection);

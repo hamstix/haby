@@ -97,7 +97,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
                     await using var data = new NpgsqlConnection(originalLogin); await data.OpenAsync();
                     Assert.Equal("original-v1", await new NpgsqlCommand("SELECT value FROM app.mixed_probe WHERE id = 160", data).ExecuteScalarAsync());
                 }
+                var noop = await UpdatePlan(client, await ImportUpdate(client, MixedEnvelope(scenario, 4, added)), 4, added: true);
+                var receipt = await client.CommitDesiredStateAsync(new() { ChangeSetId = noop.ChangeSetId, PlanId = noop.PlanId });
+                Assert.Equal(CommitStatus.Committed, receipt.Status); Assert.Equal(4, receipt.Commit.Generation);
                 await using var verify = Context(scenario.Connection);
+                Assert.Equal(4, await verify.DeploymentGenerations.CountAsync());
                 Assert.Equal(6, await verify.DurableOperations.CountAsync()); Assert.Equal(6, await verify.DurableOperationAttempts.CountAsync());
                 Assert.Equal(5, await verify.OperationOutputs.CountAsync());
                 Assert.All(await verify.ResourceManagement.AsNoTracking().ToArrayAsync(), r => Assert.Equal(r.Resource == "extra" ? 2 : 1, r.SourceGeneration));
