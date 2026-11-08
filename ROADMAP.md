@@ -107,6 +107,22 @@ authentication and explicit local issuance are implemented in issue #150 below.
 - [ ] Add Profile discovery and exact Profile revision-history listing; do not change exact assignment/planning references.
 - [ ] Add one-request materialization of all Component documents for one server-selected Application generation, preserving per-document atomicity and idempotency. Keep invocation explicit; batch access issuance and automatic Workload credential distribution are deferred.
 
+### Limited Application updates before P3
+
+After the current P2 runtime/diagnostic, Profile discovery and Application-wide
+materialization slices, implement a bounded sequential update path between
+Application generations before starting Workload implementation. Agree detailed
+contracts in an ADR before coding this path; it is planned, not currently supported.
+
+- [ ] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and execution of the next generation. Separate Plan/Commit/Execute commands are sufficient; deferred apply is not a prerequisite.
+- [ ] Preserve stable identities and confirmed management of unchanged database/login Resources. Reuse the existing database, role and generated credential; observing an external name alone is not proof of Haby ownership.
+- [ ] Admit application-version and supported configuration changes; materialize exact new-generation document revisions while previous documents and grants remain scoped to their original revisions until explicit revocation.
+- [ ] Reject unsupported Resource rename/removal, database-name changes, Provider-instance changes, credential rotation and other unimplemented mutations during planning. Do not silently recreate, adopt, migrate or delete resources.
+- [ ] Prove v1 writes data -> v2 with changed configuration -> same database/role/credential and preserved data, exact new configuration, and continued old-document access. Cover repeat, restart and partial failure without blind external-effect replay.
+
+This checkpoint supplies the update foundation for P3 rollout; it does not claim
+arbitrary Resource evolution, multi-Application orchestration or production readiness.
+
 Exit evidence:
 
 - Two Components use the same application login/SecretRef with different permitted consumer settings.
@@ -128,8 +144,9 @@ Authority: ADR-017/018/034/035/036/037.
 
 ## P3 - Workload lifecycle
 
-Status: planned. Goal: deploy and operate an application using Haby-managed
-configuration and the same durable state/operation model.
+Status: planned. Begin implementation after the limited Application-generation
+update checkpoint in P2 above. Goal: deploy and operate an application using
+Haby-managed configuration and the same durable state/operation model.
 
 - [ ] Agree the first Kubernetes Workload contract, reconciliation ownership, exact inputs and update semantics.
 - [ ] Reconcile explicitly requested Deployment, Service, headless Service and Ingress objects. Resource selection is configurable; no compulsory bundle.
@@ -187,7 +204,8 @@ operating profiles it supports; completing a pilot alone is insufficient.
 - **Security:** implement EnvelopeEncrypted storage/key management under ADR-006, scoped operator/runtime authorization, OIDC/API accounts and rate limits as required by the supported deployment. Plaintext remains a standard explicit storage mode, with documented backup/database-reader exposure.
 - **Public extension SDK:** after several real Providers validate the boundaries, package versioned abstractions, explicit module/custom gRPC registration and Native AOT CLI command composition. Prove an external sample without core edits; keep the CLI API-only. This is separate from P4 standard Provider delivery.
 - **Configuration evolution:** typed parameters, selectors/groups, authorized cross-Application exports, Profile rollout, YAML/text execution and optional publication channels. No silent latest resolution or unrestricted JSON merge.
-- **Scale and availability:** multiple Applications per ChangeSet, deployment updates beyond the first pilot, leases/workers/HA only after their accepted contracts and tests. Sequential single-instance execution remains the current supported profile.
+- **Scale and availability:** multiple Applications per ChangeSet, broader Resource/deployment evolution beyond the limited P2 update checkpoint, and leases/workers/HA require separate accepted contracts and tests. The limited generation-update path is scheduled in P2 before P3; current execution remains sequential and single-instance.
+- **Automated apply (deferred):** provide one `habyctl apply` command/request that performs Plan creation -> freshness verification -> desired-state Commit on the server for an explicit ChangeSet. Preserve separate immutable Plan and Commit records, exact planning inputs and atomic commit/precondition checks; keep the reviewable separate commands. The CLI must not orchestrate these steps locally. Execute remains an explicit separate operation; this item does not authorize automatic provisioning, materialization, access issuance or Workload rollout. Define retry/response-loss semantics before implementation.
 - **Public API:** stable versioned REST/gRPC contracts and client/compatibility policy follow the mutable internal alpha operator surface.
 - **UI:** MudBlazor administration after the useful CLI/API path; navigation Folders follow stable UI views. Folders never imply identity, configuration or permission inheritance.
 - **Distribution:** versioned images/packages, installation and empty-environment rehearsals, supported-version matrix, vulnerability handling and documented upgrade/reset boundaries.
