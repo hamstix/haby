@@ -60,7 +60,7 @@ historical warnings remain unchanged; corrections affect new validation/import.
 
 ### Explicit materialization of an Application
 
-The future batch command selects an Application by operator names and optional
+The explicit batch command selects an Application by operator names and optional
 explicit generation, with ADR-041's exact internal identities. Resolve the target
 generation once on the server, then enumerate the exact Component/document set
 from that generation's frozen layout. Send one request; do not implement a CLI
@@ -102,3 +102,27 @@ the existing create/insert/read probe from a full EF migration rehearsal. Do not
 reset catalogs, rewrite historical warnings or expose credentials to close an
 evidence gap. New diagnostics/presentation remain current alpha contracts under
 ADR-033; Provider-neutral persistence and generated serialization remain mandatory.
+
+## Application materialization implementation (#156)
+
+`habyctl configuration materialize <application-id> --all` sends one authenticated
+generated operator RPC, with existing Environment/context selection and optional
+positive `--generation`. Single-document flags are mutually exclusive with `--all`.
+The Provider-neutral Application use case selects one exact eligible frozen inventory,
+orders ComponentId/DocumentId ordinally, preflights count/response metadata and then
+materializes sequentially through the existing exact per-document port.
+
+The first failure stops processing; successful revisions and original audit survive,
+and the rest of the complete inventory is NotAttempted. An eligible empty inventory
+succeeds without writes. The top-level status distinguishes complete success from
+failure. There is no batch transaction or durable journal. Cancellation/response loss
+may hide accepted documents; only explicit same-generation retry is an exact retry.
+Concurrent calls retain the existing immutable per-document convergence rules.
+
+The finite limit is 512 items, with a deterministic pre-write reservation of 16 KiB
+plus 12 KiB per item within the existing scoped 8 MiB budgets. Bounded metadata and
+complete CLI validation prevent truncated/foreign/malformed ordinary output. See
+[runbook 146](../development/146-configuration-materialization-preview.md#explicit-application-materialization)
+for wire outcomes, metadata budget proof, retry syntax and test evidence. No catalog
+migration/reset or generation-update admission is introduced. Automatic materialization,
+batch grants, secret resolution and Workload integration remain deferred.

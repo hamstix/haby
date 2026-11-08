@@ -105,7 +105,7 @@ authentication and explicit local issuance are implemented in issue #150 below.
 - [x] Accept ordered rehearsal follow-ups and explicit Application-wide materialization with per-document atomicity under [ADR-044](docs/adr/0044-p2-rehearsal-follow-ups-and-application-materialization.md).
 - [x] Add safe receiving-client setting assertions and correct misleading supported-graph/Resource-use diagnostics: [issue #152](https://github.com/hamstix/haby/issues/152), merged PR #153. The earlier manual runtime assertion remains unperformed; subsequent implementation/test evidence is separate.
 - [x] Add Profile discovery and exact Profile revision-history listing; preserve exact assignment/planning references: [issue #154](https://github.com/hamstix/haby/issues/154), [operator runbook](docs/development/134-profile-operator-path.md).
-- [ ] Add one-request materialization of all Component documents for one server-selected Application generation, preserving per-document atomicity and idempotency. Keep invocation explicit; batch access issuance and automatic Workload credential distribution are deferred.
+- [x] Add one-request materialization of all Component documents for one server-selected Application generation, preserving per-document atomicity, idempotency and a truthful committed prefix on failure: [issue #156 operator path and bounds](docs/development/146-configuration-materialization-preview.md#explicit-application-materialization). Invocation remains explicit; batch access issuance and automatic Workload credential distribution are deferred.
 
 ### Limited Application updates before P3
 

@@ -9,7 +9,7 @@ public sealed record ConfigurationDocumentTarget(ApplicationDeploymentId Deploym
 public sealed record ConfigurationDocumentSelection(EnvironmentId Environment, ApplicationId Application,
     ManifestLocalId Component, ManifestLocalId Document, DeploymentGeneration? Generation);
 
-public enum ConfigurationDocumentStatus { Created, Existing, Found, NotFound, InvalidRequest, NotApplied, InputUnavailable, IntegrityConflict, LimitExceeded }
+public enum ConfigurationDocumentStatus { Created, Existing, Found, NotFound, InvalidRequest, NotApplied, InputUnavailable, IntegrityConflict, LimitExceeded, InputCorrupt, StorageUnavailable, NotAttempted }
 
 public sealed record ConfigurationDocumentMetadata(ConfigurationDocumentRevisionId Id, ConfigurationDocumentTarget Target,
     EnvironmentId Environment, ApplicationId Application, ManifestRevisionRef Revision, DeploymentPlanId Plan,

@@ -26,6 +26,7 @@ internal interface IRegistryClient : IDisposable
     Task<ConfigurationAccessReply> CreateConfigurationAccessAsync(CreateConfigurationAccessRequest request, CancellationToken cancellationToken);
     Task<ConfigurationAccessReply> GetConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken);
     Task<ConfigurationAccessReply> RevokeConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken);
+    Task<ConfigurationApplicationReply> MaterializeApplicationConfigurationAsync(ConfigurationApplicationRequest request, CancellationToken token);
     Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
     Task<ConfigurationDocumentReply> GetConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
     Task<ConfigurationDocumentReply> PreviewConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken);
@@ -106,6 +107,8 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? confi
         await _client.RevokeConfigurationAccessAsync(request, headers, cancellationToken: cancellationToken);
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
     private readonly ManifestOperator.ManifestOperatorClient _configurationClient = new(configurationChannel ?? channel);
+    public async Task<ConfigurationApplicationReply> MaterializeApplicationConfigurationAsync(ConfigurationApplicationRequest request, CancellationToken token) =>
+        await _configurationClient.MaterializeApplicationConfigurationAsync(request, headers, cancellationToken: token);
     public async Task<ConfigurationDocumentReply> MaterializeConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken) =>
         await _configurationClient.MaterializeConfigurationAsync(request, headers, cancellationToken: cancellationToken);
     public async Task<ConfigurationDocumentReply> GetConfigurationAsync(ConfigurationDocumentRequest request, CancellationToken cancellationToken) =>

@@ -49,23 +49,7 @@ public sealed partial class ManifestOperatorService
             };
             if (result.Revision is { } revision)
             {
-                var m = revision.Metadata;
-                reply.Artifact = new()
-                {
-                    RevisionId = m.Id.ToString(),
-                    Target = DocumentIdentity(m.Target),
-                    Environment = m.Environment.Value,
-                    ApplicationId = m.Application.Value,
-                    SourceRevision = Reference(m.Revision),
-                    PlanId = m.Plan.ToString(),
-                    FileName = m.FileName,
-                    Format = m.Format,
-                    Serializer = m.Serializer,
-                    Fingerprint = m.Fingerprint,
-                    FrozenInputFingerprint = m.FrozenInputFingerprint,
-                    TechnicalActorId = m.Actor,
-                    CreatedAtUtc = m.CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
-                };
+                reply.Artifact = DocumentMetadata(revision.Metadata);
                 if (preview) reply.PreviewJson = ByteString.CopyFromUtf8(ConfigurationJson.Preview(revision.Tree).Json);
             }
             if (reply.CalculateSize() > 8 * 1024 * 1024) throw new ConfigurationDocumentLimitException();
@@ -77,6 +61,72 @@ public sealed partial class ManifestOperatorService
         reply.Artifact = null; reply.PreviewJson = ByteString.Empty;
         return reply;
     }
+    private static Haby.Operator.Contracts.ConfigurationDocumentMetadata DocumentMetadata(Haby.Application.ConfigurationDocumentMetadata m) => new()
+    {
+        RevisionId = m.Id.ToString(),
+        Target = DocumentIdentity(m.Target),
+        Environment = m.Environment.Value,
+        ApplicationId = m.Application.Value,
+        SourceRevision = Reference(m.Revision),
+        PlanId = m.Plan.ToString(),
+        FileName = m.FileName,
+        Format = m.Format,
+        Serializer = m.Serializer,
+        Fingerprint = m.Fingerprint,
+        FrozenInputFingerprint = m.FrozenInputFingerprint,
+        TechnicalActorId = m.Actor,
+        CreatedAtUtc = m.CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+    };
+
+    public override async Task<ConfigurationApplicationReply> MaterializeApplicationConfiguration(ConfigurationApplicationRequest request, ServerCallContext context)
+    {
+        ConfigurationApplicationSelection selection;
+        try
+        {
+            selection = new(EnvironmentId.Create(request.Environment), ApplicationId.Create(request.ApplicationId),
+                request.HasGeneration ? DeploymentGeneration.Create(request.Generation) : null);
+        }
+        catch (ArgumentException) { return new() { Selector = request.Clone(), Status = Haby.Operator.Contracts.ConfigurationApplicationStatus.InvalidRequest }; }
+        var result = await applicationConfiguration.ExecuteAsync(selection, Actor, context.CancellationToken);
+        var reply = new ConfigurationApplicationReply
+        {
+            Selector = request.Clone(),
+            Status = result.Status switch
+            {
+                Haby.Application.ConfigurationApplicationStatus.Succeeded => Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded,
+                Haby.Application.ConfigurationApplicationStatus.Failed => Haby.Operator.Contracts.ConfigurationApplicationStatus.Failed,
+                Haby.Application.ConfigurationApplicationStatus.InvalidRequest => Haby.Operator.Contracts.ConfigurationApplicationStatus.InvalidRequest,
+                Haby.Application.ConfigurationApplicationStatus.NotFound => Haby.Operator.Contracts.ConfigurationApplicationStatus.NotFound,
+                Haby.Application.ConfigurationApplicationStatus.NotApplied => Haby.Operator.Contracts.ConfigurationApplicationStatus.NotApplied,
+                Haby.Application.ConfigurationApplicationStatus.InputCorrupt => Haby.Operator.Contracts.ConfigurationApplicationStatus.InputCorrupt,
+                Haby.Application.ConfigurationApplicationStatus.StorageUnavailable => Haby.Operator.Contracts.ConfigurationApplicationStatus.StorageUnavailable,
+                _ => Haby.Operator.Contracts.ConfigurationApplicationStatus.LimitExceeded
+            },
+            Target = result.Target is { } t ? new() { DeploymentId = t.Deployment.ToString(), Generation = t.Generation.Value } : null,
+            SelectedCount = result.Items.Count
+        };
+        foreach (var item in result.Items)
+            reply.Items.Add(new Haby.Operator.Contracts.ConfigurationApplicationItem { Target = DocumentIdentity(item.Target), Status = ItemStatus(item.Status), Artifact = item.Artifact is { } m ? DocumentMetadata(m) : null });
+        if (reply.CalculateSize() > ConfigurationApplicationLimits.MaxResponseBytes)
+            throw new RpcException(new(Grpc.Core.StatusCode.Internal, "Configuration response unavailable; accepted documents may exist. Inspect the exact generation."));
+        return reply;
+    }
+
+    private static Status ItemStatus(Haby.Application.ConfigurationDocumentStatus status) => status switch
+    {
+        Haby.Application.ConfigurationDocumentStatus.Created => Status.Created,
+        Haby.Application.ConfigurationDocumentStatus.Existing => Status.Existing,
+        Haby.Application.ConfigurationDocumentStatus.NotFound => Status.NotFound,
+        Haby.Application.ConfigurationDocumentStatus.InvalidRequest => Status.InvalidRequest,
+        Haby.Application.ConfigurationDocumentStatus.NotApplied => Status.NotApplied,
+        Haby.Application.ConfigurationDocumentStatus.InputUnavailable => Status.InputUnavailable,
+        Haby.Application.ConfigurationDocumentStatus.IntegrityConflict => Status.IntegrityConflict,
+        Haby.Application.ConfigurationDocumentStatus.LimitExceeded => Status.LimitExceeded,
+        Haby.Application.ConfigurationDocumentStatus.StorageUnavailable => Status.StorageUnavailable,
+        Haby.Application.ConfigurationDocumentStatus.InputCorrupt => Status.InputCorrupt,
+        _ => Status.NotAttempted
+    };
+
     private static ConfigurationDocumentIdentity DocumentIdentity(ConfigurationDocumentTarget target) => new()
     { DeploymentId = target.Deployment.ToString(), Generation = target.Generation.Value, ComponentId = target.Component.Value, DocumentId = target.Document.Value };
 }
