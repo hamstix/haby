@@ -23,7 +23,7 @@ public sealed partial class ManifestOperatorService
                     throw new ArgumentException();
                 expiry = parsed;
             }
-            var created = await configurationAccess.CreateAsync(selection, OperatorHostApplication.TechnicalActorId, expiry, context.CancellationToken);
+            var created = await configurationAccess.CreateAsync(selection, Actor, expiry, context.CancellationToken);
             return created is null ? new() { Status = AccessStatus.NotFound } : new() { Status = AccessStatus.Created, Grant = AccessMetadata(created.Grant), Credential = created.Credential };
         }
         catch (ArgumentException) { return new() { Status = AccessStatus.InvalidRequest }; }
@@ -37,7 +37,7 @@ public sealed partial class ManifestOperatorService
         if (!Guid.TryParseExact(request.GrantId, "D", out var id) || id == Guid.Empty) return new() { Status = AccessStatus.InvalidRequest };
         try
         {
-            var grant = revoke ? await configurationAccess.RevokeAsync(id, OperatorHostApplication.TechnicalActorId, token) : await configurationAccess.GetAsync(id, token);
+            var grant = revoke ? await configurationAccess.RevokeAsync(id, Actor, token) : await configurationAccess.GetAsync(id, token);
             return grant is null ? new() { Status = AccessStatus.NotFound } : new() { Status = revoke ? AccessStatus.Revoked : AccessStatus.Found, Grant = AccessMetadata(grant) };
         }
         catch (OperationCanceledException) { throw; }

@@ -10,7 +10,7 @@ public sealed partial class ManifestOperatorService
         ProviderReplyOf(await providerAdministration.ApplyAsync(request.Declaration.Memory,
             request.HasEnvironment ? request.Environment : null, request.ConfirmLogicalIdentity,
             request.HasExpectedPreviousRevision ? request.ExpectedPreviousRevision : null,
-            OperatorHostApplication.TechnicalActorId, context.CancellationToken));
+            Actor, context.CancellationToken));
 
     public override async Task<ProviderReply> GetProvider(GetProviderRequest request, ServerCallContext context) =>
         ProviderReplyOf(await providerAdministration.GetAsync(request.Environment, request.Name,

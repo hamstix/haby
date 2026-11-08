@@ -12,8 +12,12 @@ public sealed partial class ManifestOperatorService(ManifestContractCatalog cata
     IDurableOperationExecutor executor, DurableGenerationRunner generationRunner, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
     ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess,
     ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions,
-    IConfigurationDocumentStore configurationDocuments, IConfigurationAccessStore configurationAccess) : ManifestOperator.ManifestOperatorBase
+    IConfigurationDocumentStore configurationDocuments, IConfigurationAccessStore configurationAccess,
+    IOperatorAccessStore operatorAccess, IHttpContextAccessor httpContext) : ManifestOperator.ManifestOperatorBase
 {
+    private string Actor => httpContext.HttpContext?.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        ?? throw new InvalidOperationException("Authenticated operator identity is required.");
+
     public override Task<ValidateReply> Validate(EnvelopeRequest request, ServerCallContext context)
     {
         context.CancellationToken.ThrowIfCancellationRequested();
@@ -39,7 +43,7 @@ public sealed partial class ManifestOperatorService(ManifestContractCatalog cata
 
     public override async Task<ImportReply> Import(EnvelopeRequest request, ServerCallContext context)
     {
-        var result = await importer.ExecuteAsync(request.OriginalEnvelope.Memory, OperatorHostApplication.TechnicalActorId,
+        var result = await importer.ExecuteAsync(request.OriginalEnvelope.Memory, Actor,
             context.CancellationToken);
         return result switch
         {

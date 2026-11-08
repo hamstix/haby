@@ -25,7 +25,7 @@ internal sealed record CliGetRevisionData(CliRevision? Revision, CliReference? R
 internal sealed record CliPreviewData(bool Hypothetical, bool CanApply, string? EnvironmentId,
     string? ResourceId, string? DatabaseName, string? ProviderAlias, string? InstanceId,
     long? ConfigurationRevision, string? ImplementationId, string? Alias);
-internal sealed record CliConfigInstance(string Name, string Endpoint);
+internal sealed record CliConfigInstance(string Name, string Endpoint, string? Token = null, string? TokenFile = null, bool AllowInsecureHttp = false);
 internal sealed record CliConfigContext(string Name, string Instance, string EnvironmentId);
 internal sealed record CliConfigData(int FormatVersion, [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? CurrentContext,
     CliConfigInstance[] Instances, CliConfigContext[] Contexts);
@@ -169,7 +169,7 @@ internal sealed partial class CliJsonPresenter(TextWriter output)
     internal void PrintConfiguration(CliConfiguration config, string? current) =>
         Write("config view", "ok", new CliConfigData(1, current,
             [.. config.Instances.OrderBy(item => item.Key, StringComparer.Ordinal)
-                .Select(item => new CliConfigInstance(item.Key, item.Value.Endpoint))],
+                .Select(item => new CliConfigInstance(item.Key, item.Value.Endpoint, item.Value.Token is null ? null : "[redacted]", item.Value.TokenFile is null ? null : "[redacted]", item.Value.AllowInsecureHttp))],
             [.. config.Contexts.OrderBy(item => item.Key, StringComparer.Ordinal)
                 .Select(item => new CliConfigContext(item.Key, item.Value.Instance, item.Value.EnvironmentId))]),
             NoDiagnostics, CliOutputJsonContext.Default.CliEnvelopeCliConfigData);

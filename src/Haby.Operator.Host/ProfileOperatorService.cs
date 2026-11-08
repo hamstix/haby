@@ -19,7 +19,7 @@ public sealed partial class ManifestOperatorService
 
     public override async Task<ProfileReply> ImportProfile(ProfilePayloadRequest request, ServerCallContext context)
     {
-        var result = await SafeProfileOperation(() => profileImporter.ExecuteAsync(request.Payload.Memory, OperatorHostApplication.TechnicalActorId,
+        var result = await SafeProfileOperation(() => profileImporter.ExecuteAsync(request.Payload.Memory, Actor,
             context.CancellationToken), context.CancellationToken);
         return result switch
         {

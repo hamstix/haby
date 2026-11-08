@@ -23,9 +23,9 @@ public sealed partial class OperatorHostIntegrationTests
         var target = new NoActionTarget();
         await using var host = OperatorHostApplication.Build(Arguments(scenario.Connection, scenario.CertificatePath),
             services => services.AddSingleton<Haby.PostgreSql.IPostgreSqlDatabaseCreateTarget>(target));
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var imported = await client.ImportAsync(new EnvelopeRequest { OriginalEnvelope = ByteString.CopyFrom(Envelope("unsupported-saved-plan")) });
         var change = await client.CreateChangeSetAsync(new CreateChangeSetRequest
         {
@@ -83,9 +83,9 @@ public sealed partial class OperatorHostIntegrationTests
         var target = new NoActionTarget();
         await using var host = OperatorHostApplication.Build(Arguments(scenario.Connection, scenario.CertificatePath),
             services => services.AddSingleton<Haby.PostgreSql.IPostgreSqlDatabaseCreateTarget>(target));
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var current = await CommitExecutionAsync(client, scenario.Database);
         Assert.Equal(OperationStatus.Found, (await client.GetOperationAsync(current)).Status);
         using var bytes = new MemoryStream();

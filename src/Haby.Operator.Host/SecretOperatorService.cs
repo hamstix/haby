@@ -16,7 +16,7 @@ public sealed partial class ManifestOperatorService
         {
             using var material = new SecretMaterial(bytes);
             return SecretReplyOf(await secretAdministration.CreateAsync(request.Environment, request.Name, requestId,
-                material, OperatorHostApplication.TechnicalActorId, context.CancellationToken));
+                material, Actor, context.CancellationToken));
         }
         finally { Array.Clear(bytes); }
     }

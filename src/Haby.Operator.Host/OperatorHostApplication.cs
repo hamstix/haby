@@ -72,6 +72,15 @@ public static class OperatorHostApplication
         }));
         builder.Services.AddGrpc(options => { options.MaxReceiveMessageSize = MaxReceiveBytes; options.MaxSendMessageSize = 8 * 1024 * 1024; });
         builder.Services.AddGrpcReflection();
+        var reflectionEnabled = true;
+        if (builder.Configuration["Haby:Reflection:Enabled"] is { } reflectionText && !bool.TryParse(reflectionText, out reflectionEnabled))
+            throw new InvalidOperationException("Invalid configuration key: Haby:Reflection:Enabled");
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddSingleton<IOperatorAccessStore, PostgreSqlOperatorAccessStore>();
+        builder.Services.AddAuthentication(OperatorAuthentication.SchemeName)
+            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, OperatorAuthentication>(OperatorAuthentication.SchemeName, _ => { });
+        builder.Services.AddAuthorization(options => options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+            .AddAuthenticationSchemes(OperatorAuthentication.SchemeName).RequireAuthenticatedUser().Build());
         builder.Services.AddSingleton(PostgreSqlConnectionRendering.CreateCatalog());
         builder.Services.AddSingleton(PostgreSqlConnectionRendering.FormatterCatalog());
         builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [],
@@ -132,9 +141,12 @@ public static class OperatorHostApplication
         _ = app.Services.GetRequiredService<IProviderConfigurationStore>();
         _ = app.Services.GetRequiredService<ProviderPreflightRegistry>();
         _ = app.Services.GetRequiredService<DurableActionRegistry>();
+        app.UseRouting();
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.MapGrpcService<ManifestOperatorService>();
-        app.MapGrpcService<ConfigurationDeliveryService>();
-        app.MapGrpcReflectionService();
+        app.MapGrpcService<ConfigurationDeliveryService>().AllowAnonymous();
+        if (reflectionEnabled) app.MapGrpcReflectionService();
 
         return app;
     }

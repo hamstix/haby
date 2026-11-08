@@ -21,9 +21,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var scenario = await Prepare(full: true, render: true);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
             "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var node = PostgreSqlPairPlanningTests.Example();
         node["manifest"]!["metadata"]!["id"] = "render-operator";
         foreach (var component in new[] { "api", "worker" })
@@ -94,7 +94,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
         if (binary is null) return;
         var config = Path.Combine(Path.GetTempPath(), "haby-renderer-" + Guid.NewGuid().ToString("N") + ".yaml");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
+        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
         try
         {
             foreach (var format in new[] { "text", "json" })

@@ -4,6 +4,10 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc CreateOperatorAccess(CreateOperatorAccessRequest) returns (OperatorAccessReply);
+  rpc GetOperatorAccess(OperatorAccessRequest) returns (OperatorAccessReply);
+  rpc ListOperatorAccess(ListOperatorAccessRequest) returns (ListOperatorAccessReply);
+  rpc RevokeOperatorAccess(OperatorAccessRequest) returns (OperatorAccessReply);
   rpc CreateConfigurationAccess(CreateConfigurationAccessRequest) returns (ConfigurationAccessReply);
   rpc GetConfigurationAccess(ConfigurationAccessRequest) returns (ConfigurationAccessReply);
   rpc RevokeConfigurationAccess(ConfigurationAccessRequest) returns (ConfigurationAccessReply);
@@ -782,3 +786,20 @@ message ConfigurationDocumentReply {
   // Bounded object-valued {document, redactedPaths}; only for successful preview.
   bytes preview_json = 5;
 }
+
+// Operator-admin only. No request-supplied audit identity.
+message CreateOperatorAccessRequest { optional string display_name = 1; optional string expires_at_utc = 2; }
+message OperatorAccessRequest { string grant_id = 1; }
+message ListOperatorAccessRequest { int32 page_size = 1; optional string after_grant_id = 2; }
+message OperatorAccessMetadata {
+  string grant_id = 1;
+  optional string display_name = 2;
+  string actor = 3;
+  string created_at_utc = 4;
+  optional string expires_at_utc = 5;
+  optional string revoked_by = 6;
+  optional string revoked_at_utc = 7;
+}
+// Credential is returned only by successful creation. Never log this response.
+message OperatorAccessReply { OperatorAccessMetadata grant = 1; optional string credential = 2; }
+message ListOperatorAccessReply { repeated OperatorAccessMetadata grants = 1; optional string next_after_grant_id = 2; }

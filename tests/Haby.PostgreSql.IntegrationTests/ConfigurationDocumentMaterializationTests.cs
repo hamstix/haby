@@ -45,9 +45,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
             services.AddSingleton<ComposeConfigurationDocument>(p => new(PostgreSqlConnectionRendering.CreateCatalog(), PostgreSqlConnectionRendering.FormatterCatalog(),
                 barrier.Wrap(p.GetRequiredService<IConfigurationOutputEvidence>())))))
         {
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var request = DocumentRequest(scenario);
             Assert.Equal(Status.NotApplied, (await client.MaterializeConfigurationAsync(request)).Status);
             Assert.Equal(Status.NotFound, (await client.PreviewConfigurationAsync(DocumentRequest(scenario, exact: true))).Status);
@@ -105,9 +105,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 services.AddSingleton(ConfigurationRenderingCatalog.Empty).AddSingleton(new ConfigurationFormatterCatalog([], []))
                     .AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(new RenderingReadTrap())));
             await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             foreach (var original in new[] { api, worker })
             {
                 var request = original.Selector.Clone(); request.Generation = 1;
@@ -178,7 +178,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
         if (binary is null) return;
         var config = Path.Combine(Path.GetTempPath(), "haby-document-" + Guid.NewGuid().ToString("N") + ".yaml");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: wrong\ninstances:\n  local:\n    endpoint: {endpoint}\ncontexts:\n  wrong:\n    instance: local\n    environmentId: absent\n  right:\n    instance: local\n    environmentId: pilot\n");
+        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: wrong\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  wrong:\n    instance: local\n    environmentId: absent\n  right:\n    instance: local\n    environmentId: pilot\n");
         try
         {
             foreach (var format in new[] { "text", "json" })

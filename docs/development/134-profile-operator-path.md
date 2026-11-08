@@ -1,5 +1,10 @@
 # Profile operator administration
 
+For the current Host, first complete [operator credential setup](150-operator-access-tokens.md).
+All administrative calls now require operator-admin; older rehearsal evidence below
+records its original slice. Historical audit is preserved; new audit uses the verified
+grant identity.
+
 Issue #134 exposes installation-scoped Configuration Profile declaration validation,
 immutable import and exact revision reads through the existing internal alpha
 gRPC Host and Native AOT `habyctl`. These are Configuration Profiles, separate from

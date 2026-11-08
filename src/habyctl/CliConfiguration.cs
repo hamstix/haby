@@ -5,7 +5,10 @@ using YamlDotNet.RepresentationModel;
 
 namespace Haby.Cli;
 
-internal sealed record CliInstance(string Endpoint);
+internal sealed record CliInstance(string Endpoint, string? Token = null, string? TokenFile = null, bool AllowInsecureHttp = false)
+{
+    public override string ToString() => "[Registry instance]";
+}
 internal sealed record CliNamedContext(string Instance, string EnvironmentId);
 internal sealed record CliConfiguration(
     string? CurrentContext,
@@ -102,10 +105,15 @@ internal sealed class CliConfigurationService(IConfigEnvironment environment)
             {
                 Name(name);
                 var values = Mapping(node, 2);
-                Fields(values, "endpoint");
+                Fields(values, "endpoint", "token", "tokenFile", "allowInsecureHttp");
                 var endpoint = Scalar(Required(values, "endpoint"), 3);
-                if (CliApplication.ParseEndpoint(endpoint) is null) throw Invalid();
-                instances.Add(name, new CliInstance(endpoint));
+                var allowHttp = values.TryGetValue("allowInsecureHttp", out var allowNode) ? Scalar(allowNode, 3, true) switch
+                { "true" => true, "false" => false, _ => throw Invalid() } : false;
+                if (CliApplication.ParseEndpoint(endpoint, allowHttp) is null) throw Invalid();
+                var inline = values.TryGetValue("token", out var tokenNode) ? Scalar(tokenNode, 3) : null;
+                var file = values.TryGetValue("tokenFile", out var fileNode) ? Scalar(fileNode, 3) : null;
+                if (inline is not null && file is not null || inline is not null && !CliOperatorCredential.Valid(inline) || file?.Any(char.IsControl) == true) throw Invalid();
+                instances.Add(name, new CliInstance(endpoint, inline, file, allowHttp));
             }
             var contexts = new SortedDictionary<string, CliNamedContext>(StringComparer.Ordinal);
             foreach (var (name, node) in Mapping(Required(root, "contexts"), 1))

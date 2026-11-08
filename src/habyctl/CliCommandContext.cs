@@ -85,18 +85,22 @@ internal sealed partial class CliCommandContext(
     {
         Uri address;
         string environmentId = "";
+        string? credential = null;
         try
         {
             var selected = options();
             var config = await configuration.LoadAsync(selected.File, cancellationToken);
             var contextName = selected.Context ?? config.CurrentContext;
             string? endpoint;
+            var allowHttp = false;
             if (contextName is not null)
             {
                 if (!config.Contexts.TryGetValue(contextName, out var context) ||
                     !config.Instances.TryGetValue(context.Instance, out var instance))
                     throw new InvalidDataException("Invalid CLI configuration.");
                 endpoint = instance.Endpoint;
+                allowHttp = instance.AllowInsecureHttp;
+                credential = await CliOperatorCredential.ResolveAsync(instance, cancellationToken);
                 environmentId = context.EnvironmentId;
             }
             else
@@ -108,10 +112,10 @@ internal sealed partial class CliCommandContext(
                 }
                 endpoint = endpointSource.GetAddress();
             }
-            var selectedAddress = CliApplication.ParseEndpoint(endpoint);
+            var selectedAddress = CliApplication.ParseEndpoint(endpoint, allowHttp);
             if (selectedAddress is null)
             {
-                error.WriteLine("Select a loopback HTTP or HTTPS registry endpoint.");
+                error.WriteLine("Select an HTTPS registry endpoint, loopback HTTP or an explicitly isolated HTTP instance.");
                 return CliApplication.UsageError;
             }
             address = selectedAddress;
@@ -130,7 +134,7 @@ internal sealed partial class CliCommandContext(
         try
         {
             using var client = clientFactory.Create(address,
-                CliApplication.SkipTlsCertificateValidation(endpointSource.GetSkipTlsValidation()));
+                CliApplication.SkipTlsCertificateValidation(endpointSource.GetSkipTlsValidation()), credential);
             return await action(client, environmentId, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -171,7 +175,7 @@ internal sealed partial class CliCommandContext(
             output.WriteLine($"currentContext: {current ?? "(none)"}");
             output.WriteLine("instances:");
             foreach (var (name, instance) in config.Instances)
-                output.WriteLine($"  {name}: {instance.Endpoint}");
+                output.WriteLine($"  {name}: {instance.Endpoint}; token={(instance.Token is null ? "(none)" : "[redacted]")}; tokenFile={(instance.TokenFile is null ? "(none)" : "[redacted]")}; allowInsecureHttp={instance.AllowInsecureHttp}");
             output.WriteLine("contexts:");
             foreach (var (name, context) in config.Contexts)
                 output.WriteLine($"  {name}: instance={context.Instance}, environmentId={context.EnvironmentId}");

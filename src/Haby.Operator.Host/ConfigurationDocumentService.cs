@@ -34,7 +34,7 @@ public sealed partial class ManifestOperatorService
             var selected = await configurationDocuments.SelectAsync(selection, token);
             if (selected.Target is { } target) reply.Target = DocumentIdentity(target);
             var result = selected.Status == Haby.Application.ConfigurationDocumentStatus.Found && selected.Target is { } exact
-                ? materialize ? await configurationDocuments.MaterializeAsync(exact, OperatorHostApplication.TechnicalActorId, token) : await configurationDocuments.ReadAsync(exact, token)
+                ? materialize ? await configurationDocuments.MaterializeAsync(exact, Actor, token) : await configurationDocuments.ReadAsync(exact, token)
                 : selected;
             reply.Status = result.Status switch
             {

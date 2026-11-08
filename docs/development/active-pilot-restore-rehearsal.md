@@ -1,10 +1,15 @@
 # Single-instance active-pilot catalog restore rehearsal
 
+For the current Host, first complete [operator credential setup](150-operator-access-tokens.md).
+All administrative calls now require operator-admin; older rehearsal evidence below
+records its original slice. Historical audit is preserved; new audit uses the verified
+grant identity.
+
 This extends the [shadow rehearsal](shadow-pilot-rehearsal.md) through durable
 execution and manual recovery (ADR-006/023/024/025/026). Use only disposable
 PostgreSQL and isolated test targets. Keep the production Host's TLS and IPv4
-loopback boundary. The alpha has no operator authentication; its recorded
-technical actor identifies the allowed Host, not an authenticated human.
+loopback boundary. The original rehearsal used a shared technical actor; current requests use the
+server-verified operator grant identity under ADR-043.
 This checkpoint does not complete the usable application-configuration pilot:
 role/credential generation, configuration delivery and broader orchestration
 remain separate work.

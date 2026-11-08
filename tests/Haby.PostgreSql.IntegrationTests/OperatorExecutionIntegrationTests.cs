@@ -37,7 +37,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await StartExecutionLoggedHost(scenario.Connection, scenario.CertificatePath, faults))
         {
             using var channel = Channel(host, scenario.Certificate);
-            try { request = await CommitExecutionAsync(new ManifestOperator.ManifestOperatorClient(channel), scenario.Database); }
+            try { request = await CommitExecutionAsync(OperatorTestCredentials.Client(channel), scenario.Database); }
             catch (Grpc.Core.RpcException)
             {
                 // Preserve diagnostic categories and code location, never exception messages/values.
@@ -56,7 +56,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath))
         {
             using var channel = Channel(restarted, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var operation = await client.GetOperationAsync(request);
             Assert.Equal(wireNumber, (int)operation.Operation.Reason);
             Assert.Equal(wireNumber, (int)OperationReply.Parser.ParseFrom(operation.ToByteArray()).Operation.Reason);
@@ -94,7 +94,7 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.IsType<ExactDurableOperationExecutor>(executor);
             Assert.IsType<PostgreSqlDatabaseCreateTarget>(host.Services.GetRequiredService<IPostgreSqlDatabaseCreateTarget>());
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var request = await CommitExecutionAsync(client, scenario.Database);
             var pending = await client.GetOperationAsync(request);
             Assert.Equal(OperationState.Pending, pending.Operation.State);
@@ -119,7 +119,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath))
         {
             using var channel = Channel(restarted, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(original, await client.GetOperationAsync(original.Operation.Key));
             Assert.Equal(OperationStatus.Succeeded, (await client.ExecuteOperationAsync(original.Operation.Key)).Status);
             Assert.Equal(original, await client.GetOperationAsync(original.Operation.Key));
@@ -133,7 +133,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using var scenario = await ExecutionScenarioAsync();
         await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var request = await CommitExecutionAsync(client, scenario.Database);
         await ExecutionSql(scenario.Connection, $"CREATE DATABASE \"{scenario.Database}\"");
         var result = await client.ExecuteOperationAsync(request);
@@ -156,7 +156,7 @@ public sealed partial class OperatorHostIntegrationTests
         using var logs = new ExecutionLogs();
         await using var host = await StartExecutionLoggedHost(restricted, scenario.CertificatePath, logs);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var request = await CommitExecutionAsync(client, scenario.Database);
         var result = await client.ExecuteOperationAsync(request);
         Assert.Equal(OperationStatus.RetryableFailure, result.Status);
@@ -182,7 +182,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using var scenario = await ExecutionScenarioAsync();
         await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var channel = Channel(host, scenario.Certificate);
-        var client = new ManifestOperator.ManifestOperatorClient(channel);
+        var client = OperatorTestCredentials.Client(channel);
         var request = await CommitExecutionAsync(client, scenario.Database);
         var invalid = new List<OperationRequest> { new() };
         foreach (var id in new[] { "", "bad", Guid.NewGuid().ToString(), Guid.CreateVersion7().ToString().ToUpperInvariant() })
@@ -225,7 +225,7 @@ public sealed partial class OperatorHostIntegrationTests
                 BeforeSuccess = _ => throw new IOException("injected process crash")
             });
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             request = await CommitExecutionAsync(client, scenario.Database);
             var error = await Assert.ThrowsAsync<RpcException>(async () => await client.ExecuteOperationAsync(request));
             Assert.Equal(StatusCode.Internal, error.StatusCode);
@@ -235,7 +235,7 @@ public sealed partial class OperatorHostIntegrationTests
         {
             await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
             using var channel = Channel(host, scenario.Certificate);
-            request = await CommitExecutionAsync(new ManifestOperator.ManifestOperatorClient(channel), scenario.Database);
+            request = await CommitExecutionAsync(OperatorTestCredentials.Client(channel), scenario.Database);
             // Trusted journal API simulates death after the committed marker before SQL.
             var key = ExecutionKey(request);
             var journal = host.Services.GetRequiredService<IDurableOperationJournal>();
@@ -248,7 +248,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath))
         {
             using var channel = Channel(restarted, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var dispatching = await client.GetOperationAsync(request);
             Assert.Equal(OperationState.Dispatching, dispatching.Operation.State);
             Assert.Equal(OperationAttemptOutcome.Unspecified, Assert.Single(dispatching.Attempts).Outcome);
@@ -285,7 +285,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await StartExecutionFaultHost(scenario, hooks))
         {
             using var channel = Channel(host, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             request = await CommitExecutionAsync(client, scenario.Database);
             using var cancellation = new CancellationTokenSource();
             using var operationCall = generationExecution ? null : client.ExecuteOperationAsync(request, cancellationToken: cancellation.Token);
@@ -304,7 +304,7 @@ public sealed partial class OperatorHostIntegrationTests
         }
         await using var restarted = await StartAsync(scenario.Connection, scenario.CertificatePath);
         using var nextChannel = Channel(restarted, scenario.Certificate);
-        var next = new ManifestOperator.ManifestOperatorClient(nextChannel);
+        var next = OperatorTestCredentials.Client(nextChannel);
         Assert.Equal(afterMarker ? OperationStatus.NeedsAttention : OperationStatus.Succeeded,
             (await next.ExecuteOperationAsync(request)).Status);
         var history = await next.GetOperationAsync(request);
@@ -451,7 +451,7 @@ public sealed partial class OperatorHostIntegrationTests
         var host = OperatorHostApplication.Build(Arguments(scenario.Connection, scenario.CertificatePath), services =>
             services.AddSingleton<IDurableCreateDispatchFaultHooks>(hooks));
         await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         return host;
     }
 
@@ -459,7 +459,7 @@ public sealed partial class OperatorHostIntegrationTests
     {
         var host = OperatorHostApplication.Build(Arguments(connection, path), services => services.AddLogging(b => b.AddProvider(logs)));
         await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         return host;
     }
 

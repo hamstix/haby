@@ -67,7 +67,7 @@ public sealed partial class OperatorHostIntegrationTests
             if (trap is not null) services.AddSingleton<IPostgreSqlDatabaseCreateTarget>(trap);
         });
         await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-        await host.StartAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         return host;
     }
 
@@ -81,7 +81,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var source = await GraphHost(scenario, boundary, crash: true))
         {
             using var channel = Channel(source, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             request = await CommitExecutionAsync(client, scenario.Database);
             var generationReply = await client.GetGenerationAsync(new GenerationRequest { DeploymentId = request.DeploymentId, Generation = 1 });
             Assert.Equal(new[] { "db-create", "z-sibling" }, generationReply.DesiredGeneration.Operations.Select(n => n.OperationId).ToArray());
@@ -119,7 +119,7 @@ public sealed partial class OperatorHostIntegrationTests
             var trap = new RestoreProviderTrap();
             await using var fresh = await GraphHost(scenario, boundary, restored, trap: trap);
             using var channel = Channel(fresh, scenario.Certificate);
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var runner = fresh.Services.GetRequiredService<DurableGenerationRunner>();
             var key = ExecutionKey(request);
             Assert.Equal(0, (await runner.ProgressAsync(key.DeploymentId, key.Generation, default))!.Completed);

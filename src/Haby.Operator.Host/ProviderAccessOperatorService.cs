@@ -17,7 +17,7 @@ public sealed partial class ManifestOperatorService
             return new() { Status = ProviderAccessStatus.InvalidRequest };
         return AccessReply(await providerAccess.SetAliasAsync(request.Environment, request.Alias, Selector(request.Target),
             request.ExpectedAbsent, request.Expected is null ? null : Selector(request.Expected),
-            OperatorHostApplication.TechnicalActorId, context.CancellationToken));
+            Actor, context.CancellationToken));
     }
     private static Haby.Application.ProviderSelector Selector(Haby.Operator.Contracts.ProviderSelector value) => new(
         value.SelectionCase == Haby.Operator.Contracts.ProviderSelector.SelectionOneofCase.Name ? value.Name : null,

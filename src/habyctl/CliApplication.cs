@@ -88,12 +88,12 @@ internal sealed partial class CliApplication
         return bytes.AsSpan(0, count).ToArray();
     }
 
-    internal static Uri? ParseEndpoint(string? value) =>
+    internal static Uri? ParseEndpoint(string? value, bool allowInsecureHttp = false) =>
         Uri.TryCreate(value, UriKind.Absolute, out var address) &&
         (address.Scheme == Uri.UriSchemeHttps || address.Scheme == Uri.UriSchemeHttp) &&
         address.UserInfo.Length == 0 && address.Query.Length == 0 && address.Fragment.Length == 0 &&
         address.AbsolutePath == "/" &&
-        IPAddressIsLoopback(address.Host) ? address : null;
+        (address.Scheme == Uri.UriSchemeHttps || IPAddressIsLoopback(address.Host) || allowInsecureHttp) ? address : null;
 
     internal static bool SkipTlsCertificateValidation(string? setting) =>
         string.Equals(setting, "true", StringComparison.OrdinalIgnoreCase);

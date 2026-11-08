@@ -19,7 +19,7 @@ public sealed partial class ManifestOperatorService
         }
         catch (ArgumentException) { return CommitResult(CommitStatus.InvalidRequest); }
         // The committer alone owns retry ordering, pinned inputs, locks and the transaction.
-        var result = await committer.CommitAsync(change, plan, OperatorHostApplication.TechnicalActorId,
+        var result = await committer.CommitAsync(change, plan, Actor,
             context.CancellationToken);
         if (result is DurableCommitResult.Committed)
         {

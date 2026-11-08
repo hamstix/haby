@@ -52,11 +52,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         {
             await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Port=0", "--Haby:ListenAddress=127.0.0.2",
                 "--Haby:Tls:CertificatePath=" + path, "--Haby:Tls:CertificatePassword=" + password]);
-            await host.StartAsync();
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             Assert.Single(host.Urls); Assert.StartsWith("https://127.0.0.2:", host.Urls.Single());
             using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, actual, _, _) => actual is not null && actual.RawData.AsSpan().SequenceEqual(certificate.RawData) };
             using var channel = GrpcChannel.ForAddress(host.Urls.Single(), new GrpcChannelOptions { HttpHandler = handler });
-            var admin = new ManifestOperator.ManifestOperatorClient(channel);
+            var admin = OperatorTestCredentials.Client(channel);
             Assert.Equal(EnvironmentStatus.Found, (await admin.GetEnvironmentAsync(new() { Name = "pilot" })).Status);
             await Denied(new ConfigurationDelivery.ConfigurationDeliveryClient(channel), ConfigurationDocumentRevisionId.New().ToString(), null);
             await host.StopAsync();
@@ -80,8 +80,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
         {
             saved = await arrange.ConfigurationDocuments.AsNoTracking().SingleAsync();
             await arrange.Database.ExecuteSqlRawAsync("""
+                DROP TABLE operator_access_grants;
                 DROP TABLE configuration_access_grants;
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%AddConfigurationAccess';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
         }
         await using (var services = OwnerServices(scenario)) await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
@@ -153,9 +154,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
             await using (var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
                 services => services.AddLogging(l => l.AddProvider(logs).SetMinimumLevel(LogLevel.Trace)).AddSingleton<TimeProvider>(clock).AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(trap))))
             {
-                await host.StartAsync();
+                await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
                 using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-                var admin = new ManifestOperator.ManifestOperatorClient(channel);
+                var admin = OperatorTestCredentials.Client(channel);
                 var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
                 var selection = DocumentRequest(scenario);
                 Assert.Equal(ConfigurationAccessStatus.NotFound, (await admin.CreateConfigurationAccessAsync(new() { Selector = selection })).Status);
@@ -272,13 +273,13 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0", "--Haby:ListenAddress=127.0.0.1"],
                     s => s.AddSingleton<TimeProvider>(clock).AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(trap)));
                 await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-                await host.StartAsync();
+                await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
                 using var channel = GrpcChannel.ForAddress(host.Urls.Single());
                 var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
                 await RunRuntime(host.Urls.Single(), api.Artifact.RevisionId, credentialFile, scenario);
                 await Denied(runtime, api.Artifact.RevisionId, revoked.Credential);
                 await Denied(runtime, api.Artifact.RevisionId, expires.Credential);
-                var admin = new ManifestOperator.ManifestOperatorClient(channel);
+                var admin = OperatorTestCredentials.Client(channel);
                 var safe = await admin.GetConfigurationAccessAsync(new() { GrantId = active.Grant.GrantId });
                 Assert.False(safe.HasCredential); Assert.Equal(active.Grant, safe.Grant);
                 await using var verify = Context(connection);
@@ -329,8 +330,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var catalog = new ConfigurationRenderingCatalog([new PostgreSqlConnectionRendererContract()], [new PostgreSqlConnectionRenderer()], formatters, [formatter]);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
             s => s.AddSingleton(catalog).AddLogging(l => l.AddProvider(logs).SetMinimumLevel(LogLevel.Trace)).AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(reads)));
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var admin = new ManifestOperator.ManifestOperatorClient(channel); var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+        var admin = OperatorTestCredentials.Client(channel); var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
         var document = await admin.MaterializeConfigurationAsync(DocumentRequest(scenario));
         var grant = await admin.CreateConfigurationAccessAsync(new() { Selector = DocumentRequest(scenario) });
         ConfigurationDocumentRow saved; SecretPayloadRow payload; SecretRef reference;
@@ -422,7 +423,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
         if (binary is null) return;
         var config = Path.Combine(folder, "native.yaml"); var credentialFile = Path.Combine(folder, "native.token");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  selected:\n    endpoint: {endpoint}\ncontexts:\n  pilot:\n    instance: selected\n    environmentId: pilot\n");
+        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  selected:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: selected\n    environmentId: pilot\n");
         var text = await Run(["create", selector.ApplicationId, "--component", "api", "--document", "settings", "--token-output-file", credentialFile]);
         using var parsed = JsonDocument.Parse(text); var id = parsed.RootElement.GetProperty("data"u8).GetProperty("grantId"u8).GetString()!;
         var retained = await RuntimeConfigurationClient.ReadCredentialAsync(credentialFile, default);

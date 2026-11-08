@@ -47,7 +47,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var scenario = await Prepare(full: true, render: true, renderingProfile: profile.ToJsonString());
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], services =>
             services.AddSingleton(ConfigurationRenderingCatalog.Empty).AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(new RenderingReadTrap())));
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         var request = DocumentRequest(scenario, exact: true); request.DocumentId = "static";
         Assert.Equal(Status.NotApplied, (await client.MaterializeConfigurationAsync(request)).Status);
         await AccessReady(scenario); await AccessExecute(scenario);
@@ -64,14 +64,15 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var scenario = await Prepare(full: true, render: true);
         await using (var arrange = Context(scenario.Connection))
             await arrange.Database.ExecuteSqlRawAsync("""
+                DROP TABLE operator_access_grants;
                 DROP TABLE configuration_access_grants;
                 DROP TABLE configuration_document_revisions;
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
         await using (var act = OwnerServices(scenario)) await act.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         await using var verify = Context(scenario.Connection);
         Assert.Equal(scenario.Plan.Inputs.Configuration, ConfigurationPlanningSnapshotCodec.Decode((await verify.DeploymentGenerations.AsNoTracking().SingleAsync()).ConfigurationJson, scenario.Plan.Inputs.Revision));
-        Assert.Equal(23, (await verify.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(24, (await verify.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
     }
@@ -88,7 +89,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var scenario = await Prepare(full: true, render: true, renderingProfile: source);
         await AccessReady(scenario); await AccessExecute(scenario);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         Assert.Equal(mode == "liquid" ? Status.InputUnavailable : Status.LimitExceeded, (await client.MaterializeConfigurationAsync(DocumentRequest(scenario))).Status);
         await using var verify = Context(scenario.Connection); Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
         await host.StopAsync();
@@ -128,7 +129,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             if (mode == "unavailable-renderer") services.AddSingleton(ConfigurationRenderingCatalog.Empty);
             services.AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(new RenderingReadTrap()));
         });
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         var reply = await client.MaterializeConfigurationAsync(DocumentRequest(scenario));
         Assert.Equal(mode == "incomplete" ? Status.NotApplied : Status.InputUnavailable, reply.Status);
         Assert.Null(reply.Artifact); Assert.True(reply.PreviewJson.IsEmpty);
@@ -145,7 +146,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], services =>
             services.AddSingleton<IConfigurationDocumentStore>(p => pause.Wrap(new PostgreSqlConfigurationDocumentStore(p.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
                 p.GetRequiredService<ComposeConfigurationDocument>(), TimeProvider.System))));
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         var request = DocumentRequest(scenario);
         var pending = client.MaterializeConfigurationAsync(request).ResponseAsync;
         await pause.Selected.Task.WaitAsync(TimeSpan.FromSeconds(30));
@@ -229,7 +230,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         var request = DocumentRequest(scenario, exact: true);
         Assert.Equal(Status.Created, (await client.MaterializeConfigurationAsync(request)).Status);
         string saved;

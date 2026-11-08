@@ -58,7 +58,7 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var host = await ProfileHost(args, logs, commands))
         {
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = new ManifestOperator.ManifestOperatorClient(channel);
+            var client = OperatorTestCredentials.Client(channel);
             var before = commands.Count;
             var initialSecretReads = commands.SecretReads;
             Assert.Equal(ProfileAssignmentStatus.Valid, (await client.ValidateProfileAssignmentAsync(new() { Payload = AssignmentPayload(component, UseLayout) })).Status);
@@ -125,7 +125,7 @@ public sealed partial class OperatorHostIntegrationTests
         }
         await using (var host = await ProfileHost(args, logs))
         {
-            using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+            using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
             foreach (var state in states) Assert.Equal(state, (await client.GetProfileAssignmentAsync(new() { Environment = "production", Target = state.Target })).Assignment);
             await host.StopAsync();
         }
@@ -145,7 +145,7 @@ public sealed partial class OperatorHostIntegrationTests
         var connection = await NewDatabaseAsync(); var logs = new ProfileLog();
         var args = new[] { "--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0" };
         await using var host = await ProfileHost(args, logs);
-        using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+        using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         await client.CreateEnvironmentAsync(new() { Name = "production" });
         await client.ImportProfileAsync(Payload(Node()));
         var target = AssignmentTarget();
@@ -205,7 +205,7 @@ public sealed partial class OperatorHostIntegrationTests
             await fixture.RunClientUtilityAsync("pg_restore", "-U", "postgres", "--exit-on-error", "--no-owner", "--no-privileges",
                 "--dbname=" + new NpgsqlConnectionStringBuilder(restored).Database, dump);
             await using var host = await ProfileHost(["--Haby:PostgreSql:ConnectionString=" + restored, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], new ProfileLog());
-            using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+            using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
             foreach (var expected in states)
                 Assert.Equal(expected, (await client.GetProfileAssignmentAsync(new() { Environment = expected.Environment, Target = expected.Target })).Assignment);
             await host.StopAsync();
@@ -223,7 +223,7 @@ public sealed partial class OperatorHostIntegrationTests
     {
         var connection = await NewDatabaseAsync(); var gate = new ProfileQueryGate { WatchedTable = "configuration_profile_assignments" };
         await using var host = await ProfileHost(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], new ProfileLog(), gate);
-        using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = new ManifestOperator.ManifestOperatorClient(channel);
+        using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         await client.CreateEnvironmentAsync(new() { Name = "production" });
         foreach (var apply in new[] { false, true })
         {
@@ -255,6 +255,7 @@ public sealed partial class OperatorHostIntegrationTests
                 instances:
                   local:
                     endpoint: {host.Urls.Single()}
+                    token: {OperatorTestCredentials.Credential(host.Urls.Single())}
                 contexts:
                   wrong:
                     instance: local
