@@ -110,13 +110,26 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             reference, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber,
             resolved.ImplementationId);
         var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
-        if (admitted != DurablePlanStatus.Planned) return new(admitted);
         try
         {
-            var producers = await DescribeProducersAsync(context, spec, revisionRow, inputs, cancellationToken);
+            var producers = admitted == DurablePlanStatus.Planned
+                ? await DescribeProducersAsync(context, spec, revisionRow, inputs, cancellationToken) : [];
             var configuration = await ConfigurationPlanningCapture.CaptureAsync(context,
                 new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering, producers: producers);
-            if (configuration.Snapshot is null) return new(DurablePlanStatus.ConfigurationRefused, ConfigurationReport: configuration.Expansion);
+            if (configuration.Snapshot is null)
+            {
+                var report = configuration.Expansion;
+                if (admitted != DurablePlanStatus.Planned)
+                {
+                    // No producer inventory exists for a refused shape. Preserve configuration
+                    // diagnostics before admission without reporting synthetic missing producers.
+                    var errors = report.Diagnostics.Where(d => d.Code != "render.producer.unavailable").ToArray();
+                    if (errors.Length == 0) return new(admitted);
+                    report = new([], errors);
+                }
+                return new(DurablePlanStatus.ConfigurationRefused, ConfigurationReport: report);
+            }
+            if (admitted != DurablePlanStatus.Planned) return new(admitted);
             inputs = inputs with { Configuration = configuration.Snapshot };
         }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }

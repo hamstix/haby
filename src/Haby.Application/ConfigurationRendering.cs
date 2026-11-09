@@ -86,8 +86,6 @@ public sealed class ConfigurationRenderingCatalog
         if (request.Binding.Target is not NormalizedLocalResourceTarget local ||
             !spec.Resources.TryGetValue(local.ResourceRef, out var resource) || resource.Type != definition.Resource)
             return (null, "render.output.incompatible");
-        var matches = producers.Where(n => n.ResourceId == local.ResourceRef && n.Action == definition.ProducerAction).ToArray();
-        if (matches.Length != 1) return (null, "render.producer.unavailable");
         if (!definition.ValidateOptions(request.ProfileOptions, false) || !definition.ValidateOptions(request.Binding.Options, false) ||
             !definition.ValidateOptions(definition.Defaults, true)) return (null, "render.options.invalid");
         var settings = definition.Defaults.Members.ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
@@ -95,6 +93,8 @@ public sealed class ConfigurationRenderingCatalog
         foreach (var pair in request.Options.Members) { settings[pair.Key] = pair.Value; origins[pair.Key] = request.OptionOrigins[pair.Key]; }
         var complete = new ConfigurationObject(settings);
         if (!definition.ValidateOptions(complete, true)) return (null, "render.options.invalid");
+        var matches = producers.Where(n => n.ResourceId == local.ResourceRef && n.Action == definition.ProducerAction).ToArray();
+        if (matches.Length != 1) return (null, "render.producer.unavailable");
         return (new(component, index, request.Renderer, renderer.Identity, definition.Formatter, formatter.Identity,
             definition.Resource, local.ResourceRef, definition.OutputContract, definition.OutputKey, matches[0].Id, definition.ProducerAction,
             definition.NormalizeOptions(definition.Defaults), definition.NormalizeOptions(complete), origins.ToImmutableDictionary(StringComparer.Ordinal)), null);

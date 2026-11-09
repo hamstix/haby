@@ -13,7 +13,8 @@ one standalone database or one pair; this is an update path.
 Renderer definitions now identify the Resource contract, producer action and output
 contract/key; they no longer fix a concrete operation ID for an entire Application.
 Planning resolves exactly one producer for the Binding's Resource and action from
-adapter-composed nodes. Missing/ambiguous selection refuses. Each immutable render
+adapter-composed nodes. Missing/ambiguous selection refuses with
+`render.producer.unavailable`; text and generated JSON retain that safe code. Each immutable render
 pin still stores the concrete Resource, operation, action, output contract/key,
 formatter, implementations, defaults and consumer options. Both pairs use the same
 registered renderer and formatter. Rebuild extensions against this current API.

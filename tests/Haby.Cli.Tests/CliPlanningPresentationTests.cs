@@ -7,6 +7,17 @@ namespace Haby.Cli.Tests;
 public sealed class CliPlanningPresentationTests
 {
     [Fact]
+    public void Producer_resolution_refusal_has_safe_text_generated_JSON_and_rejection_exit()
+    {
+        var reply = new PlanningReply { Status = PlanningStatus.ConfigurationRefused, ConfigurationErrorCodes = { "render.producer.unavailable" } };
+        using var json = new StringWriter(); using var text = new StringWriter();
+        Assert.Equal(1, new CliJsonPresenter(json).PrintPlanning("plan create", reply));
+        Assert.Equal(1, new CliTextPresenter(text).PrintPlanning("plan create", reply));
+        Assert.Contains("render.producer.unavailable", json.ToString());
+        Assert.Contains("render.producer.unavailable", text.ToString());
+    }
+
+    [Fact]
     public void Mixed_plan_text_and_generated_JSON_expose_new_work_and_original_reuse_together()
     {
         var reply = DescriptionReply(new PlanDescription { Status = PlanDescriptionStatus.OperationGraph });
