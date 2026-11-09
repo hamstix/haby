@@ -26,7 +26,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [InlineData("alias-stale", true)]
     [InlineData("profile-stale", false)]
     [InlineData("profile-stale", true)]
-    [InlineData("same-revision-configuration", false)]
     [InlineData("provider-revision", false)]
     [InlineData("provider-revision", true)]
     public async Task Resource_reuse_requires_complete_baseline_exact_generation_provider_and_fresh_inputs(string mode, bool mixed)
@@ -37,10 +36,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var history = await ReuseHistory(scenario.Connection);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
-        var revision = mode == "same-revision-configuration" ? new RevisionReference { ApplicationRecordId = scenario.Plan.Inputs.Revision.ApplicationRecordId.ToString(), RevisionNumber = 1 }
-            : await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_pins_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2, 200)); // Version-only update is admitted independently from declaration content.
+        var revision = mixed ? await ImportUpdate(client, MixedEnvelope(scenario, 2, "mixed_pins_" + Guid.NewGuid().ToString("N"))) : SameRevision(scenario);
         DurablePlanSummary? plan = mode.EndsWith("stale", StringComparison.Ordinal) ? await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0) : null;
-        if (mode is "profile-stale" or "same-revision-configuration")
+        if (mode == "profile-stale")
         {
             var environment = (await host.Services.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("pilot"), default))!;
             var assignments = host.Services.GetRequiredService<IProfileAssignmentStore>(); var target = new Haby.Domain.ProfileAssignmentTarget.Environment();
@@ -68,7 +66,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         {
             var change = await client.CreateChangeSetAsync(new() { EnvironmentId = "pilot", Reference = revision, Precondition = PlanningPrecondition.ExpectedGeneration, ExpectedGeneration = mode == "wrong-generation" ? 2 : 1 });
             var result = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
-            Assert.Equal(mode switch { "wrong-generation" => PlanningStatus.ChangeSetStale, "provider-revision" or "same-revision-configuration" => PlanningStatus.UnsupportedShape, _ => PlanningStatus.PlanInputUnavailable }, result.Status);
+            Assert.Equal(mode switch { "wrong-generation" => PlanningStatus.ChangeSetStale, "provider-revision" => PlanningStatus.UnsupportedShape, _ => PlanningStatus.PlanInputUnavailable }, result.Status);
         }
         Assert.Equal(history, await ReuseHistory(scenario.Connection));
         await using var verify = Context(scenario.Connection); Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).DesiredGeneration);
@@ -92,9 +90,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Resource_reuse_cancellation_before_acceptance_rolls_back_and_after_confirmed_commit_keeps_receipt(bool mixed)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Resource_reuse_cancellation_before_acceptance_rolls_back_and_after_confirmed_commit_keeps_receipt(bool mixed, bool configurationOnly)
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
         using var before = new CancellationTokenSource(); using var after = new CancellationTokenSource();
@@ -102,7 +101,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
             s => s.AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(cancelBefore, cancelAfter)));
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
-        var revision = await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_cancel_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2));
+        var revision = configurationOnly ? await SelectConfigurationRevision(client, scenario, 2) : await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_cancel_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2));
         var plan = await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
         var committer = host.Services.GetRequiredService<IDurableDesiredStateCommitter>();
         cancelBefore.Enabled = true;

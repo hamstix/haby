@@ -75,9 +75,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Resource_reuse_v1_v2_v3_original_evidence_data_delivery_noop_native_restart_and_restore(bool changedComponents)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Resource_reuse_v1_v2_v3_original_evidence_data_delivery_noop_native_restart_and_restore(bool changedComponents, bool configurationOnly)
     {
         var scenario = await Prepare(full: true, render: true, configureManifest: changedComponents ? envelope =>
         {
@@ -92,6 +93,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         string login;
         CommitReply? secondReceipt = null;
         CommitDesiredStateRequest? secondCommit = null;
+        CommitReply? noopReceipt = null; CommitDesiredStateRequest? noopCommit = null;
         await using (var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]))
         {
             await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
@@ -115,7 +117,18 @@ public sealed partial class PostgreSqlApplicationLoginTests
             // Independent no-Provider-work oracle: the restarted Host has no administrator
             // material with which to contact the external server. Application material remains exact.
             await Sql(scenario.Connection, "SET session_replication_role = replica; DELETE FROM secret_payloads WHERE secret_version_id NOT IN (SELECT version_id FROM generated_credential_slots)");
-            var revision = await ImportUpdate(client, changedComponents ? ComponentEnvelope(scenario, 2) : UpdateEnvelope(scenario, 2));
+            var revision = configurationOnly ? await SelectConfigurationRevision(client, scenario, 2) :
+                await ImportUpdate(client, changedComponents ? ComponentEnvelope(scenario, 2) : UpdateEnvelope(scenario, 2));
+            if (configurationOnly)
+            {
+                await using var verifyAssignment = Context(scenario.Connection);
+                var unchanged = await verifyAssignment.ApplicationDeployments.AsNoTracking().SingleAsync();
+                Assert.Equal(1, unchanged.DesiredGeneration); Assert.Equal(1, unchanged.AppliedGeneration);
+                Assert.Equal(1, await verifyAssignment.DurablePlans.CountAsync());
+                Assert.Equal(2, await verifyAssignment.ConfigurationDocuments.CountAsync());
+                Assert.Equal(2, await verifyAssignment.ConfigurationAccess.CountAsync());
+                Assert.Equal(history, await ReuseHistory(scenario.Connection));
+            }
             var plan = await UpdatePlan(client, revision, 1, host.Urls.Single());
             _ = await NativeReuseCommand(host.Urls.Single(), "changeset", "commit", plan.ChangeSetId, "--plan", plan.PlanId);
             var committed = await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId });
@@ -123,6 +136,14 @@ public sealed partial class PostgreSqlApplicationLoginTests
             secondCommit = new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId };
             Assert.Equal(CommitStatus.Committed, committed.Status); Assert.Equal(2, committed.Commit.Generation);
             var progress = await client.GetGenerationAsync(new() { DeploymentId = committed.Commit.DeploymentId, Generation = 2 });
+            if (configurationOnly)
+            {
+                await using var verify = Context(scenario.Connection);
+                var saved = await verify.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.Generation == 2);
+                Assert.Equal(1, saved.RevisionNumber);
+                var captured = ConfigurationPlanningSnapshotCodec.Decode(saved.ConfigurationJson, scenario.Plan.Inputs.Revision);
+                Assert.Equal(2, Assert.Single(captured.Profiles).Reference.Revision);
+            }
             Assert.Equal(2, progress.Progress.DesiredGeneration); Assert.Equal(1, progress.Progress.AppliedGeneration);
             Assert.Empty(progress.Progress.Nodes); Assert.Equal(2, progress.Progress.ReusedResources);
             Assert.Equal(history, await ReuseHistory(scenario.Connection)); Assert.Equal(external, await ExternalIdentity(scenario));
@@ -138,7 +159,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
             {
                 if (generation == 3)
                 {
-                    var revision = await ImportUpdate(client, changedComponents ? ComponentEnvelope(scenario, 3) : UpdateEnvelope(scenario, 3, 220));
+                    // Revision 3 deliberately has identical values to Profile 2. Exact input identity still changes.
+                    var revision = configurationOnly ? await SelectConfigurationRevision(client, scenario, 3) :
+                        await ImportUpdate(client, changedComponents ? ComponentEnvelope(scenario, 3) : UpdateEnvelope(scenario, 3, 220));
                     var plan = await UpdatePlan(client, revision, 2, host.Urls.Single());
                     _ = await NativeReuseCommand(host.Urls.Single(), "changeset", "commit", plan.ChangeSetId, "--plan", plan.PlanId);
                     Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Status);
@@ -183,7 +206,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 }
                 var document = await client.GetConfigurationAsync(selection);
                 var grant = await client.CreateConfigurationAccessAsync(new() { Selector = selection });
-                grants.Add((selection, document, grant, generation == 2 ? 210 : 220));
+                grants.Add((selection, document, grant, configurationOnly ? 200 : generation == 2 ? 210 : 220));
                 foreach (var item in grants)
                 {
                     Assert.True(login == await ReceivedConnection(channel, item.Document, item.Grant, item.Timeout), "Credential identity changed.");
@@ -195,10 +218,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 Assert.Equal("retained-v1", await new NpgsqlCommand("SELECT value FROM app.reuse_probe WHERE id = 158", data).ExecuteScalarAsync());
             }
             // A new ChangeSet with the same complete effective state is a no-op; its own receipt is immutable.
-            var revision3 = await ImportUpdate(client, changedComponents ? ComponentEnvelope(scenario, 3) : UpdateEnvelope(scenario, 3, 220));
+            var revision3 = configurationOnly ? SameRevision(scenario) : await ImportUpdate(client, changedComponents ? ComponentEnvelope(scenario, 3) : UpdateEnvelope(scenario, 3, 220));
             Assert.Equal(secondReceipt, await client.CommitDesiredStateAsync(secondCommit!));
             var noop = await UpdatePlan(client, revision3, 3);
             var receipt = await client.CommitDesiredStateAsync(new() { ChangeSetId = noop.ChangeSetId, PlanId = noop.PlanId });
+            noopReceipt = receipt; noopCommit = new() { ChangeSetId = noop.ChangeSetId, PlanId = noop.PlanId };
             Assert.Equal(3, receipt.Commit.Generation);
             Assert.Equal(receipt, await client.CommitDesiredStateAsync(new() { ChangeSetId = noop.ChangeSetId, PlanId = noop.PlanId }));
             await using (var verify = Context(scenario.Connection)) Assert.Equal(3, await verify.DeploymentGenerations.CountAsync());
@@ -216,6 +240,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
             await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
             foreach (var item in grants) _ = await ReceivedConnection(channel, item.Document, item.Grant, item.Timeout);
+            Assert.Equal(secondReceipt, await client.CommitDesiredStateAsync(secondCommit!));
+            Assert.Equal(noopReceipt, await client.CommitDesiredStateAsync(noopCommit!));
             for (var generation = 2; generation <= 3; generation++) Assert.Equal(GenerationExecutionStatus.Succeeded,
                 (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = generation })).Status);
             Assert.Equal(history, await ReuseHistory(restored));
@@ -229,7 +255,15 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 .DeliverAsync(new() { RevisionId = document.Artifact.RevisionId }, Bearer(grant.Credential));
             using var json = JsonDocument.Parse(result.Json.Memory);
             var settings = new NpgsqlConnectionStringBuilder(json.RootElement.GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8).GetString());
-            Assert.Equal(timeout, settings.Timeout); Assert.Equal(30, settings.CommandTimeout); Assert.Equal(SslMode.Disable, settings.SslMode);
+            var expectedCommandTimeout = 30;
+            if (configurationOnly)
+            {
+                var current = grants.SingleOrDefault(x => x.Document.Artifact.RevisionId == document.Artifact.RevisionId);
+                var generation = current.Selector?.Generation ?? 1;
+                expectedCommandTimeout = generation == 1 ? 30 : 40;
+                Assert.Equal(generation == 1 ? "Information" : "Debug", json.RootElement.GetProperty("Logging"u8).GetProperty("Level"u8).GetString());
+            }
+            Assert.Equal(timeout, settings.Timeout); Assert.Equal(expectedCommandTimeout, settings.CommandTimeout); Assert.Equal(SslMode.Disable, settings.SslMode);
             Assert.Equal(scenario.Database, settings.Database); Assert.Equal(scenario.Role, settings.Username);
             await using (var runtime = new NpgsqlConnection(settings.ConnectionString))
             {
@@ -237,7 +271,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 Assert.Equal(scenario.Database, await new NpgsqlCommand("SELECT current_database()", runtime).ExecuteScalarAsync());
                 Assert.Equal(scenario.Role, await new NpgsqlCommand("SELECT current_user", runtime).ExecuteScalarAsync());
             }
-            settings.Timeout = 200; // Compare the immutable credential and endpoint after independently checking target settings.
+            settings.Timeout = 200; settings.CommandTimeout = 30; // Compare the immutable credential and endpoint after independently checking target settings.
             return settings.ConnectionString;
         }
     }

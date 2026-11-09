@@ -93,8 +93,7 @@ compatibility is claimed. Catalogs without #158 management records are not
 backfilled and still cannot update. Startup never resets persistent data.
 
 Destructive deprovisioning, pair/all-Resource removal, release/transfer of retained
-names, rotation, general Resource additions, Provider rebinding, same-revision
-configuration-only intent and Workloads remain unsupported. P3 rollout/retirement
+names, rotation, general Resource additions, Provider rebinding and Workloads remain unsupported. The subsequent [configuration-only slice](166-configuration-only-generations.md) admits explicit same-revision Profile/assignment/default changes. P3 rollout/retirement
 and explicit grant/Workload cleanup remain tracked and incomplete; no automatic
 cleanup, materialization, access issuance or privilege retirement is introduced.
 

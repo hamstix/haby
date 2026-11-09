@@ -421,8 +421,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         // Resource identity. CaptureAsync has expanded the complete target layout,
         // scopes (including absence), pins and provenance; Commit revalidates it.
         // Adapter reuse policies below still own Resource compatibility and targets.
-        // Same-revision configuration-only intent is deliberately outside this slice.
-        if (baseline.RevisionNumber == inputs.Revision.RevisionNumber.Value && !accepted.Equals(inputs.Configuration)) return null;
+        // The same immutable revision may accept different exact configuration inputs.
+        // Commit compares the full captured configuration to preserve exact-input no-ops;
+        // revision equality never bypasses Provider, management or original-evidence checks.
         var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);
         var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
         var configuration = PreparedConfiguration(instance.ProviderKindId, provider);
