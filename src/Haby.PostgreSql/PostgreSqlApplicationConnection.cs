@@ -9,7 +9,7 @@ namespace Haby.PostgreSql;
 public sealed record PostgreSqlApplicationConnection(string Host, int Port, string DatabaseName, string Schema, string UserName, SecretRef Password);
 
 public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurationStore providers, PostgreSqlProviderConfigurationCodec codec,
-    IGeneratedCredentialOperations generated) : IExternalOperationOutputContract
+    IGeneratedCredentialOperations generated, IProviderResourceReservations reservations) : IExternalOperationOutputContract
 {
     public const string Contract = "postgresql.application-login-output/v1alpha1";
     public const string Key = "connection";
@@ -41,18 +41,20 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
         PostgreSqlApplicationAccessAction.Decode(node) is { } input && Decode(output) is { } value &&
         input.DatabaseName == value.DatabaseName && input.Schema == value.Schema;
 
-    public ValueTask<bool> ValidateReuseAsync(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
+    public async ValueTask<bool> ValidateReuseAsync(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
         IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration prepared, CancellationToken cancellationToken)
     {
-        if (!Validate(accepted.Node, output) || accepted.Graph.Nodes.Count != 5 || !PostgreSqlPairExecution.IsSupported(accepted, prepared)) return new(false);
+        if (!Validate(accepted.Node, output) || accepted.Graph.Nodes.Count != 5 || !PostgreSqlPairExecution.IsSupported(accepted, prepared)) return false;
         var configuration = codec.DecodeTyped(prepared.PayloadJson);
         var input = PostgreSqlApplicationAccessAction.Decode(accepted.Node)!;
         var selector = input.PasswordSource.ToReference();
         var candidates = sources.Where(x => x.Producer == selector.ProducerOperationId && x.Output.Contract == selector.OutputContract && x.Output.Key == selector.OutputKey).ToArray();
-        if (candidates.Length != 1 || GeneratedCredentialOutputCodec.Decode(candidates[0].Output.Contract, candidates[0].Output.Payload) is not { } password) return new(false);
+        if (candidates.Length != 1 || GeneratedCredentialOutputCodec.Decode(candidates[0].Output.Contract, candidates[0].Output.Payload) is not { } password) return false;
         var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
-        return new(Decode(output) == new PostgreSqlApplicationConnection(configuration.Host, configuration.Port, input.DatabaseName,
-            input.Schema, PostgreSqlPairResourceAdmission.RoleName(owner), password.Reference));
+        return Decode(output) == new PostgreSqlApplicationConnection(configuration.Host, configuration.Port, input.DatabaseName,
+            input.Schema, PostgreSqlPairResourceAdmission.RoleName(owner), password.Reference) &&
+            await reservations.ContainsAsync(new(accepted.Inputs.ProviderInstance, owner.EnvironmentRecordId, owner.ApplicationRecordId,
+                owner.ResourceLocalId, PostgreSqlApplicationLoginAction.RoleReservationNamespace, PostgreSqlPairResourceAdmission.RoleName(owner)), cancellationToken);
     }
 
     public async ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,

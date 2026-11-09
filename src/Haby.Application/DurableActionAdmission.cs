@@ -209,7 +209,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         return true;
     }
     public DurableOperationGraph PlanUpdate(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration configuration, IReadOnlyList<ResourceReuse> reused, ResourceReuseBaseline baseline)
+        PreparedProviderConfiguration configuration, IReadOnlyList<ResourceReuse> reused, ResourceReuseBaseline baseline, IReadOnlyList<ResourceReuse>? retained = null)
     {
         if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
         var nodes = spec.Resources.Where(r => !reused.Any(x => x.Resource == r.Key)).SelectMany(r =>
@@ -218,7 +218,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
             return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
                 : handler.Plan(r.Key, r.Value, inputs);
         });
-        var graph = new DurableOperationGraph(nodes, reused, baseline);
+        var graph = new DurableOperationGraph(nodes, reused, baseline, retained);
         graph.ValidateReferences(inputs);
         if (!spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(reused.Select(r => r.Resource))) ||
             graph.Nodes.Any(n => !spec.Resources.TryGetValue(n.ResourceId, out var declared) ||
@@ -242,6 +242,18 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         registry.Find(new DurableActionAdmissionKey(declared.Type, provider)) is IDurableResourceReusePolicy policy &&
         policy.CanReuse(accepted, target, resource, inputs, configuration);
 
+    public bool CanRetainResource(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
+        ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        original.Resources.TryGetValue(resource, out var declared) &&
+        registry.Find(new DurableActionAdmissionKey(declared.Type, provider)) is IDurableResourceRetentionPolicy policy &&
+        policy.CanRetain(original, target, resource, inputs, configuration);
+
+    public bool CanAddResource(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+        ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        target.Resources.TryGetValue(resource, out var declared) &&
+        registry.Find(new DurableActionAdmissionKey(declared.Type, provider)) is IDurableResourceAdditionPolicy policy &&
+        policy.CanAdd(accepted, target, resource, inputs, configuration);
+
     // Validate original creation nodes against their own frozen declaration, including
     // a source generation that itself reused peers. No baseline traversal is needed.
     public bool ValidateCreationGraph(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
@@ -249,7 +261,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
     {
         if (!spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(graph.ReusedResources.Select(r => r.Resource)))) return false;
         var expected = graph.Baseline is { } baseline
-            ? PlanUpdate(spec, provider, inputs, configuration, graph.ReusedResources, baseline)
+            ? PlanUpdate(spec, provider, inputs, configuration, graph.ReusedResources, baseline, graph.RetainedResources)
             : Plan(spec, provider, inputs, configuration);
         return expected.Equals(graph);
     }

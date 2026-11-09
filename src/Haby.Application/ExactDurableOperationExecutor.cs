@@ -60,7 +60,7 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
 
         var progress = await journal.ProgressAsync(key.DeploymentId, key.Generation, cancellationToken);
         if (progress is null) return DurableExecutionResult.NotFound();
-        if (progress.Reused > 0 && !await journal.ValidateReuseAsync(key.DeploymentId, key.Generation, cancellationToken))
+        if (progress.Reused > 0 && !await journal.ValidateReuseAsync(key.DeploymentId, key.Generation, new DurableActionAdmission(registry), cancellationToken))
             return new(DurableExecutionOutcome.InputUnavailable, operation);
         if (operation.Node.Dependencies.Any(dependency => !progress.Nodes.Any(n =>
             n.Operation.Key.OperationId == dependency && n.Operation.State == DurableOperationState.Succeeded)))

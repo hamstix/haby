@@ -16,7 +16,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
     IEnumerable<IExternalOperationOutputContract> outputContracts, IEnumerable<IProviderConfigurationCodec>? codecs = null)
     : IDurableOperationJournal, IDurableOperationQuery
 {
-    public async ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken cancellationToken)
+    public async ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, DurableActionAdmission admission, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
         await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
@@ -27,12 +27,12 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             _ = ResourceContinuity.Inputs(source);
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
             return await ResourceContinuity.ValidateAsync(db, source.DeploymentId, graph, cancellationToken) &&
-                await ResourceContinuity.ValidateOutputsAsync(db, source.DeploymentId, graph, outputContracts, codecs ?? [], cancellationToken, validateMaterial: true);
+                await ResourceContinuity.ValidateOutputsAsync(db, source.DeploymentId, graph, outputContracts, codecs ?? [], admission, ResourceContinuity.Inputs(source), cancellationToken, validateMaterial: true);
         }
         catch (InvalidDataException) { return false; }
     }
 
-    public async ValueTask<bool> TryCompleteReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken cancellationToken)
+    public async ValueTask<bool> TryCompleteReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, DurableActionAdmission admission, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -49,7 +49,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             var operations = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == id && x.Generation == generation.Value).ToArrayAsync(cancellationToken);
             if (operations.Length != graph.Nodes.Count || graph.Nodes.Any(n => !operations.Any(o => o.OperationId == n.Id.Value && o.State == nameof(DurableOperationState.Succeeded)))) return false;
             if (!await ResourceContinuity.ValidateAsync(db, id, graph, cancellationToken) ||
-                !await ResourceContinuity.ValidateOutputsAsync(db, id, graph, outputContracts, codecs ?? [], cancellationToken, validateMaterial: true,
+                !await ResourceContinuity.ValidateOutputsAsync(db, id, graph, outputContracts, codecs ?? [], admission, ResourceContinuity.Inputs(source), cancellationToken, validateMaterial: true,
                     creationGeneration: graph.Nodes.Count > 0 ? generation.Value : null)) return false;
             foreach (var resource in graph.Nodes.Select(n => n.ResourceId.Value).Distinct())
             {
@@ -89,7 +89,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         return new(deployment, generation, owner.DesiredGeneration, owner.AppliedGeneration,
             operations.Select(o => new DurableNodeProgress(o, Array.AsReadOnly(o.Node.Dependencies.Where(d => !succeeded.Contains(d)).ToArray()),
                 attempts.SingleOrDefault(a => a.AttemptId == o.AttemptId)?.Outcome is { } outcome ? ParseOutcome(outcome) : null)).ToArray())
-        { Reused = graph.ReusedResources.Count };
+        { Reused = graph.ReusedResources.Count, Retained = graph.RetainedResources.Count, Reintroduced = graph.ReusedResources.Count(x => x.Reintroduced) };
     }
 
     public async ValueTask<DurableOperation?> FindAsync(DurableOperationKey key,

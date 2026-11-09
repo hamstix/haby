@@ -34,18 +34,23 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
 {
     public IReadOnlyList<DurableOperationNode> Nodes { get; }
     public IReadOnlyList<ResourceReuse> ReusedResources { get; }
+    public IReadOnlyList<ResourceReuse> RetainedResources { get; }
     public ResourceReuseBaseline? Baseline { get; }
     public DurableOperationGraph(IEnumerable<DurableOperationNode> nodes,
-        IEnumerable<ResourceReuse>? reusedResources = null, ResourceReuseBaseline? baseline = null)
+        IEnumerable<ResourceReuse>? reusedResources = null, ResourceReuseBaseline? baseline = null, IEnumerable<ResourceReuse>? retainedResources = null)
     {
-        var reuse = (reusedResources ?? []).OrderBy(x => x.Resource.Value, StringComparer.Ordinal).ToArray();
+        var retained = (retainedResources ?? []).OrderBy(x => x.Resource.Value, StringComparer.Ordinal).ToArray();
+        var active = (reusedResources ?? []).ToArray();
+        var reuse = active.Concat(retained).OrderBy(x => x.Resource.Value, StringComparer.Ordinal).ToArray();
         if (reuse.Length > 256 || reuse.Select(x => x.Resource).Distinct().Count() != reuse.Length ||
             reuse.Select(x => x.ManagementId).Distinct().Count() != reuse.Length ||
             reuse.Any(x => x.ManagementId == Guid.Empty || x.SourceGeneration <= 0 || x.SourceGeneration > baseline?.Generation ||
                 x.EvidenceFingerprint is not { Length: 64 } || x.EvidenceFingerprint.Any(c => !char.IsAsciiHexDigit(c))) ||
             (reuse.Length > 0) != (baseline is not null) || baseline is { Generation: <= 0 })
             throw new InvalidDataException("Invalid reuse requirements.");
-        ReusedResources = Array.AsReadOnly(reuse);
+        if (retained.Any(x => x.Reintroduced)) throw new InvalidDataException("Invalid retained membership.");
+        ReusedResources = Array.AsReadOnly(active.OrderBy(x => x.Resource.Value, StringComparer.Ordinal).ToArray());
+        RetainedResources = Array.AsReadOnly(retained);
         Baseline = baseline;
         var ordered = nodes.OrderBy(n => n.Id.Value, StringComparer.Ordinal).Select(n => n with
         {
@@ -113,8 +118,9 @@ public static class DurableOperationGraphCodec
             n.References.ConfigurationRevision.Value, n.Input.Format, n.Input.Json,
             n.Dependencies.Select(d => d.Value).ToArray(), n.OutputReferences.Select(r =>
                 new OutputRefDocument(r.ProducerOperationId.Value, r.OutputContract, r.OutputKey)).ToArray())).ToArray(),
-        graph.ReusedResources.Count == 0 ? null : graph.ReusedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint)).ToArray(),
-        graph.Baseline is { } b ? new BaselineDocument(b.Deployment.ToString(), b.Generation, b.Fingerprint) : null), GraphJsonContext.Default.GraphDocument);
+        graph.ReusedResources.Count == 0 ? null : graph.ReusedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, r.Reintroduced)).ToArray(),
+        graph.Baseline is { } b ? new BaselineDocument(b.Deployment.ToString(), b.Generation, b.Fingerprint) : null,
+        graph.RetainedResources.Count == 0 ? null : graph.RetainedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, false)).ToArray()), GraphJsonContext.Default.GraphDocument);
 
     public static DurableOperationGraph Decode(string json)
     {
@@ -131,8 +137,9 @@ public static class DurableOperationGraphCodec
                     ProviderConfigurationRevisionNumber.Create(n.Revision), n.Implementation),
                 new(n.Format, n.Input), n.Dependencies.Select(OperationId.Create).ToArray())
             { OutputReferences = n.Outputs.Select(r => new OperationOutputRef(OperationId.Create(r.Producer), r.Contract, r.Key)).ToArray() }),
-                (document.Reuse ?? []).Select(r => new ResourceReuse(ManifestLocalId.Create(r.Resource), r.Management, r.Generation, r.Evidence)),
-                document.Baseline is { } b ? new(ApplicationDeploymentId.Parse(b.Deployment), b.Generation, b.Fingerprint) : null);
+                (document.Reuse ?? []).Select(r => new ResourceReuse(ManifestLocalId.Create(r.Resource), r.Management, r.Generation, r.Evidence) { Reintroduced = r.Reintroduced }),
+                document.Baseline is { } b ? new(ApplicationDeploymentId.Parse(b.Deployment), b.Generation, b.Fingerprint) : null,
+                (document.Retained ?? []).Select(r => new ResourceReuse(ManifestLocalId.Create(r.Resource), r.Management, r.Generation, r.Evidence) { Reintroduced = r.Reintroduced }));
         }
         catch (Exception e) when (e is JsonException or ArgumentException or NullReferenceException or FormatException)
         { throw new InvalidDataException("Invalid operation graph."); }
@@ -153,8 +160,10 @@ public static class DurableOperationGraphCodec
 
 internal sealed record GraphDocument(int Version, NodeDocument[] Nodes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Reuse,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BaselineDocument? Baseline);
-internal sealed record ReuseDocument(string Resource, Guid Management, long Generation, string Evidence);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BaselineDocument? Baseline,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Retained = null);
+internal sealed record ReuseDocument(string Resource, Guid Management, long Generation, string Evidence,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Reintroduced = false);
 internal sealed record BaselineDocument(string Deployment, long Generation, string Fingerprint);
 internal sealed record NodeDocument(string Id, string Resource, string ResourceContract, string Kind,
     string Configuration, string Implementation, string Action, string Environment, string Provider,

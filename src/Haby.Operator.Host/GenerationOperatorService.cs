@@ -53,7 +53,9 @@ public sealed partial class ManifestOperatorService
             DesiredGeneration = value.DesiredGeneration,
             Completed = value.Completed,
             Total = value.Total,
-            ReusedResources = value.Reused
+            ReusedResources = value.Reused,
+            RetainedResources = value.Retained,
+            ReintroducedResources = value.Reintroduced
         };
         if (value.AppliedGeneration is { } applied) progress.AppliedGeneration = applied;
         if (value.StoppedAt is { } stopped) progress.StoppedOperationId = stopped.Operation.Key.OperationId.Value;

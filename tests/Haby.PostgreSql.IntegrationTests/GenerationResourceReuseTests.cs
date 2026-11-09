@@ -61,7 +61,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var slots = await db.GeneratedCredentialSlots.AsNoTracking().Select(x => x.SecretId + ":" + x.VersionId).ToArrayAsync();
         var management = await db.ResourceManagement.AsNoTracking().OrderBy(x => x.Resource)
             .Select(x => x.Id + ":" + x.Environment + ":" + x.Application + ":" + x.Resource + ":" + x.Deployment + ":" + x.SourceGeneration).ToArrayAsync();
-        return string.Join("\n", operations.Concat(attempts).Concat(outputs).Concat(slots).Concat(management)) + ":" + await db.SecretVersions.CountAsync() + ":" + await db.GeneratedCredentialCreationAudits.CountAsync();
+        var reservations = await db.ProviderResourceReservations.AsNoTracking().OrderBy(x => x.Namespace).ThenBy(x => x.Value)
+            .Select(x => x.ProviderInstanceId + ":" + x.EnvironmentRecordId + ":" + x.ApplicationRecordId + ":" + x.ResourceLocalId + ":" + x.Namespace + ":" + x.Value).ToArrayAsync();
+        return string.Join("\n", operations.Concat(attempts).Concat(outputs).Concat(slots).Concat(management).Concat(reservations)) + ":" + await db.SecretVersions.CountAsync() + ":" + await db.GeneratedCredentialCreationAudits.CountAsync();
     }
 
     private async Task<string> ExternalIdentity(Scenario scenario)
