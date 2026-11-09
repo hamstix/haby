@@ -11,7 +11,7 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed partial class ExactActionAdmissionTests
 {
     private sealed record DefaultQueueDefinition(string Mode) : ConfigurationRendererContract(QueueRenderer, QueueContract,
-        QueueEvidenceContract.Contract, "receipt", QueueEvidenceProducerId, Key, QueueFormatter)
+        QueueEvidenceContract.Contract, "receipt", Key, QueueFormatter)
     {
         public override ConfigurationObject Defaults => new(new Dictionary<string, ConfigurationValue> { ["mode"] = new ConfigurationString(Mode) });
         public override bool ValidateOptions(ConfigurationObject options, bool complete) =>

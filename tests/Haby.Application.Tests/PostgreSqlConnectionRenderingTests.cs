@@ -86,7 +86,11 @@ public sealed class PostgreSqlConnectionRenderingTests
         var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((t, i) => new ConfigurationPlanningScope(t,
             i == 0 ? AssignmentToken.New() : null, new(t, i == 0 ? [new ProfileDecision.Use(profile.Reference)] : [])));
         var result = ConfigurationPlanningSnapshot.Prepare(ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)),
-            manifest, scopes, [profile], PostgreSqlConnectionRendering.CreateCatalog());
+            manifest, scopes, [profile], PostgreSqlConnectionRendering.CreateCatalog(),
+            manifest.Spec.Resources.Where(r => r.Value.Type == PostgreSqlApplicationLoginContract.Id).Select(r =>
+                new DurableOperationNode(OperationId.Create(r.Key.Value + "-access"), r.Key, PostgreSqlApplicationAccessAction.RegistrationKey,
+                    new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "test"),
+                    new("test/v1", "{}"), [])).ToArray());
         Assert.Equal(accepted, result.Snapshot is not null);
         if (!accepted) { Assert.Contains(result.Expansion.Diagnostics, x => x.Code == "render.options.invalid"); return; }
         var pin = Assert.Single(result.Snapshot!.RenderPins);
@@ -109,7 +113,7 @@ public sealed class PostgreSqlConnectionRenderingTests
         Assert.Equal(reference, Assert.IsType<ConfigurationSecretReference>(deferred.Arguments.Members["password"]).Reference);
         Assert.False(ConfigurationJson.Serialize(fragment.Value).IsSuccess);
         Assert.Equal(new[] { "" }, ConfigurationJson.Preview(fragment.Value).RedactedPaths);
-        foreach (var material in new[] { "semi;colon", "equals=value", "double\"single'", "back\\slash", "пароль🔑" })
+        foreach (var material in new[] { "semi;colon", "equals=value", "double\"single'", "back\\slash", "РїР°СЂРѕР»СЊрџ”‘" })
         {
             var result = new PostgreSqlConnectionFormatter().Format(deferred.Arguments, material)!;
             Assert.DoesNotContain(material, result.ToString());

@@ -1,5 +1,7 @@
 # Component and Binding generation updates
 
+The subsequent [#168 independent-pair slice](168-independent-database-login-pair.md) also admits one new database/application-login pair per update; its Resource-scoped producer and alpha catalog boundaries supersede the earlier new-pair refusal below.
+
 Issue #162 implements the next bounded [ADR-045](../adr/0045-application-generation-updates-and-resource-continuity.md)
 P2 slice. A new ManifestRevision may add/remove Components and local Bindings or
 retarget a Binding to a supported existing Resource. Resource keys, contracts,

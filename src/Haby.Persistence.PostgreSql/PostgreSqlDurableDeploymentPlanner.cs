@@ -109,16 +109,17 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId),
             reference, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber,
             resolved.ImplementationId);
+        var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
+        if (admitted != DurablePlanStatus.Planned) return new(admitted);
         try
         {
+            var producers = await DescribeProducersAsync(context, spec, revisionRow, inputs, cancellationToken);
             var configuration = await ConfigurationPlanningCapture.CaptureAsync(context,
-                new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering);
+                new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering, producers: producers);
             if (configuration.Snapshot is null) return new(DurablePlanStatus.ConfigurationRefused, ConfigurationReport: configuration.Expansion);
             inputs = inputs with { Configuration = configuration.Snapshot };
         }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
-        var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
-        if (admitted != DurablePlanStatus.Planned) return new(admitted);
         DurableOperationGraph graph;
         try
         {
@@ -386,6 +387,10 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
     internal async Task<bool> ValidateGraphAsync(ManifestCatalogDbContext context, NormalizedManifestSpec spec,
         ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs, DurableOperationGraph graph, CancellationToken token)
     {
+        var producers = await DescribeProducersAsync(context, spec, revision, inputs, token);
+        if (inputs.Configuration is null || inputs.Configuration.RenderPins.Any(p =>
+            producers.Count(n => n.ResourceId == p.ResourceLocalId && n.Action == p.ProducerAction) != 1 ||
+            !producers.Any(n => n.ResourceId == p.ResourceLocalId && n.Action == p.ProducerAction && n.Id == p.Producer))) return false;
         if (graph.Baseline is { } baseline)
         {
             var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == Guid.Parse(baseline.Deployment.ToString()), token);
@@ -468,6 +473,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         if (!await ResourceContinuity.ValidateOutputsAsync(db, owner.Id, result, outputContracts ?? [], _codecs, admission, inputs, token)) throw new InvalidDataException();
         return result;
     }
+    private async Task<IReadOnlyList<DurableOperationNode>> DescribeProducersAsync(ManifestCatalogDbContext context,
+        NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs, CancellationToken token)
+    {
+        var instance = await context.ProviderInstances.AsNoTracking().SingleAsync(r => r.Id == revision.ProviderInstanceId, token);
+        return admission.DescribeProducers(spec, new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId),
+            inputs, PreparedConfiguration(instance.ProviderKindId, revision));
+    }
+
     internal async Task<DurableOperationGraph> PlanGraphAsync(ManifestCatalogDbContext context,
         NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs,
         CancellationToken cancellationToken)

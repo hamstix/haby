@@ -1,5 +1,7 @@
 # Bounded Application generation updates
 
+The subsequent [#168 independent-pair slice](168-independent-database-login-pair.md) also admits one new database/application-login pair per update; its Resource-scoped producer and alpha catalog boundaries supersede the earlier new-pair refusal below.
+
 Issue #158 implements the first [ADR-045](../adr/0045-application-generation-updates-and-resource-continuity.md)
 slice. One fully applied Application can accept a new ManifestRevision using the
 same database/application-login pair, exact Resource keys, contracts, properties,

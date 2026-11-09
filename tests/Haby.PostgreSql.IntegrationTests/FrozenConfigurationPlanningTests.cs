@@ -20,7 +20,7 @@ public sealed partial class DurableDeploymentPlanningTests
     {
         var setup = await PrepareConfigurationAsync();
         ConfigurationRenderingCatalog CatalogWith(string value) => Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1",
-            new(new Dictionary<string, ConfigurationValue> { ["rendererValue"] = new ConfigurationString(value) }));
+            new(new Dictionary<string, ConfigurationValue> { ["rendererValue"] = new ConfigurationString(value) }), producerAction: Haby.PostgreSql.PostgreSqlDatabaseCreateAction.RegistrationKey);
         DurablePlan plan;
         await using (var original = Services(setup.Connection, setup.Time, rendering: CatalogWith("original")))
             plan = await ConfigurationPlan(setup, original);

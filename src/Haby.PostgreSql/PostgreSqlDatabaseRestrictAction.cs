@@ -23,10 +23,10 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
         {
             var input = JsonSerializer.Deserialize(node.Input.Json, PostgreSqlPairJsonContext.Default.PostgreSqlDatabaseRestrictInput);
             return input?.DatabaseName is not null && PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(input.DatabaseName) &&
-                input.DatabaseSource is not null && input.DatabaseSource.ProducerOperationId == "db-create" &&
+                input.DatabaseSource is not null && input.DatabaseSource.ProducerOperationId == node.ResourceId.Value + "-create" &&
                 input.DatabaseSource.OutputContract == PostgreSqlDatabaseOutputContract.Contract && input.DatabaseSource.OutputKey == PostgreSqlDatabaseOutputContract.Key &&
                 !string.IsNullOrWhiteSpace(input.ExpectedOwnerUserName) && node.OutputReferences.SequenceEqual([input.DatabaseSource.ToReference()]) &&
-                node.Dependencies.SequenceEqual([OperationId.Create("db-create")]) ? input : null;
+                node.Dependencies.SequenceEqual([input.DatabaseSource.ToReference().ProducerOperationId]) ? input : null;
         }
         catch (Exception e) when (e is JsonException or ArgumentException) { return null; }
     }

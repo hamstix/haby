@@ -74,11 +74,11 @@ public sealed record OperationOutputRefDocument(string ProducerOperationId, stri
 
 /// <summary>Pure PostgreSQL pair admission. The Host composes its database half with standalone admission.
 /// It owns exactly the nodes of its declared Resource; no executor or success placeholder is provided.</summary>
-public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy
+public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
 {
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        TryPair(accepted, inputs, configuration) is not null && TryPair(target, inputs, configuration) is not null &&
+        TryPair(accepted, inputs, configuration, resource) is not null && TryPair(target, inputs, configuration, resource) is not null &&
         accepted.Resources.TryGetValue(resource, out var before) && target.Resources.TryGetValue(resource, out var after) &&
         before.Type == after.Type && before.ProviderRef == after.ProviderRef && before.Properties.Equals(after.Properties) && before.DeletionPolicy == after.DeletionPolicy;
 
@@ -91,7 +91,7 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         throw new InvalidDataException("Pair context required.");
 
     public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        TryPair(spec, inputs, configuration) is { } pair && (resource == pair.Database || resource == pair.Login) &&
+        TryPair(spec, inputs, configuration, resource) is { } pair && (resource == pair.Database || resource == pair.Login) &&
         spec.Resources.TryGetValue(resource, out var declared) && declared.Type == Key.Admission.ResourceContract;
 
     internal static bool SupportsShape(NormalizedManifestSpec spec, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
@@ -118,7 +118,7 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
 
     private sealed record Pair(ManifestLocalId Database, ManifestLocalId Login, string Name,
         PostgreSqlApplicationLoginProperties Properties, string Administrator);
-    private static Pair? TryPair(NormalizedManifestSpec spec, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
+    private static Pair? TryPair(NormalizedManifestSpec spec, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, ManifestLocalId? resource = null)
     {
         if (configuration.ProviderKindId != Provider.ProviderKind || configuration.ShapeId != Provider.ConfigurationContract ||
             configuration.ImplementationId != Provider.ImplementationId || inputs.ImplementationId != Provider.ImplementationId ||
@@ -126,40 +126,61 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         try
         {
             var snapshot = JsonSerializer.Deserialize(configuration.PayloadJson, PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot);
-            return snapshot is null || snapshot.ImplementationId != inputs.ImplementationId ? null : TryShape(spec, inputs, snapshot.AdministratorUserName);
+            return snapshot is null || snapshot.ImplementationId != inputs.ImplementationId ? null : TryShape(spec, inputs, snapshot.AdministratorUserName, resource);
         }
         catch (JsonException) { return null; }
     }
 
-    private static Pair? TryShape(NormalizedManifestSpec spec, DurablePlanningInputs inputs, string administrator)
+    private static Pair? TryShape(NormalizedManifestSpec spec, DurablePlanningInputs inputs, string administrator, ManifestLocalId? resource = null)
     {
         if (!HasSingleOwner(spec) || spec.Resources.Count < 2 || spec.Exports.Count != 0 || spec.Parameters.Count != 0 ||
             inputs.ImplementationId != Provider.ImplementationId || string.IsNullOrWhiteSpace(administrator) ||
             spec.Resources.Values.Any(r => r.ProviderRef != inputs.Alias)) return null;
         var databases = spec.Resources.Where(r => r.Value.Type == PostgreSqlDatabaseContract.Id).ToArray();
         var logins = spec.Resources.Where(r => r.Value.Type == PostgreSqlApplicationLoginContract.Id).ToArray();
-        if (logins.Length != 1 || databases.Length + logins.Length != spec.Resources.Count ||
+        if (logins.Length == 0 || databases.Length + logins.Length != spec.Resources.Count ||
             databases.Any(r => PostgreSqlDatabaseCreateValidation.Name(r.Value) is null) ||
-            databases.Select(r => PostgreSqlDatabaseCreateValidation.Name(r.Value)).Distinct(StringComparer.Ordinal).Count() != databases.Length ||
-            PostgreSqlApplicationLoginContract.Parse(logins[0].Value.Properties) is not { } properties) return null;
-        var database = databases.SingleOrDefault(r => r.Key.Value == properties.DatabaseRef);
-        if (database.Key is null || PostgreSqlDatabaseCreateValidation.Name(database.Value) is not { } name) return null;
+            databases.Select(r => PostgreSqlDatabaseCreateValidation.Name(r.Value)).Distinct(StringComparer.Ordinal).Count() != databases.Length) return null;
+        var pairs = new List<Pair>();
+        foreach (var login in logins)
+        {
+            if (PostgreSqlApplicationLoginContract.Parse(login.Value.Properties) is not { } properties) return null;
+            var database = databases.SingleOrDefault(r => r.Key.Value == properties.DatabaseRef);
+            if (database.Key is null || PostgreSqlDatabaseCreateValidation.Name(database.Value) is not { } name) return null;
+            pairs.Add(new(database.Key, login.Key, name, properties, administrator));
+        }
         foreach (var component in spec.Components.Values)
             if (component.Workloads.Count != 0 || component.Bindings.Values.Any(b =>
-                b.Target is not NormalizedLocalResourceTarget target || target.ResourceRef != logins[0].Key)) return null;
-        return new(database.Key, logins[0].Key, name, properties, administrator);
+                b.Target is not NormalizedLocalResourceTarget target || !pairs.Any(p => p.Login == target.ResourceRef))) return null;
+        return resource is null ? pairs[0] : pairs.SingleOrDefault(p => p.Database == resource || p.Login == resource);
+    }
+
+    public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        CanAddPair(accepted, target, resource, inputs, configuration);
+
+    internal static bool CanAddPair(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
+    {
+        var added = target.Resources.Keys.Where(k => !accepted.Resources.ContainsKey(k)).ToArray();
+        if (added.Length != 2 || target.Resources.Count != accepted.Resources.Count + 2 ||
+            !accepted.Resources.Keys.All(target.Resources.ContainsKey) || TryPair(accepted, inputs, configuration) is null ||
+            TryPair(target, inputs, configuration, resource) is not { } pair) return false;
+        return added.Contains(pair.Database) && added.Contains(pair.Login);
     }
 
     internal static PlanDescriptionStatus DescribeGraph(NormalizedManifestSpec spec, DurablePlanningInputs inputs, DurableOperationGraph? graph)
     {
         if (graph is null || graph.Nodes.Count != 5) return PlanDescriptionStatus.UnsupportedShape;
-        var restrict = graph.Nodes.SingleOrDefault(n => n.Id.Value == "db-restrict");
-        if (restrict?.Input.Format != "haby.postgresql.database-restrict/v1") return PlanDescriptionStatus.UnsupportedShape;
+        var candidates = graph.Nodes.Where(n => n.Action == PostgreSqlDatabaseRestrictAction.RegistrationKey).Take(2).ToArray();
+        if (candidates.Length != 1) return PlanDescriptionStatus.UnsupportedShape;
+        var restrict = candidates[0];
+        if (restrict.Input.Format != "haby.postgresql.database-restrict/v1") return PlanDescriptionStatus.UnsupportedShape;
         try
         {
             var frozen = JsonSerializer.Deserialize(restrict.Input.Json, PostgreSqlPairJsonContext.Default.PostgreSqlDatabaseRestrictInput);
             if (frozen is null) return PlanDescriptionStatus.InputCorrupt;
-            var pair = TryShape(spec, inputs, frozen.ExpectedOwnerUserName);
+            var pair = TryShape(spec, inputs, frozen.ExpectedOwnerUserName, restrict.ResourceId);
             if (pair is null) return PlanDescriptionStatus.UnsupportedShape;
             var expected = spec.Resources.SelectMany(r => new PostgreSqlPairResourceAdmission(r.Value.Type).Plan(r.Key, inputs, pair));
             return new DurableOperationGraph(expected).Equals(graph) ? PlanDescriptionStatus.OperationGraph : PlanDescriptionStatus.PinnedInputMismatch;
@@ -170,7 +191,7 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
 
     public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        Plan(resource, inputs, TryPair(spec, inputs, configuration) ?? throw new InvalidDataException("Unsupported PostgreSQL pair."));
+        Plan(resource, inputs, TryPair(spec, inputs, configuration, resource) ?? throw new InvalidDataException("Unsupported PostgreSQL pair."));
 
     private IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resource, DurablePlanningInputs inputs, Pair pair)
     {
@@ -180,36 +201,45 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
             new(OperationId.Create(id), resource, new(Key.Admission, OperationContractId.Create(action)), references,
                 new(format, JsonSerializer.Serialize(input, metadata)), dependencies.Select(OperationId.Create).ToArray())
             { OutputReferences = outputs.Select(o => o.ToReference()).ToArray() };
-        var database = new OperationOutputRefDocument("db-create", PostgreSqlApplicationLoginContract.DatabaseOutput, "database");
-        var password = new OperationOutputRefDocument("app-login-material", GeneratedCredentialContracts.OutputContract, "password");
-        var role = new OperationOutputRefDocument("app-login-create", PostgreSqlApplicationLoginContract.RoleOutput, "role");
+        var dbCreate = pair.Database.Value + "-create";
+        var dbRestrict = pair.Database.Value + "-restrict";
+        var loginMaterial = pair.Login.Value + "-material";
+        var loginCreate = pair.Login.Value + "-create";
+        var loginAccess = pair.Login.Value + "-access";
+        var database = new OperationOutputRefDocument(dbCreate, PostgreSqlApplicationLoginContract.DatabaseOutput, "database");
+        var password = new OperationOutputRefDocument(loginMaterial, GeneratedCredentialContracts.OutputContract, "password");
+        var role = new OperationOutputRefDocument(loginCreate, PostgreSqlApplicationLoginContract.RoleOutput, "role");
         if (resource == pair.Database)
-            return [Node("db-create", "postgresql.database.create/v1alpha1", PostgreSqlDatabaseCreateAction.Format,
+            return [Node(dbCreate, "postgresql.database.create/v1alpha1", PostgreSqlDatabaseCreateAction.Format,
                 new PostgreSqlDatabaseActionInput(pair.Name), PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput, []),
-                Node("db-restrict", "postgresql.database.restrict/v1alpha1", "haby.postgresql.database-restrict/v1",
+                Node(dbRestrict, "postgresql.database.restrict/v1alpha1", "haby.postgresql.database-restrict/v1",
                     new PostgreSqlDatabaseRestrictInput(pair.Name, database, pair.Administrator), PostgreSqlPairJsonContext.Default.PostgreSqlDatabaseRestrictInput,
-                    ["db-create"], database)];
+                    [dbCreate], database)];
         var owner = new ManagedResourceKey(inputs.Environment, inputs.Revision.ApplicationRecordId, pair.Login);
-        var material = new DurableOperationNode(OperationId.Create("app-login-material"), pair.Login,
+        var material = new DurableOperationNode(OperationId.Create(loginMaterial), pair.Login,
             new(Key.Admission, OperationContractId.Create(GeneratedCredentialContracts.Action)), references,
             GeneratedCredentialInputCodec.Encode(new(owner, GeneratedCredentialSlot.ApplicationPassword, GeneratedCredentialSlot.RandomPasswordV1)),
-            [OperationId.Create("db-restrict")]);
+            [OperationId.Create(dbRestrict)]);
         return [material,
-            Node("app-login-create", "postgresql.application-login.create/v1alpha1", "haby.postgresql.application-login-create/v1",
+            Node(loginCreate, "postgresql.application-login.create/v1alpha1", "haby.postgresql.application-login-create/v1",
                 new PostgreSqlLoginCreateInput(new(owner.EnvironmentRecordId.ToString(), owner.ApplicationRecordId.ToString(), owner.ResourceLocalId.Value),
                     pair.Name, database, RoleName(owner), password), PostgreSqlPairJsonContext.Default.PostgreSqlLoginCreateInput,
-                    ["db-create", "db-restrict", "app-login-material"], database, password),
-            Node("app-login-access", "postgresql.application-login.configure-access/v1alpha1", "haby.postgresql.application-login-configure-access/v1",
+                    [dbCreate, dbRestrict, loginMaterial], database, password),
+            Node(loginAccess, "postgresql.application-login.configure-access/v1alpha1", "haby.postgresql.application-login-configure-access/v1",
                 new PostgreSqlLoginAccessInput(pair.Name, database, pair.Properties.Schema, pair.Properties.PrivilegePolicy, role, password),
-                PostgreSqlPairJsonContext.Default.PostgreSqlLoginAccessInput, ["db-create", "db-restrict", "app-login-create", "app-login-material"], database, role, password)];
+                PostgreSqlPairJsonContext.Default.PostgreSqlLoginAccessInput, [dbCreate, dbRestrict, loginCreate, loginMaterial], database, role, password)];
     }
 
     public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
         PreparedProviderConfiguration configuration, DurableOperationGraph graph)
     {
-        // Pair creation supports only the pair itself. Additional databases require
-        // reusing the already applied pair, so no pair nodes are composed for them.
-        if (spec.Resources.Count != 2) return false;
+        // Initial installation remains one pair. Updates create exactly one complete
+        // independent pair; every other declared Resource has explicit reuse.
+        if (graph.Baseline is null && spec.Resources.Count != 2) return false;
+        if (TryPair(spec, inputs, configuration, resource) is not { } pair ||
+            graph.ReusedResources.Any(r => r.Resource == pair.Database || r.Resource == pair.Login) ||
+            graph.Nodes.Count != 5 || !graph.Nodes.Select(n => n.ResourceId).ToHashSet().SetEquals([pair.Database, pair.Login]) ||
+            !spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(graph.ReusedResources.Select(r => r.Resource)))) return false;
         // Exact typed current-format nodes, including complete dependency and selector sets.
         // No external existence/name-availability assertion is made by this comparison.
         var expected = Plan(spec, resource, inputs, configuration).OrderBy(n => n.Id.Value, StringComparer.Ordinal).ToArray();

@@ -32,12 +32,12 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
     public static (ConfigurationPlanningSnapshot? Snapshot, ProfileExpansionResult Expansion) Prepare(
         ManifestRevisionRef revision, NormalizedApplicationManifest manifest,
         IEnumerable<ConfigurationPlanningScope> scopes, IEnumerable<ConfigurationProfileRevision> profiles,
-        ConfigurationRenderingCatalog? rendering = null) => PrepareCore(revision, manifest, scopes, profiles, rendering);
+        ConfigurationRenderingCatalog? rendering = null, IReadOnlyList<DurableOperationNode>? producers = null) => PrepareCore(revision, manifest, scopes, profiles, rendering, producers: producers);
 
     internal static (ConfigurationPlanningSnapshot? Snapshot, ProfileExpansionResult Expansion) PrepareCore(
         ManifestRevisionRef revision, NormalizedApplicationManifest manifest,
         IEnumerable<ConfigurationPlanningScope> scopes, IEnumerable<ConfigurationProfileRevision> profiles,
-        ConfigurationRenderingCatalog? rendering = null, IReadOnlyList<ConfigurationRenderPin>? frozenPins = null)
+        ConfigurationRenderingCatalog? rendering = null, IReadOnlyList<ConfigurationRenderPin>? frozenPins = null, IReadOnlyList<DurableOperationNode>? producers = null)
     {
         var targets = Targets(manifest);
         var local = scopes.ToImmutableArray();
@@ -73,7 +73,7 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
                 }
                 else
                 {
-                    var resolved = (rendering ?? ConfigurationRenderingCatalog.Empty).Prepare(layout.Component, i, request, manifest.Spec);
+                    var resolved = (rendering ?? ConfigurationRenderingCatalog.Empty).Prepare(layout.Component, i, request, manifest.Spec, producers ?? []);
                     if (resolved.Pin is { } pin) pins.Add(pin);
                     else errors.Add(new(resolved.Error!, layout.Component.Value, "", "", request.BindingId.Value));
                 }

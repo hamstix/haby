@@ -11,21 +11,6 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class ExactActionAdmissionTests
 {
-    private static readonly ConfigurationRendererId AddedQueueRenderer = ConfigurationRendererId.Create("sample.added-queue-render/v1");
-    private sealed record AddedQueueDefinition() : ConfigurationRendererContract(AddedQueueRenderer, QueueContract, QueueEvidenceContract.Contract,
-        "receipt", OperationId.Create("extra-create"), Key, QueueFormatter)
-    {
-        public override ConfigurationObject Defaults => new([]);
-        public override bool ValidateOptions(ConfigurationObject options, bool complete) => options.Members.Count == 0;
-        public override ConfigurationObject NormalizeOptions(ConfigurationObject options) => options;
-    }
-    private sealed class AddedQueueDocumentRenderer : IConfigurationRenderer
-    {
-        public ConfigurationRendererId Contract => AddedQueueRenderer;
-        public ManifestLocalId Identity => QueueImplementation;
-        public ConfigurationFragment? Render(ExternalOperationOutput output, ConfigurationObject options) => new QueueDocumentRenderer().Render(output, options);
-    }
-
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -41,7 +26,7 @@ public sealed partial class ExactActionAdmissionTests
             Assert.Equal(1, result.Progress!.AppliedGeneration);
         }
         var renderer = new QueueDocumentRenderer();
-        var rendering = new ConfigurationRenderingCatalog([new QueueRenderDefinition(), new AddedQueueDefinition()], [renderer, new AddedQueueDocumentRenderer()], QueueFormatting(), [new QueueNeverFormatter()]);
+        var rendering = new ConfigurationRenderingCatalog([new QueueRenderDefinition()], [renderer], QueueFormatting(), [new QueueNeverFormatter()]);
         for (var version = 2; version <= (retain ? 5 : 3); version++)
         {
             await using var services = Services(scenario.Connection, boundary, rendering: rendering);
@@ -63,10 +48,13 @@ public sealed partial class ExactActionAdmissionTests
                 // Retarget a changed Binding to the existing Resource created in the mixed generation.
                 var binding = envelope["manifest"]!["spec"]!["components"]![component]!["bindings"]!["second"]!;
                 binding["target"]!["resourceRef"] = "extra";
-                binding["documentProjections"]![0]!["rendererRef"] = AddedQueueRenderer.Value;
+                binding["documentProjections"]![0]!["rendererRef"] = QueueRenderer.Value;
+                var first = binding.DeepClone(); first["target"]!["resourceRef"] = "jobs";
+                first["documentProjections"]![0]!["path"] = "/OriginalQueue";
+                envelope["manifest"]!["spec"]!["components"]![component]!["bindings"]!["original"] = first;
             }
             var payload = Encoding.UTF8.GetBytes(envelope.ToJsonString());
-            var catalog = new ManifestContractCatalog([new ResourceTypeDefinition(QueueContract, "{\"type\":\"object\"}")], [], [], [new(QueueRenderer), new(AddedQueueRenderer)]);
+            var catalog = new ManifestContractCatalog([new ResourceTypeDefinition(QueueContract, "{\"type\":\"object\"}")], [], [], [new(QueueRenderer)]);
             var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(
                 services.GetRequiredService<IManifestImportStore>(), catalog, TimeProvider.System).ExecuteAsync(payload, "tester"));
             var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
@@ -81,9 +69,14 @@ public sealed partial class ExactActionAdmissionTests
             var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default));
             Assert.Equal(version, commit.Commit.Generation.Value);
             Assert.Equal(component, Assert.Single(plan.Inputs.Configuration!.Layouts).Component.Value);
-            Assert.Equal(version == 2 ? "first" : "second", Assert.Single(Assert.Single(plan.Inputs.Configuration.Layouts).BindingRequests).BindingId.Value);
-            Assert.Equal(mixed && version >= 3 && !absent ? AddedQueueRenderer : QueueRenderer, Assert.Single(plan.Inputs.Configuration.RenderPins).Renderer);
-            Assert.Equal(mixed && version >= 3 && !absent ? "extra" : "jobs", Assert.Single(plan.Inputs.Configuration.RenderPins).ResourceLocalId.Value);
+            Assert.Contains(Assert.Single(plan.Inputs.Configuration.Layouts).BindingRequests, r => r.BindingId.Value == (version == 2 ? "first" : "second"));
+            Assert.All(plan.Inputs.Configuration.RenderPins, p => Assert.Equal(QueueRenderer, p.Renderer));
+            if (mixed && version >= 3 && !absent)
+            {
+                Assert.Equal("extra-create", plan.Inputs.Configuration.RenderPins.Single(p => p.ResourceLocalId.Value == "extra").Producer.Value);
+                Assert.Equal("10-external", plan.Inputs.Configuration.RenderPins.Single(p => p.ResourceLocalId.Value == "jobs").Producer.Value);
+            }
+            Assert.Contains(plan.Inputs.Configuration.RenderPins, p => p.ResourceLocalId.Value == (mixed && version >= 3 && !absent ? "extra" : "jobs"));
             var result = await services.GetRequiredService<DurableGenerationRunner>().RunAsync(commit.Commit.DeploymentId, commit.Commit.Generation, default);
             Assert.Null(result.StopOutcome); Assert.Equal(version, result.Progress!.AppliedGeneration); Assert.Equal(mixed && version == 2 ? 1 : 0, result.Progress.Total);
             var output = await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(new(commit.Commit.DeploymentId, commit.Commit.Generation, QueueEvidenceProducerId),
@@ -97,6 +90,11 @@ public sealed partial class ExactActionAdmissionTests
             Assert.Equal(ConfigurationDocumentStatus.Created, materialized.Status);
             var value = Assert.IsType<ConfigurationDeferredValue>(Assert.IsType<ConfigurationObject>(materialized.Revision!.Tree).Members["Queue"]);
             Assert.Equal(new ConfigurationString(mixed && version >= 3 && !absent ? "accepted-2" : "accepted-1"), value.Arguments.Members["receipt"]);
+            if (mixed && version >= 3 && !absent)
+            {
+                var original = Assert.IsType<ConfigurationDeferredValue>(Assert.IsType<ConfigurationObject>(materialized.Revision!.Tree).Members["OriginalQueue"]);
+                Assert.Equal(new ConfigurationString("accepted-1"), original.Arguments.Members["receipt"]);
+            }
             if (mixed && !absent)
             {
                 var added = await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(

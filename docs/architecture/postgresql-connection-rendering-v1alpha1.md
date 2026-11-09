@@ -4,6 +4,13 @@ Status: accepted design under [ADR-040](../adr/0040-postgresql-connection-render
 Pure primitives and exact planning are implemented by [issue #144](../development/144-postgresql-connection-rendering.md).
 This document does not claim a working configuration delivery endpoint.
 
+Renderer metadata selects the exact Resource contract and producer action/output
+contract/key. Planning resolves exactly one matching producer for the bound Resource
+and freezes its concrete operation ID in the render pin. Multiple logins use the
+same renderer/formatter registration; there is no Application-wide fixed producer.
+Missing or ambiguous matches refuse. See [#168](../development/168-independent-database-login-pair.md)
+for current alpha API/catalog implications.
+
 ## Exact contracts
 
 - Resource: postgresql.application-login/v1alpha1.

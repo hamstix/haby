@@ -29,7 +29,7 @@ public sealed class ConfigurationPlanningSnapshotTests
     private static ConfigurationPlanningScope[] Scopes(NormalizedApplicationManifest manifest, AssignmentToken token, params ProfileDecision[] decisions) =>
         ConfigurationPlanningSnapshot.Targets(manifest).Select((t, i) => new ConfigurationPlanningScope(t, i == 0 ? token : null, new(t, i == 0 ? decisions : []))).ToArray();
     private static ConfigurationPlanningSnapshot Snapshot(NormalizedApplicationManifest manifest, ConfigurationProfileRevision profile, AssignmentToken token) =>
-        ConfigurationPlanningSnapshot.Prepare(Revision, manifest, Scopes(manifest, token, new ProfileDecision.Use(profile.Reference)), [profile], Haby.Tests.ConfigurationRenderingSamples.Catalog()).Snapshot!;
+        ConfigurationPlanningSnapshot.Prepare(Revision, manifest, Scopes(manifest, token, new ProfileDecision.Use(profile.Reference)), [profile], Haby.Tests.ConfigurationRenderingSamples.Catalog(), Haby.Tests.ConfigurationRenderingSamples.Producers(manifest.Spec)).Snapshot!;
 
     internal static string Fingerprint(ConfigurationPlanningSnapshot snapshot)
     {
@@ -81,7 +81,7 @@ public sealed class ConfigurationPlanningSnapshotTests
         var snapshot = Snapshot(manifest, profile, token);
         var scopes = snapshot.Scopes.ToArray();
         scopes[1] = scopes[1] with { Token = AssignmentToken.New() };
-        var empty = ConfigurationPlanningSnapshot.Prepare(Revision, manifest, scopes, [profile], Haby.Tests.ConfigurationRenderingSamples.Catalog()).Snapshot!;
+        var empty = ConfigurationPlanningSnapshot.Prepare(Revision, manifest, scopes, [profile], Haby.Tests.ConfigurationRenderingSamples.Catalog(), Haby.Tests.ConfigurationRenderingSamples.Producers(manifest.Spec)).Snapshot!;
         Assert.NotEqual(snapshot, empty);
         var text = ConfigurationPlanningSnapshotCodec.Encode(snapshot);
         Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(text,
@@ -117,6 +117,6 @@ public sealed class ConfigurationPlanningSnapshotTests
             Declaration = new(scopes[1].Target,
             [new ProfileDecision.Disable(profile.Reference.ProfileId), new ProfileDecision.Use(ordinary.Reference)])
         };
-        Assert.NotNull(ConfigurationPlanningSnapshot.Prepare(Revision, manifest, scopes, [profile, ordinary], Haby.Tests.ConfigurationRenderingSamples.Catalog()).Snapshot);
+        Assert.NotNull(ConfigurationPlanningSnapshot.Prepare(Revision, manifest, scopes, [profile, ordinary], Haby.Tests.ConfigurationRenderingSamples.Catalog(), Haby.Tests.ConfigurationRenderingSamples.Producers(manifest.Spec)).Snapshot);
     }
 }
