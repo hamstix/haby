@@ -42,7 +42,7 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             // Retain the earlier real-effect fixtures. Complete pairs require explicit
             // final-target composition and the exact accepted five-node graph.
-            if (accepted.Graph.Nodes.Count is not (2 or 4) && (accepted.Graph.Nodes.Count != 5 || access is null)) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+            if (accepted.Graph.Nodes.Any(n => n.Action == PostgreSqlApplicationAccessAction.RegistrationKey) && access is null) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             if (input is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,

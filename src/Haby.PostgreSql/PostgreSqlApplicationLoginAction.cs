@@ -51,7 +51,7 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
         {
             var accepted = await outputs.FindAcceptedAsync(key, cancellationToken);
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
-            if (accepted.Graph.Nodes.Count != 4 && (accepted.Graph.Nodes.Count != 5 || access is null)) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+            if (accepted.Graph.Nodes.Any(n => n.Action == PostgreSqlApplicationAccessAction.RegistrationKey) && access is null) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
                 accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;

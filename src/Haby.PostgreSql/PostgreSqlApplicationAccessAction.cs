@@ -48,7 +48,6 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
         {
             var accepted = await outputs.FindAcceptedAsync(key, cancellationToken);
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
-            if (accepted.Graph.Nodes.Count != 5) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
                 accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
