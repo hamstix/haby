@@ -168,9 +168,13 @@ Status: planned. Begin implementation after the limited Application-generation
 update checkpoint in P2 above. Goal: deploy and operate an application using
 Haby-managed configuration and the same durable state/operation model.
 
-- [ ] Agree the first Kubernetes Workload contract, reconciliation ownership, exact inputs and update semantics.
-- [ ] Reconcile explicitly requested Deployment, Service, headless Service and Ingress objects. Resource selection is configurable; no compulsory bundle.
-- [ ] Connect exact configuration revisions to workload startup and define rollout/update behavior.
+- [x] Accept the first Workload foundation packet under [ADR-046](docs/adr/0046-kubernetes-workload-foundation-and-rollout-stages.md): unified deployment planning/execution, Kubernetes-specific contracts with neutral core/storage, exact inputs, staged readiness and mandatory retirement cleanup. This is design acceptance, not implementation.
+- [ ] Specify closed JSON and reusable placement inheritance/overrides: existing namespace (normally shared per Environment), container/image/ports/env/resources, replicas/strategy/rollout, startup/liveness/readiness probes, nodeSelector, imagePullSecrets and existing ConfigMap/Secret/PVC mounts with optional/readOnly/subPath semantics. Explicit Development Recreate and Production RollingUpdate settings are configuration choices, not Environment-name inference.
+- [ ] Implement Deployment and explicitly selected Service and headless Service (allowed together), plus individual Ingress controlled by placement. No compulsory bundle, arbitrary PodSpec/YAML or ownership of referenced objects; shared product routing remains separate.
+- [ ] Specify Kubernetes object identity/field ownership, update conflicts and action-specific uncertain-result evidence before the corresponding implementation; no same-name/label-based implicit adoption.
+- [ ] Implement Resource-ready -> exact configuration/access preparation -> Workload submission -> readiness -> AppliedGeneration completion. Preserve the Resource-only path and the existing ordinary fully-applied configuration selector.
+- [ ] Support submission without waiting, with a saved checkpoint and later exact-generation wait/resume. Not waiting does not waive readiness or advance AppliedGeneration. Define bounded batch readiness observation for CI after several Applications have been submitted; multi-Application ChangeSets are not required.
+- [ ] Agree the initial runtime authentication and durable credential-transfer path, including response loss, restart, rotation and revocation; operator credentials never enter Pods. Connect exact configuration revisions to startup without implicit latest or an unrestricted pre-applied materialization bypass.
 - [ ] Implement Kubernetes Runtime Identity and scoped configuration retrieval using the accepted projected-token/TokenReview model.
 - [ ] Support image/version updates through a new accepted desired generation, with observable completion and safe failure behavior.
 - [ ] Separate desired replicas from suspend/resume and temporary operational overrides.
@@ -183,8 +187,12 @@ application through supported interfaces. Explicit object ownership prevents
 accidental removal of unrelated objects. Workload removal does not implicitly
 drop a still-declared database or rotate credentials.
 
-A Kubernetes Provider/reconciler is an integration. Haby still uses PostgreSQL
-as its default source of truth; Kubernetes is not a mandatory runtime. A CRD
+Kubernetes is the first and only supported Workload runtime in this scope;
+its declarations/implementation may be Kubernetes-specific. Shared deployment
+logic and persistence stay independent of Kubernetes client types and fixed object
+structure; additional runtime abstractions require actual demand. A Kubernetes
+Provider/reconciler is an integration. Haby still uses PostgreSQL as its default
+source of truth; Kubernetes is not a mandatory runtime for hosting Haby. A CRD
 operator, leader election and Kubernetes-only storage mode are separate later
 capabilities, not prerequisites for this milestone.
 

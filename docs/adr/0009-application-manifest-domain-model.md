@@ -51,10 +51,12 @@ is still Application-owned. Bindings express consumption, not ownership.
 Workload is a separate domain declaration rather than a Resource subtype or an
 unstructured Component value. Its manifest declaration is nested inside the
 Component for authoring convenience, making the parent relationship structural
-and removing a redundant `componentRef`. Each persisted ManagedWorkload retains
-its own immutable ID, desired and observed state and operation history. Resource
-and ManagedWorkload implementations share durable operation infrastructure but
-use distinct domain contracts.
+and removing a redundant `componentRef`. ManagedWorkload has stable identity,
+desired/observed state and execution history. Resource and Workload participate in
+unified deployment planning and share durable execution infrastructure. As refined
+by [ADR-046](0046-kubernetes-workload-foundation-and-rollout-stages.md), separate
+persisted models are introduced only for genuinely different state/invariants;
+distinct declarations do not mandate parallel tables or execution infrastructure.
 
 RuntimeInstance is conceptual and observed rather than a required persisted
 aggregate in M2. A later runtime delivery or observability capability may append
@@ -302,8 +304,9 @@ collapsing the domain concepts.
 A top-level collection requires every Workload to repeat `componentRef`, permits
 dangling references and separates runtime configuration from the Component it
 runs. Nesting is preferred for authoring while the parsed Workload remains a
-separate domain declaration and its Environment-specific ManagedWorkload remains
-a separate persisted entity.
+separate domain declaration with Environment-specific managed state. Under
+ADR-046, persistence separation follows actual state/invariants rather than the
+authoring hierarchy alone.
 
 ### Infer publication from a document flag
 

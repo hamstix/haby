@@ -5,6 +5,11 @@
 - Scope: P2 immutable unresolved documents and the operator materialize/get/preview path
 - Extends: ADR-017/026/027/033/035/036/037/039/040
 
+[ADR-046](0046-kubernetes-workload-foundation-and-rollout-stages.md) accepts a
+future P3 server deployment-preparation path after Resource-stage readiness and
+before full Workload readiness. It does not weaken this P2 operator selection or
+materialization gate; implementation requires a separate checked stage contract.
+
 ## Decision
 
 ### Operator selectors and exact internal targets
