@@ -10,6 +10,62 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class PostgreSqlPairPlanningTests
 {
+    [Fact]
+    public void Initial_pair_plus_independent_database_is_refused_before_acceptance()
+    {
+        var envelope = Example();
+        envelope["manifest"]!["spec"]!["resources"]!["extra"] = new JsonObject
+        {
+            ["type"] = "postgresql.database/v1alpha1", ["providerRef"] = "postgresql.primary",
+            ["properties"] = new JsonObject { ["name"] = "sample_extra" }
+        };
+        var spec = Spec(envelope); var inputs = Inputs(); var configuration = Configuration();
+        IDurableActionAdmissionHandler[] handlers =
+            [new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id)];
+        var admission = new DurableActionAdmission(new DurableActionRegistry(handlers, []));
+        // The expanded declaration is valid for reuse comparison. Creating the pair
+        // in that declaration must still fail the adapter's execution-profile check.
+        Assert.Equal(DurablePlanStatus.Planned, admission.Admit(spec, Provider, inputs, configuration));
+        var graph = new DurableOperationGraph(spec.Resources.SelectMany(r =>
+            ((IDurableResourcePlanComposer)handlers.Single(h => h.Key.Admission.ResourceContract == r.Value.Type))
+                .Plan(spec, r.Key, inputs, configuration)));
+        Assert.Equal(6, graph.Nodes.Count);
+        Assert.False(admission.ValidateGraph(spec, Provider, inputs, configuration, graph));
+        Assert.Throws<InvalidDataException>(() => admission.Plan(spec, Provider, inputs, configuration));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Mixed_admission_composes_only_new_database_even_when_original_operation_identity_is_reused(bool sameOperationId)
+    {
+        var envelope = Example();
+        if (sameOperationId)
+        {
+            var resources = envelope["manifest"]!["spec"]!["resources"]!.AsObject();
+            resources["core"] = resources["db"]!.DeepClone(); resources.Remove("db");
+            resources["app-login"]!["properties"]!["databaseRef"] = "core";
+        }
+        var accepted = Spec(envelope);
+        var added = sameOperationId ? "db" : "extra";
+        envelope["manifest"]!["spec"]!["resources"]![added] = new JsonObject
+        {
+            ["type"] = "postgresql.database/v1alpha1", ["providerRef"] = "postgresql.primary",
+            ["properties"] = new JsonObject { ["name"] = "sample_extra" }
+        };
+        var target = Spec(envelope); var inputs = Inputs(); var configuration = Configuration();
+        var admission = new DurableActionAdmission(new DurableActionRegistry([
+            new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id)], []));
+        Assert.True(admission.CanReuse(accepted, target, Provider, inputs, configuration));
+        var reuse = accepted.Resources.Keys.Select(r => new ResourceReuse(r, Guid.NewGuid(), 1, new string('B', 64))).ToArray();
+        var graph = admission.PlanUpdate(target, Provider, inputs, configuration, reuse,
+            new(ApplicationDeploymentId.New(), 1, "v2:" + new string('A', 64)));
+        var node = Assert.Single(graph.Nodes);
+        Assert.Equal(added, node.ResourceId.Value); Assert.Equal(added + "-create", node.Id.Value);
+        Assert.Empty(node.Dependencies); Assert.Empty(node.OutputReferences); Assert.Equal(2, graph.ReusedResources.Count);
+        Assert.True(admission.ValidateCreationGraph(target, Provider, inputs, configuration, graph));
+    }
+
     internal static readonly ManifestContractCatalog Catalog = new(
         [PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [], [], []);
     internal static readonly ProviderAdapterKey Provider = new("postgresql/v1", "haby.postgresql.connection/v1", PostgreSqlDatabaseCheckpointCapability.ImplementationId);

@@ -93,7 +93,6 @@ public sealed partial class ManifestOperatorService
                 DeploymentGeneration.Create(request.Generation), OperationId.Create(request.OperationId));
         }
         catch (ArgumentException) { return OperationStatus.InvalidRequest; }
-        if (request.Generation != 1) return OperationStatus.UnsupportedShape;
         return OperationStatus.Unspecified;
     }
 

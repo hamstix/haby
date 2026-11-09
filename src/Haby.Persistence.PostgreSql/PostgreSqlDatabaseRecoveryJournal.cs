@@ -48,7 +48,7 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
             // no-output success. Concrete PostgreSQL eligibility remains adapter-owned.
             var accepted = await context.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(row =>
                 row.DeploymentId == deployment && row.Generation == generation, cancellationToken);
-            if (accepted is null || DurableOperationGraphCodec.Decode(accepted.GraphJson).Nodes is not [var only] ||
+            if (accepted is null || DurableOperationGraphCodec.Decode(accepted.GraphJson) is not { Baseline: null, Nodes: [var only] } ||
                 only.Id != key.OperationId || only.Dependencies.Count != 0 || only.OutputReferences.Count != 0 ||
                 await context.DurableOperations.CountAsync(row => row.DeploymentId == deployment &&
                     row.Generation == generation, cancellationToken) != 1)

@@ -95,6 +95,11 @@ public abstract record DurableMarkerResult
 /// </summary>
 public interface IDurableOperationJournal
 {
+    /// <summary>Checks exact retained reuse evidence before new work, without creating attempts or advancing state.</summary>
+    ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+        CancellationToken cancellationToken) => new(false);
+
+    /// <summary>Completes an all-reuse or mixed generation only after its combined locked evidence checks.</summary>
     ValueTask<bool> TryCompleteReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
         CancellationToken cancellationToken) => new(false);
 
@@ -127,7 +132,8 @@ public interface IDurableOperationJournal
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Atomically records <c>Succeeded</c> and advances the deployment's applied generation.
+    /// Atomically records <c>Succeeded</c> and checks operation completion. Mixed generations
+    /// retain this success until the runner separately validates their combined reuse requirements.
     /// A rejected guard must leave the recoverable pre-terminal state, never a false applied generation.
     /// </summary>
     ValueTask<bool> TryRecordSuccessAsync(DurableOperationKey key, Guid attemptId, DateTimeOffset at,

@@ -99,7 +99,7 @@ public sealed partial class OperatorHostIntegrationTests
         Add(r => r.Key.DeploymentId = r.Key.DeploymentId.ToUpperInvariant(), RecoveryStatus.InvalidRequest);
         Add(r => r.Key.OperationId = "other", RecoveryStatus.OperationNotFound);
         Add(r => r.Key.DeploymentId = ApplicationDeploymentId.New().ToString(), RecoveryStatus.OperationNotFound);
-        Add(r => r.Key.Generation = 2, RecoveryStatus.UnsupportedRecoveryAction);
+        Add(r => r.Key.Generation = 2, RecoveryStatus.OperationNotFound);
         Add(r => r.Key = null, RecoveryStatus.InvalidRequest);
         Add(r => r.Reason = RecoveryReason.Unspecified, RecoveryStatus.InvalidRequest);
         Add(r => r.Reason = (RecoveryReason)999, RecoveryStatus.InvalidRequest);

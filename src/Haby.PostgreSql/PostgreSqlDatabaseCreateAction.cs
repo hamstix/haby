@@ -10,11 +10,24 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Haby.PostgreSql;
 
 /// <summary>One exact database admission, explicitly composing standalone and pair planning.</summary>
-public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy
+public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
 {
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        pair.CanReuse(accepted, target, resource, inputs, configuration);
+        (Standalone(accepted) && Standalone(target) ||
+            PostgreSqlPairResourceAdmission.SupportsShape(accepted, inputs, configuration) &&
+            PostgreSqlPairResourceAdmission.SupportsShape(target, inputs, configuration)) &&
+        accepted.Resources.TryGetValue(resource, out var before) && target.Resources.TryGetValue(resource, out var after) &&
+        before.Type == after.Type && before.ProviderRef == after.ProviderRef && before.Properties.Equals(after.Properties) &&
+        before.DeletionPolicy == after.DeletionPolicy &&
+        PostgreSqlPairResourceAdmission.IsIndependentDatabase(accepted, resource) == PostgreSqlPairResourceAdmission.IsIndependentDatabase(target, resource);
+
+    public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        target.Resources.Count == accepted.Resources.Count + 1 &&
+        PostgreSqlPairResourceAdmission.SupportsShape(accepted, inputs, configuration) &&
+        PostgreSqlPairResourceAdmission.SupportsShape(target, inputs, configuration) &&
+        PostgreSqlPairResourceAdmission.IsIndependentDatabase(target, resource);
 
     public override DurableActionExecutionKey Key => PostgreSqlDatabaseCreateAction.RegistrationKey;
     public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
@@ -29,16 +42,20 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
 
     private readonly PostgreSqlPairResourceAdmission pair = new(PostgreSqlDatabaseContract.Id);
     private static bool Standalone(NormalizedManifestSpec spec) => CheckpointDatabaseShape.IsSupported(spec);
+    private static bool StandaloneResource(NormalizedManifestSpec spec, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => Standalone(spec) ||
+        PostgreSqlPairResourceAdmission.SupportsShape(spec, inputs, configuration) &&
+        PostgreSqlPairResourceAdmission.IsIndependentDatabase(spec, resource);
     public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration configuration) => Standalone(spec)
+        PreparedProviderConfiguration configuration) => StandaloneResource(spec, resource, inputs, configuration)
             ? spec.Resources.ContainsKey(resource) && Validate(spec.Resources[resource], inputs)
             : pair.Validate(spec, resource, inputs, configuration);
     public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource,
-        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => Standalone(spec)
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => StandaloneResource(spec, resource, inputs, configuration)
             ? Plan(resource, spec.Resources[resource], inputs) : pair.Plan(spec, resource, inputs, configuration);
     public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration configuration, DurableOperationGraph graph) => Standalone(spec)
-            ? new DurableOperationGraph(Plan(resource, spec.Resources[resource], inputs)).Equals(graph)
+        PreparedProviderConfiguration configuration, DurableOperationGraph graph) => StandaloneResource(spec, resource, inputs, configuration)
+            ? new DurableOperationGraph(Plan(resource, spec.Resources[resource], inputs)).Equals(new DurableOperationGraph(graph.Nodes.Where(n => n.ResourceId == resource)))
             : pair.ValidateGraph(spec, resource, inputs, configuration, graph);
 }
 

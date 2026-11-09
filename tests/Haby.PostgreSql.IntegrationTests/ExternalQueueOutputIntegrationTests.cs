@@ -55,13 +55,17 @@ public sealed partial class ExactActionAdmissionTests
     // Test-only adapter boundary: counted queue effects, never PostgreSQL database evidence or a production broker.
     private sealed class QueueEvidenceProducer(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
         IProviderConfigurationStore configurations, QueueBoundary boundary)
-        : DurableActionHandler<QueueCreateInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy
+        : DurableActionHandler<QueueCreateInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
     {
         public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
             DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
             Validate(accepted, resource, inputs, configuration) && Validate(target, resource, inputs, configuration) &&
             accepted.Resources[resource].Properties.Equals(target.Resources[resource].Properties) &&
             accepted.Resources[resource].DeletionPolicy == target.Resources[resource].DeletionPolicy;
+
+        public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => resource.Value == "extra" &&
+            !accepted.Resources.ContainsKey(resource) && Validate(target, resource, inputs, configuration);
 
         public override bool RequiresExternalOutput => true;
         public override DurableActionExecutionKey Key => ExactActionAdmissionTests.Key;
@@ -73,7 +77,8 @@ public sealed partial class ExactActionAdmissionTests
                 ? new("jobs") : null;
         public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
         {
-            var producer = PrepareNode(QueueEvidenceProducerId, resourceId, resource, inputs);
+            var producer = PrepareNode(resourceId.Value == "jobs" ? QueueEvidenceProducerId : OperationId.Create(resourceId.Value + "-create"), resourceId, resource, inputs);
+            if (resourceId.Value != "jobs") return [producer];
             return [producer, producer with
             {
                 Id = QueueEvidenceConsumerId, Action = QueueSubscribeKey,
@@ -82,14 +87,14 @@ public sealed partial class ExactActionAdmissionTests
             }];
         }
         public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-            spec.Resources.Count == 1 && spec.Components.Values.All(x => x.Workloads.Count == 0) && spec.Resources.TryGetValue(resource, out var declared) &&
+            spec.Resources.Count is > 0 and <= 2 && spec.Components.Values.All(x => x.Workloads.Count == 0) && spec.Resources.TryGetValue(resource, out var declared) &&
             Validate(declared, inputs) && configuration.ProviderKindId == "sample/v1" && configuration.ShapeId == "sample.configuration/v1" &&
             configuration.ImplementationId == "sample.impl/v1";
         public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
             PreparedProviderConfiguration configuration) => Plan(resource, spec.Resources[resource], inputs);
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
             PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
-            Validate(spec, resource, inputs, configuration) && new DurableOperationGraph(Plan(spec, resource, inputs, configuration)).Equals(graph);
+            Validate(spec, resource, inputs, configuration) && new DurableOperationGraph(Plan(spec, resource, inputs, configuration)).Equals(new DurableOperationGraph(graph.Nodes.Where(n => n.ResourceId == resource)));
 
         public override async ValueTask<DurableExecutionResult> ExecuteTypedAsync(DurableOperation operation, QueueCreateInput? input, CancellationToken token)
         {

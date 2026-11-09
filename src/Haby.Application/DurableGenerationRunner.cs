@@ -44,7 +44,9 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
             cancellationToken.ThrowIfCancellationRequested();
             var progress = await ProgressAsync(deployment, generation, cancellationToken);
             if (progress is null) return new(null);
-            if (progress.Reused > 0 && progress.Total == 0)
+            if (progress.Reused > 0 && !await journal.ValidateReuseAsync(deployment, generation, cancellationToken))
+                return new(progress, StopOutcome: DurableExecutionOutcome.InputUnavailable);
+            if (progress.Reused > 0 && progress.Completed == progress.Total)
             {
                 var complete = await journal.TryCompleteReuseAsync(deployment, generation, cancellationToken);
                 return new(await ProgressAsync(deployment, generation, CancellationToken.None),

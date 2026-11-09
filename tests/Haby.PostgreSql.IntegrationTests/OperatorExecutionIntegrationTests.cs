@@ -197,9 +197,9 @@ public sealed partial class OperatorHostIntegrationTests
             Assert.Equal(OperationStatus.InvalidRequest, (await client.ExecuteOperationAsync(bad)).Status);
             Assert.Equal(OperationStatus.InvalidRequest, (await client.GetOperationAsync(bad)).Status);
         }
-        var unsupported = request.Clone(); unsupported.Generation = 2;
-        Assert.Equal(OperationStatus.UnsupportedShape, (await client.ExecuteOperationAsync(unsupported)).Status);
-        Assert.Equal(OperationStatus.UnsupportedShape, (await client.GetOperationAsync(unsupported)).Status);
+        var future = request.Clone(); future.Generation = 2;
+        Assert.Equal(OperationStatus.OperationNotFound, (await client.ExecuteOperationAsync(future)).Status);
+        Assert.Equal(OperationStatus.OperationNotFound, (await client.GetOperationAsync(future)).Status);
         var missing = request.Clone(); missing.OperationId = "other";
         Assert.Equal(OperationStatus.OperationNotFound, (await client.ExecuteOperationAsync(missing)).Status);
         Assert.Equal(OperationStatus.OperationNotFound, (await client.GetOperationAsync(missing)).Status);

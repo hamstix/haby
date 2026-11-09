@@ -14,3 +14,10 @@ public interface IDurableResourceReusePolicy
     bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration);
 }
+
+/// <summary>Explicit adapter-owned admission of a new stable key in an additive update.</summary>
+public interface IDurableResourceAdditionPolicy
+{
+    bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
+        ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration);
+}

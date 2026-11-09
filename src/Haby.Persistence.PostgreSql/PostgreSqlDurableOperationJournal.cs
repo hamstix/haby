@@ -16,6 +16,22 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
     IEnumerable<IExternalOperationOutputContract> outputContracts, IEnumerable<IProviderConfigurationCodec>? codecs = null)
     : IDurableOperationJournal, IDurableOperationQuery
 {
+    public async ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken cancellationToken)
+    {
+        await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
+        try
+        {
+            var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == Guid.Parse(deployment.ToString()) && x.Generation == generation.Value, cancellationToken);
+            if (source is null) return false;
+            _ = ResourceContinuity.Inputs(source);
+            var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+            return await ResourceContinuity.ValidateAsync(db, source.DeploymentId, graph, cancellationToken) &&
+                await ResourceContinuity.ValidateOutputsAsync(db, source.DeploymentId, graph, outputContracts, codecs ?? [], cancellationToken, validateMaterial: true);
+        }
+        catch (InvalidDataException) { return false; }
+    }
+
     public async ValueTask<bool> TryCompleteReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
@@ -30,9 +46,17 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         {
             _ = ResourceContinuity.Inputs(source);
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
-            if (await db.DurableOperations.AnyAsync(x => x.DeploymentId == id && x.Generation == generation.Value, cancellationToken)) return false;
+            var operations = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == id && x.Generation == generation.Value).ToArrayAsync(cancellationToken);
+            if (operations.Length != graph.Nodes.Count || graph.Nodes.Any(n => !operations.Any(o => o.OperationId == n.Id.Value && o.State == nameof(DurableOperationState.Succeeded)))) return false;
             if (!await ResourceContinuity.ValidateAsync(db, id, graph, cancellationToken) ||
-                !await ResourceContinuity.ValidateOutputsAsync(db, id, graph, outputContracts, codecs ?? [], cancellationToken, validateMaterial: true)) return false;
+                !await ResourceContinuity.ValidateOutputsAsync(db, id, graph, outputContracts, codecs ?? [], cancellationToken, validateMaterial: true,
+                    creationGeneration: graph.Nodes.Count > 0 ? generation.Value : null)) return false;
+            foreach (var resource in graph.Nodes.Select(n => n.ResourceId.Value).Distinct())
+            {
+                var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == id && x.Resource == resource, cancellationToken);
+                if (managed is null || managed.Environment != source.EnvironmentRecordId || managed.Application != source.ApplicationRecordId ||
+                    managed.SourceGeneration != generation.Value || await ResourceContinuity.EvidenceAsync(db, managed, cancellationToken, requireApplied: false) is null) return false;
+            }
             if (owner.AppliedGeneration >= generation.Value) return true;
             if (owner.DesiredGeneration != generation.Value || graph.Baseline?.Generation != owner.AppliedGeneration) return false;
             var advanced = await db.ApplicationDeployments.Where(x => x.Id == id && x.DesiredGeneration == generation.Value && x.AppliedGeneration == owner.AppliedGeneration)

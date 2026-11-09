@@ -8,7 +8,7 @@ The Component and Binding identity sets must stay unchanged. Supported document
 configuration and consumer options may change. A new ApplicationVersion with an
 otherwise identical declaration is still a new target revision.
 
-Resource additions/removals/renames, Component/Binding identity changes, Provider
+Beyond the bounded standalone addition below, Resource additions/removals/renames, Component/Binding identity changes, Provider
 rebinding, rotation, ownership-policy changes, same-revision configuration-only
 updates and Workloads remain unsupported. They fail during planning; no implicit
 adoption, replacement, cleanup, privilege replay or drift repair occurs.
@@ -112,3 +112,91 @@ inputs and unavailable/corrupt/foreign original evidence. Synthetic tests exerci
 the shared boundary. These are automated disposable-contour checks, not a claim of
 general production readiness, arbitrary Resource evolution or manual acceptance.
 Full-suite timing/artifact gates remain those of [issue 140](140-postgresql-integration-performance.md).
+
+## Mixed reuse and create (#160)
+
+Initial installation still admits only a standalone database or the exact
+database/login pair. An initial pair plus independent databases is refused during
+adapter graph validation (`planInputUnavailable`), before a Plan or desired
+generation is accepted and before any Provider effect. Install/apply the pair
+first, then use the additive update below; pair creation execution is not expanded.
+
+After the original pair is fully applied at generation 1, import a new version
+retaining every Resource, Component and Binding identity. Add one unused Resource
+(for example `extra`) with type `postgresql.database/v1alpha1`, the **same exact
+Provider alias/configuration revision**, and properties `{ "name": "sample_extra" }`.
+Use a new independent physical name. Do not add a Binding, login, access profile,
+owner/restrict dependency or renderer for this database. It has ordinary standalone
+CREATE semantics; no additional PUBLIC/owner/access policy is inferred.
+
+Run the operator sequence above with expected generation 1. Review **two Reuse
+entries plus one `extra-create` operation**. Plan and Commit do not contact the
+Provider or create the database. Commit atomically accepts Desired=2, Applied=1,
+retains the original pair's management IDs/source=1 and creates only the new
+management record (source=2) and Pending operation. A management record alone is
+not successful ownership/effect evidence.
+
+Exact operation get/execute now select positive committed generations as well;
+an absent generation or operation returns NotFound. Recovery still requires its
+existing action-specific eligibility, not merely a valid operation key.
+
+Explicit generation Execute validates every reuse requirement before new dispatch.
+The new operation uses its ordinary exact adapter, dispatch marker, confirmed
+output and attributable attempt. Final completion locks the aggregate/continuity
+records and checks both the complete operation inventory/evidence and reuse.
+Applied advances to 2 only after that combined decision. If reuse becomes invalid
+after the new CREATE, the confirmed new effect remains Succeeded with Applied=1;
+restoring valid inputs and explicitly repeating Execute skips that confirmed effect.
+This is not a product drift-repair or metadata-repair command. Completed external
+nodes alone do not produce successful generation output or exit 0.
+
+An external name collision fails without adoption or changes to the old pair.
+Duplicate declared physical names and unsupported additions/mutations refuse.
+Uncertainty after dispatch leaves Dispatching/NeedsAttention and blocks another
+generation. There is no automatic replay, adoption, compensation or cleanup.
+Existing manual database assignment is still limited to a singleton graph with
+**no reused members**; it does not recover a database added in a mixed generation.
+A crash before aggregate completion may leave all new effects confirmed but the
+aggregate unapplied. Inspect and explicitly Execute that exact generation again.
+
+For v3 (and v4), retain all three Resource definitions, import the new version and
+use expected generation 2 (then 3). Plan contains zero operations and three direct
+Reuse references: original pair source=1, extra source=2. A valid creation source
+may itself contain reused peers. The reader checks the source's completed applied
+position, frozen declaration/graph, own successful nodes/attempts/typed outputs and
+exact owner/Provider references. It never recursively walks prior generations or
+copies historical outputs/attempts. Common code enforces identity and evidence;
+adapters own compatibility, dependencies and supported shape admission. A narrow
+typed synthetic queue addition traverses this same persisted path.
+
+After Execute, explicitly materialize generation 2/3 using `--all --generation n`
+and issue grants as before. api/worker keep the original credential/SecretRef;
+the unused extra database needs no renderer. Frozen target consumer settings may
+change as in the reuse-only slice. Every previously issued exact document/grant
+continues to return its original configuration. No automatic materialization,
+grant creation, hot reload or Workload rollout is introduced. Per-document batch
+atomicity, failure prefixes, bounds and timing artifacts remain unchanged.
+
+This slice adds no schema migration or payload fields: the strict current graph
+codec now permits disjoint reuse and creation inventories together. Existing
+initial/reuse-only graph bytes, fingerprints, documents and credential histories
+are not rewritten. Catalogs admitted after #158 need no reset; its no-backfill
+restriction for older catalogs still applies. Startup never resets or adopts.
+
+Admission remains one Application, a fully applied sequential baseline, exact
+ExpectedGeneration and one pinned Provider revision/implementation. One independent
+standalone database may be added per update alongside the managed pair (and any
+previously admitted standalone databases). New login/pair shapes, dependencies on
+reused outputs, deletion/rename/reintroduction, new Component/Binding identities,
+Provider rebinding, rotation, configuration-only intent and Workloads stay refused.
+General additions and the broader P2 update checkpoint remain incomplete.
+
+`MixedResourceGenerationTests` covers authenticated actual Host/generated clients,
+published Native AOT CLI when required, independent OIDs/data/credential/history,
+v1 -> mixed v2 -> reuse v3/v4, retained exact grants, restart before Execute and
+real pg_dump/pg_restore. `MixedResourceSafetyTests` checks corrupt/foreign reuse
+before dispatch, changed final reuse, lost success without replay, new-producer
+evidence corruption, external conflict and overlapping execution/canceled waiters.
+The existing lock-observed competing Commit and acceptance-cancellation tests run
+both reuse-only and mixed cases. Synthetic typed-family tests run both paths.
+These automated disposable-contour checks do not claim manual production acceptance.

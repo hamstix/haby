@@ -416,17 +416,18 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ManifestRevisionRef.Create(inputs.Revision.ApplicationRecordId, ManifestRevisionNumber.Create(baseline.RevisionNumber)));
         _ = ResourceContinuity.Inputs(baseline);
         var baselineGraph = DurableOperationGraphCodec.Decode(baseline.GraphJson);
-        if (baselineGraph.Baseline is not null && (!await ResourceContinuity.ValidateAsync(db, owner.Id, baselineGraph, token) ||
-            await db.DurableOperations.AnyAsync(x => x.DeploymentId == owner.Id && x.Generation == baseline.Generation, token))) throw new InvalidDataException();
+        if (baselineGraph.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, owner.Id, baselineGraph, token)) throw new InvalidDataException();
         if (!accepted.Manifest.Spec.Components.Keys.ToHashSet().SetEquals(target.Components.Keys) ||
-            target.Components.Any(c => !accepted.Manifest.Spec.Components[c.Key].Bindings.Keys.ToHashSet().SetEquals(c.Value.Bindings.Keys))) return null;
+            target.Components.Any(c => !accepted.Manifest.Spec.Components[c.Key].Bindings.Keys.ToHashSet().SetEquals(c.Value.Bindings.Keys) ||
+                c.Value.Bindings.Any(b => accepted.Manifest.Spec.Components[c.Key].Bindings[b.Key].Target is not NormalizedLocalResourceTarget before ||
+                    b.Value.Target is not NormalizedLocalResourceTarget after || before.ResourceRef != after.ResourceRef))) return null;
         // Same-revision configuration-only intent is deliberately outside this slice.
         if (baseline.RevisionNumber == inputs.Revision.RevisionNumber.Value && !accepted.Equals(inputs.Configuration)) return null;
         var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);
         if (!admission.CanReuse(accepted.Manifest.Spec, target, new(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId),
             inputs, PreparedConfiguration(instance.ProviderKindId, provider))) return null;
         var reuse = new List<ResourceReuse>();
-        foreach (var resource in target.Resources.Keys)
+        foreach (var resource in accepted.Manifest.Spec.Resources.Keys)
         {
             var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Environment == owner.EnvironmentRecordId &&
                 x.Application == owner.ApplicationRecordId && x.Resource == resource.Value, token);
@@ -440,10 +441,19 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             // Missing registrations cannot turn a lost mandatory terminal output into
             // an action that supposedly never required confirmed evidence.
             if (!admission.Supports(original)) throw new InvalidDataException();
-            if (!await ValidateGraphAsync(db, target, provider, inputs, original, token)) throw new InvalidDataException();
+            var originalInputs = ResourceContinuity.Inputs(source);
+            var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
+            var configuration = PreparedConfiguration(instance.ProviderKindId, provider);
+            if (!admission.ValidateCreationGraph(originalInputs.Configuration!.Manifest.Spec, adapter, originalInputs, configuration, original) ||
+                !admission.CanReuseResource(originalInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration)) throw new InvalidDataException();
             reuse.Add(new(resource, managed.Id, managed.SourceGeneration, evidence));
         }
-        var result = new DurableOperationGraph([], reuse, new(ApplicationDeploymentId.Parse(owner.Id.ToString()), baseline.Generation, baseline.Fingerprint));
+        var existing = accepted.Manifest.Spec.Resources.Keys.ToHashSet();
+        if (await db.ResourceManagement.AnyAsync(x => x.Environment == owner.EnvironmentRecordId && x.Application == owner.ApplicationRecordId &&
+            !existing.Select(k => k.Value).Contains(x.Resource), token)) throw new InvalidDataException();
+        var result = admission.PlanUpdate(target, new(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId),
+            inputs, PreparedConfiguration(instance.ProviderKindId, provider), reuse,
+            new(ApplicationDeploymentId.Parse(owner.Id.ToString()), baseline.Generation, baseline.Fingerprint));
         if (!await ResourceContinuity.ValidateOutputsAsync(db, owner.Id, result, outputContracts ?? [], _codecs, token)) throw new InvalidDataException();
         return result;
     }

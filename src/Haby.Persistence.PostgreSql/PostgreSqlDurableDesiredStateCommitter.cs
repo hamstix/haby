@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Haby.Persistence.PostgreSql;
 
-/// <summary>Atomically accepts initial or bounded reuse-only desired state; execution remains explicit.</summary>
+/// <summary>Atomically accepts initial or bounded additive desired state; execution remains explicit.</summary>
 public sealed class PostgreSqlDurableDesiredStateCommitter(
     IDbContextFactory<ManifestCatalogDbContext> contexts,
     PostgreSqlDurableDeploymentPlanner planner,
@@ -224,7 +224,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 State = nameof(DurableOperationState.Pending),
                 CreatedAt = committedAt
             });
-        if (actual is null) foreach (var resource in spec.Resources.Keys)
+        if (!unchanged) foreach (var resource in spec.Resources.Keys.Where(r => !graph.ReusedResources.Any(x => x.Resource == r)))
             context.ResourceManagement.Add(new()
             {
                 Id = Guid.CreateVersion7(),

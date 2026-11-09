@@ -119,7 +119,8 @@ the broader mutation checkpoint below remains incomplete.
 
 - [x] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and explicit execution of a reuse-only next generation from a fully applied baseline. Deferred apply remains separate.
 - [x] Preserve stable identities and confirmed management of unchanged database/login Resources with the exact same Provider configuration revision. Reuse the existing database, role and credential through original confirmed evidence, without repeating creation, generation or privilege work. Catalogs without management records are not backfilled.
-- [ ] Add new Resources of admitted contracts during an update, with explicit dependency planning, normal conflict checks and creation of only the new effects. Do not implicitly adopt existing external objects.
+- [x] Admit the bounded #160 mixed update: reuse the unchanged managed PostgreSQL pair and create one independent unused standalone database on the same exact Provider revision. Later reuse retains direct original sources (pair=1, added database=2), without replaying old work. [Runbook and completion boundary](docs/development/158-resource-reuse-generation-updates.md#mixed-reuse-and-create-160).
+- [ ] Expand admitted Resource additions/dependencies beyond that standalone database boundary. Keep ordinary conflicts and no implicit adoption.
 - [ ] Support adding/removing Components and Bindings in the new declaration and its configuration layout. New Components/Bindings receive configuration; removed ones do not participate in the new generation. Kubernetes object creation/removal remains P3 work.
 - [ ] Allow removal of Resource declarations without external deletion: retain the existing database/role and explicit management/ownership records. Validate remaining references; do not silently lose ownership, treat a rename as an in-place identity change or grant automatic later adoption. Agree retained-resource reintroduction semantics before implementation.
 - [ ] Admit application-version and supported configuration changes; materialize exact new-generation document revisions while previous documents and grants remain scoped to their original revisions until explicit revocation.
@@ -131,8 +132,10 @@ Implement the checkpoint sequentially: first reuse unchanged Resources across
 generations, then Resource additions and Component/Binding changes with retained
 removals, then configuration-only generations, and finally P3 image rollout and
 credential/configuration transfer. Detailed contracts require accepted ADRs before
-implementation. The current update profile admits only unchanged managed pair
-reuse with stable Component/Binding identities and a new ManifestRevision.
+implementation. The current update profile admits unchanged managed pair
+reuse plus one independent standalone database addition per update, with stable
+Component/Binding identities and a new ManifestRevision. New login/pair additions
+and dependencies on reused outputs remain refused.
 
 This checkpoint supplies the update foundation for P3 rollout; it does not claim
 arbitrary Resource evolution, destructive Application/data deletion, automatic
