@@ -417,10 +417,10 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         _ = ResourceContinuity.Inputs(baseline);
         var baselineGraph = DurableOperationGraphCodec.Decode(baseline.GraphJson);
         if (baselineGraph.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, owner.Id, baselineGraph, token)) throw new InvalidDataException();
-        if (!accepted.Manifest.Spec.Components.Keys.ToHashSet().SetEquals(target.Components.Keys) ||
-            target.Components.Any(c => !accepted.Manifest.Spec.Components[c.Key].Bindings.Keys.ToHashSet().SetEquals(c.Value.Bindings.Keys) ||
-                c.Value.Bindings.Any(b => accepted.Manifest.Spec.Components[c.Key].Bindings[b.Key].Target is not NormalizedLocalResourceTarget before ||
-                    b.Value.Target is not NormalizedLocalResourceTarget after || before.ResourceRef != after.ResourceRef))) return null;
+        // Component/Binding membership belongs to the target configuration, not
+        // Resource identity. CaptureAsync has expanded the complete target layout,
+        // scopes (including absence), pins and provenance; Commit revalidates it.
+        // Adapter reuse policies below still own Resource compatibility and targets.
         // Same-revision configuration-only intent is deliberately outside this slice.
         if (baseline.RevisionNumber == inputs.Revision.RevisionNumber.Value && !accepted.Equals(inputs.Configuration)) return null;
         var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);
