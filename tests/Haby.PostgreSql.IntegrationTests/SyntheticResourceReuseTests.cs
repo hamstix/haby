@@ -2,6 +2,7 @@ using System.Text;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
+using Haby.Persistence.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -10,6 +11,21 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class ExactActionAdmissionTests
 {
+    private static readonly ConfigurationRendererId AddedQueueRenderer = ConfigurationRendererId.Create("sample.added-queue-render/v1");
+    private sealed record AddedQueueDefinition() : ConfigurationRendererContract(AddedQueueRenderer, QueueContract, QueueEvidenceContract.Contract,
+        "receipt", OperationId.Create("extra-create"), Key, QueueFormatter)
+    {
+        public override ConfigurationObject Defaults => new([]);
+        public override bool ValidateOptions(ConfigurationObject options, bool complete) => options.Members.Count == 0;
+        public override ConfigurationObject NormalizeOptions(ConfigurationObject options) => options;
+    }
+    private sealed class AddedQueueDocumentRenderer : IConfigurationRenderer
+    {
+        public ConfigurationRendererId Contract => AddedQueueRenderer;
+        public ManifestLocalId Identity => QueueImplementation;
+        public ConfigurationFragment? Render(ExternalOperationOutput output, ConfigurationObject options) => new QueueDocumentRenderer().Render(output, options);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -23,17 +39,32 @@ public sealed partial class ExactActionAdmissionTests
             var result = await runner.RunAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default);
             Assert.Equal(1, result.Progress!.AppliedGeneration);
         }
+        var renderer = new QueueDocumentRenderer();
+        var rendering = new ConfigurationRenderingCatalog([new QueueRenderDefinition(), new AddedQueueDefinition()], [renderer, new AddedQueueDocumentRenderer()], QueueFormatting(), [new QueueNeverFormatter()]);
         for (var version = 2; version <= 3; version++)
         {
-            await using var services = Services(scenario.Connection, boundary);
+            await using var services = Services(scenario.Connection, boundary, rendering: rendering);
             var envelope = System.Text.Json.Nodes.JsonNode.Parse("""
                 {"applicationVersion":"VERSION","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application",
                 "metadata":{"id":"graph-app"},"spec":{"resources":{"jobs":{"type":"sample.queue/v1",
                 "providerRef":"queues.primary","properties":{"queueName":"jobs"}}}}}}
                 """.Replace("VERSION", "v" + version, StringComparison.Ordinal))!;
             if (mixed) envelope["manifest"]!["spec"]!["resources"]!["extra"] = envelope["manifest"]!["spec"]!["resources"]!["jobs"]!.DeepClone();
+            var component = version == 2 ? "scheduler" : "worker";
+            envelope["manifest"]!["spec"]!["components"] = System.Text.Json.Nodes.JsonNode.Parse("""
+                {"COMPONENT":{"documents":{"settings":{"fileName":"queue.json","format":"json","template":{}}},
+                "bindings":{"BINDING":{"target":{"kind":"local-resource","resourceRef":"jobs"},"documentProjections":[
+                {"documentRef":"settings","path":"/Queue","rendererRef":"sample.queue-render/v1"}]}}}}
+                """.Replace("COMPONENT", component, StringComparison.Ordinal).Replace("BINDING", version == 2 ? "first" : "second", StringComparison.Ordinal));
+            if (mixed && version == 3)
+            {
+                // Retarget a changed Binding to the existing Resource created in the mixed generation.
+                var binding = envelope["manifest"]!["spec"]!["components"]![component]!["bindings"]!["second"]!;
+                binding["target"]!["resourceRef"] = "extra";
+                binding["documentProjections"]![0]!["rendererRef"] = AddedQueueRenderer.Value;
+            }
             var payload = Encoding.UTF8.GetBytes(envelope.ToJsonString());
-            var catalog = new ManifestContractCatalog([new ResourceTypeDefinition(QueueContract, "{\"type\":\"object\"}")], [], [], []);
+            var catalog = new ManifestContractCatalog([new ResourceTypeDefinition(QueueContract, "{\"type\":\"object\"}")], [], [], [new(QueueRenderer), new(AddedQueueRenderer)]);
             var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(
                 services.GetRequiredService<IManifestImportStore>(), catalog, TimeProvider.System).ExecuteAsync(payload, "tester"));
             var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
@@ -45,12 +76,23 @@ public sealed partial class ExactActionAdmissionTests
             Assert.All(plan.Graph.ReusedResources, r => Assert.Equal(r.Resource.Value == "extra" ? 2 : 1, r.SourceGeneration));
             var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default));
             Assert.Equal(version, commit.Commit.Generation.Value);
+            Assert.Equal(component, Assert.Single(plan.Inputs.Configuration!.Layouts).Component.Value);
+            Assert.Equal(version == 2 ? "first" : "second", Assert.Single(Assert.Single(plan.Inputs.Configuration.Layouts).BindingRequests).BindingId.Value);
+            Assert.Equal(mixed && version == 3 ? AddedQueueRenderer : QueueRenderer, Assert.Single(plan.Inputs.Configuration.RenderPins).Renderer);
+            Assert.Equal(mixed && version == 3 ? "extra" : "jobs", Assert.Single(plan.Inputs.Configuration.RenderPins).ResourceLocalId.Value);
             var result = await services.GetRequiredService<DurableGenerationRunner>().RunAsync(commit.Commit.DeploymentId, commit.Commit.Generation, default);
             Assert.Null(result.StopOutcome); Assert.Equal(version, result.Progress!.AppliedGeneration); Assert.Equal(mixed && version == 2 ? 1 : 0, result.Progress.Total);
             var output = await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(new(commit.Commit.DeploymentId, commit.Commit.Generation, QueueEvidenceProducerId),
                 new(scenario.Plan.Inputs.Environment, imported.ManifestRevisionRef.ApplicationRecordId, ManifestLocalId.Create("jobs")), Key,
                 QueueEvidenceContract.Contract, "receipt", default);
             Assert.Equal("accepted-1", QueueEvidenceContract.Decode(output!)!.Receipt);
+            var documents = new PostgreSqlConfigurationDocumentStore(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+                new(rendering, QueueFormatting(), services.GetRequiredService<IConfigurationOutputEvidence>()), TimeProvider.System);
+            var materialized = await documents.MaterializeAsync(new(commit.Commit.DeploymentId, commit.Commit.Generation,
+                ManifestLocalId.Create(component), ManifestLocalId.Create("settings")), "tester", default);
+            Assert.Equal(ConfigurationDocumentStatus.Created, materialized.Status);
+            var value = Assert.IsType<ConfigurationDeferredValue>(Assert.IsType<ConfigurationObject>(materialized.Revision!.Tree).Members["Queue"]);
+            Assert.Equal(new ConfigurationString(mixed && version == 3 ? "accepted-2" : "accepted-1"), value.Arguments.Members["receipt"]);
             if (mixed)
             {
                 var added = await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(

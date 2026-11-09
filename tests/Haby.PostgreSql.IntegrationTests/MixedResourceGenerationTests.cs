@@ -17,7 +17,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var envelope = UpdateEnvelope(scenario, version);
         envelope["manifest"]!["spec"]!["resources"]!["extra"] = new JsonObject
         {
-            ["type"] = "postgresql.database/v1alpha1", ["providerRef"] = "postgres.primary",
+            ["type"] = "postgresql.database/v1alpha1",
+            ["providerRef"] = "postgres.primary",
             ["properties"] = new JsonObject { ["name"] = name }
         };
         // Use the exact declared alias, independently of the test fixture's spelling.
@@ -75,7 +76,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 {
                     if (generation > 2)
                     {
-                        var revision = await ImportUpdate(client, MixedEnvelope(scenario, generation, added));
+                        var changed = MixedEnvelope(scenario, generation, added);
+                        changed["manifest"]!["spec"]!["components"] = ComponentEnvelope(scenario, generation == 3 ? 2 : 3)["manifest"]!["spec"]!["components"]!.DeepClone();
+                        var revision = await ImportUpdate(client, changed);
                         var plan = await UpdatePlan(client, revision, generation - 1, host.Urls.Single(), added: true);
                         _ = await NativeReuseCommand(host.Urls.Single(), "changeset", "commit", plan.ChangeSetId, "--plan", plan.PlanId);
                         Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Status);
@@ -92,12 +95,14 @@ public sealed partial class PostgreSqlApplicationLoginTests
                     Assert.Equal(generation == 2 ? 1 : 0, executed.Progress.Total);
                     var oid = await DatabaseOid(added); Assert.NotNull(oid); addedOid ??= oid; Assert.Equal(addedOid, oid);
                     Assert.Equal(originalHistory, await OriginalHistory()); Assert.Equal(originalIdentity, await ExternalIdentity(scenario));
-                    Assert.True(originalLogin == await SaveAndReceive(generation, 210), "Existing credential changed.");
+                    Assert.True(originalLogin == await SaveAndReceive(generation, generation == 4 ? 220 : 210), "Existing credential changed.");
                     foreach (var item in retained) Assert.True(originalLogin == await Receive(item.Document, item.Grant, item.Timeout), "Retained grant changed.");
                     await using var data = new NpgsqlConnection(originalLogin); await data.OpenAsync();
                     Assert.Equal("original-v1", await new NpgsqlCommand("SELECT value FROM app.mixed_probe WHERE id = 160", data).ExecuteScalarAsync());
                 }
-                var noop = await UpdatePlan(client, await ImportUpdate(client, MixedEnvelope(scenario, 4, added)), 4, added: true);
+                var same = MixedEnvelope(scenario, 4, added);
+                same["manifest"]!["spec"]!["components"] = ComponentEnvelope(scenario, 3)["manifest"]!["spec"]!["components"]!.DeepClone();
+                var noop = await UpdatePlan(client, await ImportUpdate(client, same), 4, added: true);
                 var receipt = await client.CommitDesiredStateAsync(new() { ChangeSetId = noop.ChangeSetId, PlanId = noop.PlanId });
                 Assert.Equal(CommitStatus.Committed, receipt.Status); Assert.Equal(4, receipt.Commit.Generation);
                 await using var verify = Context(scenario.Connection);

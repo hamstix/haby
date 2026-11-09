@@ -4,7 +4,7 @@
 - Date: 2026-11-08
 - Scope: Expanded P2 sequential Application updates before Workload implementation
 - Extends: ADR-016/018/026/033/034/035/036/039/040/041/042/044
-- Implementation: unchanged-Resource reuse in issue #158 and bounded mixed reuse/create in issue #160; [runbook and catalog boundary](../development/158-resource-reuse-generation-updates.md). The additive slice admits one independent standalone PostgreSQL database alongside the unchanged managed pair, with direct later provenance from its mixed creation generation. Broader additions/removals, identity changes and same-revision configuration-only updates remain planned.
+- Implementation: unchanged-Resource reuse in issue #158 and bounded mixed reuse/create in issue #160; [runbook and catalog boundary](../development/158-resource-reuse-generation-updates.md). The additive slice admits one independent standalone PostgreSQL database alongside the unchanged managed pair, with direct later provenance from its mixed creation generation. Changed Component/local Binding sets with unchanged managed Resources are implemented in issue #162; [target layout, assignment and cleanup boundary](../development/162-component-binding-generation-updates.md). Broader Resource additions/removals, Resource identity changes and same-revision configuration-only updates remain planned.
 
 ## Context
 

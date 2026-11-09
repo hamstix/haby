@@ -46,9 +46,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [InlineData("multiple-additions")]
     [InlineData("resource-rename")]
     [InlineData("resource-remove")]
-    [InlineData("component-add")]
-    [InlineData("component-remove")]
-    [InlineData("binding-add")]
     public async Task Resource_reuse_unsupported_declaration_changes_refuse_without_effects(string mutation)
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
@@ -75,11 +72,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 spec["resources"]!.AsObject().Remove("db");
                 spec["resources"]!["app-login"]!["properties"]!["databaseRef"] = "renamed"; break;
             case "resource-remove": spec["resources"]!.AsObject().Remove("app-login"); spec["components"]!.AsObject().Clear(); break;
-            case "component-add": spec["components"]!["extra"] = spec["components"]!["worker"]!.DeepClone(); break;
-            case "component-remove": spec["components"]!.AsObject().Remove("worker"); break;
-            case "binding-add":
-                spec["components"]!["api"]!["bindings"]!["other"] = spec["components"]!["api"]!["bindings"]!["storage"]!.DeepClone();
-                spec["components"]!["api"]!["bindings"]!["other"]!.AsObject().Remove("configurationSlot"); break;
         }
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
