@@ -8,7 +8,7 @@ Issue #162 now permits changed Component/local Binding sets over unchanged manag
 configuration and consumer options may change. A new ApplicationVersion with an
 otherwise identical declaration is still a new target revision.
 
-Beyond the bounded standalone addition below, Resource additions/removals/renames, Provider
+The [#164 retained lifecycle](164-retained-resource-reintroduction.md) additionally admits removal and compatible reintroduction of that standalone database while keeping the pair declared. Beyond these boundaries, Resource additions/removals/renames, Provider
 rebinding, rotation, ownership-policy changes, same-revision configuration-only
 updates and Workloads remain unsupported. They fail during planning; no implicit
 adoption, replacement, cleanup, privilege replay or drift repair occurs.
@@ -187,7 +187,7 @@ Admission remains one Application, a fully applied sequential baseline, exact
 ExpectedGeneration and one pinned Provider revision/implementation. One independent
 standalone database may be added per update alongside the managed pair (and any
 previously admitted standalone databases). New login/pair shapes, dependencies on
-reused outputs, deletion/rename/reintroduction, Provider rebinding, rotation, configuration-only intent and Workloads stay refused.
+reused outputs, broader removal/rename/reintroduction, Provider rebinding, rotation, configuration-only intent and Workloads stay refused.
 General additions and the broader P2 update checkpoint remain incomplete.
 
 `MixedResourceGenerationTests` covers authenticated actual Host/generated clients,

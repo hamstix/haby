@@ -6,6 +6,23 @@ namespace Haby.Application.Tests;
 public sealed class DurableOperationGraphTests
 {
     [Fact]
+    public void Retained_membership_and_reintroduction_are_immutable_distinct_direct_source_requirements()
+    {
+        var baseline = new ResourceReuseBaseline(ApplicationDeploymentId.New(), 4, "v2:" + new string('A', 64));
+        var original = new ResourceReuse(ManifestLocalId.Create("extra"), Guid.CreateVersion7(), 2, new string('B', 64));
+        var retained = new DurableOperationGraph([], baseline: baseline, retainedResources: [original]);
+        Assert.Equal(retained, DurableOperationGraphCodec.Decode(DurableOperationGraphCodec.Encode(retained)));
+        Assert.Empty(retained.Nodes); Assert.Empty(retained.ReusedResources);
+        Assert.Equal(original, Assert.Single(retained.RetainedResources));
+        var reintroduced = new DurableOperationGraph([], [original with { Reintroduced = true }], baseline);
+        Assert.Equal(reintroduced, DurableOperationGraphCodec.Decode(DurableOperationGraphCodec.Encode(reintroduced)));
+        Assert.NotEqual(DurableOperationGraphCodec.Fingerprint(Inputs, retained), DurableOperationGraphCodec.Fingerprint(Inputs, reintroduced));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], [original], baseline, [original]));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], baseline: baseline, retainedResources: [original with { Reintroduced = true }]));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], retainedResources: [original]));
+    }
+
+    [Fact]
     public void Mixed_graph_roundtrips_new_work_and_direct_original_reuse_without_overlapping_owners()
     {
         var reused = new ResourceReuse(ManifestLocalId.Create("old-resource"), Guid.CreateVersion7(), 2, new string('B', 64));

@@ -13,6 +13,7 @@ internal static class ResourceContinuity
     internal static async Task LockAsync(ManifestCatalogDbContext db, Guid deployment, CancellationToken token)
     {
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM resource_management WHERE deployment_id = {deployment} FOR SHARE", token);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT r.provider_instance_id FROM provider_resource_reservations r JOIN application_deployments d ON d.environment_record_id = r.environment_record_id AND d.application_record_id = r.application_record_id WHERE d.id = {deployment} FOR SHARE OF r", token);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT deployment_id FROM application_deployment_generations WHERE deployment_id = {deployment} FOR SHARE", token);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT deployment_id FROM durable_create_operations WHERE deployment_id = {deployment} FOR SHARE", token);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT deployment_id FROM durable_create_operation_attempts WHERE deployment_id = {deployment} FOR SHARE", token);
@@ -34,10 +35,10 @@ internal static class ResourceContinuity
 
     internal static async Task<bool> ValidateOutputsAsync(ManifestCatalogDbContext db, Guid deployment,
         DurableOperationGraph reuse, IEnumerable<IExternalOperationOutputContract> registrations,
-        IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token, bool validateMaterial = false, long? creationGeneration = null)
+        IEnumerable<IProviderConfigurationCodec> codecs, DurableActionAdmission admission, DurablePlanningInputs target, CancellationToken token, bool validateMaterial = false, long? creationGeneration = null)
     {
         var contracts = registrations.ToArray();
-        foreach (var generation in reuse.ReusedResources.Select(x => x.SourceGeneration).Concat(creationGeneration is { } g ? [g] : []).Distinct())
+        foreach (var generation in reuse.ReusedResources.Concat(reuse.RetainedResources).Select(x => x.SourceGeneration).Concat(creationGeneration is { } g ? [g] : []).Distinct())
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
             var inputs = Inputs(source);
@@ -52,6 +53,12 @@ internal static class ResourceContinuity
             catch (Exception e) when (e is ArgumentException or InvalidOperationException or JsonException) { return false; }
             if (configuration.PayloadJson != provider.PayloadJson || configuration.ImplementationId != source.ImplementationId) return false;
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+            var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
+            if (!admission.Supports(graph) || !admission.ValidateCreationGraph(inputs.Configuration!.Manifest.Spec, adapter, inputs, configuration, graph)) return false;
+            foreach (var requirement in reuse.ReusedResources.Where(x => x.SourceGeneration == generation))
+                if (!admission.CanReuseResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration)) return false;
+            foreach (var requirement in reuse.RetainedResources.Where(x => x.SourceGeneration == generation))
+                if (!admission.CanRetainResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration)) return false;
             var all = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation).ToArrayAsync(token);
             var references = all.Select(x => new ConfirmedOperationOutput(OperationId.Create(x.OperationId), new(x.Contract, x.Key, x.Payload))).ToArray();
             foreach (var node in graph.Nodes)
@@ -131,13 +138,20 @@ internal static class ResourceContinuity
             x.DeploymentId == deployment && x.Generation == baseline.Generation, token);
         if (previous?.Fingerprint != baseline.Fingerprint) return false;
         var accepted = Inputs(previous);
-        if (!accepted.Configuration!.Manifest.Spec.Resources.Keys.ToHashSet().SetEquals(graph.ReusedResources.Select(x => x.Resource))) return false;
-        foreach (var reuse in graph.ReusedResources)
+        var previousGraph = DurableOperationGraphCodec.Decode(previous.GraphJson);
+        var inventory = accepted.Configuration!.Manifest.Spec.Resources.Keys.Concat(previousGraph.RetainedResources.Select(x => x.Resource)).ToHashSet();
+        var requirements = graph.ReusedResources.Concat(graph.RetainedResources).ToArray();
+        if (!inventory.SetEquals(requirements.Select(x => x.Resource))) return false;
+        foreach (var reuse in requirements)
         {
             var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token);
             if (managed is null || managed.Deployment != deployment || managed.Environment != owner.EnvironmentRecordId ||
                 managed.Application != owner.ApplicationRecordId || managed.Resource != reuse.Resource.Value || managed.SourceGeneration != reuse.SourceGeneration ||
                 await EvidenceAsync(db, managed, token) != reuse.EvidenceFingerprint) return false;
+            if (graph.ReusedResources.Contains(reuse) && reuse.Reintroduced != previousGraph.RetainedResources.Any(x => x.Resource == reuse.Resource)) return false;
+            var original = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == reuse.SourceGeneration, token);
+            if (original.ProviderInstanceId != previous.ProviderInstanceId || original.ConfigurationRevisionNumber != previous.ConfigurationRevisionNumber ||
+                original.ImplementationId != previous.ImplementationId) return false;
         }
         return graph.ReusedResources.Count > 0;
     }

@@ -424,14 +424,19 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         // Same-revision configuration-only intent is deliberately outside this slice.
         if (baseline.RevisionNumber == inputs.Revision.RevisionNumber.Value && !accepted.Equals(inputs.Configuration)) return null;
         var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);
-        if (!admission.CanReuse(accepted.Manifest.Spec, target, new(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId),
-            inputs, PreparedConfiguration(instance.ProviderKindId, provider))) return null;
+        var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
+        var configuration = PreparedConfiguration(instance.ProviderKindId, provider);
+        var managedResources = await db.ResourceManagement.AsNoTracking().Where(x => x.Environment == owner.EnvironmentRecordId &&
+            x.Application == owner.ApplicationRecordId).ToArrayAsync(token);
+        var expected = accepted.Manifest.Spec.Resources.Keys.Select(x => x.Value)
+            .Concat(baselineGraph.RetainedResources.Select(x => x.Resource.Value)).ToHashSet(StringComparer.Ordinal);
+        if (!expected.SetEquals(managedResources.Select(x => x.Resource))) throw new InvalidDataException();
         var reuse = new List<ResourceReuse>();
-        foreach (var resource in accepted.Manifest.Spec.Resources.Keys)
+        var retained = new List<ResourceReuse>();
+        foreach (var managed in managedResources.OrderBy(x => x.Resource, StringComparer.Ordinal))
         {
-            var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Environment == owner.EnvironmentRecordId &&
-                x.Application == owner.ApplicationRecordId && x.Resource == resource.Value, token);
-            if (managed is null || managed.Deployment != owner.Id) throw new InvalidDataException();
+            var resource = ManifestLocalId.Create(managed.Resource);
+            if (managed.Deployment != owner.Id) throw new InvalidDataException();
             var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == owner.Id && x.Generation == managed.SourceGeneration, token)
                 ?? throw new InvalidDataException();
             if (source.ProviderInstanceId != provider.ProviderInstanceId || source.ConfigurationRevisionNumber != provider.RevisionNumber ||
@@ -442,19 +447,24 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             // an action that supposedly never required confirmed evidence.
             if (!admission.Supports(original)) throw new InvalidDataException();
             var originalInputs = ResourceContinuity.Inputs(source);
-            var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
-            var configuration = PreparedConfiguration(instance.ProviderKindId, provider);
-            if (!admission.ValidateCreationGraph(originalInputs.Configuration!.Manifest.Spec, adapter, originalInputs, configuration, original) ||
-                !admission.CanReuseResource(originalInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration)) throw new InvalidDataException();
-            reuse.Add(new(resource, managed.Id, managed.SourceGeneration, evidence));
+            if (!admission.ValidateCreationGraph(originalInputs.Configuration!.Manifest.Spec, adapter, originalInputs, configuration, original)) throw new InvalidDataException();
+            if (target.Resources.ContainsKey(resource))
+            {
+                if (!admission.CanReuseResource(originalInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration)) return null;
+                reuse.Add(new(resource, managed.Id, managed.SourceGeneration, evidence)
+                { Reintroduced = baselineGraph.RetainedResources.Any(x => x.Resource == resource) });
+            }
+            else
+            {
+                if (!admission.CanRetainResource(originalInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration)) return null;
+                retained.Add(new(resource, managed.Id, managed.SourceGeneration, evidence));
+            }
         }
-        var existing = accepted.Manifest.Spec.Resources.Keys.ToHashSet();
-        if (await db.ResourceManagement.AnyAsync(x => x.Environment == owner.EnvironmentRecordId && x.Application == owner.ApplicationRecordId &&
-            !existing.Select(k => k.Value).Contains(x.Resource), token)) throw new InvalidDataException();
-        var result = admission.PlanUpdate(target, new(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId),
-            inputs, PreparedConfiguration(instance.ProviderKindId, provider), reuse,
-            new(ApplicationDeploymentId.Parse(owner.Id.ToString()), baseline.Generation, baseline.Fingerprint));
-        if (!await ResourceContinuity.ValidateOutputsAsync(db, owner.Id, result, outputContracts ?? [], _codecs, token)) throw new InvalidDataException();
+        foreach (var added in target.Resources.Keys.Where(k => !expected.Contains(k.Value)))
+            if (!admission.CanAddResource(accepted.Manifest.Spec, target, added, adapter, inputs, configuration)) return null;
+        var result = admission.PlanUpdate(target, adapter, inputs, configuration, reuse,
+            new(ApplicationDeploymentId.Parse(owner.Id.ToString()), baseline.Generation, baseline.Fingerprint), retained);
+        if (!await ResourceContinuity.ValidateOutputsAsync(db, owner.Id, result, outputContracts ?? [], _codecs, admission, inputs, token)) throw new InvalidDataException();
         return result;
     }
     internal async Task<DurableOperationGraph> PlanGraphAsync(ManifestCatalogDbContext context,

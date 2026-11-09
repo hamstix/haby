@@ -7,6 +7,8 @@ public sealed record DurableGenerationProgress(ApplicationDeploymentId Deploymen
     long DesiredGeneration, long? AppliedGeneration, IReadOnlyList<DurableNodeProgress> Nodes)
 {
     public int Reused { get; init; }
+    public int Retained { get; init; }
+    public int Reintroduced { get; init; }
     public int Completed => Nodes.Count(n => n.Operation.State == DurableOperationState.Succeeded);
     public int Total => Nodes.Count;
     public DurableNodeProgress? StoppedAt => Nodes.FirstOrDefault(n => n.Operation.State is
@@ -19,7 +21,7 @@ public sealed record DurableGenerationRunResult(DurableGenerationProgress? Progr
 
 /// <summary>Explicit sequential pass; one owner of the generation gate, no recursive locking.</summary>
 public sealed class DurableGenerationRunner(ExactDurableOperationExecutor executor,
-    IDurableOperationJournal journal, DurableOperationSerialization serialization)
+    IDurableOperationJournal journal, DurableOperationSerialization serialization, DurableActionAdmission admission)
 {
     public ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment,
         DeploymentGeneration generation, CancellationToken cancellationToken) => journal.ProgressAsync(deployment, generation, cancellationToken);
@@ -44,11 +46,11 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
             cancellationToken.ThrowIfCancellationRequested();
             var progress = await ProgressAsync(deployment, generation, cancellationToken);
             if (progress is null) return new(null);
-            if (progress.Reused > 0 && !await journal.ValidateReuseAsync(deployment, generation, cancellationToken))
+            if (progress.Reused > 0 && !await journal.ValidateReuseAsync(deployment, generation, admission, cancellationToken))
                 return new(progress, StopOutcome: DurableExecutionOutcome.InputUnavailable);
             if (progress.Reused > 0 && progress.Completed == progress.Total)
             {
-                var complete = await journal.TryCompleteReuseAsync(deployment, generation, cancellationToken);
+                var complete = await journal.TryCompleteReuseAsync(deployment, generation, admission, cancellationToken);
                 return new(await ProgressAsync(deployment, generation, CancellationToken.None),
                     StopOutcome: complete ? null : DurableExecutionOutcome.InputUnavailable);
             }

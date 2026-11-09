@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Haby.PostgreSql;
 
 /// <summary>One exact database admission, explicitly composing standalone and pair planning.</summary>
-public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
+public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy, IDurableResourceRetentionPolicy
 {
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
@@ -28,6 +28,16 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
         PostgreSqlPairResourceAdmission.SupportsShape(accepted, inputs, configuration) &&
         PostgreSqlPairResourceAdmission.SupportsShape(target, inputs, configuration) &&
         PostgreSqlPairResourceAdmission.IsIndependentDatabase(target, resource);
+
+    public bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        PostgreSqlPairResourceAdmission.SupportsShape(original, inputs, configuration) &&
+        PostgreSqlPairResourceAdmission.SupportsShape(target, inputs, configuration) &&
+        PostgreSqlPairResourceAdmission.IsIndependentDatabase(original, resource) &&
+        original.Resources[resource].DeletionPolicy == ResourceDeletionPolicy.Retain &&
+        !target.Resources.ContainsKey(resource) &&
+        target.Resources.Values.Where(r => r.Type == PostgreSqlDatabaseContract.Id).All(r =>
+            PostgreSqlDatabaseCreateValidation.Name(r) != PostgreSqlDatabaseCreateValidation.Name(original.Resources[resource]));
 
     public override DurableActionExecutionKey Key => PostgreSqlDatabaseCreateAction.RegistrationKey;
     public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>

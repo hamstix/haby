@@ -85,7 +85,7 @@ remains open and must account for still-running recipients, owned obsolete objec
 partial failure/retry and explicit grant retirement. This issue implements none of
 that cleanup, automatic materialization, access issuance or revocation.
 
-Resource removal/rename/reintroduction, new login/pair/access shapes, Provider
+This slice did not admit Resource removal/reintroduction; the subsequent [bounded standalone retained lifecycle](164-retained-resource-reintroduction.md) does. Broader removal/rename/reintroduction, new login/pair/access shapes, Provider
 rebinding, rotation, configuration-only updates of the same ManifestRevision,
 exports, unsupported templates and Workloads remain outside this slice.
 No schema, codec or wire-format change is needed; admitted #158 catalogs need no

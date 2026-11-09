@@ -97,11 +97,11 @@ public interface IDurableOperationJournal
 {
     /// <summary>Checks exact retained reuse evidence before new work, without creating attempts or advancing state.</summary>
     ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
-        CancellationToken cancellationToken) => new(false);
+        DurableActionAdmission admission, CancellationToken cancellationToken) => new(false);
 
     /// <summary>Completes an all-reuse or mixed generation only after its combined locked evidence checks.</summary>
     ValueTask<bool> TryCompleteReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
-        CancellationToken cancellationToken) => new(false);
+        DurableActionAdmission admission, CancellationToken cancellationToken) => new(false);
 
     ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment,
         DeploymentGeneration generation, CancellationToken cancellationToken);

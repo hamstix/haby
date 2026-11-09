@@ -8,7 +8,10 @@ internal sealed record CliDesiredGeneration(string DeploymentId, long Generation
     string ChangeSetId, string PlanId, string AcceptedAtUtc, string TechnicalActorId,
     string EnvironmentRecordId, string EnvironmentId, CliReference Reference, string ProviderAlias,
     string ProviderInstanceId, long ConfigurationRevision, string ImplementationId, CliPlannedOperation[] Operations)
-{ public CliReusedResource[] ReusedResources { get; init; } = []; }
+{
+    public CliReusedResource[] ReusedResources { get; init; } = [];
+    public CliReusedResource[] RetainedResources { get; init; } = [];
+}
 internal sealed record CliCommitData(string StateMeaning, CliCommit? Commit,
     CliDesiredGeneration? DesiredGeneration, long? ActualGeneration, CliGenerationProgress? Progress);
 
@@ -51,7 +54,7 @@ internal static class CommitPresentation
             g.ChangeSetId, g.PlanId, g.AcceptedAtUtc, g.TechnicalActorId, g.EnvironmentRecordId, g.EnvironmentId,
             g.Reference is { } r ? new(r.ApplicationRecordId, r.RevisionNumber) : throw new InvalidDataException("Missing revision."),
             g.ProviderAlias, g.ProviderInstanceId, g.ConfigurationRevision, g.ImplementationId, PlanningPresentation.Operations(g.Operations))
-        { ReusedResources = PlanningPresentation.Reuse(g.ReusedResources) },
+        { ReusedResources = PlanningPresentation.Reuse(g.ReusedResources), RetainedResources = PlanningPresentation.Reuse(g.RetainedResources) },
         reply.HasActualGeneration ? reply.ActualGeneration : null, GenerationPresentation.Progress(reply.Progress));
 }
 
@@ -89,7 +92,9 @@ internal sealed partial class CliTextPresenter
             foreach (var node in g.Operations)
                 _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}");
             foreach (var resource in g.ReusedResources)
-                _output.WriteLine($"Reuse Resource: {resource.ResourceId}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
+                _output.WriteLine($"Reuse Resource: {resource.ResourceId}; reintroduced: {resource.Reintroduced}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
+            foreach (var resource in g.RetainedResources)
+                _output.WriteLine($"Retain Resource: {resource.ResourceId}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}; no external deletion or drift check");
             _output.WriteLine($"Provider: {g.ProviderAlias} -> {g.ProviderInstanceId} revision {g.ConfigurationRevision}; implementation: {g.ImplementationId}");
             _output.WriteLine($"Accepted UTC: {g.AcceptedAtUtc}; technical actor: {g.TechnicalActorId}");
             _output.WriteLine("This immutable desired snapshot does not confirm applied infrastructure.");

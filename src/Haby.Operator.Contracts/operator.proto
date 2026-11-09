@@ -294,11 +294,13 @@ message DurablePlanSummary {
   PlanDescription intended_work = 16;
   repeated PlannedOperationSummary operations = 17;
   repeated ReusedResourceSummary reused_resources = 18;
+  repeated ReusedResourceSummary retained_resources = 19;
 }
 message ReusedResourceSummary {
   string resource_id = 1;
   string management_id = 2;
   int64 source_generation = 3;
+  bool reintroduced = 4;
 }
 // Immutable intended work only: no Provider preflight, absence check or execution guarantee.
 enum PlanDescriptionStatus {
@@ -382,6 +384,7 @@ message DesiredGenerationSummary {
   string implementation_id = 14;
   repeated PlannedOperationSummary operations = 15;
   repeated ReusedResourceSummary reused_resources = 16;
+  repeated ReusedResourceSummary retained_resources = 17;
 }
 message CommitReply {
   CommitStatus status = 1;
@@ -643,6 +646,8 @@ message GenerationProgress {
   repeated GenerationNodeProgress nodes = 7;
   optional string stopped_operation_id = 8;
   int32 reused_resources = 9;
+  int32 retained_resources = 10;
+  int32 reintroduced_resources = 11;
 }
 enum GenerationExecutionStatus {
   GENERATION_EXECUTION_STATUS_UNSPECIFIED = 0;

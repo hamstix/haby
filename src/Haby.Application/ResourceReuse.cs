@@ -4,7 +4,10 @@ namespace Haby.Application;
 
 /// <summary>Direct original-source provenance. No recursive generation-chain lookup.</summary>
 public sealed record ResourceReuse(ManifestLocalId Resource, Guid ManagementId,
-    long SourceGeneration, string EvidenceFingerprint);
+    long SourceGeneration, string EvidenceFingerprint)
+{
+    public bool Reintroduced { get; init; }
+}
 
 public sealed record ResourceReuseBaseline(ApplicationDeploymentId Deployment, long Generation, string Fingerprint);
 
@@ -19,5 +22,12 @@ public interface IDurableResourceReusePolicy
 public interface IDurableResourceAdditionPolicy
 {
     bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
+        ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration);
+}
+
+/// <summary>Adapter-owned retained membership and namespace compatibility; no external effects.</summary>
+public interface IDurableResourceRetentionPolicy
+{
+    bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration);
 }

@@ -55,13 +55,19 @@ public sealed partial class ExactActionAdmissionTests
     // Test-only adapter boundary: counted queue effects, never PostgreSQL database evidence or a production broker.
     private sealed class QueueEvidenceProducer(IDurableOperationJournal journal, IExternalOperationOutputs outputs,
         IProviderConfigurationStore configurations, QueueBoundary boundary)
-        : DurableActionHandler<QueueCreateInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
+        : DurableActionHandler<QueueCreateInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy, IDurableResourceRetentionPolicy
     {
         public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
             DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
             Validate(accepted, resource, inputs, configuration) && Validate(target, resource, inputs, configuration) &&
             accepted.Resources[resource].Properties.Equals(target.Resources[resource].Properties) &&
             accepted.Resources[resource].DeletionPolicy == target.Resources[resource].DeletionPolicy;
+
+        public bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => resource.Value == "extra" &&
+            original.Resources[resource].DeletionPolicy == ResourceDeletionPolicy.Retain &&
+            Validate(original, resource, inputs, configuration) && !target.Resources.ContainsKey(resource) &&
+            target.Resources.ContainsKey(ManifestLocalId.Create("jobs"));
 
         public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
             DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => resource.Value == "extra" &&
