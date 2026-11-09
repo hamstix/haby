@@ -160,6 +160,7 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
         public bool Graph;
         public bool Generated;
         public bool ExternalEvidence;
+        public bool DependentResources;
         public int OutputContractRegistrations = 1;
         public bool RejectAcceptedOutput;
         public string PlannedName = "jobs";

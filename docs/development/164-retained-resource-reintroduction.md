@@ -1,5 +1,10 @@
 # Retained standalone Resource removal and reintroduction
 
+The subsequent [#170 pair-retention slice](170-retained-independent-pair.md) also
+admits removal/compatible return of both Resources of one independent pair while
+another original pair remains active. Its bounded policy supersedes pair-removal
+refusals below; last-pair/all-Resource removal and cleanup remain unsupported.
+
 The subsequent [#168 independent-pair slice](168-independent-database-login-pair.md) also admits one new database/application-login pair per update; its Resource-scoped producer and alpha catalog boundaries supersede the earlier new-pair refusal below.
 
 Issue #164 implements the bounded retained lifecycle under

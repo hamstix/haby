@@ -12,12 +12,13 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed partial class ExactActionAdmissionTests
 {
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task Resource_reuse_synthetic_typed_family_uses_common_provenance_without_database_or_login_contracts(bool mixed, bool retain)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public async Task Resource_reuse_synthetic_typed_family_uses_common_provenance_without_database_or_login_contracts(bool mixed, bool retain, bool dependent)
     {
-        var boundary = new QueueBoundary { ExternalEvidence = true };
+        var boundary = new QueueBoundary { ExternalEvidence = true, DependentResources = dependent };
         var scenario = await GraphCase(boundary);
         await using (var execute = Services(scenario.Connection, boundary))
         {
@@ -37,6 +38,12 @@ public sealed partial class ExactActionAdmissionTests
                 """.Replace("VERSION", "v" + version, StringComparison.Ordinal))!;
             var absent = retain && version is 3 or 4;
             if (mixed && !absent) envelope["manifest"]!["spec"]!["resources"]!["extra"] = envelope["manifest"]!["spec"]!["resources"]!["jobs"]!.DeepClone();
+            if (dependent && !absent)
+            {
+                var peer = envelope["manifest"]!["spec"]!["resources"]!["jobs"]!.DeepClone();
+                peer["properties"] = System.Text.Json.Nodes.JsonNode.Parse("""{"parentRef":"extra"}"""u8);
+                envelope["manifest"]!["spec"]!["resources"]!["extra-peer"] = peer;
+            }
             var component = version == 2 ? "scheduler" : "worker";
             envelope["manifest"]!["spec"]!["components"] = System.Text.Json.Nodes.JsonNode.Parse("""
                 {"COMPONENT":{"documents":{"settings":{"fileName":"queue.json","format":"json","template":{}}},
@@ -60,12 +67,14 @@ public sealed partial class ExactActionAdmissionTests
             var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
             var change = (await planner.CreateChangeSetAsync(scenario.Plan.Inputs.Environment, imported.ManifestRevisionRef.ApplicationRecordId,
                 imported.ManifestRevisionRef, new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(version - 1)), "tester", default)).ChangeSet!;
-            var plan = (await planner.CreatePlanAsync(change.Id, "tester", default)).Plan!;
-            Assert.NotNull(plan); Assert.Equal(mixed && version == 2 ? 1 : 0, plan.Graph.Nodes.Count);
-            Assert.Equal(mixed && version >= 3 && !absent ? 2 : 1, plan.Graph.ReusedResources.Count);
-            Assert.Equal(absent ? 1 : 0, plan.Graph.RetainedResources.Count);
-            if (absent) Assert.Equal(2, Assert.Single(plan.Graph.RetainedResources).SourceGeneration);
-            Assert.All(plan.Graph.ReusedResources, r => Assert.Equal(r.Resource.Value == "extra" ? 2 : 1, r.SourceGeneration));
+            var planned = await planner.CreatePlanAsync(change.Id, "tester", default);
+            Assert.True(planned.Plan is not null, $"Generation {version}: {planned.Status}"); var plan = planned.Plan!;
+            Assert.Equal(mixed && version == 2 ? dependent ? 2 : 1 : 0, plan.Graph.Nodes.Count);
+            Assert.Equal(mixed && version >= 3 && !absent ? dependent ? 3 : 2 : 1, plan.Graph.ReusedResources.Count);
+            Assert.Equal(absent ? dependent ? 2 : 1 : 0, plan.Graph.RetainedResources.Count);
+            Assert.All(plan.Graph.RetainedResources, r => Assert.Equal(2, r.SourceGeneration));
+            Assert.All(plan.Graph.ReusedResources, r => Assert.Equal(r.Resource.Value == "jobs" ? 1 : 2, r.SourceGeneration));
+            if (dependent && version == 5) Assert.All(plan.Graph.ReusedResources.Where(r => r.SourceGeneration == 2), r => Assert.True(r.Reintroduced));
             var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default));
             Assert.Equal(version, commit.Commit.Generation.Value);
             Assert.Equal(component, Assert.Single(plan.Inputs.Configuration!.Layouts).Component.Value);
@@ -78,7 +87,7 @@ public sealed partial class ExactActionAdmissionTests
             }
             Assert.Contains(plan.Inputs.Configuration.RenderPins, p => p.ResourceLocalId.Value == (mixed && version >= 3 && !absent ? "extra" : "jobs"));
             var result = await services.GetRequiredService<DurableGenerationRunner>().RunAsync(commit.Commit.DeploymentId, commit.Commit.Generation, default);
-            Assert.Null(result.StopOutcome); Assert.Equal(version, result.Progress!.AppliedGeneration); Assert.Equal(mixed && version == 2 ? 1 : 0, result.Progress.Total);
+            Assert.Null(result.StopOutcome); Assert.Equal(version, result.Progress!.AppliedGeneration); Assert.Equal(mixed && version == 2 ? dependent ? 2 : 1 : 0, result.Progress.Total);
             var output = await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(new(commit.Commit.DeploymentId, commit.Commit.Generation, QueueEvidenceProducerId),
                 new(scenario.Plan.Inputs.Environment, imported.ManifestRevisionRef.ApplicationRecordId, ManifestLocalId.Create("jobs")), Key,
                 QueueEvidenceContract.Contract, "receipt", default);
@@ -104,9 +113,9 @@ public sealed partial class ExactActionAdmissionTests
                 Assert.NotNull(added); Assert.Equal("accepted-2", QueueEvidenceContract.Decode(added)!.Receipt);
             }
         }
-        Assert.Equal(mixed ? 2 : 1, boundary.Calls); Assert.Equal(mixed ? ["create:accepted-1", "subscribe:accepted-1", "create:accepted-2"] : ["create:accepted-1", "subscribe:accepted-1"], boundary.Effects);
+        Assert.Equal(mixed ? 2 : 1, boundary.Calls); Assert.Equal(dependent ? ["create:accepted-1", "subscribe:accepted-1", "create:accepted-2", "subscribe:accepted-2"] : mixed ? ["create:accepted-1", "subscribe:accepted-1", "create:accepted-2"] : ["create:accepted-1", "subscribe:accepted-1"], boundary.Effects);
         await using var verify = OutputContext(scenario.Connection);
-        Assert.Equal(mixed ? 3 : 2, await verify.DurableOperationAttempts.CountAsync()); Assert.Equal(mixed ? 2 : 1, await verify.OperationOutputs.CountAsync());
+        Assert.Equal(dependent ? 4 : mixed ? 3 : 2, await verify.DurableOperationAttempts.CountAsync()); Assert.Equal(mixed ? 2 : 1, await verify.OperationOutputs.CountAsync());
         Assert.Equal(retain ? 5 : 3, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
     }
 }

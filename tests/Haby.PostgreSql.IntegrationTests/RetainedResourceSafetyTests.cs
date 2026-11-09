@@ -13,16 +13,16 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class PostgreSqlApplicationLoginTests
 {
-    private sealed class WithoutRetentionPolicy : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy
+    private sealed class WithoutRetentionPolicy(IDurableActionAdmissionHandler? handler = null) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy
     {
-        private readonly PostgreSqlDatabaseCreateAdmission inner = new();
+        private readonly IDurableActionAdmissionHandler inner = handler ?? new PostgreSqlDatabaseCreateAdmission();
         public DurableActionExecutionKey Key => inner.Key;
         public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) => inner.Validate(resource, inputs);
         public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resource, NormalizedResource value, DurablePlanningInputs inputs) => inner.Plan(resource, value, inputs);
-        public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => inner.Validate(spec, resource, inputs, configuration);
-        public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => inner.Plan(spec, resource, inputs, configuration);
-        public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) => inner.ValidateGraph(spec, resource, inputs, configuration, graph);
-        public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => inner.CanReuse(accepted, target, resource, inputs, configuration);
+        public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => ((IDurableResourcePlanComposer)inner).Validate(spec, resource, inputs, configuration);
+        public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => ((IDurableResourcePlanComposer)inner).Plan(spec, resource, inputs, configuration);
+        public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) => ((IDurableResourcePlanComposer)inner).ValidateGraph(spec, resource, inputs, configuration, graph);
+        public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => ((IDurableResourceReusePolicy)inner).CanReuse(accepted, target, resource, inputs, configuration);
     }
 
     [Theory]
@@ -55,12 +55,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await restarted.StopAsync();
     }
 
-    private async Task EstablishRetained(Scenario scenario, ManifestOperator.ManifestOperatorClient client, string name, int through = 3)
+    private async Task EstablishRetained(Scenario scenario, ManifestOperator.ManifestOperatorClient client, string name, int through = 3, bool pair = false)
     {
         for (var generation = 2; generation <= through; generation++)
         {
-            var envelope = generation == 2 ? MixedEnvelope(scenario, generation, name) : UpdateEnvelope(scenario, generation);
-            var plan = await UpdatePlan(client, await ImportUpdate(client, envelope), generation - 1, created: generation == 2 ? 1 : 0);
+            var plan = await RetentionPlan(scenario, client, name, generation, generation - 1, pair, generation == 2);
             Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Status);
             Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = generation })).Status);
         }

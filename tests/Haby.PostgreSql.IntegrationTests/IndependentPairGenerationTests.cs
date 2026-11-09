@@ -31,7 +31,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     private static async Task<DurablePlanSummary> IndependentPlan(ManifestOperator.ManifestOperatorClient client,
-        RevisionReference revision, int expected, string endpoint, int created)
+        RevisionReference revision, int expected, string endpoint, int created, bool retainedPair = false)
     {
         var native = await NativeReuseCommand(endpoint, "changeset", "create", revision.ApplicationRecordId,
             revision.RevisionNumber.ToString(), "--expected-generation", expected.ToString());
@@ -40,15 +40,25 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var planned = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
         Assert.Equal(PlanningStatus.Planned, planned.Status);
         Assert.Equal(created, planned.Plan.Operations.Count);
-        Assert.Equal(expected == 1 ? 2 : 4, planned.Plan.ReusedResources.Count);
+        Assert.Equal(expected == 1 || retainedPair ? 2 : 4, planned.Plan.ReusedResources.Count);
+        Assert.Equal(retainedPair ? 2 : 0, planned.Plan.RetainedResources.Count);
+        Assert.All(planned.Plan.RetainedResources, r => Assert.Equal(2, r.SourceGeneration));
         Assert.All(planned.Plan.ReusedResources, r => Assert.Equal(r.ResourceId is "db-b" or "login-b" ? 2 : 1, r.SourceGeneration));
         Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new() { PlanId = planned.Plan.PlanId })).Status);
-        _ = await NativeReuseCommand(endpoint, "plan", "get", planned.Plan.PlanId);
+        if (await NativeReuseCommand(endpoint, "plan", "get", planned.Plan.PlanId) is { } described)
+        {
+            var saved = described.GetProperty("data"u8).GetProperty("plan"u8);
+            Assert.Equal(planned.Plan.ReusedResources.Count, saved.GetProperty("reusedResources"u8).GetArrayLength());
+            Assert.Equal(planned.Plan.RetainedResources.Count, saved.GetProperty("retainedResources"u8).GetArrayLength());
+            Assert.All(saved.GetProperty("retainedResources"u8).EnumerateArray(), r => Assert.Equal(2, r.GetProperty("sourceGeneration"u8).GetInt64()));
+        }
         return planned.Plan;
     }
 
-    [Fact]
-    public async Task Independent_pair_native_runtime_direct_sources_configuration_only_restart_restore_and_old_exact_grants()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Independent_pair_native_runtime_direct_sources_configuration_only_restart_restore_and_old_exact_grants(bool retainPair)
     {
         const string sentinelA = "pair-a-before-generation-2";
         const string sentinelB = "pair-b-created-in-generation-2";
@@ -80,13 +90,16 @@ public sealed partial class PostgreSqlApplicationLoginTests
             }
             else
             {
-                for (var generation = 2; generation <= 4; generation++)
+                for (var generation = 2; generation <= (retainPair ? 6 : 4); generation++)
                 {
                     if (generation > 2)
                     {
-                        if (generation == 3) revision = await ImportUpdate(client, IndependentEnvelope(scenario, 3, databaseB));
-                        else _ = await SelectConfigurationRevision(client, scenario, 2);
-                        await Commit(await IndependentPlan(client, revision!, generation - 1, host.Urls.Single(), 0));
+                        if (generation == 3) revision = await ImportUpdate(client, retainPair ? UpdateEnvelope(scenario, 3) : IndependentEnvelope(scenario, 3, databaseB));
+                        else if (generation == 4) _ = await SelectConfigurationRevision(client, scenario, 2);
+                        else revision = await ImportUpdate(client, IndependentEnvelope(scenario, generation, databaseB));
+                        var plan = await IndependentPlan(client, revision!, generation - 1, host.Urls.Single(), 0, retainPair && generation is 3 or 4);
+                        if (retainPair && generation == 5) Assert.All(plan.ReusedResources.Where(r => r.SourceGeneration == 2), r => Assert.True(r.Reintroduced));
+                        await Commit(plan);
                     }
                     var native = await NativeReuseCommand(host.Urls.Single(), "deployment", "generation", "execute", scenario.Commit.DeploymentId.ToString(), generation.ToString());
                     if (native is { } n) Assert.Equal(generation == 2 ? 5 : 0, n.GetProperty("data"u8).GetProperty("progress"u8).GetProperty("total"u8).GetInt32());
@@ -95,10 +108,30 @@ public sealed partial class PostgreSqlApplicationLoginTests
                     Assert.Equal(identityA, await ExternalIdentity(scenario)); Assert.Equal(historyA, await OriginalPairHistory());
                     _ = await NativeReuseCommand(host.Urls.Single(), "configuration", "materialize", DocumentRequest(scenario).ApplicationId, "--all", "--generation", generation.ToString());
                     var batch = await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = DocumentRequest(scenario).ApplicationId, Generation = generation });
-                    Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, batch.Status); Assert.Equal(3, batch.Items.Count);
-                    await Save(generation, false, 210, generation == 4 ? 40 : 30);
-                    await Save(generation, true, 73, generation == 4 ? 40 : 30, seed: generation == 2);
+                    var absent = retainPair && generation is 3 or 4;
+                    Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, batch.Status); Assert.Equal(absent ? 2 : 3, batch.Items.Count);
+                    await Save(generation, false, 210, generation >= 4 ? 40 : 30);
+                    if (!absent) await Save(generation, true, 73, generation >= 4 ? 40 : 30, seed: generation == 2);
                     foreach (var item in retained) await Receive(channel, item);
+                    if (retainPair && generation == 4)
+                    {
+                        // Restore an actually absent generation, then use OLD B's
+                        // exact grant and read its original sentinel before runtime DML.
+                        var restoredAbsent = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("pair_absent_restore_")));
+                        var absentDump = "/tmp/haby-pair-absent-" + Guid.NewGuid().ToString("N") + ".dump";
+                        try
+                        {
+                            await fixture.RunClientUtilityAsync("pg_dump", "-U", "postgres", "--format=custom", "--file=" + absentDump, "--dbname=" + new NpgsqlConnectionStringBuilder(scenario.Connection).Database);
+                            await fixture.RunClientUtilityAsync("pg_restore", "-U", "postgres", "--exit-on-error", "--no-owner", "--no-privileges", "--dbname=" + new NpgsqlConnectionStringBuilder(restoredAbsent).Database, absentDump);
+                            await using var absentHost = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + restoredAbsent, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
+                            await OperatorTestCredentials.StartWithIssuedOperatorAsync(absentHost);
+                            using var absentChannel = GrpcChannel.ForAddress(absentHost.Urls.Single());
+                            foreach (var item in retained) await Receive(absentChannel, item);
+                            Assert.Equal(await ReuseHistory(scenario.Connection), await ReuseHistory(restoredAbsent));
+                            await absentHost.StopAsync();
+                        }
+                        finally { await fixture.RunClientUtilityAsync("rm", "-f", absentDump); }
+                    }
                     completeHistory ??= await ReuseHistory(scenario.Connection);
                     Assert.Equal(completeHistory, await ReuseHistory(scenario.Connection));
                     identityB ??= await PairBIdentity(); Assert.Equal(identityB, await PairBIdentity());
@@ -112,20 +145,30 @@ public sealed partial class PostgreSqlApplicationLoginTests
                         var frozen = ConfigurationPlanningSnapshotCodec.Decode(saved.ConfigurationJson,
                             ManifestRevisionRef.Create(scenario.Plan.Inputs.Revision.ApplicationRecordId, ManifestRevisionNumber.Create(saved.RevisionNumber)));
                         Assert.Equal("app-login-access", frozen.RenderPins.Single(p => p.Component.Value == "api").Producer.Value);
-                        Assert.Equal("login-b-access", frozen.RenderPins.Single(p => p.Component.Value == "consumer-b").Producer.Value);
+                        if (!absent) Assert.Equal("login-b-access", frozen.RenderPins.Single(p => p.Component.Value == "consumer-b").Producer.Value);
+                        else Assert.DoesNotContain(frozen.RenderPins, p => p.Component.Value == "consumer-b");
                         Assert.Single(frozen.RenderPins.Select(p => p.Renderer).Distinct());
                         if (generation == 4) Assert.Equal(revision!.RevisionNumber, saved.RevisionNumber);
                     }
                     var denial = await Assert.ThrowsAsync<RpcException>(async () => await new Haby.Configuration.Contracts.ConfigurationDelivery.ConfigurationDeliveryClient(channel)
                         .DeliverAsync(new() { RevisionId = retained.Last(x => x.B).Document.Artifact.RevisionId }, Bearer(retained[0].Grant.Credential)));
                     Assert.Equal(StatusCode.PermissionDenied, denial.StatusCode);
+                    if (retainPair && generation >= 5)
+                    {
+                        var oldB = retained.First(x => x.B); var returnedB = retained.Last(x => x.B);
+                        Assert.NotEqual(oldB.Document.Artifact.RevisionId, returnedB.Document.Artifact.RevisionId);
+                        var oldDenial = await Assert.ThrowsAsync<RpcException>(async () => await new Haby.Configuration.Contracts.ConfigurationDelivery.ConfigurationDeliveryClient(channel)
+                            .DeliverAsync(new() { RevisionId = returnedB.Document.Artifact.RevisionId }, Bearer(oldB.Grant.Credential)));
+                        Assert.Equal(StatusCode.PermissionDenied, oldDenial.StatusCode);
+                    }
                 }
             }
             if (phase == 2)
             {
-                var noop = await IndependentPlan(client, revision!, 4, host.Urls.Single(), 0);
+                var last = retainPair ? 6 : 4;
+                var noop = await IndependentPlan(client, revision!, last, host.Urls.Single(), 0);
                 var receipt = await client.CommitDesiredStateAsync(new() { ChangeSetId = noop.ChangeSetId, PlanId = noop.PlanId });
-                Assert.Equal(CommitStatus.Committed, receipt.Status); Assert.Equal(4, receipt.Commit.Generation);
+                Assert.Equal(CommitStatus.Committed, receipt.Status); Assert.Equal(last, receipt.Commit.Generation);
                 Assert.Equal(completeHistory, await ReuseHistory(scenario.Connection));
             }
             await host.StopAsync();
@@ -157,7 +200,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
             foreach (var item in retained) await Receive(channel, item);
-            for (var g = 2; g <= 4; g++) Assert.Equal(GenerationExecutionStatus.Succeeded,
+            for (var g = 2; g <= (retainPair ? 6 : 4); g++) Assert.Equal(GenerationExecutionStatus.Succeeded,
                 (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = g })).Status);
             Assert.Equal(completeHistory, await ReuseHistory(restored));
             await host.StopAsync();
@@ -237,7 +280,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var envelope = IndependentEnvelope(scenario, generation, b);
             if (generation is 3 or 5) envelope["manifest"]!["spec"]!["resources"]!["extra"] = new JsonObject
             {
-                ["type"] = "postgresql.database/v1alpha1", ["providerRef"] = "postgresql.primary",
+                ["type"] = "postgresql.database/v1alpha1",
+                ["providerRef"] = "postgresql.primary",
                 ["properties"] = new JsonObject { ["name"] = extra }
             };
             var reference = await ImportUpdate(client, envelope);
