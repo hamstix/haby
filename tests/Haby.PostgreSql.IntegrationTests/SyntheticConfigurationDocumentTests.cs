@@ -25,7 +25,7 @@ public sealed partial class ExactActionAdmissionTests
     private static readonly ConfigurationFormatterId QueueFormatter = ConfigurationFormatterId.Create("sample.queue-format/v1");
     private static readonly ManifestLocalId QueueImplementation = ManifestLocalId.Create("sample-queue-v1");
     private sealed record QueueRenderDefinition() : ConfigurationRendererContract(QueueRenderer, QueueContract, QueueEvidenceContract.Contract,
-        "receipt", QueueEvidenceProducerId, Key, QueueFormatter)
+        "receipt", Key, QueueFormatter)
     {
         public override ConfigurationObject Defaults => new([]);
         public override bool ValidateOptions(ConfigurationObject options, bool complete) => options.Members.Count == 0;

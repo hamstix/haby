@@ -10,7 +10,7 @@ public sealed class PostgreSqlApplicationLoginContractTests
 {
     private static DurableOperationNode Node()
     {
-        var owner = new ManagedResourceKey(EnvironmentRecordId.New(), ApplicationRecordId.New(), ManifestLocalId.Create("login"));
+        var owner = new ManagedResourceKey(EnvironmentRecordId.New(), ApplicationRecordId.New(), ManifestLocalId.Create("app-login"));
         var database = new OperationOutputRefDocument("db-create", PostgreSqlDatabaseOutputContract.Contract, "database");
         var password = new OperationOutputRefDocument("app-login-material", GeneratedCredentialContracts.OutputContract, "password");
         return new(OperationId.Create("app-login-create"), owner.ResourceLocalId, PostgreSqlApplicationLoginAction.RegistrationKey,
@@ -28,6 +28,7 @@ public sealed class PostgreSqlApplicationLoginContractTests
         var node = Node(); Assert.NotNull(PostgreSqlApplicationLoginAction.Decode(node));
         foreach (var json in new[]
         {
+            node.Input.Json.Replace("\"producerOperationId\":\"db-create\"", "\"producerOperationId\":null", StringComparison.Ordinal),
             node.Input.Json[..^1] + ",\"password\":\"forbidden\"}",
             node.Input.Json.Replace("\"owner\":{", "\"owner\":null,\"unknown\":{", StringComparison.Ordinal),
             node.Input.Json.Replace("app-login-material", "other-material", StringComparison.Ordinal),

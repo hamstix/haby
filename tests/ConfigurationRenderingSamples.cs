@@ -10,9 +10,9 @@ internal static class ConfigurationRenderingSamples
     internal static readonly ConfigurationRendererId RendererId = ConfigurationRendererId.Create("sample.connection/v1");
     internal static readonly ConfigurationFormatterId FormatterId = ConfigurationFormatterId.Create("sample.string/v1");
     internal static readonly ManifestLocalId Implementation = ManifestLocalId.Create("sample-v1");
-    internal sealed record Definition(ResourceTypeId ResourceType, ConfigurationObject DefaultOptions, ConfigurationRendererId? ExactRenderer = null) : ConfigurationRendererContract(
-        ExactRenderer ?? RendererId, ResourceType, "sample.output/v1", "value", OperationId.Create("create"),
-        new(new(ResourceType, ProviderKindId.Create("sample/v1"), ProviderConfigurationContractId.Create("sample.configuration/v1"),
+    internal sealed record Definition(ResourceTypeId ResourceType, ConfigurationObject DefaultOptions, ConfigurationRendererId? ExactRenderer = null, DurableActionExecutionKey? Action = null) : ConfigurationRendererContract(
+        ExactRenderer ?? RendererId, ResourceType, "sample.output/v1", "value",
+        Action ?? new(new(ResourceType, ProviderKindId.Create("sample/v1"), ProviderConfigurationContractId.Create("sample.configuration/v1"),
             ProviderImplementationId.Create("sample/v1")), OperationContractId.Create("sample.create/v1")), FormatterId)
     {
         public override ConfigurationObject Defaults => DefaultOptions;
@@ -44,10 +44,15 @@ internal static class ConfigurationRenderingSamples
         public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) =>
             new FormatterDefinition().ValidateArguments(arguments) && !material.IsEmpty ? new(material.ToString()) : null;
     }
-    internal static ConfigurationRenderingCatalog Catalog(string resource = "sample.resource/v1", ConfigurationObject? defaults = null, bool events = false) =>
-        new(events ? [new Definition(ResourceTypeId.Create(resource), defaults ?? new([])),
-                new Definition(ResourceTypeId.Create(resource), new([]), ConfigurationRendererId.Create("sample.events/v1"))]
-            : [new Definition(ResourceTypeId.Create(resource), defaults ?? new([]))],
+    internal static IReadOnlyList<DurableOperationNode> Producers(NormalizedManifestSpec spec) => spec.Resources.Select(r =>
+        new DurableOperationNode(OperationId.Create(r.Key.Value == "resource" ? "create" : r.Key.Value + "-create"), r.Key,
+            new Definition(r.Value.Type, new([])).ProducerAction,
+            new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample/v1"),
+            new("sample.input/v1", "{}"), [])).ToArray();
+    internal static ConfigurationRenderingCatalog Catalog(string resource = "sample.resource/v1", ConfigurationObject? defaults = null, bool events = false, DurableActionExecutionKey? producerAction = null) =>
+        new(events ? [new Definition(ResourceTypeId.Create(resource), defaults ?? new([]), Action: producerAction),
+                new Definition(ResourceTypeId.Create(resource), new([]), ConfigurationRendererId.Create("sample.events/v1"), producerAction)]
+            : [new Definition(ResourceTypeId.Create(resource), defaults ?? new([]), Action: producerAction)],
             events ? [new Renderer(), new Renderer(ConfigurationRendererId.Create("sample.events/v1"))] : [new Renderer()],
             new([new FormatterDefinition()], [new(Implementation, FormatterId)]), [new Formatter()]);
 }

@@ -42,7 +42,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [InlineData("schema")]
     [InlineData("resource-add")]
     [InlineData("login-add")]
-    [InlineData("pair-add")]
+    [InlineData("two-pairs-add")]
     [InlineData("multiple-additions")]
     [InlineData("resource-rename")]
     [InlineData("resource-remove")]
@@ -58,11 +58,15 @@ public sealed partial class PostgreSqlApplicationLoginTests
             case "schema": spec["resources"]!["app-login"]!["properties"]!["schema"] = "other_schema"; break;
             case "resource-add": spec["resources"]!["other"] = spec["resources"]!["db"]!.DeepClone(); break;
             case "login-add": spec["resources"]!["other-login"] = spec["resources"]!["app-login"]!.DeepClone(); break;
-            case "pair-add":
+            case "two-pairs-add":
                 spec["resources"]!["other-db"] = spec["resources"]!["db"]!.DeepClone();
                 spec["resources"]!["other-db"]!["properties"]!["name"] = "unsupported_extra_pair";
                 spec["resources"]!["other-login"] = spec["resources"]!["app-login"]!.DeepClone();
-                spec["resources"]!["other-login"]!["properties"]!["databaseRef"] = "other-db"; break;
+                spec["resources"]!["other-login"]!["properties"]!["databaseRef"] = "other-db";
+                spec["resources"]!["third-db"] = spec["resources"]!["other-db"]!.DeepClone();
+                spec["resources"]!["third-db"]!["properties"]!["name"] = "unsupported_third_pair";
+                spec["resources"]!["third-login"] = spec["resources"]!["other-login"]!.DeepClone();
+                spec["resources"]!["third-login"]!["properties"]!["databaseRef"] = "third-db"; break;
             case "multiple-additions":
                 foreach (var id in new[] { "other", "another" })
                 { spec["resources"]![id] = spec["resources"]!["db"]!.DeepClone(); spec["resources"]![id]!["properties"]!["name"] = "unsupported_" + id; }
@@ -158,16 +162,18 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Resource_reuse_competing_commits_wait_on_real_database_lock_then_have_one_atomic_winner(bool mixed)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Resource_reuse_competing_commits_wait_on_real_database_lock_then_have_one_atomic_winner(bool mixed, bool pair)
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
         var history = await ReuseHistory(scenario.Connection);
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
-        var revision = await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_race_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2));
-        var first = await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0); var second = await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
+        var revision = await ImportUpdate(client, pair ? IndependentEnvelope(scenario, 2, "pair_race_" + Guid.NewGuid().ToString("N")) : mixed ? MixedEnvelope(scenario, 2, "mixed_race_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2));
+        var first = pair ? await IndependentPlan(client, revision, 1, host.Urls.Single(), 5) : await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
+        var second = pair ? await IndependentPlan(client, revision, 1, host.Urls.Single(), 5) : await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
         var lockKey = $"haby-deployment:{Guid.Parse(scenario.Plan.Inputs.Environment.ToString()):N}:{Guid.Parse(scenario.Plan.Inputs.Revision.ApplicationRecordId.ToString()):N}";
         await using var blocker = new NpgsqlConnection(scenario.Connection); await blocker.OpenAsync(); await using var tx = await blocker.BeginTransactionAsync();
         await using (var hold = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", blocker, tx))
@@ -192,10 +198,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using var verify = Context(scenario.Connection);
         Assert.Equal(2, await verify.DeploymentGenerations.CountAsync()); Assert.Equal(2, await verify.ChangeSetCommits.CountAsync());
         var owner = await verify.ApplicationDeployments.AsNoTracking().SingleAsync(); Assert.Equal(2, owner.DesiredGeneration); Assert.Equal(1, owner.AppliedGeneration);
-        if (!mixed) Assert.Equal(history, await ReuseHistory(scenario.Connection));
-        Assert.Equal(mixed ? 6 : 5, await verify.DurableOperations.CountAsync());
+        if (!mixed && !pair) Assert.Equal(history, await ReuseHistory(scenario.Connection));
+        Assert.Equal(pair ? 10 : mixed ? 6 : 5, await verify.DurableOperations.CountAsync());
         Assert.Equal(5, await verify.DurableOperationAttempts.CountAsync());
-        Assert.Equal(mixed ? 3 : 2, await verify.ResourceManagement.CountAsync());
+        Assert.Equal(pair ? 4 : mixed ? 3 : 2, await verify.ResourceManagement.CountAsync());
         await host.StopAsync();
     }
 }

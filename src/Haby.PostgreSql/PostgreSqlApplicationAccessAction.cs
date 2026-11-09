@@ -21,17 +21,20 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
     public bool Supports(DurableOperationNode node) => Decode(node) is not null;
     internal static PostgreSqlLoginAccessInput? Decode(DurableOperationNode node)
     {
-        if (node.Action != RegistrationKey || node.Input.Format != Format || node.Id.Value != "app-login-access") return null;
+        if (node.Action != RegistrationKey || node.Input.Format != Format || node.Id.Value != node.ResourceId.Value + "-access") return null;
         try
         {
             var input = JsonSerializer.Deserialize(node.Input.Json, PostgreSqlPairJsonContext.Default.PostgreSqlLoginAccessInput);
             return input is not null && input.DatabaseName is not null && PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(input.DatabaseName) &&
                 PostgreSqlApplicationLoginContract.ValidSchema(input.Schema) && input.Policy == PostgreSqlApplicationLoginContract.Policy &&
-                input.DatabaseSource == new OperationOutputRefDocument("db-create", PostgreSqlDatabaseOutputContract.Contract, "database") &&
-                input.RoleSource == new OperationOutputRefDocument("app-login-create", PostgreSqlRoleEvidenceContract.Contract, "role") &&
-                input.PasswordSource == new OperationOutputRefDocument("app-login-material", GeneratedCredentialContracts.OutputContract, "password") &&
-                node.Dependencies.Select(d => d.Value).SequenceEqual(new[] { "app-login-create", "app-login-material", "db-create", "db-restrict" }) &&
-                node.OutputReferences.SequenceEqual(new[] { input.RoleSource.ToReference(), input.PasswordSource.ToReference(), input.DatabaseSource.ToReference() }) ? input : null;
+                input.DatabaseSource is not null && input.DatabaseSource.OutputContract == PostgreSqlDatabaseOutputContract.Contract && input.DatabaseSource.OutputKey == "database" &&
+                input.DatabaseSource.ProducerOperationId?.EndsWith("-create", StringComparison.Ordinal) == true &&
+                input.RoleSource == new OperationOutputRefDocument(node.ResourceId.Value + "-create", PostgreSqlRoleEvidenceContract.Contract, "role") &&
+                input.PasswordSource == new OperationOutputRefDocument(node.ResourceId.Value + "-material", GeneratedCredentialContracts.OutputContract, "password") &&
+                node.Dependencies.Select(d => d.Value).SequenceEqual(new[] { input.RoleSource.ProducerOperationId, input.PasswordSource.ProducerOperationId,
+                    input.DatabaseSource.ProducerOperationId, input.DatabaseSource.ProducerOperationId[..^7] + "-restrict" }.Order(StringComparer.Ordinal)) &&
+                node.OutputReferences.SequenceEqual(new[] { input.RoleSource.ToReference(), input.PasswordSource.ToReference(), input.DatabaseSource.ToReference() }
+                    .OrderBy(o => o.ProducerOperationId.Value, StringComparer.Ordinal)) ? input : null;
         }
         catch (Exception e) when (e is JsonException or ArgumentException or FormatException) { return null; }
     }
@@ -45,7 +48,6 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
         {
             var accepted = await outputs.FindAcceptedAsync(key, cancellationToken);
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
-            if (accepted.Graph.Nodes.Count != 5) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
                 accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
@@ -54,7 +56,7 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
             var progress = await journal.ProgressAsync(key.DeploymentId, key.Generation, cancellationToken);
             if (progress is null || accepted.Node.Dependencies.Any(d => !progress.Nodes.Any(n => n.Operation.Key.OperationId == d &&
                 n.Operation.State == DurableOperationState.Succeeded))) return new(DurableExecutionOutcome.Blocked, operation);
-            var restricted = progress.Nodes.Single(n => n.Operation.Key.OperationId.Value == "db-restrict").Operation;
+            var restricted = progress.Nodes.Single(n => n.Operation.Key.OperationId.Value == input.DatabaseSource.ProducerOperationId[..^7] + "-restrict").Operation;
             var restrictAttempts = await journal.FindAttemptsAsync(restricted.Key, cancellationToken);
             if (!restrictAttempts.Any(a => a.AttemptId == restricted.AttemptId && a.AttemptNumber == restricted.AttemptNumber &&
                 a.DispatchedAt is not null && a.FinishedAt is not null && a.Outcome == DurableAttemptOutcome.Succeeded))

@@ -287,7 +287,7 @@ public sealed partial class ConfigurationProfilePersistenceTests(PostgreSqlFixtu
         await using (var transaction = await capture.Database.BeginTransactionAsync())
         {
             var environment = (await fresh.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("expansion"), default))!;
-            var prepared = await ConfigurationPlanningCapture.CaptureAsync(capture, environment, applicationRef, app.Declaration, default, Haby.Tests.ConfigurationRenderingSamples.Catalog(events: true));
+            var prepared = await ConfigurationPlanningCapture.CaptureAsync(capture, environment, applicationRef, app.Declaration, default, Haby.Tests.ConfigurationRenderingSamples.Catalog(events: true), producers: Haby.Tests.ConfigurationRenderingSamples.Producers(app.Declaration.Spec));
             Assert.NotNull(prepared.Snapshot);
             var encoded = ConfigurationPlanningSnapshotCodec.Encode(prepared.Snapshot);
             Assert.Equal(prepared.Snapshot, ConfigurationPlanningSnapshotCodec.Decode(encoded, applicationRef));

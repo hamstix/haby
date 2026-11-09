@@ -120,7 +120,7 @@ the broader mutation checkpoint below remains incomplete.
 - [x] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and explicit execution of a reuse-only next generation from a fully applied baseline. Deferred apply remains separate.
 - [x] Preserve stable identities and confirmed management of unchanged database/login Resources with the exact same Provider configuration revision. Reuse the existing database, role and credential through original confirmed evidence, without repeating creation, generation or privilege work. Catalogs without management records are not backfilled.
 - [x] Admit the bounded #160 mixed update: reuse the unchanged managed PostgreSQL pair and create one independent unused standalone database on the same exact Provider revision. Later reuse retains direct original sources (pair=1, added database=2), without replaying old work. [Runbook and completion boundary](docs/development/158-resource-reuse-generation-updates.md#mixed-reuse-and-create-160).
-- [ ] Expand admitted Resource additions/dependencies beyond that standalone database boundary. Keep ordinary conflicts and no implicit adoption.
+- [x] Admit one independent database/application-login pair per update, reusing every previous managed Resource with exact Resource-scoped producers, isolated credentials and direct original sources ([issue #168](docs/development/168-independent-database-login-pair.md)). General dependencies on reused outputs remain unsupported.
 - [x] Support adding/removing Components and local Bindings in a new ManifestRevision with the unchanged managed Resource set and exact Provider revision ([issue #162](docs/development/162-component-binding-generation-updates.md)). New Components/Bindings receive configuration; removed ones do not participate in the new generation. Kubernetes object creation/removal remains P3 work.
 - [x] Admit retained removal and compatible same-key reintroduction of the #160 independent standalone database while keeping the managed pair declared, with explicit immutable generation membership, stable management/original source, unchanged data/privileges and retained name ownership ([issue #164](docs/development/164-retained-resource-reintroduction.md)).
 - [ ] Expand retained removals beyond that standalone boundary. Pair/owner/all-Resource removal, destructive deprovisioning and release/transfer of retained names remain unsupported.
@@ -135,8 +135,7 @@ removals, then configuration-only generations, and finally P3 image rollout and
 credential/configuration transfer. Detailed contracts require accepted ADRs before
 implementation. The current update profile admits unchanged managed pair
 reuse plus one independent standalone database addition per update, and changed Component/local Binding sets over unchanged managed Resources,
-with a new ManifestRevision, plus explicit same-revision acceptance of changed supported Profile/assignment/default inputs. Bounded standalone removal/reintroduction retains direct original provenance even through multiple absent generations. New login/pair additions
-and dependencies on reused outputs remain refused.
+with a new ManifestRevision, plus explicit same-revision acceptance of changed supported Profile/assignment/default inputs. Bounded standalone removal/reintroduction retains direct original provenance even through multiple absent generations. One new independent database/login pair per update is also supported; new logins on existing databases and general dependencies on reused outputs remain refused.
 
 This checkpoint supplies the update foundation for P3 rollout; it does not claim
 arbitrary Resource evolution, destructive Application/data deletion, automatic

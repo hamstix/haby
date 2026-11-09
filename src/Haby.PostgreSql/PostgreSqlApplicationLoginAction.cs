@@ -30,12 +30,15 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
                 input.DatabaseName is null || !PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(input.DatabaseName)) return null;
             var owner = new ManagedResourceKey(EnvironmentRecordId.Parse(input.Owner.Environment),
                 ApplicationRecordId.Parse(input.Owner.Application), ManifestLocalId.Create(input.Owner.Resource));
-            return input.RoleName == PostgreSqlPairResourceAdmission.RoleName(owner) && node.Id.Value == "app-login-create" &&
+            return input.RoleName == PostgreSqlPairResourceAdmission.RoleName(owner) && node.Id.Value == node.ResourceId.Value + "-create" &&
                 node.ResourceId == owner.ResourceLocalId && node.References.Environment == owner.EnvironmentRecordId &&
-                input.DatabaseSource == new OperationOutputRefDocument("db-create", PostgreSqlDatabaseOutputContract.Contract, "database") &&
-                input.PasswordSource == new OperationOutputRefDocument("app-login-material", GeneratedCredentialContracts.OutputContract, "password") &&
-                node.Dependencies.Select(d => d.Value).SequenceEqual(new[] { "app-login-material", "db-create", "db-restrict" }) &&
-                node.OutputReferences.SequenceEqual(new[] { input.PasswordSource.ToReference(), input.DatabaseSource.ToReference() }) ? input : null;
+                input.DatabaseSource.OutputContract == PostgreSqlDatabaseOutputContract.Contract && input.DatabaseSource.OutputKey == "database" &&
+                input.PasswordSource == new OperationOutputRefDocument(node.ResourceId.Value + "-material", GeneratedCredentialContracts.OutputContract, "password") &&
+                input.DatabaseSource.ProducerOperationId?.EndsWith("-create", StringComparison.Ordinal) == true &&
+                node.Dependencies.Select(d => d.Value).SequenceEqual(new[] { input.PasswordSource.ProducerOperationId,
+                    input.DatabaseSource.ProducerOperationId, input.DatabaseSource.ProducerOperationId[..^7] + "-restrict" }.Order(StringComparer.Ordinal)) &&
+                node.OutputReferences.SequenceEqual(new[] { input.PasswordSource.ToReference(), input.DatabaseSource.ToReference() }
+                    .OrderBy(o => o.ProducerOperationId.Value, StringComparer.Ordinal)) ? input : null;
         }
         catch (Exception e) when (e is JsonException or ArgumentException or FormatException) { return null; }
     }
@@ -48,7 +51,7 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
         {
             var accepted = await outputs.FindAcceptedAsync(key, cancellationToken);
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
-            if (accepted.Graph.Nodes.Count != 4 && (accepted.Graph.Nodes.Count != 5 || access is null)) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+            if (accepted.Graph.Nodes.Any(n => n.Action == PostgreSqlApplicationAccessAction.RegistrationKey) && access is null) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
                 accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;

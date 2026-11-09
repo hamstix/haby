@@ -632,7 +632,7 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
         bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null, ConfigurationRenderingCatalog? rendering = null)
     {
         var services = new ServiceCollection()
-            .AddSingleton(rendering ?? Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1"))
+            .AddSingleton(rendering ?? Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1", producerAction: Haby.PostgreSql.PostgreSqlDatabaseCreateAction.RegistrationKey))
             .AddSingleton(clock)
             .AddPostgreSqlManifestCatalog(connection)
             .AddPostgreSqlPlaintextSecretStore()

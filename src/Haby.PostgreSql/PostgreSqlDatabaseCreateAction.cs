@@ -24,6 +24,7 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
 
     public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        PostgreSqlPairResourceAdmission.CanAddPair(accepted, target, resource, inputs, configuration) ||
         target.Resources.Count == accepted.Resources.Count + 1 &&
         PostgreSqlPairResourceAdmission.SupportsShape(accepted, inputs, configuration) &&
         PostgreSqlPairResourceAdmission.SupportsShape(target, inputs, configuration) &&

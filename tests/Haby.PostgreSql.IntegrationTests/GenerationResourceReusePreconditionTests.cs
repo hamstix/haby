@@ -90,10 +90,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task Resource_reuse_cancellation_before_acceptance_rolls_back_and_after_confirmed_commit_keeps_receipt(bool mixed, bool configurationOnly)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task Resource_reuse_cancellation_before_acceptance_rolls_back_and_after_confirmed_commit_keeps_receipt(bool mixed, bool configurationOnly, bool pair)
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
         using var before = new CancellationTokenSource(); using var after = new CancellationTokenSource();
@@ -101,8 +102,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
             s => s.AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(cancelBefore, cancelAfter)));
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
-        var revision = configurationOnly ? await SelectConfigurationRevision(client, scenario, 2) : await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_cancel_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2));
-        var plan = await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
+        var revision = pair ? await ImportUpdate(client, IndependentEnvelope(scenario, 2, "pair_cancel_" + Guid.NewGuid().ToString("N"))) : configurationOnly ? await SelectConfigurationRevision(client, scenario, 2) : await ImportUpdate(client, mixed ? MixedEnvelope(scenario, 2, "mixed_cancel_" + Guid.NewGuid().ToString("N")) : UpdateEnvelope(scenario, 2));
+        var plan = pair ? await IndependentPlan(client, revision, 1, host.Urls.Single(), 5) : await UpdatePlan(client, revision, 1, created: mixed ? 1 : 0);
         var committer = host.Services.GetRequiredService<IDurableDesiredStateCommitter>();
         cancelBefore.Enabled = true;
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await committer.CommitAsync(DeploymentChangeSetId.Parse(plan.ChangeSetId), DeploymentPlanId.Parse(plan.PlanId), "tester", before.Token));

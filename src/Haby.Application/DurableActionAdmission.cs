@@ -168,6 +168,18 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         }
         return DurablePlanStatus.Planned;
     }
+    public IReadOnlyList<DurableOperationNode> DescribeProducers(NormalizedManifestSpec spec, ProviderAdapterKey provider,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
+    {
+        if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
+        return spec.Resources.SelectMany(r =>
+        {
+            var handler = registry.Find(new DurableActionAdmissionKey(r.Value.Type, provider))!;
+            return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
+                : handler.Plan(r.Key, r.Value, inputs);
+        }).ToArray();
+    }
+
     public DurableOperationGraph Plan(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
         PreparedProviderConfiguration? configuration = null)
     {

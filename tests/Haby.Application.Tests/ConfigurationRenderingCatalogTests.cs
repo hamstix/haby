@@ -9,13 +9,19 @@ namespace Haby.Application.Tests;
 
 public sealed class ConfigurationRenderingCatalogTests
 {
-    private static ConfigurationPlanningSnapshot Snapshot(ConfigurationRenderingCatalog catalog)
+    private static ConfigurationPlanningSnapshot Snapshot(ConfigurationRenderingCatalog catalog, bool two = false, Func<IReadOnlyList<DurableOperationNode>, IReadOnlyList<DurableOperationNode>>? changeProducers = null)
     {
         var node = JsonNode.Parse("""
             {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{
             "resources":{"resource":{"type":"sample.resource/v1","providerRef":"pg","properties":{}}},
             "components":{"api":{"bindings":{"use":{"target":{"kind":"local-resource","resourceRef":"resource"},"configurationSlot":"main"}}}}}}}
             """u8)!;
+        if (two)
+        {
+            node["manifest"]!["spec"]!["resources"]!["second"] = node["manifest"]!["spec"]!["resources"]!["resource"]!.DeepClone();
+            node["manifest"]!["spec"]!["components"]!["consumer-b"] = node["manifest"]!["spec"]!["components"]!["api"]!.DeepClone();
+            node["manifest"]!["spec"]!["components"]!["consumer-b"]!["bindings"]!["use"]!["target"]!["resourceRef"] = "second";
+        }
         var manifest = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Bytes(node),
             new([new(ResourceTypeId.Create("sample.resource/v1"), "{}", "{}")], [], [], []))).Candidate.Declaration;
         var profileNode = Node(false); profileNode["spec"]!["bindingRules"]!["connection"]!["documentProjections"]!.AsArray().RemoveAt(1);
@@ -23,8 +29,34 @@ public sealed class ConfigurationRenderingCatalogTests
         var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((t, i) => new ConfigurationPlanningScope(t, i == 0 ? AssignmentToken.New() : null,
             new(t, i == 0 ? [new ProfileDecision.Use(profile.Reference)] : [])));
         return ConfigurationPlanningSnapshot.Prepare(ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)),
-            manifest, scopes, [profile], catalog).Snapshot!;
+            manifest, scopes, [profile], catalog, changeProducers?.Invoke(Producers(manifest.Spec)) ?? Producers(manifest.Spec)).Snapshot!;
     }
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("ambiguous")]
+    [InlineData("owner")]
+    [InlineData("action")]
+    public void Missing_ambiguous_or_foreign_producers_refuse_without_first_match_fallback(string fault)
+    {
+        Assert.Null(Snapshot(Catalog(), changeProducers: nodes => fault switch
+        {
+            "missing" => [],
+            "ambiguous" => [nodes[0], nodes[0] with { Id = OperationId.Create("another") }],
+            "owner" => [nodes[0] with { ResourceId = ManifestLocalId.Create("foreign") }],
+            _ => [nodes[0] with { Action = nodes[0].Action with { ActionContract = OperationContractId.Create("other/v1") } }]
+        }));
+    }
+
+    [Fact]
+    public void Same_renderer_contract_freezes_distinct_resource_scoped_producers()
+    {
+        var snapshot = Snapshot(Catalog(), two: true);
+        Assert.Equal(2, snapshot.RenderPins.Count);
+        Assert.Equal("create", snapshot.RenderPins.Single(p => p.ResourceLocalId.Value == "resource").Producer.Value);
+        Assert.Equal("second-create", snapshot.RenderPins.Single(p => p.ResourceLocalId.Value == "second").Producer.Value);
+        Assert.Single(snapshot.RenderPins.Select(p => p.Renderer).Distinct());
+    }
+
     [Fact]
     public void Second_typed_family_traverses_actual_dispatch_and_frozen_defaults_without_current_recomputation()
     {
@@ -53,7 +85,7 @@ public sealed class ConfigurationRenderingCatalogTests
             var altered = ConfigurationPlanningSnapshotCodec.Decode(json.ToJsonString(), snapshot.Revision);
             Assert.NotEqual(snapshot, altered);
             Assert.NotEqual(ConfigurationPlanningSnapshotTests.Fingerprint(snapshot), ConfigurationPlanningSnapshotTests.Fingerprint(altered));
-            Assert.False(catalog.Supports(altered.RenderPins.Single()));
+            if (field != "producer") Assert.False(catalog.Supports(altered.RenderPins.Single()));
         }
     }
     [Fact]

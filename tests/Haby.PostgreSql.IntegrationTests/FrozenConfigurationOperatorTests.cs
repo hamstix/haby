@@ -25,7 +25,7 @@ public sealed partial class DurableDeploymentPlanningTests
         var trap = new ConfigurationSecretReadTrap();
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + setup.Connection,
             "--Haby:Tls:Enabled=false", "--Haby:Port=0"], services =>
-            services.AddSingleton(Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1"))
+            services.AddSingleton(Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1", producerAction: Haby.PostgreSql.PostgreSqlDatabaseCreateAction.RegistrationKey))
                 .AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(trap)));
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single());

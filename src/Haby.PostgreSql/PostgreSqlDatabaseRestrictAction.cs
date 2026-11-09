@@ -23,10 +23,10 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
         {
             var input = JsonSerializer.Deserialize(node.Input.Json, PostgreSqlPairJsonContext.Default.PostgreSqlDatabaseRestrictInput);
             return input?.DatabaseName is not null && PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(input.DatabaseName) &&
-                input.DatabaseSource is not null && input.DatabaseSource.ProducerOperationId == "db-create" &&
+                input.DatabaseSource is not null && input.DatabaseSource.ProducerOperationId == node.ResourceId.Value + "-create" &&
                 input.DatabaseSource.OutputContract == PostgreSqlDatabaseOutputContract.Contract && input.DatabaseSource.OutputKey == PostgreSqlDatabaseOutputContract.Key &&
                 !string.IsNullOrWhiteSpace(input.ExpectedOwnerUserName) && node.OutputReferences.SequenceEqual([input.DatabaseSource.ToReference()]) &&
-                node.Dependencies.SequenceEqual([OperationId.Create("db-create")]) ? input : null;
+                node.Dependencies.SequenceEqual([input.DatabaseSource.ToReference().ProducerOperationId]) ? input : null;
         }
         catch (Exception e) when (e is JsonException or ArgumentException) { return null; }
     }
@@ -42,7 +42,7 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             // Retain the earlier real-effect fixtures. Complete pairs require explicit
             // final-target composition and the exact accepted five-node graph.
-            if (accepted.Graph.Nodes.Count is not (2 or 4) && (accepted.Graph.Nodes.Count != 5 || access is null)) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
+            if (accepted.Graph.Nodes.Any(n => n.Action == PostgreSqlApplicationAccessAction.RegistrationKey) && access is null) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             if (input is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,

@@ -44,7 +44,7 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
     public async ValueTask<bool> ValidateReuseAsync(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
         IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration prepared, CancellationToken cancellationToken)
     {
-        if (!Validate(accepted.Node, output) || accepted.Graph.Nodes.Count != 5 || !PostgreSqlPairExecution.IsSupported(accepted, prepared)) return false;
+        if (!Validate(accepted.Node, output) || !PostgreSqlPairExecution.IsSupported(accepted, prepared)) return false;
         var configuration = codec.DecodeTyped(prepared.PayloadJson);
         var input = PostgreSqlApplicationAccessAction.Decode(accepted.Node)!;
         var selector = input.PasswordSource.ToReference();
@@ -60,7 +60,7 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
     public async ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
         ExternalOperationOutput output, CancellationToken cancellationToken)
     {
-        if (!Validate(accepted.Node, output) || accepted.Graph.Nodes.Count != 5) return false;
+        if (!Validate(accepted.Node, output)) return false;
         var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
             accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
         if (configuration is null || !PostgreSqlPairExecution.IsSupported(accepted, codec.Encode(configuration))) return false;

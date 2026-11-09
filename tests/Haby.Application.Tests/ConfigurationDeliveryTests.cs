@@ -15,7 +15,7 @@ public sealed class ConfigurationDeliveryTests
     private static readonly ResourceTypeId Resource = ResourceTypeId.Create("sample.resource/v1");
     private static readonly DurableActionExecutionKey Action = new(new(Resource, ProviderKindId.Create("sample/v1"),
         ProviderConfigurationContractId.Create("sample.configuration/v1"), ProviderImplementationId.Create("sample/v1")), OperationContractId.Create("sample.create/v1"));
-    private sealed record Definition() : ConfigurationRendererContract(Renderer, ConfigurationDeliveryTests.Resource, "sample.output/v1", "value", OperationId.Create("create"), Action, ConfigurationDeliveryTests.Formatter)
+    private sealed record Definition() : ConfigurationRendererContract(Renderer, ConfigurationDeliveryTests.Resource, "sample.output/v1", "value", Action, ConfigurationDeliveryTests.Formatter)
     {
         public override ConfigurationObject Defaults => new([]);
         public override bool ValidateOptions(ConfigurationObject options, bool complete) => options.Members.Count == 0;
@@ -131,7 +131,9 @@ public sealed class ConfigurationDeliveryTests
         var adapter = new Adapter();
         var formatters = new ConfigurationFormatterCatalog([new FormatDefinition()], [new(Implementation, Formatter)]);
         var catalog = new ConfigurationRenderingCatalog([new Definition()], [new SyntheticRenderer(adapter)], formatters, [adapter]);
-        var frozen = ConfigurationPlanningSnapshot.Prepare(reference, manifest, scopes, [profile], catalog).Snapshot!;
+        var frozen = ConfigurationPlanningSnapshot.Prepare(reference, manifest, scopes, [profile], catalog,
+            [new(OperationId.Create("create"), ManifestLocalId.Create("resource"), Action,
+                new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample/v1"), new("sample/v1", "{}"), [])]).Snapshot!;
         var environment = EnvironmentRecordId.New();
         var target = new ConfigurationDocumentTarget(ApplicationDeploymentId.New(), DeploymentGeneration.Create(1), ManifestLocalId.Create("api"), ManifestLocalId.Create("settings"));
         var composed = (await new ComposeConfigurationDocument(catalog, formatters, new Evidence(adapter)).ExecuteAsync(frozen, target, environment, default))!;
@@ -317,7 +319,7 @@ public sealed class ConfigurationDeliveryTests
     [Fact]
     public async Task Unicode_quoting_exact_numbers_and_ordinary_magic_JSON_are_preserved_without_interpretation()
     {
-        var h = await Prepare(); h.Adapter.Text = "Ж🔑\n\"\\;=";
+        var h = await Prepare(); h.Adapter.Text = "Р–рџ”‘\n\"\\;=";
         var r = h.Store.Artifact.Revision;
         var tree = new ConfigurationObject(Assert.IsType<ConfigurationObject>(r.Tree).Members
             .Append(KeyValuePair.Create<string, ConfigurationValue>("number", ConfigurationNumber.Parse("123456789012345678901234567890.001e999")))

@@ -61,7 +61,7 @@ public static class PostgreSqlConsumerOptions
 public sealed record PostgreSqlConnectionRendererContract() : ConfigurationRendererContract(
     PostgreSqlConnectionRendering.Renderer, PostgreSqlApplicationLoginContract.Id,
     PostgreSqlApplicationConnectionContract.Contract, PostgreSqlApplicationConnectionContract.Key,
-    OperationId.Create("app-login-access"), PostgreSqlApplicationAccessAction.RegistrationKey, PostgreSqlConnectionRendering.Formatter)
+    PostgreSqlApplicationAccessAction.RegistrationKey, PostgreSqlConnectionRendering.Formatter)
 {
     public override ConfigurationObject Defaults => PostgreSqlConsumerOptions.Defaults;
     public override bool ValidateOptions(ConfigurationObject options, bool complete) => PostgreSqlConsumerOptions.Validate(options, complete);
@@ -107,7 +107,7 @@ public sealed class PostgreSqlConnectionResolutionBinding : IConfigurationResolu
         if (pin.Renderer != PostgreSqlConnectionRendering.Renderer || pin.RendererImplementation != Implementation ||
             pin.Formatter != Formatter || pin.FormatterImplementation != Implementation || value.Formatter != Formatter ||
             pin.Resource != PostgreSqlApplicationLoginContract.Id || pin.OutputContract != PostgreSqlApplicationConnectionContract.Contract ||
-            pin.OutputKey != PostgreSqlApplicationConnectionContract.Key || pin.Producer != OperationId.Create("app-login-access") ||
+            pin.OutputKey != PostgreSqlApplicationConnectionContract.Key || pin.Producer != OperationId.Create(pin.ResourceLocalId.Value + "-access") ||
             pin.ProducerAction != PostgreSqlApplicationAccessAction.RegistrationKey || !PostgreSqlConsumerOptions.Validate(pin.Options, true) ||
             !PostgreSqlConnectionFormatter.Valid(value.Arguments) || PostgreSqlApplicationConnectionContract.Decode(output) is not { } connection ||
             !value.Arguments.Equals(PostgreSqlConnectionRenderer.Arguments(connection, pin.Options))) return null;
