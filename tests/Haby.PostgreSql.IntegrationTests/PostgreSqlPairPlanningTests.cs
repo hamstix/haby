@@ -10,6 +10,30 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class PostgreSqlPairPlanningTests
 {
+    [Fact]
+    public void Initial_pair_plus_independent_database_is_refused_before_acceptance()
+    {
+        var envelope = Example();
+        envelope["manifest"]!["spec"]!["resources"]!["extra"] = new JsonObject
+        {
+            ["type"] = "postgresql.database/v1alpha1", ["providerRef"] = "postgresql.primary",
+            ["properties"] = new JsonObject { ["name"] = "sample_extra" }
+        };
+        var spec = Spec(envelope); var inputs = Inputs(); var configuration = Configuration();
+        IDurableActionAdmissionHandler[] handlers =
+            [new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id)];
+        var admission = new DurableActionAdmission(new DurableActionRegistry(handlers, []));
+        // The expanded declaration is valid for reuse comparison. Creating the pair
+        // in that declaration must still fail the adapter's execution-profile check.
+        Assert.Equal(DurablePlanStatus.Planned, admission.Admit(spec, Provider, inputs, configuration));
+        var graph = new DurableOperationGraph(spec.Resources.SelectMany(r =>
+            ((IDurableResourcePlanComposer)handlers.Single(h => h.Key.Admission.ResourceContract == r.Value.Type))
+                .Plan(spec, r.Key, inputs, configuration)));
+        Assert.Equal(6, graph.Nodes.Count);
+        Assert.False(admission.ValidateGraph(spec, Provider, inputs, configuration, graph));
+        Assert.Throws<InvalidDataException>(() => admission.Plan(spec, Provider, inputs, configuration));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

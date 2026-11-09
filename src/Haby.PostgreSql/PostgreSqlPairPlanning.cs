@@ -207,6 +207,9 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
     public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
         PreparedProviderConfiguration configuration, DurableOperationGraph graph)
     {
+        // Pair creation supports only the pair itself. Additional databases require
+        // reusing the already applied pair, so no pair nodes are composed for them.
+        if (spec.Resources.Count != 2) return false;
         // Exact typed current-format nodes, including complete dependency and selector sets.
         // No external existence/name-availability assertion is made by this comparison.
         var expected = Plan(spec, resource, inputs, configuration).OrderBy(n => n.Id.Value, StringComparer.Ordinal).ToArray();

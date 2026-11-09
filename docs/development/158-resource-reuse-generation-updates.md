@@ -115,6 +115,12 @@ Full-suite timing/artifact gates remain those of [issue 140](140-postgresql-inte
 
 ## Mixed reuse and create (#160)
 
+Initial installation still admits only a standalone database or the exact
+database/login pair. An initial pair plus independent databases is refused during
+adapter graph validation (`planInputUnavailable`), before a Plan or desired
+generation is accepted and before any Provider effect. Install/apply the pair
+first, then use the additive update below; pair creation execution is not expanded.
+
 After the original pair is fully applied at generation 1, import a new version
 retaining every Resource, Component and Binding identity. Add one unused Resource
 (for example `extra`) with type `postgresql.database/v1alpha1`, the **same exact
