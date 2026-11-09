@@ -50,6 +50,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [Fact]
     public async Task Independent_pair_native_runtime_direct_sources_configuration_only_restart_restore_and_old_exact_grants()
     {
+        const string sentinelA = "pair-a-before-generation-2";
+        const string sentinelB = "pair-b-created-in-generation-2";
         var scenario = await Prepare(full: true, render: true);
         var databaseB = "pair_b_" + Guid.NewGuid().ToString("N");
         var roleB = PostgreSqlPairResourceAdmission.RoleName(scenario.Owner with { ResourceLocalId = ManifestLocalId.Create("login-b") });
@@ -64,7 +66,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             if (phase == 1)
             {
                 Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = 1 })).Status);
-                await Save(1, false, 200, 30);
+                await Save(1, false, 200, 30, seed: true);
                 identityA = await ExternalIdentity(scenario); historyA = await OriginalPairHistory();
                 revision = await ImportUpdate(client, IndependentEnvelope(scenario, 2, databaseB));
                 var plan = await IndependentPlan(client, revision, 1, host.Urls.Single(), 5);
@@ -95,7 +97,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
                     var batch = await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = DocumentRequest(scenario).ApplicationId, Generation = generation });
                     Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, batch.Status); Assert.Equal(3, batch.Items.Count);
                     await Save(generation, false, 210, generation == 4 ? 40 : 30);
-                    await Save(generation, true, 73, generation == 4 ? 40 : 30);
+                    await Save(generation, true, 73, generation == 4 ? 40 : 30, seed: generation == 2);
                     foreach (var item in retained) await Receive(channel, item);
                     completeHistory ??= await ReuseHistory(scenario.Connection);
                     Assert.Equal(completeHistory, await ReuseHistory(scenario.Connection));
@@ -133,13 +135,15 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 _ = await NativeReuseCommand(host.Urls.Single(), "changeset", "commit", plan.ChangeSetId, "--plan", plan.PlanId);
                 Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Status);
             }
-            async Task Save(int generation, bool b, int timeout, int command)
+            async Task Save(int generation, bool b, int timeout, int command, bool seed = false)
             {
                 var selector = DocumentRequest(scenario, b ? "consumer-b" : "api"); selector.Generation = generation;
                 var doc = await client.MaterializeConfigurationAsync(selector);
                 Assert.Contains(doc.Status, new[] { Haby.Operator.Contracts.ConfigurationDocumentStatus.Created, Haby.Operator.Contracts.ConfigurationDocumentStatus.Existing });
                 var grant = await client.CreateConfigurationAccessAsync(new() { Selector = selector });
-                var item = (doc, grant, b, timeout, command); retained.Add(item); await Receive(channel, item);
+                var item = (doc, grant, b, timeout, command);
+                if (seed) await Seed(channel, item);
+                retained.Add(item); await Receive(channel, item);
             }
         }
         var restored = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("pair_restore_")));
@@ -160,7 +164,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         finally { await fixture.RunClientUtilityAsync("rm", "-f", dump); await fixture.RunClientUtilityAsync("rmdir", directory); }
 
-        async Task Receive(GrpcChannel channel, (ConfigurationDocumentReply Document, ConfigurationAccessReply Grant, bool B, int Timeout, int Command) item)
+        async Task<NpgsqlConnectionStringBuilder> DeliveredSettings(GrpcChannel channel, (ConfigurationDocumentReply Document, ConfigurationAccessReply Grant, bool B, int Timeout, int Command) item)
         {
             var result = await new Haby.Configuration.Contracts.ConfigurationDelivery.ConfigurationDeliveryClient(channel)
                 .DeliverAsync(new() { RevisionId = item.Document.Artifact.RevisionId }, Bearer(item.Grant.Credential));
@@ -169,11 +173,29 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var database = item.B ? databaseB : scenario.Database; var role = item.B ? roleB : scenario.Role;
             Assert.Equal(database, settings.Database); Assert.Equal(role, settings.Username);
             Assert.Equal(item.Timeout, settings.Timeout); Assert.Equal(item.Command, settings.CommandTimeout); Assert.Equal(SslMode.Disable, settings.SslMode);
+            return settings;
+        }
+        async Task Seed(GrpcChannel channel, (ConfigurationDocumentReply Document, ConfigurationAccessReply Grant, bool B, int Timeout, int Command) item)
+        {
+            var settings = await DeliveredSettings(channel, item);
+            await using var runtime = new NpgsqlConnection(settings.ConnectionString); await runtime.OpenAsync();
+            // Each pair is seeded only at its creation generation; repeat checks never repair data.
+            await new NpgsqlCommand("CREATE TABLE app.pair_probe(id integer PRIMARY KEY, value text NOT NULL); CREATE TABLE app.pair_runtime_writes(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, value text NOT NULL)", runtime).ExecuteNonQueryAsync();
+            await using var insert = new NpgsqlCommand("INSERT INTO app.pair_probe VALUES (168, $1)", runtime);
+            insert.Parameters.AddWithValue(item.B ? sentinelB : sentinelA);
+            await insert.ExecuteNonQueryAsync();
+        }
+        async Task Receive(GrpcChannel channel, (ConfigurationDocumentReply Document, ConfigurationAccessReply Grant, bool B, int Timeout, int Command) item)
+        {
+            var settings = await DeliveredSettings(channel, item);
+            var role = item.B ? roleB : scenario.Role;
             await using var runtime = new NpgsqlConnection(settings.ConnectionString); await runtime.OpenAsync();
             Assert.Equal(role, await new NpgsqlCommand("SELECT current_user", runtime).ExecuteScalarAsync());
             Assert.Equal(role, await new NpgsqlCommand("SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'app'", runtime).ExecuteScalarAsync());
-            await new NpgsqlCommand("CREATE TABLE IF NOT EXISTS app.pair_probe(id integer PRIMARY KEY, value text NOT NULL); INSERT INTO app.pair_probe VALUES (168, current_user) ON CONFLICT (id) DO NOTHING", runtime).ExecuteNonQueryAsync();
-            Assert.Equal(role, await new NpgsqlCommand("SELECT value FROM app.pair_probe WHERE id = 168", runtime).ExecuteScalarAsync());
+            // Read the original sentinel before any write, including old-grant and restore checks.
+            Assert.Equal(item.B ? sentinelB : sentinelA, await new NpgsqlCommand("SELECT value FROM app.pair_probe WHERE id = 168", runtime).ExecuteScalarAsync());
+            // Runtime write capability is a separate probe and cannot replace the preserved row.
+            Assert.Equal(role, await new NpgsqlCommand("INSERT INTO app.pair_runtime_writes(value) VALUES (current_user) RETURNING value", runtime).ExecuteScalarAsync());
             if (await DatabaseOid(databaseB) is not null)
             {
                 await using var query = new NpgsqlCommand("SELECT has_database_privilege(current_user, $1, 'CONNECT')", runtime);

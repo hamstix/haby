@@ -111,6 +111,9 @@ selectors, foreign/extra/missing nodes and unsupported shapes. The persisted Hos
 rehearsal exercises A -> A+B -> direct reuse -> same-revision configuration change,
 independent runtime settings and SQL writes, cross-pair/grant denial, old grants,
 slots/management/history, restart before Execute and real pg_dump/pg_restore.
+Each pair receives a distinct sentinel only at its creation generation. Every later
+runtime, old-grant and restore check reads that original sentinel before writing;
+a separate table proves runtime write access without repairing preserved data.
 The typed synthetic queue test materializes two distinct expected outputs through
 the same renderer contract and direct mixed-generation provenance.
 
