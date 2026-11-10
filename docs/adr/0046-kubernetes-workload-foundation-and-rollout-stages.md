@@ -174,11 +174,11 @@ New replicas receive configuration for their exact generation. Old replicas may
 still need their previous documents/access during rollout. Do not revoke access
 at Commit or after the first new replica becomes ready.
 
-Agree the initial runtime authentication/credential-transfer path in a separate
-packet, considering existing static scoped delivery and ADR-012 projected-token/
-TokenReview identity. Operator-admin tokens never enter Pods. Durable secure
-transfer, restart, lost issuance responses, rotation and revocation are part of
-that decision, not incidental Deployment fields. No mechanism is selected here.
+[ADR-050](0050-kubernetes-runtime-identity-and-configuration-publication.md) selects
+projected TokenReview identity with a stable ServiceAccount/binding per Workload,
+separate exact-document publication and bounded mass-start handling. It permits
+old Pods to request newer published revisions; no per-generation identity check.
+Operator-admin tokens never enter Pods. Concrete contracts precede implementation.
 
 Cleanup is required P3 behavior: explicit retirement of owned obsolete Workload
 objects and obsolete runtime access at an agreed safe boundary, with partial
