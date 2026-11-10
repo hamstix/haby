@@ -9,6 +9,7 @@ internal sealed record CliDesiredGeneration(string DeploymentId, long Generation
     string EnvironmentRecordId, string EnvironmentId, CliReference Reference, string ProviderAlias,
     string ProviderInstanceId, long ConfigurationRevision, string ImplementationId, CliPlannedOperation[] Operations)
 {
+    public CliFrozenNaming? Naming { get; init; }
     public CliReusedResource[] ReusedResources { get; init; } = [];
     public CliReusedResource[] RetainedResources { get; init; } = [];
 }
@@ -54,7 +55,7 @@ internal static class CommitPresentation
             g.ChangeSetId, g.PlanId, g.AcceptedAtUtc, g.TechnicalActorId, g.EnvironmentRecordId, g.EnvironmentId,
             g.Reference is { } r ? new(r.ApplicationRecordId, r.RevisionNumber) : throw new InvalidDataException("Missing revision."),
             g.ProviderAlias, g.ProviderInstanceId, g.ConfigurationRevision, g.ImplementationId, PlanningPresentation.Operations(g.Operations))
-        { ReusedResources = PlanningPresentation.Reuse(g.ReusedResources), RetainedResources = PlanningPresentation.Reuse(g.RetainedResources) },
+        { Naming = NamingPresentation.Map(g.Naming), ReusedResources = PlanningPresentation.Reuse(g.ReusedResources), RetainedResources = PlanningPresentation.Reuse(g.RetainedResources) },
         reply.HasActualGeneration ? reply.ActualGeneration : null, GenerationPresentation.Progress(reply.Progress));
 }
 
@@ -89,8 +90,9 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"ChangeSet: {g.ChangeSetId}; original Plan: {g.PlanId}");
             _output.WriteLine($"Environment: {g.EnvironmentId}; record: {g.EnvironmentRecordId}");
             _output.WriteLine($"Revision: {g.Reference.ApplicationRecordId} {g.Reference.RevisionNumber}");
+            if (g.Naming is { } naming) _output.WriteLine($"Naming: {naming.Mode}; policy: {naming.Name ?? "canonical default"}; revision: {naming.Revision}; prefix: {naming.Prefix}");
             foreach (var node in g.Operations)
-                _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}");
+                _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}; target: {node.TargetName}");
             foreach (var resource in g.ReusedResources)
                 _output.WriteLine($"Reuse Resource: {resource.ResourceId}; reintroduced: {resource.Reintroduced}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
             foreach (var resource in g.RetainedResources)

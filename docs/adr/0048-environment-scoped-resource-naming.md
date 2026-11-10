@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-10
 - Scope: Adoption prerequisite before P3 Workload implementation
-- Implementation: Planned in [issue #175](https://github.com/hamstix/haby/issues/175); no runtime change in this decision commit
+- Implementation: [Issue #175](https://github.com/hamstix/haby/issues/175), draft [PR #176](https://github.com/hamstix/haby/pull/176); [current contract](../architecture/resource-naming-v1alpha1.md) and [operator path/evidence boundaries](../development/175-environment-resource-naming.md)
 - Extends: ADR-018/022/024/026/030/033/034/035/045
 
 ## Context

@@ -28,7 +28,8 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
     {
         public DurableOperationKey Key(string id) => new(Commit.DeploymentId, Commit.Generation, OperationId.Create(id));
         public ManagedResourceKey Owner => new(Plan.Inputs.Environment, Plan.Inputs.Revision.ApplicationRecordId, ManifestLocalId.Create("app-login"));
-        public string Role => PostgreSqlPairResourceAdmission.RoleName(Owner);
+        public string DeclaredDatabase { get; init; } = Database;
+        public string Role => PostgreSqlResourceNaming.Role(Owner, Plan.Inputs.Naming.Policy)!;
     }
     private sealed class Prefix(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer
     {
@@ -42,7 +43,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
             new DurableOperationGraph(spec.Resources.SelectMany(r => new Prefix(r.Value.Type).Plan(spec, r.Key, inputs, configuration))).Equals(graph);
     }
-    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null)
+    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null)
     {
         var services = new ServiceCollection().AddSingleton(TimeProvider.System)
             .AddSingleton(PostgreSqlConnectionRendering.CreateCatalog())
@@ -63,6 +64,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         if (fault is not null) services.AddSingleton(fault);
         if (access) services.AddPostgreSqlApplicationAccess();
         if (accessFault is not null) services.AddSingleton(accessFault);
+        if (createFault is not null) services.AddSingleton(createFault);
         return services.BuildServiceProvider();
     }
     private static ManifestCatalogDbContext Context(string connection) => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
@@ -74,7 +76,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name, Pooling = false }.ConnectionString;
     }
     private async Task<Scenario> Prepare(bool full = false, bool render = false, string? renderingProfile = null,
-        Action<System.Text.Json.Nodes.JsonNode>? configureManifest = null)
+        Action<System.Text.Json.Nodes.JsonNode>? configureManifest = null, string? namingPrefix = null)
     {
         var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("login_catalog_")));
         var name = "login_target_" + Guid.NewGuid().ToString("N");
@@ -93,6 +95,13 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         await providers.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1), config, default);
         Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environment,
             ProviderAlias.Create("postgresql.primary"), null, new(instance, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
+        if (namingPrefix is not null)
+        {
+            var naming = services.GetRequiredService<IResourceNamingStore>();
+            Assert.Equal(ResourceNamingOutcome.Created, (await naming.CreateAsync(environment, new("contour", 1), new("prefixed", namingPrefix), "tester", default)).Outcome);
+            Assert.Equal(ResourceNamingOutcome.Changed, (await naming.SelectAsync(environment, ProviderAlias.Create("postgresql.primary"),
+                new(instance, ProviderConfigurationRevisionNumber.Create(1)), null, new("contour", 1), "tester", default)).Outcome);
+        }
         var envelope = PostgreSqlPairPlanningTests.Example();
         envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = name;
         if (render)
@@ -123,7 +132,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         var plan = (await planner.FindPlanAsync(planned.Id, default))!;
         Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(plan.Id, default));
         var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
-        return new(connection, name, (await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(change.Id, default))!, plan);
+        return new(connection, PostgreSqlResourceNaming.Database(name, plan.Inputs.Naming.Policy)!, (await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(change.Id, default))!, plan) { DeclaredDatabase = name };
     }
     private static async Task<DurableExecutionResult> Execute(Scenario scenario, string id, IPostgreSqlLoginFaultHooks? fault = null, CancellationToken token = default)
     {

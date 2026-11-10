@@ -9,7 +9,10 @@ namespace Haby.PostgreSql;
 
 public enum PostgreSqlLoginOutcome { Confirmed, Conflict, InputUnavailable, SecretUnavailable, Connectivity, Rejected, Uncertain }
 public sealed record PostgreSqlLoginTargetInput(PostgreSqlDatabaseCreateInput Provider, PostgreSqlDatabaseOutput Database,
-    string Administrator, ManagedResourceKey Owner, string RoleName, SecretRef Password);
+    string Administrator, ManagedResourceKey Owner, string RoleName, SecretRef Password)
+{
+    public ResourceNamingPolicy Naming { get; init; } = ResourceNamingPolicy.Exact;
+}
 public sealed record PostgreSqlLoginResult(PostgreSqlLoginOutcome Outcome, PostgreSqlRoleEvidence? Evidence = null);
 
 /// <summary>Fault boundaries, never alternate successful effects.</summary>
@@ -57,7 +60,7 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
         {
             if (resolved.Outcome != PostgreSqlDatabaseAbsenceOutcome.Absent)
                 return resolved.Outcome == PostgreSqlDatabaseAbsenceOutcome.SecretUnavailable ? PostgreSqlLoginOutcome.SecretUnavailable : PostgreSqlLoginOutcome.InputUnavailable;
-            if (input.RoleName != PostgreSqlPairResourceAdmission.RoleName(input.Owner) ||
+            if (input.RoleName != PostgreSqlResourceNaming.Role(input.Owner, input.Naming) ||
                 input.Provider.DatabaseName != input.Database.DatabaseName || resolved.Builder!.Username != input.Administrator)
                 return PostgreSqlLoginOutcome.InputUnavailable;
             using var material = await secrets.ResolveAsync(new(new SecretOwner.Resource(input.Owner), SecretPurpose.ApplicationLogin), input.Password, token);
@@ -88,7 +91,7 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
             using var material = await secrets.ResolveAsync(new(new SecretOwner.Resource(input.Owner), SecretPurpose.ApplicationLogin), input.Password, token);
             if (material is null) return new(PostgreSqlLoginOutcome.Uncertain);
             bytes = material.CopyBytes();
-            if (!PostgreSqlScramVerifier.ValidPassword(bytes) || input.RoleName != PostgreSqlPairResourceAdmission.RoleName(input.Owner))
+            if (!PostgreSqlScramVerifier.ValidPassword(bytes) || input.RoleName != PostgreSqlResourceNaming.Role(input.Owner, input.Naming))
                 return new(PostgreSqlLoginOutcome.Uncertain);
             resolved.Builder.Database = input.Database.DatabaseName;
             await using var source = PrivateSource(resolved.Builder);

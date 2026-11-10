@@ -4,6 +4,10 @@ package haby.operator.v1alpha1;
 
 // Internal alpha contract. No compatibility promise before M4.
 service ManifestOperator {
+  rpc CreateResourceNaming(CreateResourceNamingRequest) returns (ResourceNamingReply);
+  rpc GetResourceNaming(ResourceNamingRequest) returns (ResourceNamingReply);
+  rpc GetResourceNamingSelection(ResourceNamingSelectionRequest) returns (ResourceNamingReply);
+  rpc SelectResourceNaming(SelectResourceNamingRequest) returns (ResourceNamingReply);
   rpc CreateOperatorAccess(CreateOperatorAccessRequest) returns (OperatorAccessReply);
   rpc GetOperatorAccess(OperatorAccessRequest) returns (OperatorAccessReply);
   rpc ListOperatorAccess(ListOperatorAccessRequest) returns (ListOperatorAccessReply);
@@ -56,6 +60,43 @@ service ManifestOperator {
   rpc GetOperation(OperationRequest) returns (OperationReply);
   rpc InspectOperationRecovery(OperationRequest) returns (RecoveryReply);
   rpc AssignExistingOperation(AssignExistingOperationRequest) returns (RecoveryReply);
+}
+
+message ResourceNamingRequest { string environment = 1; string name = 2; int64 revision = 3; }
+message CreateResourceNamingRequest { ResourceNamingRequest reference = 1; string declaration_json = 2; }
+message ResourceNamingSelectionRequest { string environment = 1; string alias = 2; }
+message SelectResourceNamingRequest {
+  ResourceNamingSelectionRequest binding = 1;
+  string name = 2;
+  int64 revision = 3;
+  string expected_provider_instance_id = 4;
+  int64 expected_configuration_revision = 5;
+  oneof precondition { bool expected_absence = 6; string expected_token = 7; }
+}
+enum ResourceNamingStatus {
+  RESOURCE_NAMING_STATUS_UNSPECIFIED = 0;
+  RESOURCE_NAMING_STATUS_CREATED = 1;
+  RESOURCE_NAMING_STATUS_FOUND = 2;
+  RESOURCE_NAMING_STATUS_CHANGED = 3;
+  RESOURCE_NAMING_STATUS_UNCHANGED = 4;
+  RESOURCE_NAMING_STATUS_NOT_FOUND = 5;
+  RESOURCE_NAMING_STATUS_STALE_EXPECTATION = 6;
+  RESOURCE_NAMING_STATUS_INVALID_DECLARATION = 7;
+  RESOURCE_NAMING_STATUS_ENVIRONMENT_NOT_FOUND = 8;
+  RESOURCE_NAMING_STATUS_BINDING_NOT_FOUND = 9;
+  RESOURCE_NAMING_STATUS_REVISION_NOT_FOUND = 10;
+  RESOURCE_NAMING_STATUS_REVISION_CONFLICT = 11;
+  RESOURCE_NAMING_STATUS_STORE_UNAVAILABLE = 12;
+}
+message ResourceNamingReply {
+  ResourceNamingStatus status = 1;
+  optional string name = 2;
+  optional int64 revision = 3;
+  string mode = 4;
+  optional string prefix = 5;
+  optional string token = 6;
+  string actor = 7;
+  string changed_at_utc = 8;
 }
 
 // Trusted operator access administration; runtime delivery has an independent contract.
@@ -270,12 +311,14 @@ message DurableChangeSetSummary {
   optional int64 expected_generation = 7;
 }
 message PlannedOperationSummary {
+  optional string target_name = 5;
   string operation_id = 1;
   string resource_id = 2;
   string action_contract = 3;
   repeated string dependencies = 4;
 }
 message DurablePlanSummary {
+  FrozenResourceNaming naming = 20;
   string plan_id = 1;
   string change_set_id = 2;
   string environment_record_id = 3;
@@ -368,6 +411,7 @@ message DurableCommitSummary {
 }
 // Immutable desired snapshot, never a claim about current applied/operation state.
 message DesiredGenerationSummary {
+  FrozenResourceNaming naming = 18;
   string deployment_id = 1;
   int64 generation = 2;
   string desired_presence = 3;
@@ -385,6 +429,14 @@ message DesiredGenerationSummary {
   repeated PlannedOperationSummary operations = 15;
   repeated ReusedResourceSummary reused_resources = 16;
   repeated ReusedResourceSummary retained_resources = 17;
+}
+message FrozenResourceNaming {
+  int32 version = 1;
+  optional string name = 2;
+  optional int64 revision = 3;
+  string mode = 4;
+  optional string prefix = 5;
+  optional string selection_token = 6;
 }
 message CommitReply {
   CommitStatus status = 1;

@@ -59,7 +59,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     [Fact]
-    public async Task Configuration_document_additive_migration_preserves_current_catalog_with_frozen_plans_and_generations()
+    public async Task Prior_document_catalog_refuses_naming_upgrade_and_preserves_frozen_plans_and_generations()
     {
         var scenario = await Prepare(full: true, render: true);
         await using (var arrange = Context(scenario.Connection))
@@ -69,15 +69,20 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 DROP TABLE configuration_document_revisions;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
-        await using (var act = OwnerServices(scenario)) await act.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        await using (var act = OwnerServices(scenario))
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => act.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
+            Assert.Contains("fresh catalog", error.Message);
+        }
         await using var verify = Context(scenario.Connection);
         Assert.Equal(scenario.Plan.Inputs.Configuration, ConfigurationPlanningSnapshotCodec.Decode((await verify.DeploymentGenerations.AsNoTracking().SingleAsync()).ConfigurationJson, scenario.Plan.Inputs.Revision));
-        Assert.Equal(25, (await verify.Database.GetAppliedMigrationsAsync()).Count());
-        Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
+        Assert.DoesNotContain(await verify.Database.GetAppliedMigrationsAsync(), m => m.EndsWith("AddResourceNaming", StringComparison.Ordinal));
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
+        await using var connection = new Npgsql.NpgsqlConnection(scenario.Connection); await connection.OpenAsync();
+        Assert.Equal(true, await new Npgsql.NpgsqlCommand("SELECT to_regclass('public.configuration_document_revisions') IS NULL", connection).ExecuteScalarAsync());
     }
 
     [Theory]

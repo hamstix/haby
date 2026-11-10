@@ -132,7 +132,7 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
             producer.Input.Format != PostgreSqlDatabaseCreateAction.Format || node.Id.Value != "db-restrict" ||
             accepted.Spec.Resources.Count != 1 || accepted.Spec.Components.Count != 0 ||
             !accepted.Spec.Resources.TryGetValue(node.ResourceId, out var resource) ||
-            PostgreSqlDatabaseCreateValidation.Name(resource) != input.DatabaseName) return false;
+            PostgreSqlResourceNaming.Database(PostgreSqlDatabaseCreateValidation.Name(resource) ?? "", accepted.Inputs.Naming.Policy) != input.DatabaseName) return false;
         return JsonSerializer.Deserialize(producer.Input.Json, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)?.DatabaseName == input.DatabaseName;
     }
 

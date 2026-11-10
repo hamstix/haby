@@ -104,7 +104,7 @@ public sealed partial class ManifestOperatorService
         TechnicalActorId = value.ActorId
     };
 
-    private static DesiredGenerationSummary Summary(DurableDesiredGeneration value)
+    private DesiredGenerationSummary Summary(DurableDesiredGeneration value)
     {
         var summary = new DesiredGenerationSummary
         {
@@ -119,11 +119,15 @@ public sealed partial class ManifestOperatorService
             EnvironmentId = value.Inputs.EnvironmentKey.Value,
             Reference = Reference(value.Inputs.Revision),
             ProviderAlias = value.Inputs.Alias.Value,
+            Naming = FrozenNaming(value.Inputs.Naming),
             ProviderInstanceId = value.Inputs.ProviderInstance.ToString(),
             ConfigurationRevision = value.Inputs.ConfigurationRevision.Value,
             ImplementationId = value.Inputs.ImplementationId
         };
         summary.Operations.AddRange(OperationSummaries(value.Graph));
+        var names = descriptions.Targets(value.Inputs.ImplementationId, value.Graph);
+        foreach (var operation in summary.Operations)
+            if (names.SingleOrDefault(n => n.Operation.Value == operation.OperationId) is { } name) operation.TargetName = name.Name;
         summary.ReusedResources.AddRange(value.Graph.ReusedResources.Select(x => new ReusedResourceSummary
         { ResourceId = x.Resource.Value, ManagementId = x.ManagementId.ToString(), SourceGeneration = x.SourceGeneration, Reintroduced = x.Reintroduced }));
         summary.RetainedResources.AddRange(value.Graph.RetainedResources.Select(x => new ReusedResourceSummary

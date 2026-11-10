@@ -33,6 +33,8 @@ public sealed class PostgreSqlApplicationLoginContractTests
             node.Input.Json.Replace("\"owner\":{", "\"owner\":null,\"unknown\":{", StringComparison.Ordinal),
             node.Input.Json.Replace("app-login-material", "other-material", StringComparison.Ordinal),
             node.Input.Json.Replace("haby_a_", "other_", StringComparison.Ordinal),
+            node.Input.Json.Replace(PostgreSqlResourceNaming.Algorithm, "unsupported/v9", StringComparison.Ordinal),
+            node.Input.Json.Replace("\"naming\":{", "\"naming\":null,\"unknown\":{", StringComparison.Ordinal),
             node.Input.Json.Replace("\"password\"", "\"other\"", StringComparison.Ordinal),
             node.Input.Json.Replace("\"databaseSource\":{", "\"databaseSource\":null,\"unknown\":{", StringComparison.Ordinal)
         }) Assert.Null(PostgreSqlApplicationLoginAction.Decode(node with { Input = new(node.Input.Format, json) }));
@@ -45,6 +47,18 @@ public sealed class PostgreSqlApplicationLoginContractTests
         Assert.Null(PostgreSqlRoleEvidenceContract.Decode(valid with { Payload = valid.Payload[..^1] + ",\"password\":null}" }));
         Assert.Null(PostgreSqlRoleEvidenceContract.Decode(PostgreSqlRoleEvidenceContract.Encode(new(input.RoleName, 0))));
         Assert.False(contract.Validate(node, PostgreSqlRoleEvidenceContract.Encode(new("haby_a_" + new string('0', 48), 123))));
+    }
+
+    [Fact]
+    public void Saved_login_inputs_require_explicit_naming_and_derivation_data()
+    {
+        var node = Node();
+        foreach (var field in new[] { "naming", "derivation" })
+        {
+            var json = System.Text.Json.Nodes.JsonNode.Parse(node.Input.Json)!.AsObject();
+            Assert.True(json.Remove(field));
+            Assert.Null(PostgreSqlApplicationLoginAction.Decode(node with { Input = new(node.Input.Format, json.ToJsonString()) }));
+        }
     }
 
     [Fact]

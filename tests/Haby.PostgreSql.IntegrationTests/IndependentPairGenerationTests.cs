@@ -56,15 +56,18 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Independent_pair_native_runtime_direct_sources_configuration_only_restart_restore_and_old_exact_grants(bool retainPair)
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(true, "staging_")]
+    [InlineData(true, "staging_shard_")]
+    public async Task Independent_pair_native_runtime_direct_sources_configuration_only_restart_restore_and_old_exact_grants(bool retainPair, string? namingPrefix)
     {
         const string sentinelA = "pair-a-before-generation-2";
         const string sentinelB = "pair-b-created-in-generation-2";
-        var scenario = await Prepare(full: true, render: true);
-        var databaseB = "pair_b_" + Guid.NewGuid().ToString("N");
-        var roleB = PostgreSqlPairResourceAdmission.RoleName(scenario.Owner with { ResourceLocalId = ManifestLocalId.Create("login-b") });
+        var scenario = await Prepare(full: true, render: true, namingPrefix: namingPrefix);
+        var declaredB = "pair_b_" + Guid.NewGuid().ToString("N");
+        var databaseB = PostgreSqlResourceNaming.Database(declaredB, scenario.Plan.Inputs.Naming.Policy)!;
+        var roleB = PostgreSqlResourceNaming.Role(scenario.Owner with { ResourceLocalId = ManifestLocalId.Create("login-b") }, scenario.Plan.Inputs.Naming.Policy)!;
         var retained = new List<(ConfigurationDocumentReply Document, ConfigurationAccessReply Grant, bool B, int Timeout, int Command)>();
         string? identityA = null, historyA = null, completeHistory = null, identityB = null;
         RevisionReference? revision = null;
@@ -78,7 +81,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = 1 })).Status);
                 await Save(1, false, 200, 30, seed: true);
                 identityA = await ExternalIdentity(scenario); historyA = await OriginalPairHistory();
-                revision = await ImportUpdate(client, IndependentEnvelope(scenario, 2, databaseB));
+                revision = await ImportUpdate(client, IndependentEnvelope(scenario, 2, declaredB));
                 var plan = await IndependentPlan(client, revision, 1, host.Urls.Single(), 5);
                 Assert.Equal(new[] { "db-b-create", "db-b-restrict", "login-b-access", "login-b-create", "login-b-material" }, plan.Operations.Select(o => o.OperationId));
                 await Commit(plan);
@@ -94,9 +97,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 {
                     if (generation > 2)
                     {
-                        if (generation == 3) revision = await ImportUpdate(client, retainPair ? UpdateEnvelope(scenario, 3) : IndependentEnvelope(scenario, 3, databaseB));
+                        if (generation == 3) revision = await ImportUpdate(client, retainPair ? UpdateEnvelope(scenario, 3) : IndependentEnvelope(scenario, 3, declaredB));
                         else if (generation == 4) _ = await SelectConfigurationRevision(client, scenario, 2);
-                        else revision = await ImportUpdate(client, IndependentEnvelope(scenario, generation, databaseB));
+                        else revision = await ImportUpdate(client, IndependentEnvelope(scenario, generation, declaredB));
                         var plan = await IndependentPlan(client, revision!, generation - 1, host.Urls.Single(), 0, retainPair && generation is 3 or 4);
                         if (retainPair && generation == 5) Assert.All(plan.ReusedResources.Where(r => r.SourceGeneration == 2), r => Assert.True(r.Reintroduced));
                         await Commit(plan);

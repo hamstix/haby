@@ -17,8 +17,10 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
     private static readonly DurableActionExecutionKey Key = new(new(QueueContract,
         new("sample/v1", "sample.configuration/v1", "sample.impl/v1")), QueueCreate);
 
-    [Fact]
-    public async Task Different_typed_queue_crosses_real_plan_check_commit_dispatch_and_restart()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Different_typed_queue_crosses_real_plan_check_commit_dispatch_and_restart(bool naming)
     {
         var name = "haby_queue_" + Guid.NewGuid().ToString("N");
         await using (var admin = new NpgsqlConnection(fixture.ConnectionString))
@@ -42,6 +44,13 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>()
                 .ChangeAsync(environment, ProviderAlias.Create("queues.primary"), null,
                     new(instance, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
+            if (naming)
+            {
+                var policies = services.GetRequiredService<IResourceNamingStore>();
+                Assert.Equal(ResourceNamingOutcome.Created, (await policies.CreateAsync(environment, new("contour", 1), new("prefixed", "contour/"), "tester", default)).Outcome);
+                Assert.Equal(ResourceNamingOutcome.Changed, (await policies.SelectAsync(environment, ProviderAlias.Create("queues.primary"),
+                    new(instance, ProviderConfigurationRevisionNumber.Create(1)), null, new("contour", 1), "tester", default)).Outcome);
+            }
             var catalog = new ManifestContractCatalog([new ResourceTypeDefinition(QueueContract, "{\"type\":\"object\"}")], [], [], []);
             var payload = Encoding.UTF8.GetBytes("""
                 {"applicationVersion":"v1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application",
@@ -93,7 +102,8 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
             var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => executor.ExecuteAsync(operation, default).AsTask()));
             Assert.All(results, result => Assert.Equal(DurableExecutionOutcome.Succeeded, result.Outcome));
             Assert.Equal(1, boundary.Calls);
-            Assert.Equal("jobs", boundary.Input!.QueueName);
+            Assert.Equal(naming ? "contour/jobs" : "jobs", boundary.Input!.QueueName);
+            Assert.Equal(naming ? new ResourceNamingPolicy("prefixed", "contour/") : ResourceNamingPolicy.Exact, plan.Inputs.Naming.Policy);
         }
         // Terminal history needs neither a handler nor a configuration reader.
         await using (var missing = Services(connection, boundary, installed: false, codec: false))
@@ -175,7 +185,7 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
         public void Create(QueueCreateInput input) { Input = input; Interlocked.Increment(ref Calls); }
     }
     private sealed class QueueAction(IDurableOperationJournal journal, IProviderConfigurationStore configurations,
-        QueueBoundary boundary, IServiceProvider services) : DurableActionHandler<QueueCreateInput>
+        QueueBoundary boundary, IServiceProvider services) : DurableActionHandler<QueueCreateInput>, IResourceNamingPolicyHandler
     {
         public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
         {
@@ -203,13 +213,14 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
             // Deliberately non-canonical declaration order; all three steps own the same Resource.
             return [Step("30-independent", 3), Step("20-dependent", 2, "10-first"), Step("10-first", 1)];
         }
+        public bool SupportsNaming(ResourceNamingPolicy policy) => policy.Mode == "exact" || policy.Mode == "prefixed" && policy.Prefix is { Length: > 0 and <= 128 };
         public override string InputFormat => boundary.Format;
         public override System.Text.Json.Serialization.Metadata.JsonTypeInfo<QueueCreateInput> InputTypeInfo => QueueJsonContext.Default.QueueCreateInput;
         public override DurableActionExecutionKey Key => ExactActionAdmissionTests.Key;
         public override QueueCreateInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
             resource.Type == QueueContract && resource.Properties.Members.Count == 1 &&
             resource.Properties.Members.TryGetValue("queueName", out var value) && value is ConfigurationString name && name.Value == "jobs"
-                ? new(name.Value) : null;
+                ? new((inputs.Naming.Policy.Prefix ?? "") + name.Value) : null;
         public override async ValueTask<DurableExecutionResult> ExecuteTypedAsync(DurableOperation operation,
             QueueCreateInput? input, CancellationToken cancellationToken)
         {

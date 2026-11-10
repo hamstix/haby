@@ -149,12 +149,12 @@ public static class DurableOperationGraphCodec
     {
         graph.ValidateReferences(inputs);
         if (inputs.Configuration is { } frozen && frozen.Revision != inputs.Revision) throw new InvalidDataException("Configuration revision mismatch.");
-        var text = string.Join('\n', "haby-operation-plan/v2", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
+        var text = string.Join('\n', "haby-operation-plan/v3", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
             inputs.Revision.ApplicationRecordId.ToString(), inputs.Revision.RevisionNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
             inputs.Alias.Value, inputs.ProviderInstance.ToString(),
-            inputs.ConfigurationRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), inputs.ImplementationId, Encode(graph),
+            inputs.ConfigurationRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), inputs.ImplementationId, ResourceNamingCodec.Encode(inputs.Naming), Encode(graph),
             inputs.Configuration is { } configuration ? ConfigurationPlanningSnapshotCodec.Encode(configuration) : "unprepared");
-        return "v2:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+        return "v3:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 }
 

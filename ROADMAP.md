@@ -165,12 +165,13 @@ Authority: ADR-017/018/034/035/036/037.
 ### Shared-system naming adoption prerequisite before P3
 
 - [x] Accept [ADR-048](docs/adr/0048-environment-scoped-resource-naming.md): logical Resource declarations, immutable exact/prefixed naming policies selected on Environment-to-Provider bindings, adapter-owned physical names, frozen Plan inputs and no implicit renaming or cross-catalog adoption.
-- [ ] Implement [issue #175](https://github.com/hamstix/haby/issues/175): neutral policy administration/selection, exact planning/freshness/snapshot capture and PostgreSQL database/generated-login resolution. Keep literal exact mode; reject unsupported existing/retained name changes. No Liquid/parameter engine or Provider-specific catalog fields.
-- [ ] Prove two independently bootstrapped Haby catalogs using the same Application revision against one disposable PostgreSQL server with distinct contour prefixes, actual configuration delivery/database access, preserved update/retention evidence and safe overlapping-prefix/external-name conflicts. Reservations remain catalog-local; prefixes are not access control.
+- [x] Implement [issue #175](https://github.com/hamstix/haby/issues/175): neutral immutable policy administration and exact conditional binding selection, frozen planning/freshness inputs and PostgreSQL database/generated-login resolution. Literal exact mode remains available; unsupported existing/retained name changes refuse. No Liquid/parameter engine or Provider-specific catalog fields. [Contract and alpha catalog boundary](docs/architecture/resource-naming-v1alpha1.md).
+- [x] Prove two independently bootstrapped authenticated Hosts/catalogs importing identical Application bytes against one disposable PostgreSQL server with staging_ and staging_shard_, Native AOT CLI administration/execution, actual delivery/database access, unchanged update/retention/return and safe overlapping-prefix/external-name conflicts. Reservations remain catalog-local; prefixes are not access control. [Evidence inventory and remaining boundaries](docs/development/175-environment-resource-naming.md); final-HEAD validation is recorded in draft PR #176.
 
 This is a concrete P2 adoption extension, scheduled before Workload implementation;
 it does not reopen general Resource relocation, rotation or distributed coordination.
-The previous operator rehearsal does not establish this not-yet-implemented capability.
+The previous operator rehearsal did not establish this capability; issue #175 adds
+the separate naming and shared-system evidence without claiming P3 rollout.
 
 ## P3 - Workload lifecycle
 

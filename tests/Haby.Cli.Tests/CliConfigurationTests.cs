@@ -46,6 +46,11 @@ public sealed class CliConfigurationTests
 
     private sealed class Client : IRegistryClient
     {
+        public Task<ResourceNamingReply> CreateResourceNamingAsync(CreateResourceNamingRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ResourceNamingReply> GetResourceNamingAsync(ResourceNamingRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ResourceNamingReply> GetResourceNamingSelectionAsync(ResourceNamingSelectionRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ResourceNamingReply> SelectResourceNamingAsync(SelectResourceNamingRequest request, CancellationToken token) => throw new NotSupportedException();
+
         public Task<OperatorAccessReply> CreateOperatorAccessAsync(CreateOperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<OperatorAccessReply> GetOperatorAccessAsync(OperatorAccessRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<ListProfilesReply> ListProfilesAsync(ListProfilesRequest request, CancellationToken token) => throw new NotSupportedException();

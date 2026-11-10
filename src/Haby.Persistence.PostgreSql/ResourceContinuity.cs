@@ -28,7 +28,7 @@ internal static class ResourceContinuity
         var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()), EnvironmentId.Create(row.EnvironmentKey),
             ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()), ManifestRevisionNumber.Create(row.RevisionNumber)),
             ProviderAlias.Create(row.ProviderAlias), ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()), ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision) };
+        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(row.NamingJson) };
         if (DurableOperationGraphCodec.Fingerprint(inputs, DurableOperationGraphCodec.Decode(row.GraphJson)) != row.Fingerprint) throw new InvalidDataException();
         return inputs;
     }

@@ -49,6 +49,12 @@ public sealed class PostgreSqlProviderAliasStore(
                 row.RevisionNumber == proposed.RevisionNumber.Value && row.IsSealed, cancellationToken);
             if (!available) return new(ProviderAliasChangeOutcome.TargetUnavailable);
 
+            // Alias changes and naming selection share one exact binding key. Readers
+            // need only SELECT plus advisory locks, preserving read-only Check/get.
+            // Writers lock the existing alias row first, as naming selection/Commit do.
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT environment_record_id FROM provider_aliases WHERE environment_record_id = {environmentId} AND alias = {alias.Value} FOR UPDATE", cancellationToken);
+            await PostgreSqlResourceNamingStore.LockAsync(context, environmentId, alias.Value, false, cancellationToken);
             if (expected is null)
             {
                 context.ProviderAliases.Add(new ProviderAliasRow
@@ -144,6 +150,7 @@ public static class ProviderAliasStoreServiceCollectionExtensions
     public static IServiceCollection AddPostgreSqlProviderAliasStore(this IServiceCollection services)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton<IResourceNamingStore, PostgreSqlResourceNamingStore>();
         services.AddSingleton<PostgreSqlProviderAliasStore>();
         services.AddSingleton<IProviderAliasStore>(provider => provider.GetRequiredService<PostgreSqlProviderAliasStore>());
         services.AddSingleton<IProviderAliasResolver>(provider => provider.GetRequiredService<PostgreSqlProviderAliasStore>());

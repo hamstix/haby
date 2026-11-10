@@ -10,8 +10,14 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Haby.PostgreSql;
 
 /// <summary>One exact database admission, explicitly composing standalone and pair planning.</summary>
-public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy, IDurableResourceRetentionPolicy
+public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHandler<PostgreSqlDatabaseActionInput>, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy, IDurableResourceRetentionPolicy, IDurableResourceNamingCompatibility, IResourceNamingPolicyHandler
 {
+    public bool SupportsNaming(ResourceNamingPolicy policy) => PostgreSqlResourceNaming.Supports(policy);
+
+    public bool SameNames(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs original,
+        DurablePlanningInputs proposed, PreparedProviderConfiguration configuration) =>
+        PostgreSqlResourceNaming.SameNames(spec, resource, original.Naming.Policy, proposed.Naming.Policy);
+
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
         (Standalone(accepted) && Standalone(target) ||
@@ -45,11 +51,11 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
 
     public override DurableActionExecutionKey Key => PostgreSqlDatabaseCreateAction.RegistrationKey;
     public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
-        PostgreSqlDatabaseCreateValidation.Name(resource) is { } name ? new(name) : null;
+        PostgreSqlDatabaseCreateValidation.Name(resource) is { } name && PostgreSqlResourceNaming.Database(name, inputs.Naming.Policy) is { } physical ? new(physical) : null;
     public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
     {
         var references = new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId);
-        var input = Prepare(resource, references) ?? throw new InvalidDataException("Invalid database input.");
+        var input = Prepare(resource, references with { Naming = inputs.Naming }) ?? throw new InvalidDataException("Invalid database input.");
         return [new(OperationId.Create(resourceId.Value + "-create"), resourceId, Key, references,
             new(PostgreSqlDatabaseCreateAction.Format, JsonSerializer.Serialize(input, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), [])];
     }
@@ -89,7 +95,7 @@ public sealed class PostgreSqlDatabaseCreateAction(PostgreSqlDurableOperationExe
     public override string InputFormat => Format;
     public override JsonTypeInfo<PostgreSqlDatabaseActionInput> InputTypeInfo => PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput;
     public override PostgreSqlDatabaseActionInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs) =>
-        PostgreSqlDatabaseCreateValidation.Name(resource) is { } name ? new(name) : null;
+        PostgreSqlDatabaseCreateValidation.Name(resource) is { } name && PostgreSqlResourceNaming.Database(name, inputs.Naming.Policy) is { } physical ? new(physical) : null;
 
     public override ValueTask<DurableExecutionResult> ExecuteTypedAsync(DurableOperation operation,
         PostgreSqlDatabaseActionInput? input, CancellationToken cancellationToken) =>

@@ -64,7 +64,11 @@ public sealed record PostgreSqlApplicationLoginProperties(string DatabaseRef, st
 public sealed record PostgreSqlPairOwner(string Environment, string Application, string Resource);
 public sealed record PostgreSqlDatabaseRestrictInput(string DatabaseName, OperationOutputRefDocument DatabaseSource, string ExpectedOwnerUserName);
 public sealed record PostgreSqlLoginCreateInput(PostgreSqlPairOwner Owner, string DatabaseName,
-    OperationOutputRefDocument DatabaseSource, string RoleName, OperationOutputRefDocument PasswordSource);
+    OperationOutputRefDocument DatabaseSource, string RoleName, OperationOutputRefDocument PasswordSource)
+{
+    [JsonRequired] public ResourceNamingPolicy Naming { get; init; } = ResourceNamingPolicy.Exact;
+    [JsonRequired] public string Derivation { get; init; } = PostgreSqlResourceNaming.Algorithm;
+}
 public sealed record PostgreSqlLoginAccessInput(string DatabaseName, OperationOutputRefDocument DatabaseSource,
     string Schema, string Policy, OperationOutputRefDocument RoleSource, OperationOutputRefDocument PasswordSource);
 public sealed record OperationOutputRefDocument(string ProducerOperationId, string OutputContract, string OutputKey)
@@ -74,8 +78,14 @@ public sealed record OperationOutputRefDocument(string ProducerOperationId, stri
 
 /// <summary>Pure PostgreSQL pair admission. The Host composes its database half with standalone admission.
 /// It owns exactly the nodes of its declared Resource; no executor or success placeholder is provided.</summary>
-public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy, IDurableResourceRetentionPolicy
+public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy, IDurableResourceRetentionPolicy, IDurableResourceNamingCompatibility, IResourceNamingPolicyHandler
 {
+    public bool SupportsNaming(ResourceNamingPolicy policy) => PostgreSqlResourceNaming.Supports(policy);
+
+    public bool SameNames(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs original,
+        DurablePlanningInputs proposed, PreparedProviderConfiguration configuration) =>
+        PostgreSqlResourceNaming.SameNames(spec, resource, original.Naming.Policy, proposed.Naming.Policy);
+
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
         TryPair(accepted, inputs, configuration, resource) is { } before &&
@@ -108,7 +118,7 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
             !original.Resources.Keys.Where(k => !IsIndependentDatabase(original, k) && !target.Resources.ContainsKey(k))
                 .ToHashSet().SetEquals([pair.Database, pair.Login]) ||
             target.Resources.Values.Where(r => r.Type == PostgreSqlDatabaseContract.Id).Any(r =>
-                PostgreSqlDatabaseCreateValidation.Name(r) == pair.Name)) return false;
+                PostgreSqlResourceNaming.Database(PostgreSqlDatabaseCreateValidation.Name(r) ?? "", inputs.Naming.Policy) == pair.Name)) return false;
         return original.Resources.Where(r => r.Value.Type == PostgreSqlApplicationLoginContract.Id && r.Key != pair.Login).Any(r =>
             TryPair(original, inputs, configuration, r.Key) is { } survivor &&
             TryPair(target, inputs, configuration, r.Key) is { } current &&
@@ -180,7 +190,8 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         {
             if (PostgreSqlApplicationLoginContract.Parse(login.Value.Properties) is not { } properties) return null;
             var database = databases.SingleOrDefault(r => r.Key.Value == properties.DatabaseRef);
-            if (database.Key is null || PostgreSqlDatabaseCreateValidation.Name(database.Value) is not { } name) return null;
+            if (database.Key is null || PostgreSqlDatabaseCreateValidation.Name(database.Value) is not { } declaredName ||
+                PostgreSqlResourceNaming.Database(declaredName, inputs.Naming.Policy) is not { } name || !PostgreSqlResourceNaming.Supports(inputs.Naming.Policy)) return null;
             pairs.Add(new(database.Key, login.Key, name, properties, administrator));
         }
         foreach (var component in spec.Components.Values)
@@ -257,7 +268,8 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         return [material,
             Node(loginCreate, "postgresql.application-login.create/v1alpha1", "haby.postgresql.application-login-create/v1",
                 new PostgreSqlLoginCreateInput(new(owner.EnvironmentRecordId.ToString(), owner.ApplicationRecordId.ToString(), owner.ResourceLocalId.Value),
-                    pair.Name, database, RoleName(owner), password), PostgreSqlPairJsonContext.Default.PostgreSqlLoginCreateInput,
+                    pair.Name, database, PostgreSqlResourceNaming.Role(owner, inputs.Naming.Policy)!, password)
+                    { Naming = inputs.Naming.Policy }, PostgreSqlPairJsonContext.Default.PostgreSqlLoginCreateInput,
                     [dbCreate, dbRestrict, loginMaterial], database, password),
             Node(loginAccess, "postgresql.application-login.configure-access/v1alpha1", "haby.postgresql.application-login-configure-access/v1",
                 new PostgreSqlLoginAccessInput(pair.Name, database, pair.Properties.Schema, pair.Properties.PrivilegePolicy, role, password),

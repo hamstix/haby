@@ -20,7 +20,7 @@ public sealed class PostgreSqlRoleEvidenceContract : IExternalOperationOutputCon
         {
             var value = JsonSerializer.Deserialize(output.Payload, PostgreSqlRoleJsonContext.Default.PostgreSqlRoleEvidence);
             return value is { RoleOid: > 0, RoleName: not null } &&
-                System.Text.RegularExpressions.Regex.IsMatch(value.RoleName, @"\Ahaby_a_[a-f0-9]{48}\z") ? value : null;
+                PostgreSqlResourceNaming.ValidRoleName(value.RoleName) ? value : null;
         }
         catch (JsonException) { return null; }
     }
