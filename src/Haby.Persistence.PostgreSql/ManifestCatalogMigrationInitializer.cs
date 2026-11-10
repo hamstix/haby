@@ -21,6 +21,11 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
             (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
                 await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
             throw new InvalidOperationException("Older durable planning inputs require an explicitly initialized fresh catalog; external resources remain unchanged.");
+        var namingBaseLength = Array.IndexOf(expected, "20261110122411_AddResourceNaming") + 1;
+        if (applied.Length > 0 && applied.Length < namingBaseLength &&
+            (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
+             await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
+            throw new InvalidOperationException("Older naming inputs require an explicitly initialized fresh catalog; external resources remain unchanged.");
         await context.Database.MigrateAsync(cancellationToken);
     }
 }

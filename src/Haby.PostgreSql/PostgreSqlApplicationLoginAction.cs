@@ -30,7 +30,8 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
                 input.DatabaseName is null || !PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(input.DatabaseName)) return null;
             var owner = new ManagedResourceKey(EnvironmentRecordId.Parse(input.Owner.Environment),
                 ApplicationRecordId.Parse(input.Owner.Application), ManifestLocalId.Create(input.Owner.Resource));
-            return input.RoleName == PostgreSqlPairResourceAdmission.RoleName(owner) && node.Id.Value == node.ResourceId.Value + "-create" &&
+            return input.Naming is not null && input.Derivation == PostgreSqlResourceNaming.Algorithm &&
+                input.RoleName == PostgreSqlResourceNaming.Role(owner, input.Naming) && node.Id.Value == node.ResourceId.Value + "-create" &&
                 node.ResourceId == owner.ResourceLocalId && node.References.Environment == owner.EnvironmentRecordId &&
                 input.DatabaseSource.OutputContract == PostgreSqlDatabaseOutputContract.Contract && input.DatabaseSource.OutputKey == "database" &&
                 input.PasswordSource == new OperationOutputRefDocument(node.ResourceId.Value + "-material", GeneratedCredentialContracts.OutputContract, "password") &&
@@ -68,7 +69,8 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
             var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
             resolved = new(new(accepted.Inputs.Environment, accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision,
                 accepted.Inputs.ImplementationId, input.DatabaseName), evidence, configuration.AdministratorUserName,
-                owner, input.RoleName, password.Reference);
+                owner, input.RoleName, password.Reference)
+            { Naming = accepted.Inputs.Naming.Policy };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { return new(DurableExecutionOutcome.InputUnavailable, operation); }

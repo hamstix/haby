@@ -10,7 +10,7 @@ namespace Haby.Application.Tests;
 public sealed class DurablePlanDescriptionTests
 {
     [Fact]
-    public async Task Exact_revision_and_validated_fields_alone_describe_intent_even_after_expiry_and_closure()
+    public async Task Exact_revision_and_saved_physical_target_describe_intent_even_after_expiry_and_closure()
     {
         var (plan, revision) = await Setup();
         var query = new Query(revision);
@@ -27,16 +27,16 @@ public sealed class DurablePlanDescriptionTests
     }
 
     [Fact]
-    public async Task Trusted_revision_content_is_read_without_proving_historical_authenticity()
+    public async Task Description_never_replaces_a_saved_physical_name_from_declaration_content()
     {
         var (plan, _) = await Setup();
         var (_, replacement) = await Setup(databaseName: "other_db");
         var altered = replacement with { Reference = plan.Inputs.Revision };
         var result = await new DescribeDurablePlan(new Query(altered), [new PostgreSqlPlanActionDescriber()]).ExecuteAsync(plan, default);
-        // The accepted storage contract trusts immutable revision rows. This read path
-        // cannot authenticate historical content independently of that trusted source.
+        // This is review metadata, not historical authentication. Physical names come
+        // from saved operation inputs even if a trusted declaration row is replaced.
         Assert.Equal(PlanDescriptionStatus.Available, result.Status);
-        Assert.Equal("other_db", result.Action!.Target.Name);
+        Assert.Equal("sample_db", result.Action!.Target.Name);
     }
 
     [Theory]
@@ -134,8 +134,13 @@ public sealed class DurablePlanDescriptionTests
         var inputs = new DurablePlanningInputs(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"), revision.Reference,
             ProviderAlias.Create("main"), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(7),
             implementation);
+        var node = new DurableOperationNode(OperationId.Create("database-create"), ManifestLocalId.Create("database"),
+            PostgreSqlDatabaseCreateAction.RegistrationKey, new(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId),
+            new(PostgreSqlDatabaseCreateAction.Format, System.Text.Json.JsonSerializer.Serialize(new PostgreSqlDatabaseActionInput(databaseName),
+                PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), []);
         return (new DurablePlan(DeploymentPlanId.New(), DeploymentChangeSetId.New(), inputs, "unchanged-fingerprint",
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), "actor", null, null), revision);
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1), "actor", null, null)
+        { Graph = new([node]) }, revision);
     }
 
     private sealed class Query(ManifestRevision? revision) : IManifestRevisionQuery

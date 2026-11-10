@@ -184,7 +184,7 @@ public sealed partial class ManifestOperatorService
         return summary;
     }
 
-    private static DurablePlanSummary Summary(DurablePlan value)
+    private DurablePlanSummary Summary(DurablePlan value)
     {
         var result = new DurablePlanSummary
         {
@@ -194,6 +194,7 @@ public sealed partial class ManifestOperatorService
             EnvironmentId = value.Inputs.EnvironmentKey.Value,
             Reference = Reference(value.Inputs.Revision),
             ProviderAlias = value.Inputs.Alias.Value,
+            Naming = FrozenNaming(value.Inputs.Naming),
             ProviderInstanceId = value.Inputs.ProviderInstance.ToString(),
             ConfigurationRevision = value.Inputs.ConfigurationRevision.Value,
             ImplementationId = value.Inputs.ImplementationId,
@@ -203,6 +204,9 @@ public sealed partial class ManifestOperatorService
             TechnicalActorId = value.ActorId
         };
         result.Operations.AddRange(OperationSummaries(value.Graph));
+        var names = descriptions.Targets(value);
+        foreach (var operation in result.Operations)
+            if (names.SingleOrDefault(n => n.Operation.Value == operation.OperationId) is { } name) operation.TargetName = name.Name;
         result.ReusedResources.AddRange(value.Graph.ReusedResources.Select(x => new ReusedResourceSummary
         { ResourceId = x.Resource.Value, ManagementId = x.ManagementId.ToString(), SourceGeneration = x.SourceGeneration, Reintroduced = x.Reintroduced }));
         result.RetainedResources.AddRange(value.Graph.RetainedResources.Select(x => new ReusedResourceSummary

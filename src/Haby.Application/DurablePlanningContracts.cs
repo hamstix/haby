@@ -8,6 +8,7 @@ public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, Envi
     ProviderConfigurationRevisionNumber ConfigurationRevision, string ImplementationId)
 {
     public ConfigurationPlanningSnapshot? Configuration { get; init; }
+    public ResourceNamingSnapshot Naming { get; init; } = ResourceNamingSnapshot.Default;
 }
 
 /// <summary>A Plan is immutable; closure is stored separately from its original record.</summary>

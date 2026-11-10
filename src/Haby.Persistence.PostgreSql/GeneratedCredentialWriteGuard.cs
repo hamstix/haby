@@ -20,6 +20,8 @@ public sealed partial class ManifestCatalogDbContext
     private async Task ValidateGeneratedWritesAsync(bool asynchronous, CancellationToken cancellationToken)
     {
         ChangeTracker.DetectChanges();
+        if (ChangeTracker.Entries<ResourceNamingPolicyRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Resource naming revisions are immutable.");
         if (ChangeTracker.Entries<ProviderResourceReservationRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Provider resource reservations are immutable.");
         if (ChangeTracker.Entries<OperationOutputRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))

@@ -97,8 +97,10 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         DurableOperationGraph graph;
         try
         {
-            if (plan.SnapshotFormatVersion != 2) return new DurableCommitResult.PlanInputUnavailable();
-            inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(plan.ConfigurationJson, inputs.Revision) };
+            if (plan.SnapshotFormatVersion != 3) return new DurableCommitResult.PlanInputUnavailable();
+            inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(plan.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(plan.NamingJson) };
+            var naming = await PostgreSqlResourceNamingStore.CaptureAsync(context, change.EnvironmentRecordId, plan.ProviderAlias, cancellationToken);
+            if (naming.Snapshot != inputs.Naming) return new DurableCommitResult.PlanStale();
             graph = DurableOperationGraphCodec.Decode(plan.GraphJson); graph.ValidateReferences(inputs);
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
@@ -165,7 +167,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         {
             var previous = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == actual.Id && x.Generation == actual.DesiredGeneration, cancellationToken);
             unchanged = previous.RevisionNumber == plan.RevisionNumber && previous.ConfigurationJson == plan.ConfigurationJson &&
-                previous.ProviderInstanceId == plan.ProviderInstanceId && previous.ConfigurationRevisionNumber == plan.ConfigurationRevisionNumber && previous.ImplementationId == plan.ImplementationId;
+                previous.ProviderInstanceId == plan.ProviderInstanceId && previous.ConfigurationRevisionNumber == plan.ConfigurationRevisionNumber && previous.ImplementationId == plan.ImplementationId && previous.NamingJson == plan.NamingJson;
             if (unchanged) generation = actual.DesiredGeneration;
             else
             {
@@ -202,6 +204,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             Fingerprint = plan.Fingerprint,
             GraphJson = plan.GraphJson,
             ConfigurationJson = plan.ConfigurationJson,
+            NamingJson = plan.NamingJson,
             AcceptedAt = committedAt,
             ActorId = actorId
         });
@@ -270,7 +273,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 ManifestRevisionNumber.Create(row.RevisionNumber)), ProviderAlias.Create(row.ProviderAlias),
             ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision) };
+        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(row.NamingJson) };
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
         if (row.Fingerprint != DurableOperationGraphCodec.Fingerprint(inputs, graph))
             throw new InvalidDataException("Generation snapshot is inconsistent.");

@@ -26,7 +26,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 ApplicationRecordId.Parse(generation.ApplicationRecordId.ToString()), ManifestRevisionNumber.Create(generation.RevisionNumber)),
             ProviderAlias.Create(generation.ProviderAlias), ProviderInstanceId.Parse(generation.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(generation.ConfigurationRevisionNumber), generation.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(generation.ConfigurationJson, inputs.Revision) };
+        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(generation.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(generation.NamingJson) };
         var graph = DurableOperationGraphCodec.Decode(generation.GraphJson);
         graph.ValidateReferences(inputs);
         var revision = await context.Revisions.AsNoTracking().SingleAsync(r =>

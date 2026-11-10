@@ -69,11 +69,12 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
             var roleOutput = await outputs.ConsumeAsync(key, input.RoleSource.ToReference(), cancellationToken);
             var role = roleOutput is null ? null : PostgreSqlRoleEvidenceContract.Decode(roleOutput);
             var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
-            if (role is null || role.RoleName != PostgreSqlPairResourceAdmission.RoleName(owner))
+            if (role is null || role.RoleName != PostgreSqlResourceNaming.Role(owner, accepted.Inputs.Naming.Policy))
                 return new(DurableExecutionOutcome.InputUnavailable, operation);
             resolved = new(new(new(accepted.Inputs.Environment, accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision,
                 accepted.Inputs.ImplementationId, input.DatabaseName), evidence, configuration.AdministratorUserName,
-                owner, role.RoleName, password.Reference), role, input.Schema);
+                owner, role.RoleName, password.Reference)
+            { Naming = accepted.Inputs.Naming.Policy }, role, input.Schema);
             connectionOutput = new(configuration.Host, configuration.Port, input.DatabaseName, input.Schema, role.RoleName, password.Reference);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

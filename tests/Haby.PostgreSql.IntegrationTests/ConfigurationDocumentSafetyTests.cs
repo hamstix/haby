@@ -69,7 +69,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 DROP TABLE configuration_document_revisions;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
-                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
         await using (var act = OwnerServices(scenario)) await act.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();

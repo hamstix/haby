@@ -21,7 +21,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     {
         var envelope = PostgreSqlPairPlanningTests.Example();
         envelope["applicationVersion"] = "v" + version;
-        envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = scenario.Database;
+        envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = scenario.DeclaredDatabase;
         foreach (var component in new[] { "api", "worker" })
             envelope["manifest"]!["spec"]!["components"]![component]!["bindings"]!["storage"]!["configurationSlot"] = "main-database";
         envelope["manifest"]!["spec"]!["components"]!["api"]!["bindings"]!["storage"]!["options"] = new JsonObject { ["timeout"] = timeout };
@@ -282,9 +282,13 @@ public sealed partial class PostgreSqlApplicationLoginTests
         if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
         if (binary is null) return null;
         var config = Path.Combine(Path.GetTempPath(), "haby-reuse-" + Guid.NewGuid().ToString("N") + ".yaml");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
         try
         {
+            var fileOptions = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows()) fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            await using (var stream = new FileStream(config, fileOptions))
+            await using (var writer = new StreamWriter(stream))
+                await writer.WriteAsync($"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
             var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var arg in args.Concat(["--config", config, "--output", "json"])) start.ArgumentList.Add(arg);
             using var process = Process.Start(start)!;

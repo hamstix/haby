@@ -98,6 +98,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         var alias = DurableActionAdmission.SingleAlias(spec);
         if (alias is null) return new(DurablePlanStatus.UnsupportedShape);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
+        await PostgreSqlResourceNamingStore.LockAsync(context, row.EnvironmentRecordId, alias.Value, true, cancellationToken);
         var resolved = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
         if (resolved is null) return new(DurablePlanStatus.AliasNotResolved);
         var revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
@@ -106,9 +107,13 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             item.EnvironmentRecordId == row.EnvironmentRecordId && item.IsSealed, cancellationToken);
         if (revisionRow is null || revisionRow.ImplementationId != resolved.ImplementationId)
             return new(DurablePlanStatus.ProviderRevisionUnavailable);
+        ResourceNamingSnapshot naming;
+        try { naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot; }
+        catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId),
             reference, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber,
-            resolved.ImplementationId);
+            resolved.ImplementationId)
+        { Naming = naming };
         var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
         try
         {
@@ -156,7 +161,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ProviderInstanceId = Guid.Parse(resolved.Binding.InstanceId.ToString()),
             ConfigurationRevisionNumber = resolved.Binding.RevisionNumber.Value,
             ImplementationId = resolved.ImplementationId,
-            SnapshotFormatVersion = 2,
+            SnapshotFormatVersion = 3,
+            NamingJson = ResourceNamingCodec.Encode(inputs.Naming),
             ConfigurationJson = ConfigurationPlanningSnapshotCodec.Encode(inputs.Configuration!),
             GraphJson = DurableOperationGraphCodec.Encode(graph),
             Fingerprint = DurableOperationGraphCodec.Fingerprint(inputs, graph),
@@ -275,6 +281,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return (DurablePlanStatus.ChangeSetStale, null);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
+        await PostgreSqlResourceNamingStore.LockAsync(context, row.EnvironmentRecordId, alias.Value, true, cancellationToken);
         var resolution = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
         if (resolution is null) return (DurablePlanStatus.AliasNotResolved, null);
         var providerRevision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
@@ -285,8 +292,10 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             return (DurablePlanStatus.ProviderRevisionUnavailable, null);
         var inputs = new DurablePlanningInputs(environmentId,
             EnvironmentId.Create(environment.EnvironmentId), revision, alias, resolution.Binding.InstanceId,
-            resolution.Binding.RevisionNumber, resolution.ImplementationId);
+            resolution.Binding.RevisionNumber, resolution.ImplementationId)
+        { Naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot };
         var frozen = plan.Inputs.Configuration ?? throw new InvalidDataException();
+        if (inputs.Naming != plan.Inputs.Naming) return (DurablePlanStatus.Planned, inputs with { Configuration = frozen });
         var scopes = await ConfigurationPlanningCapture.ReadScopesAsync(context,
             new(environmentId, inputs.EnvironmentKey), frozen.Manifest, cancellationToken);
         if (!ConfigurationPlanningCapture.SameScopes(scopes, frozen.Scopes)) return (DurablePlanStatus.Planned, inputs);
@@ -374,14 +383,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
 
     private static DurablePlan ToPlan(DurablePlanRow row, DateTimeOffset? closedAt, string? closedByActorId)
     {
-        if (row.SnapshotFormatVersion != 2) throw new InvalidDataException("Planning snapshot version is unavailable.");
+        if (row.SnapshotFormatVersion != 3) throw new InvalidDataException("Planning snapshot version is unavailable.");
         var application = ApplicationRecordId.Parse(row.ApplicationRecordId.ToString());
         var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
             EnvironmentId.Create(row.EnvironmentKey),
             ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(row.RevisionNumber)),
             ProviderAlias.Create(row.ProviderAlias), ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()),
             ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision) };
+        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(row.NamingJson) };
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
         if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint) throw new InvalidDataException("Planning snapshot is inconsistent.");
         return new(DeploymentPlanId.Parse(row.Id.ToString()), DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()),
@@ -467,6 +476,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             if (!admission.Supports(original)) throw new InvalidDataException();
             var originalInputs = ResourceContinuity.Inputs(source);
             if (!admission.ValidateCreationGraph(originalInputs.Configuration!.Manifest.Spec, adapter, originalInputs, configuration, original)) throw new InvalidDataException();
+            var proposedOriginal = originalInputs with { Naming = inputs.Naming };
+            if (!admission.SameResourceNames(originalInputs.Configuration!.Manifest.Spec, resource, adapter, originalInputs, proposedOriginal, configuration)) return null;
             if (target.Resources.ContainsKey(resource))
             {
                 if (!admission.CanReuseResource(originalInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration)) return null;

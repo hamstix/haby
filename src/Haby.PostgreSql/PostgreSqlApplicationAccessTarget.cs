@@ -27,7 +27,7 @@ public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTa
 {
     private static bool Valid(PostgreSqlAccessTargetInput input) => PostgreSqlApplicationLoginContract.ValidSchema(input.Schema) &&
         input.Role.RoleOid != 0 && input.Role.RoleName == input.Login.RoleName &&
-        input.Login.RoleName == PostgreSqlPairResourceAdmission.RoleName(input.Login.Owner) &&
+        input.Login.RoleName == PostgreSqlResourceNaming.Role(input.Login.Owner, input.Login.Naming) &&
         input.Login.Provider.DatabaseName == input.Login.Database.DatabaseName;
 
     private async Task<bool> Reserved(PostgreSqlLoginTargetInput input, CancellationToken token) =>

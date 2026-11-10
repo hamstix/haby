@@ -22,11 +22,22 @@ public interface IPlanActionDescriber
     DurablePlanDescription Describe(ManifestRevision revision, DurablePlanningInputs inputs, DurableOperationGraph graph);
 }
 
+public sealed record PlannedOperationTarget(OperationId Operation, string Name);
+public interface IPlanOperationTargetDescriber
+{
+    IReadOnlyList<PlannedOperationTarget> DescribeTargets(DurableOperationGraph graph);
+}
+
 /// <summary>Reads the exact revision from trusted immutable storage and dispatches by the pinned implementation.
 /// Structural validation does not authenticate historical content or detect arbitrary valid-content mutation.</summary>
 public sealed class DescribeDurablePlan(IManifestRevisionQuery revisions, IEnumerable<IPlanActionDescriber> describers)
 {
     private readonly IPlanActionDescriber[] _describers = describers.ToArray();
+
+    public IReadOnlyList<PlannedOperationTarget> Targets(DurablePlan plan) => Targets(plan.Inputs.ImplementationId, plan.Graph);
+    public IReadOnlyList<PlannedOperationTarget> Targets(string implementation, DurableOperationGraph graph) =>
+        _describers.Where(d => d.ImplementationId == implementation).Take(2).ToArray() is [IPlanOperationTargetDescriber names]
+            ? names.DescribeTargets(graph) : [];
 
     public async ValueTask<DurablePlanDescription> ExecuteAsync(DurablePlan plan, CancellationToken cancellationToken)
     {

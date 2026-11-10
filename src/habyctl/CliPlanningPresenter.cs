@@ -10,11 +10,13 @@ internal sealed record CliPlan(string PlanId, string ChangeSetId, string Environ
     string ImplementationId, string Fingerprint, string CreatedAtUtc, string ExpiresAtUtc,
     string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork, CliPlannedOperation[] Operations)
 {
+    public CliFrozenNaming? Naming { get; init; }
     public CliReusedResource[] ReusedResources { get; init; } = [];
     public CliReusedResource[] RetainedResources { get; init; } = [];
 }
 internal sealed record CliReusedResource(string ResourceId, string ManagementId, long SourceGeneration, bool Reintroduced);
-internal sealed record CliPlannedOperation(string OperationId, string ResourceId, string ActionContract, string[] Dependencies);
+internal sealed record CliPlannedOperation(string OperationId, string ResourceId, string ActionContract, string[] Dependencies)
+{ public string? TargetName { get; init; } }
 internal sealed record CliPlanDescription(string Status, CliIntendedAction? Action);
 internal sealed record CliIntendedAction(string Kind, string ResourceId, string ResourceType,
     CliIntendedActionTarget Target);
@@ -89,14 +91,14 @@ internal static class PlanningPresentation
             plan.Fingerprint, plan.CreatedAtUtc, plan.ExpiresAtUtc, plan.TechnicalActorId,
             plan.HasClosedAtUtc ? plan.ClosedAtUtc : null,
             plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations))
-        { ReusedResources = Reuse(plan.ReusedResources), RetainedResources = Reuse(plan.RetainedResources) })
+        { Naming = NamingPresentation.Map(plan.Naming), ReusedResources = Reuse(plan.ReusedResources), RetainedResources = Reuse(plan.RetainedResources) })
     { ConfigurationErrorCodes = reply.ConfigurationErrorCodes.ToArray() };
 
     internal static CliReusedResource[] Reuse(IEnumerable<ReusedResourceSummary> reuse) =>
         reuse.Select(r => new CliReusedResource(r.ResourceId, r.ManagementId, r.SourceGeneration, r.Reintroduced)).ToArray();
 
     internal static CliPlannedOperation[] Operations(IEnumerable<PlannedOperationSummary> operations) =>
-        operations.Select(n => new CliPlannedOperation(n.OperationId, n.ResourceId, n.ActionContract, n.Dependencies.ToArray())).ToArray();
+        operations.Select(n => new CliPlannedOperation(n.OperationId, n.ResourceId, n.ActionContract, n.Dependencies.ToArray()) { TargetName = n.HasTargetName ? n.TargetName : null }).ToArray();
 
     private static CliPlanDescription Description(PlanDescription? description)
     {
@@ -159,8 +161,9 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"Plan: {plan.PlanId}; ChangeSet: {plan.ChangeSetId}");
             _output.WriteLine($"Environment: {plan.EnvironmentId}; record: {plan.EnvironmentRecordId}");
             _output.WriteLine($"Revision: {plan.Reference.ApplicationRecordId} {plan.Reference.RevisionNumber}");
+            if (plan.Naming is { } naming) _output.WriteLine($"Naming: {naming.Mode}; policy: {naming.Name ?? "canonical default"}; revision: {naming.Revision}; prefix: {naming.Prefix}");
             foreach (var node in plan.Operations)
-                _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}");
+                _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}; target: {node.TargetName}");
             foreach (var resource in plan.ReusedResources)
                 _output.WriteLine($"Reuse Resource: {resource.ResourceId}; reintroduced: {resource.Reintroduced}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
             foreach (var resource in plan.RetainedResources)

@@ -17,6 +17,11 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<ResourceNamingReply> CreateResourceNamingAsync(CreateResourceNamingRequest request, CancellationToken token);
+    Task<ResourceNamingReply> GetResourceNamingAsync(ResourceNamingRequest request, CancellationToken token);
+    Task<ResourceNamingReply> GetResourceNamingSelectionAsync(ResourceNamingSelectionRequest request, CancellationToken token);
+    Task<ResourceNamingReply> SelectResourceNamingAsync(SelectResourceNamingRequest request, CancellationToken token);
+
     Task<ListProfilesReply> ListProfilesAsync(ListProfilesRequest request, CancellationToken token);
     Task<ListProfileRevisionsReply> ListProfileRevisionsAsync(ListProfileRevisionsRequest request, CancellationToken token);
     Task<OperatorAccessReply> CreateOperatorAccessAsync(CreateOperatorAccessRequest request, CancellationToken token);
@@ -105,6 +110,10 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? confi
         await _client.GetConfigurationAccessAsync(request, headers, cancellationToken: cancellationToken);
     public async Task<ConfigurationAccessReply> RevokeConfigurationAccessAsync(ConfigurationAccessRequest request, CancellationToken cancellationToken) =>
         await _client.RevokeConfigurationAccessAsync(request, headers, cancellationToken: cancellationToken);
+    public async Task<ResourceNamingReply> CreateResourceNamingAsync(CreateResourceNamingRequest request, CancellationToken token) => await _client.CreateResourceNamingAsync(request, headers, cancellationToken: token);
+    public async Task<ResourceNamingReply> GetResourceNamingAsync(ResourceNamingRequest request, CancellationToken token) => await _client.GetResourceNamingAsync(request, headers, cancellationToken: token);
+    public async Task<ResourceNamingReply> GetResourceNamingSelectionAsync(ResourceNamingSelectionRequest request, CancellationToken token) => await _client.GetResourceNamingSelectionAsync(request, headers, cancellationToken: token);
+    public async Task<ResourceNamingReply> SelectResourceNamingAsync(SelectResourceNamingRequest request, CancellationToken token) => await _client.SelectResourceNamingAsync(request, headers, cancellationToken: token);
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
     private readonly ManifestOperator.ManifestOperatorClient _configurationClient = new(configurationChannel ?? channel);
     public async Task<ConfigurationApplicationReply> MaterializeApplicationConfigurationAsync(ConfigurationApplicationRequest request, CancellationToken token) =>

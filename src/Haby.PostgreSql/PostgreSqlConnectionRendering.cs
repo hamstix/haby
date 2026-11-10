@@ -132,7 +132,7 @@ public sealed class PostgreSqlConnectionFormatter : IConfigurationFormatter
             h.Value.Length <= 255 && Port(a.Members["port"]) is not null &&
             a.Members["database"] is ConfigurationString d && PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(d.Value) &&
             a.Members["schema"] is ConfigurationString s && PostgreSqlApplicationLoginContract.ValidSchema(s.Value) &&
-            a.Members["username"] is ConfigurationString u && System.Text.RegularExpressions.Regex.IsMatch(u.Value, @"\Ahaby_a_[a-f0-9]{48}\z") &&
+            a.Members["username"] is ConfigurationString u && PostgreSqlResourceNaming.ValidRoleName(u.Value) &&
             a.Members["password"] is ConfigurationSecretReference && a.Members["settings"] is ConfigurationObject settings &&
             PostgreSqlConsumerOptions.Parse(settings) is not null;
     }

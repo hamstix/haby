@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://haby.dev/schemas/resource-naming-policy.v1alpha1.json",
+  "title": "Environment Resource naming policy declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode"],
+  "properties": {
+    "mode": { "enum": ["exact", "prefixed"] },
+    "prefix": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$" }
+  },
+  "oneOf": [
+    { "properties": { "mode": { "const": "exact" } }, "not": { "required": ["prefix"] } },
+    { "properties": { "mode": { "const": "prefixed" } }, "required": ["prefix"] }
+  ]
+}
