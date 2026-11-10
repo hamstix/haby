@@ -30,6 +30,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(created.State, (await store.GetAsync(catalog.Environment, reference, default)).State);
         var repeated = await store.CreateAsync(catalog.Environment, reference, ResourceNamingPolicy.Exact, "second", default);
         Assert.Equal(ResourceNamingOutcome.Unchanged, repeated.Outcome); Assert.Equal(created.State, repeated.State);
+        Assert.Equal(ResourceNamingOutcome.RevisionConflict, (await store.CreateAsync(catalog.Environment, reference, new("prefixed", "staging_"), "second", default)).Outcome);
+        Assert.Equal(created.State, (await store.GetAsync(catalog.Environment, reference, default)).State);
         var alias = ProviderAlias.Create("postgresql.primary"); var binding = new ProviderAliasBinding(catalog.Provider, ProviderConfigurationRevisionNumber.Create(1));
         var changed = await store.SelectAsync(catalog.Environment, alias, binding, null, reference, "first", default);
         Assert.Equal(changed.State, (await store.GetSelectionAsync(catalog.Environment, alias, default)).State);
@@ -57,6 +59,18 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(ResourceNamingStatus.Created, (await client.CreateResourceNamingAsync(new() { Reference = new() { Environment = "unrelated", Name = "foreign", Revision = 1 }, DeclarationJson = "{\"mode\":\"exact\"}" })).Status);
         var foreign = Select(1, null); foreign.Name = "foreign";
         Assert.Equal(ResourceNamingStatus.RevisionNotFound, (await client.SelectResourceNamingAsync(foreign)).Status);
+        // A different binding in the SAME Environment is not an input to this Plan.
+        var providers = host.Services.GetRequiredService<IProviderConfigurationStore>();
+        var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(catalog.Environment,
+            catalog.Provider, ProviderConfigurationRevisionNumber.Create(1), default))!.Configuration;
+        var unrelatedProvider = await providers.CreateInstanceAsync(catalog.Environment, configuration, default);
+        await providers.AddRevisionAsync(catalog.Environment, unrelatedProvider, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
+        var unrelatedAlias = ProviderAlias.Create("postgresql.secondary");
+        var unrelatedBinding = new ProviderAliasBinding(unrelatedProvider, ProviderConfigurationRevisionNumber.Create(1));
+        Assert.Equal(ProviderAliasChangeOutcome.Changed, (await host.Services.GetRequiredService<IProviderAliasStore>().ChangeAsync(
+            catalog.Environment, unrelatedAlias, null, unrelatedBinding, "fixture", default)).Outcome);
+        Assert.Equal(ResourceNamingOutcome.Changed, (await host.Services.GetRequiredService<IResourceNamingStore>().SelectAsync(
+            catalog.Environment, unrelatedAlias, unrelatedBinding, null, new("literal", 1), "fixture", default)).Outcome);
         Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new() { PlanId = original.Plan.PlanId })).Status);
         var requests = new[] { Select(1, null), Select(2, null) };
         var race = await Task.WhenAll(requests.Select(r => client.SelectResourceNamingAsync(r).ResponseAsync));
@@ -89,7 +103,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(ResourceNamingPolicy.Exact, saved.Inputs.Naming.Policy);
         await using var verify = Context(catalog.Connection);
         Assert.Equal(3, await verify.ResourceNamingPolicies.CountAsync());
-        Assert.Equal(returned.Token, (await verify.ResourceNamingSelections.AsNoTracking().SingleAsync()).Token.ToString("D"));
+        Assert.Equal(returned.Token, (await verify.ResourceNamingSelections.AsNoTracking().SingleAsync(x => x.Alias == "postgresql.primary")).Token.ToString("D"));
         Assert.Equal(1, await verify.DeploymentGenerations.CountAsync());
         await host.StopAsync();
 
