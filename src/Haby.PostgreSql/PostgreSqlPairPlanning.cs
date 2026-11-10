@@ -98,12 +98,15 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         // Validate the dependency closure against its ORIGINAL declaration. The
         // target deliberately does not declare either peer; it must still contain
         // another original compatible pair, never a replacement ownership shape.
+        // Independent standalone lifetimes are checked by their own policies;
+        // they are not members of this pair's ownership/dependency closure.
         if (TryPair(original, inputs, configuration, resource) is not { } pair ||
             TryPair(target, inputs, configuration) is null ||
             original.Resources[pair.Database].DeletionPolicy != ResourceDeletionPolicy.Retain ||
             original.Resources[pair.Login].DeletionPolicy != ResourceDeletionPolicy.Retain ||
             target.Resources.ContainsKey(pair.Database) || target.Resources.ContainsKey(pair.Login) ||
-            !original.Resources.Keys.Where(k => !target.Resources.ContainsKey(k)).ToHashSet().SetEquals([pair.Database, pair.Login]) ||
+            !original.Resources.Keys.Where(k => !IsIndependentDatabase(original, k) && !target.Resources.ContainsKey(k))
+                .ToHashSet().SetEquals([pair.Database, pair.Login]) ||
             target.Resources.Values.Where(r => r.Type == PostgreSqlDatabaseContract.Id).Any(r =>
                 PostgreSqlDatabaseCreateValidation.Name(r) == pair.Name)) return false;
         return original.Resources.Where(r => r.Value.Type == PostgreSqlApplicationLoginContract.Id && r.Key != pair.Login).Any(r =>

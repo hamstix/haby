@@ -75,6 +75,14 @@ complete pair while another original compatible pair remains active. Last-pair,
 all-Resource and whole-Application removal remain unsupported. Earlier standalone
 retention/addition, pair addition, reuse and configuration-only paths remain available.
 
+An independent standalone database has its own lifecycle even if it was declared
+when B was created. For example, A at generation 1, standalone S at 2 and B at 3
+may retain S and B in either order while A remains unchanged. Their direct sources
+stay A=1, S=2 and B=3 through further absence and compatible return. B's closure
+does not require S to remain declared; S still requires its own exact policy,
+management, evidence and name ownership. This does not admit removal of another
+original pair or weaken half-pair/name/ownership guards.
+
 ## Catalog and evidence boundary
 
 No schema, wire or graph-codec change, migration, backfill or catalog reset is needed.

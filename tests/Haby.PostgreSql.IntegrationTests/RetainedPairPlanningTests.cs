@@ -10,6 +10,32 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class RetainedPairPlanningTests
 {
     [Fact]
+    public void Pair_retention_does_not_require_an_unrelated_original_standalone_to_remain_declared()
+    {
+        var envelope = IndependentPairPlanningTests.TwoPairs();
+        envelope["manifest"]!["spec"]!["resources"]!["extra"] = new JsonObject
+        {
+            ["type"] = "postgresql.database/v1alpha1",
+            ["providerRef"] = "postgresql.primary",
+            ["properties"] = new JsonObject { ["name"] = "independent_standalone" }
+        };
+        var original = Spec(envelope); var target = Spec(Example()); var admission = PairAdmission();
+        foreach (var id in new[] { "db-b", "login-b", "extra" })
+            Assert.True(admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, Inputs(), PostgreSqlPairPlanningTests.Configuration()));
+    }
+
+    [Fact]
+    public void Pair_retention_still_refuses_removal_of_another_original_pair()
+    {
+        var envelope = IndependentPairPlanningTests.TwoPairs(); var resources = envelope["manifest"]!["spec"]!["resources"]!;
+        resources["db-c"] = resources["db-b"]!.DeepClone(); resources["db-c"]!["properties"]!["name"] = "sample_c";
+        resources["login-c"] = resources["login-b"]!.DeepClone(); resources["login-c"]!["properties"]!["databaseRef"] = "db-c";
+        var original = Spec(envelope); var target = Spec(Example()); var admission = PairAdmission();
+        foreach (var id in new[] { "db-b", "login-b", "db-c", "login-c" })
+            Assert.False(admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, Inputs(), PostgreSqlPairPlanningTests.Configuration()));
+    }
+
+    [Fact]
     public void Complete_independent_pair_retains_and_returns_through_exact_adapter_policies()
     {
         var original = Spec(IndependentPairPlanningTests.TwoPairs()); var target = Spec(Example());
