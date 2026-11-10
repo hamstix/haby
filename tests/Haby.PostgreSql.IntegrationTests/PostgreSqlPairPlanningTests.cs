@@ -234,9 +234,7 @@ public sealed class PostgreSqlPairPlanningTests
         if (property != "databaseRef" || value is null || value.Contains('/', StringComparison.Ordinal))
             Assert.Null(PostgreSqlApplicationLoginContract.ParseJson(props.ToJsonString()));
         var result = ManifestCandidatePipeline.Prepare(Bytes(envelope), Catalog);
-        if (result is ManifestCandidateResult.Valid valid)
-            Assert.NotEqual(DurablePlanStatus.Planned, Admission().Admit(valid.Candidate.Declaration.Spec, Provider, Inputs(), Configuration()));
-        else Assert.IsType<ManifestCandidateResult.InvalidManifest>(result);
+        Assert.IsType<ManifestCandidateResult.InvalidManifest>(result);
     }
 
     [Theory]
@@ -256,9 +254,13 @@ public sealed class PostgreSqlPairPlanningTests
         if (mode == "implementation") config = config with { ImplementationId = "other.impl/v1" };
         if (mode == "configuration") config = config with { ShapeId = "other.configuration/v1" };
         var result = ManifestCandidatePipeline.Prepare(Bytes(e), Catalog);
-        if (result is ManifestCandidateResult.Valid valid)
-            Assert.NotEqual(DurablePlanStatus.Planned, Admission().Admit(valid.Candidate.Declaration.Spec, Provider, Inputs(), config));
-        else Assert.IsType<ManifestCandidateResult.InvalidManifest>(result);
+        if (mode == "binding-options") Assert.IsType<ManifestCandidateResult.InvalidManifest>(result);
+        else
+        {
+            var valid = Assert.IsType<ManifestCandidateResult.Valid>(result);
+            Assert.Equal(mode == "alias" ? DurablePlanStatus.ProviderRevisionUnavailable : DurablePlanStatus.UnsupportedShape,
+                Admission().Admit(valid.Candidate.Declaration.Spec, Provider, Inputs(), config));
+        }
     }
 
     internal static DurableOperationGraph Tamper(DurableOperationGraph graph, string mode)

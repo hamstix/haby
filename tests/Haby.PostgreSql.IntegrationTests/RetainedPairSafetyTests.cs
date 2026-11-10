@@ -107,7 +107,18 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         var name = "retain_pair_refuse_" + Guid.NewGuid().ToString("N"); var baseline = returning ? 3 : 2;
-        await EstablishRetained(scenario, client, name, baseline, pair: true);
+        await EstablishRetained(scenario, client, name, 2, pair: true);
+        var selector = DocumentRequest(scenario, "consumer-b"); selector.Generation = 2;
+        var role = PostgreSqlPairResourceAdmission.RoleName(scenario.Owner with { ResourceLocalId = ManifestLocalId.Create("login-b") });
+        var probe = await PrepareRefusalProbe(scenario, client, channel, selector, name, role);
+        if (returning)
+        {
+            var removal = await RetentionPlan(scenario, client, name, 3, 2, true, false);
+            Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = removal.ChangeSetId, PlanId = removal.PlanId })).Status);
+            Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = 3 })).Status);
+            // Capture the accepted retained baseline, preserving the original grant and sentinel.
+            probe = probe with { Accepted = await RefusalAcceptedState(scenario.Connection) };
+        }
         var history = await ReuseHistory(scenario.Connection); var identity = await ExternalIdentity(scenario); var oid = await DatabaseOid(name);
         if (fault == "provider-revision")
         {
@@ -138,16 +149,38 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         var imported = await client.ImportAsync(new() { OriginalEnvelope = Google.Protobuf.ByteString.CopyFrom(PostgreSqlPairPlanningTests.Bytes(envelope)) });
         var revision = imported.Created?.Revision.Reference ?? imported.ExistingEquivalent?.Revision.Reference;
-        if (revision is not null)
+        if (fault is "half-db" or "policy" or "dangling")
         {
+            Assert.Equal(ImportReply.OutcomeOneofCase.InvalidManifest, imported.OutcomeCase);
+            Assert.Null(revision);
+        }
+        else
+        {
+            Assert.NotNull(revision);
             var change = await client.CreateChangeSetAsync(new() { EnvironmentId = "pilot", Reference = revision, Precondition = PlanningPrecondition.ExpectedGeneration, ExpectedGeneration = baseline });
             var plan = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
-            Assert.Null(plan.Plan); Assert.NotEqual(PlanningStatus.Planned, plan.Status);
+            Assert.Null(plan.Plan); Assert.Equal(PlanningStatus.UnsupportedShape, plan.Status);
+            Assert.Equal(PlanningStatus.UnsupportedShape, (await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId })).Status);
         }
+        await VerifyRefusalProbe(scenario, channel, probe);
         Assert.Equal(history, await ReuseHistory(scenario.Connection)); Assert.Equal(identity, await ExternalIdentity(scenario)); Assert.Equal(oid, await DatabaseOid(name));
         await using (var verify = Context(scenario.Connection))
         { Assert.Equal(baseline, await verify.DeploymentGenerations.CountAsync()); Assert.Equal(baseline, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).DesiredGeneration); }
         await host.StopAsync();
+        await using var restarted = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(restarted);
+        using var restartedChannel = GrpcChannel.ForAddress(restarted.Urls.Single());
+        var restartedClient = OperatorTestCredentials.Client(restartedChannel);
+        if (revision is not null)
+        {
+            var change = await restartedClient.CreateChangeSetAsync(new() { EnvironmentId = "pilot", Reference = revision, Precondition = PlanningPrecondition.ExpectedGeneration, ExpectedGeneration = baseline });
+            Assert.Equal(PlanningStatus.UnsupportedShape, (await restartedClient.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId })).Status);
+        }
+        else
+            Assert.Equal(ImportReply.OutcomeOneofCase.InvalidManifest, (await restartedClient.ImportAsync(new()
+            { OriginalEnvelope = Google.Protobuf.ByteString.CopyFrom(PostgreSqlPairPlanningTests.Bytes(envelope)) })).OutcomeCase);
+        await VerifyRefusalProbe(scenario, restartedChannel, probe);
+        await restarted.StopAsync();
     }
 
     [Theory]

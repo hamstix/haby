@@ -115,7 +115,8 @@ Application generations before starting Workload implementation.
 [ADR-045](docs/adr/0045-application-generation-updates-and-resource-continuity.md)
 accepts the update/Resource-continuity contracts. The first unchanged-Resource
 reuse slice is implemented in [issue #158](docs/development/158-resource-reuse-generation-updates.md);
-the broader mutation checkpoint below remains incomplete.
+the unsupported-mutation safety checkpoint is verified in [issue #172](docs/development/172-resource-mutation-refusal.md).
+The separate integrated-update rehearsal below remains incomplete.
 
 - [x] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and explicit execution of a reuse-only next generation from a fully applied baseline. Deferred apply remains separate.
 - [x] Preserve stable identities and confirmed management of unchanged database/login Resources with the exact same Provider configuration revision. Reuse the existing database, role and credential through original confirmed evidence, without repeating creation, generation or privilege work. Catalogs without management records are not backfilled.
@@ -126,7 +127,7 @@ the broader mutation checkpoint below remains incomplete.
 - [x] Extend retained removal and compatible same-key return to both Resources of one independent database-owner pair while another original pair remains declared, preserving original source/evidence, names, credentials and old exact grants ([issue #170](docs/development/170-retained-independent-pair.md)). Half-pair/last-pair/all-Resource removal, ownership transfer, destructive deprovisioning and retained-name release remain unsupported.
 - [x] Admit application-version and supported configuration changes; materialize exact new-generation document revisions while previous documents and grants remain scoped to their original revisions until explicit revocation.
 - [x] Support configuration-only generations for the same ManifestRevision when explicitly accepting changed supported Profile/default inputs through a new Plan and Commit. Assignment/default changes alone never mutate accepted generations. [Issue #166 operator path and bounded evidence](docs/development/166-configuration-only-generations.md). Do not couple logging-profile changes to an Application release or promise hot reload in a running process; configuration delivery and P3 restart/rollout are separate concerns.
-- [ ] Reject unsupported existing-Resource mutations, including database-name changes, Provider-instance changes and credential rotation, during planning. Only explicitly supported adapter changes are admitted; no automatic data migration, replacement or destructive deprovisioning.
+- [x] Verify refusal of unsupported existing-Resource mutations, including database-name changes, Provider-instance changes and credential substitution, at their actual import, planning and original-evidence boundaries ([issue #172 evidence matrix](docs/development/172-resource-mutation-refusal.md)). Saved alias changes stale existing Plans; new planning cannot authorize rebinding. Only explicitly supported adapter changes are admitted; no automatic data migration, rotation, replacement or destructive deprovisioning.
 - [ ] Prove v1 writes data -> v2 with changed configuration -> same database/role/credential and preserved data, exact new configuration, and continued old-document access. Cover Resource additions, Component/Binding changes, retained removals and configuration-only updates, with repeat, restart and partial-failure evidence and no blind external-effect replay.
 
 Implement the checkpoint sequentially: first reuse unchanged Resources across

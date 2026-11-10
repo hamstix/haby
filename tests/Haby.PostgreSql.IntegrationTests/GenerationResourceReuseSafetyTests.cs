@@ -40,6 +40,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [Theory]
     [InlineData("database")]
     [InlineData("schema")]
+    [InlineData("delete")]
+    [InlineData("database-ref")]
     [InlineData("resource-add")]
     [InlineData("login-add")]
     [InlineData("two-pairs-add")]
@@ -56,6 +58,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         {
             case "database": spec["resources"]!["db"]!["properties"]!["name"] = "unsupported_replacement"; break;
             case "schema": spec["resources"]!["app-login"]!["properties"]!["schema"] = "other_schema"; break;
+            case "delete": spec["resources"]!["db"]!["lifecycle"] = new JsonObject { ["deletionPolicy"] = "delete" }; break;
+            case "database-ref":
+                spec["resources"]!["other"] = spec["resources"]!["db"]!.DeepClone();
+                spec["resources"]!["other"]!["properties"]!["name"] = "unsupported_other";
+                spec["resources"]!["app-login"]!["properties"]!["databaseRef"] = "other"; break;
             case "resource-add": spec["resources"]!["other"] = spec["resources"]!["db"]!.DeepClone(); break;
             case "login-add": spec["resources"]!["other-login"] = spec["resources"]!["app-login"]!.DeepClone(); break;
             case "two-pairs-add":
@@ -79,14 +86,26 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
+        var probe = await PrepareRefusalProbe(scenario, client, channel);
         var revision = await ImportUpdate(client, envelope);
         var change = await client.CreateChangeSetAsync(new() { EnvironmentId = "pilot", Reference = revision, Precondition = PlanningPrecondition.ExpectedGeneration, ExpectedGeneration = 1 });
         var result = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
-        Assert.Contains(result.Status, new[] { PlanningStatus.UnsupportedShape, PlanningStatus.ConfigurationRefused }); Assert.Null(result.Plan);
+        Assert.Equal(PlanningStatus.UnsupportedShape, result.Status); Assert.Null(result.Plan);
+        Assert.Equal(PlanningStatus.UnsupportedShape, (await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId })).Status);
+        await VerifyRefusalProbe(scenario, channel, probe);
         Assert.Equal(history, await ReuseHistory(scenario.Connection));
-        await using var verify = Context(scenario.Connection); var deployment = await verify.ApplicationDeployments.AsNoTracking().SingleAsync();
-        Assert.Equal(1, deployment.DesiredGeneration); Assert.Equal(1, deployment.AppliedGeneration);
+        await using (var verify = Context(scenario.Connection))
+        {
+            var deployment = await verify.ApplicationDeployments.AsNoTracking().SingleAsync();
+            Assert.Equal(1, deployment.DesiredGeneration); Assert.Equal(1, deployment.AppliedGeneration);
+        }
         await host.StopAsync();
+        await using var restarted = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(restarted);
+        using var restartedChannel = GrpcChannel.ForAddress(restarted.Urls.Single());
+        Assert.Equal(PlanningStatus.UnsupportedShape, (await OperatorTestCredentials.Client(restartedChannel).CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId })).Status);
+        await VerifyRefusalProbe(scenario, restartedChannel, probe);
+        await restarted.StopAsync();
     }
 
     [Theory]
