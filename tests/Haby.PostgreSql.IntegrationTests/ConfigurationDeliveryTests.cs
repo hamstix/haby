@@ -67,7 +67,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     }
 
     [Fact]
-    public async Task Delivery_additive_catalog_migration_retains_existing_unresolved_artifact_without_reset_or_authority_backfill()
+    public async Task Prior_delivery_catalog_refuses_naming_upgrade_without_reset_or_authority_backfill()
     {
         var scenario = await Prepare(full: true, render: true); await AccessReady(scenario); await AccessExecute(scenario);
         ConfigurationDocumentRow saved;
@@ -88,13 +88,17 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
         }
-        await using (var services = OwnerServices(scenario)) await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        await using (var services = OwnerServices(scenario))
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
+            Assert.Contains("fresh catalog", error.Message);
+        }
         await using var verify = Context(scenario.Connection);
-        Assert.False(verify.Database.HasPendingModelChanges());
-        Assert.Equal(verify.Database.GetMigrations(), await verify.Database.GetAppliedMigrationsAsync());
         var after = await verify.ConfigurationDocuments.AsNoTracking().SingleAsync(); Assert.Equal(saved.Payload, after.Payload); Assert.Equal(saved.Fingerprint, after.Fingerprint);
-        Assert.Empty(await verify.ConfigurationAccess.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.ResourceManagement.AsNoTracking().ToArrayAsync()); // Additive schema never manufactures ownership for an earlier install.
+        Assert.DoesNotContain(await verify.Database.GetAppliedMigrationsAsync(), m => m.EndsWith("AddResourceNaming", StringComparison.Ordinal));
+        await using var connection = new Npgsql.NpgsqlConnection(scenario.Connection); await connection.OpenAsync();
+        Assert.Equal(true, await new Npgsql.NpgsqlCommand("SELECT to_regclass('public.configuration_access_grants') IS NULL AND to_regclass('public.resource_management') IS NULL", connection).ExecuteScalarAsync());
+        // Refusal never recreates authority tables, backfills ownership or rewrites the old artifact.
     }
     private sealed class DeliveryClock : TimeProvider
     {

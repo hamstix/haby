@@ -2,6 +2,7 @@ using System.Text;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Persistence.PostgreSql;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
@@ -10,6 +11,22 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class PostgreSqlApplicationLoginTests
 {
+    private sealed class NamingCreateBarrier : IDurableCreateDispatchFaultHooks
+    {
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _sessions;
+        public ValueTask BeforeDispatchMarkerAsync(CancellationToken token) => ValueTask.CompletedTask;
+        public ValueTask AfterDispatchMarkerCommittedAsync(CancellationToken token) => ValueTask.CompletedTask;
+        public async ValueTask DuringCreateCommandAsync(CancellationToken token)
+        {
+            // Both absence checks and markers have completed, and both dedicated SQL
+            // sessions are open. Neither CREATE may run before its competing session.
+            if (Interlocked.Increment(ref _sessions) == 2) _ready.TrySetResult();
+            await _ready.Task.WaitAsync(TimeSpan.FromSeconds(20), token);
+        }
+        public ValueTask BeforeSuccessPersistedAsync(CancellationToken token) => ValueTask.CompletedTask;
+    }
+
     private async Task<Scenario> NamingPlan(string logical, string prefix)
     {
         var catalog = await NamingCatalog();
@@ -40,9 +57,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
         // staging_ + shard_orders == staging_shard_ + orders, including across independent catalogs.
         var scenarios = new[] { await NamingPlan("shard_orders_" + suffix, "staging_"), await NamingPlan("orders_" + suffix, "staging_shard_") };
         Assert.Equal(scenarios[0].Database, scenarios[1].Database);
+        var barrier = concurrent ? new NamingCreateBarrier() : null;
         async Task<DurableGenerationRunResult> Run(Scenario scenario)
         {
-            await using var services = Services(scenario.Connection, full: true, access: true);
+            await using var services = Services(scenario.Connection, full: true, access: true, createFault: barrier);
             return await services.GetRequiredService<DurableGenerationRunner>().RunAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default);
         }
         Scenario winner; Scenario loser;
@@ -52,6 +70,12 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var success = Array.FindIndex(results, r => r.Progress?.AppliedGeneration == 1);
             Assert.InRange(success, 0, 1); Assert.Single(results, r => r.Progress?.AppliedGeneration == 1);
             winner = scenarios[success]; loser = scenarios[1 - success];
+            foreach (var scenario in scenarios)
+            {
+                await using var verify = Context(scenario.Connection);
+                var attempt = await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(x => x.OperationId == "db-create");
+                Assert.NotNull(attempt.DispatchedAt);
+            }
         }
         else
         {

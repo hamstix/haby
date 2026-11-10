@@ -43,7 +43,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
             new DurableOperationGraph(spec.Resources.SelectMany(r => new Prefix(r.Value.Type).Plan(spec, r.Key, inputs, configuration))).Equals(graph);
     }
-    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null)
+    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null)
     {
         var services = new ServiceCollection().AddSingleton(TimeProvider.System)
             .AddSingleton(PostgreSqlConnectionRendering.CreateCatalog())
@@ -64,6 +64,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         if (fault is not null) services.AddSingleton(fault);
         if (access) services.AddPostgreSqlApplicationAccess();
         if (accessFault is not null) services.AddSingleton(accessFault);
+        if (createFault is not null) services.AddSingleton(createFault);
         return services.BuildServiceProvider();
     }
     private static ManifestCatalogDbContext Context(string connection) => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
