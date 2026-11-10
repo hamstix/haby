@@ -157,8 +157,9 @@ product smoke tests can follow it in CI and are not automatically implied.
 Manage only objects and fields owned under the agreed policy. Preserve external
 identity, including Kubernetes UID in adapter-owned evidence. Existing foreign
 objects are not replaced/adopted merely because names or labels match.
-Agree field ownership, update mechanics, manual-edit conflicts and safe create
-identity/evidence before the corresponding implementation slice.
+Object naming, field ownership, conditional updates and response-loss evidence are
+accepted in [ADR-049](0049-kubernetes-object-ownership-and-uncertain-writes.md).
+Concrete field/metadata/evidence contracts precede the implementation slices.
 
 Kubernetes actions have their own uncertainty rules. After response loss, adapters
 may observe and establish the result only with sufficient proof tying the object
