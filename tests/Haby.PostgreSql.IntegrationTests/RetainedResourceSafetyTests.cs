@@ -108,11 +108,17 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var history = await ReuseHistory(scenario.Connection); var oid = await DatabaseOid(name);
         var import = await client.ImportAsync(new() { OriginalEnvelope = Google.Protobuf.ByteString.CopyFrom(PostgreSqlPairPlanningTests.Bytes(envelope)) });
         var revision = import.Created?.Revision.Reference ?? import.ExistingEquivalent?.Revision.Reference;
-        if (revision is not null)
+        if (mutation is "properties" or "dangling-reference")
         {
+            Assert.Equal(ImportReply.OutcomeOneofCase.InvalidManifest, import.OutcomeCase);
+            Assert.Null(revision);
+        }
+        else
+        {
+            Assert.NotNull(revision);
             var change = await client.CreateChangeSetAsync(new() { EnvironmentId = "pilot", Reference = revision, Precondition = PlanningPrecondition.ExpectedGeneration, ExpectedGeneration = 3 });
             var plan = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
-            Assert.Null(plan.Plan); Assert.NotEqual(PlanningStatus.Planned, plan.Status);
+            Assert.Null(plan.Plan); Assert.Equal(PlanningStatus.UnsupportedShape, plan.Status);
         }
         Assert.Equal(history, await ReuseHistory(scenario.Connection)); Assert.Equal(oid, await DatabaseOid(name));
         await using var verify = Context(scenario.Connection);

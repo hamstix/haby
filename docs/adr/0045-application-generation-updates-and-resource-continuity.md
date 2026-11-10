@@ -6,6 +6,14 @@
 - Extends: ADR-016/018/026/033/034/035/036/039/040/041/042/044
 - Implementation: unchanged-Resource reuse in issue #158 and bounded mixed reuse/create in issue #160; [runbook and catalog boundary](../development/158-resource-reuse-generation-updates.md). The additive slice admits one independent standalone PostgreSQL database alongside the unchanged managed pair, with direct later provenance from its mixed creation generation. Changed Component/local Binding sets with unchanged managed Resources are implemented in issue #162; [target layout, assignment and cleanup boundary](../development/162-component-binding-generation-updates.md). Retained removal/compatible same-key reintroduction of the #160 standalone database, while the pair remains declared, is implemented in issue #164; [membership, original-source and cleanup boundaries](../development/164-retained-resource-reintroduction.md). Immutable typed generation membership is accepted atomically with the generation; stable management records and original evidence remain unchanged. Same-revision configuration-only generations are implemented in issue #166; [exact inputs, frozen defaults, explicit execution and storage boundary](../development/166-configuration-only-generations.md). One independent database/application-login pair per update is implemented in issue #168; [Resource-scoped producers, direct sources and alpha catalog boundary](../development/168-independent-database-login-pair.md). Retained removal and compatible return of both Resources of one independent pair, while another original pair remains declared, are implemented in issue #170; [pair closure, exact old access and catalog boundary](../development/170-retained-independent-pair.md). Half-pair/last-pair/all-Resource removal, ownership transfer and cleanup remain unsupported. Broader Resource additions/removals and Resource identity changes remain planned.
 
+Issue #172 verifies the unsupported-Resource-mutation safety checkpoint without
+expanding mutation capabilities or changing production behavior. The
+[evidence matrix and refusal guidance](../development/172-resource-mutation-refusal.md)
+distinguish import rejection, semantic planning refusal, stale saved Plans and
+unavailable original evidence. Original generations, data, credentials and exact
+delivery grants survive repeated refusals and restart. The separate integrated P2
+update rehearsal and all P3 implementation remain incomplete.
+
 ## Context
 
 The initial install/configuration/delivery path is proven. Useful deployment now
