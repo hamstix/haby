@@ -83,7 +83,7 @@ Reusable placement settings provide common values and companion-object selection
 with explicit overrides. A typical Development configuration uses Recreate and
 individual Ingress; Production uses RollingUpdate and may disable individual
 Ingress. These are explicit configuration choices, not behavior inferred from
-Environment names. Agree exact inheritance/override contracts in a later packet.
+Environment names. Selection and bounded inheritance/override rules are accepted in [ADR-047](0047-kubernetes-workload-declarations-and-placement.md); concrete JSON contracts remain implementation work.
 
 Plan freezes exact Workload declaration, resolved placement/namespace, Provider
 configuration revision and implementation, image reference, configuration document
