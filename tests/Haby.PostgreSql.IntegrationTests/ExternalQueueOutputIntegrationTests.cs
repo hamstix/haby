@@ -61,17 +61,36 @@ public sealed partial class ExactActionAdmissionTests
             DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
             Validate(accepted, resource, inputs, configuration) && Validate(target, resource, inputs, configuration) &&
             accepted.Resources[resource].Properties.Equals(target.Resources[resource].Properties) &&
-            accepted.Resources[resource].DeletionPolicy == target.Resources[resource].DeletionPolicy;
+            accepted.Resources[resource].DeletionPolicy == target.Resources[resource].DeletionPolicy &&
+            (!boundary.DependentResources || RelatedClosure(accepted, target, resource, retain: false));
+
+        private static bool RelatedClosure(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource, bool retain)
+        {
+            if (resource.Value == "jobs") return true;
+            var parent = ManifestLocalId.Create("extra"); var peer = ManifestLocalId.Create("extra-peer");
+            if (!original.Resources.ContainsKey(parent) || !original.Resources.ContainsKey(peer)) return false;
+            return retain ? !target.Resources.ContainsKey(parent) && !target.Resources.ContainsKey(peer) &&
+                original.Resources[parent].DeletionPolicy == ResourceDeletionPolicy.Retain && original.Resources[peer].DeletionPolicy == ResourceDeletionPolicy.Retain :
+                target.Resources.ContainsKey(parent) && target.Resources.ContainsKey(peer) &&
+                Same(parent) && Same(peer);
+
+            bool Same(ManifestLocalId key) => original.Resources[key].Type == target.Resources[key].Type &&
+                original.Resources[key].ProviderRef == target.Resources[key].ProviderRef &&
+                original.Resources[key].Properties.Equals(target.Resources[key].Properties) &&
+                original.Resources[key].DeletionPolicy == target.Resources[key].DeletionPolicy;
+        }
 
         public bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
-            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => resource.Value == "extra" &&
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => (resource.Value == "extra" || boundary.DependentResources && resource.Value == "extra-peer") &&
             original.Resources[resource].DeletionPolicy == ResourceDeletionPolicy.Retain &&
             Validate(original, resource, inputs, configuration) && !target.Resources.ContainsKey(resource) &&
-            target.Resources.ContainsKey(ManifestLocalId.Create("jobs"));
+            target.Resources.ContainsKey(ManifestLocalId.Create("jobs")) &&
+            (!boundary.DependentResources || RelatedClosure(original, target, resource, retain: true));
 
         public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
-            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => resource.Value == "extra" &&
-            !accepted.Resources.ContainsKey(resource) && Validate(target, resource, inputs, configuration);
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => (resource.Value == "extra" || boundary.DependentResources && resource.Value == "extra-peer") &&
+            !accepted.Resources.ContainsKey(resource) && Validate(target, resource, inputs, configuration) &&
+            (!boundary.DependentResources || RelatedClosure(target, target, resource, retain: false));
 
         public override bool RequiresExternalOutput => true;
         public override DurableActionExecutionKey Key => ExactActionAdmissionTests.Key;
@@ -93,14 +112,26 @@ public sealed partial class ExactActionAdmissionTests
             }];
         }
         public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-            spec.Resources.Count is > 0 and <= 2 && spec.Components.Values.All(x => x.Workloads.Count == 0) && spec.Resources.TryGetValue(resource, out var declared) &&
-            Validate(declared, inputs) && configuration.ProviderKindId == "sample/v1" && configuration.ShapeId == "sample.configuration/v1" &&
+            spec.Resources.Count > 0 && spec.Resources.Count <= (boundary.DependentResources ? 3 : 2) && spec.Components.Values.All(x => x.Workloads.Count == 0) && spec.Resources.TryGetValue(resource, out var declared) &&
+            (boundary.DependentResources && resource.Value == "extra-peer"
+                ? declared.Properties.Members.Count == 1 && declared.Properties.Members.GetValueOrDefault("parentRef") is ConfigurationString { Value: "extra" } && spec.Resources.ContainsKey(ManifestLocalId.Create("extra"))
+                : Validate(declared, inputs)) && configuration.ProviderKindId == "sample/v1" && configuration.ShapeId == "sample.configuration/v1" &&
             configuration.ImplementationId == "sample.impl/v1";
         public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
-            PreparedProviderConfiguration configuration) => Plan(resource, spec.Resources[resource], inputs);
+            PreparedProviderConfiguration configuration) => boundary.DependentResources && resource.Value == "extra-peer"
+                ? [new(OperationId.Create("extra-peer-subscribe"), resource, QueueSubscribeKey,
+                    new(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId),
+                    new("sample.queue-subscribe/v1", JsonSerializer.Serialize(new QueueSubscribeInput("jobs"), QueueEvidenceJsonContext.Default.QueueSubscribeInput)),
+                    [OperationId.Create("extra-create")]) { OutputReferences = [new(OperationId.Create("extra-create"), QueueEvidenceContract.Contract, "receipt")] }]
+                : Plan(resource, spec.Resources[resource], inputs);
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
             PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
-            Validate(spec, resource, inputs, configuration) && new DurableOperationGraph(Plan(spec, resource, inputs, configuration)).Equals(new DurableOperationGraph(graph.Nodes.Where(n => n.ResourceId == resource)));
+            Validate(spec, resource, inputs, configuration) && (boundary.DependentResources && resource.Value == "extra-peer"
+                ? graph.Nodes.SingleOrDefault(n => n.ResourceId == resource) is { } node &&
+                    node.Action == QueueSubscribeKey && node.Dependencies.SequenceEqual([OperationId.Create("extra-create")]) &&
+                    node.OutputReferences.SequenceEqual([new(OperationId.Create("extra-create"), QueueEvidenceContract.Contract, "receipt")]) &&
+                    node.Input == Plan(spec, resource, inputs, configuration).Single().Input
+                : new DurableOperationGraph(Plan(spec, resource, inputs, configuration)).Equals(new DurableOperationGraph(graph.Nodes.Where(n => n.ResourceId == resource))));
 
         public override async ValueTask<DurableExecutionResult> ExecuteTypedAsync(DurableOperation operation, QueueCreateInput? input, CancellationToken token)
         {
@@ -132,15 +163,17 @@ public sealed partial class ExactActionAdmissionTests
         public DurableActionExecutionKey Key => QueueSubscribeKey;
         public bool Supports(DurableOperationNode node) => node.Action == Key && node.Input.Format == "sample.queue-subscribe/v1" &&
             JsonSerializer.Deserialize(node.Input.Json, QueueEvidenceJsonContext.Default.QueueSubscribeInput)?.QueueName == "jobs" &&
-            node.Dependencies.SequenceEqual([QueueEvidenceProducerId]) && node.OutputReferences.SequenceEqual([QueueEvidenceSelector]);
+            (node.Dependencies.SequenceEqual([QueueEvidenceProducerId]) && node.OutputReferences.SequenceEqual([QueueEvidenceSelector]) ||
+                boundary.DependentResources && node.ResourceId.Value == "extra-peer" && node.Dependencies.SequenceEqual([OperationId.Create("extra-create")]) &&
+                node.OutputReferences.SequenceEqual([new(OperationId.Create("extra-create"), QueueEvidenceContract.Contract, "receipt")]));
         public async ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation, CancellationToken token)
         {
             ExternalOperationOutput? output;
-            try { output = await outputs.ConsumeAsync(operation.Key, QueueEvidenceSelector, token); }
+            try { output = await outputs.ConsumeAsync(operation.Key, operation.Node.OutputReferences.Single(), token); }
             catch (InvalidOperationException) { output = null; }
             if (output is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var evidence = QueueEvidenceContract.Decode(output);
-            Assert.Equal(new QueueEvidence("jobs", "queue-broker", "accepted-1", boundary.DeliveryCredential?.SecretId.ToString(), boundary.DeliveryCredential?.SecretVersionId.ToString()), evidence);
+            Assert.Equal(new QueueEvidence("jobs", "queue-broker", operation.Node.ResourceId.Value == "extra-peer" ? "accepted-2" : "accepted-1", boundary.DeliveryCredential?.SecretId.ToString(), boundary.DeliveryCredential?.SecretVersionId.ToString()), evidence);
             var started = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(operation.Key, DateTimeOffset.UtcNow, token));
             Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(operation.Key, started.AttemptId, DateTimeOffset.UtcNow, token));
             boundary.Effects.Add("subscribe:" + evidence!.Receipt);

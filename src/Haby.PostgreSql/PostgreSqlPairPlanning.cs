@@ -74,13 +74,47 @@ public sealed record OperationOutputRefDocument(string ProducerOperationId, stri
 
 /// <summary>Pure PostgreSQL pair admission. The Host composes its database half with standalone admission.
 /// It owns exactly the nodes of its declared Resource; no executor or success placeholder is provided.</summary>
-public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
+public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy, IDurableResourceRetentionPolicy
 {
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        TryPair(accepted, inputs, configuration, resource) is not null && TryPair(target, inputs, configuration, resource) is not null &&
-        accepted.Resources.TryGetValue(resource, out var before) && target.Resources.TryGetValue(resource, out var after) &&
-        before.Type == after.Type && before.ProviderRef == after.ProviderRef && before.Properties.Equals(after.Properties) && before.DeletionPolicy == after.DeletionPolicy;
+        TryPair(accepted, inputs, configuration, resource) is { } before &&
+        TryPair(target, inputs, configuration, resource) is { } after &&
+        before.Database == after.Database && before.Login == after.Login &&
+        SameResource(accepted, target, before.Database) && SameResource(accepted, target, before.Login);
+
+    private static bool SameResource(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource) =>
+        original.Resources.TryGetValue(resource, out var before) && target.Resources.TryGetValue(resource, out var after) &&
+        before.Type == after.Type && before.ProviderRef == after.ProviderRef &&
+        before.Properties.Equals(after.Properties) && before.DeletionPolicy == after.DeletionPolicy;
+
+    public bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        CanRetainPair(original, target, resource, inputs, configuration);
+
+    internal static bool CanRetainPair(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
+    {
+        // Validate the dependency closure against its ORIGINAL declaration. The
+        // target deliberately does not declare either peer; it must still contain
+        // another original compatible pair, never a replacement ownership shape.
+        // Independent standalone lifetimes are checked by their own policies;
+        // they are not members of this pair's ownership/dependency closure.
+        if (TryPair(original, inputs, configuration, resource) is not { } pair ||
+            TryPair(target, inputs, configuration) is null ||
+            original.Resources[pair.Database].DeletionPolicy != ResourceDeletionPolicy.Retain ||
+            original.Resources[pair.Login].DeletionPolicy != ResourceDeletionPolicy.Retain ||
+            target.Resources.ContainsKey(pair.Database) || target.Resources.ContainsKey(pair.Login) ||
+            !original.Resources.Keys.Where(k => !IsIndependentDatabase(original, k) && !target.Resources.ContainsKey(k))
+                .ToHashSet().SetEquals([pair.Database, pair.Login]) ||
+            target.Resources.Values.Where(r => r.Type == PostgreSqlDatabaseContract.Id).Any(r =>
+                PostgreSqlDatabaseCreateValidation.Name(r) == pair.Name)) return false;
+        return original.Resources.Where(r => r.Value.Type == PostgreSqlApplicationLoginContract.Id && r.Key != pair.Login).Any(r =>
+            TryPair(original, inputs, configuration, r.Key) is { } survivor &&
+            TryPair(target, inputs, configuration, r.Key) is { } current &&
+            survivor.Database == current.Database && survivor.Login == current.Login &&
+            SameResource(original, target, survivor.Database) && SameResource(original, target, survivor.Login));
+    }
 
     private static ProviderAdapterKey Provider => new("postgresql/v1", "haby.postgresql.connection/v1", PostgreSqlDatabaseCheckpointCapability.ImplementationId);
     public DurableActionExecutionKey Key { get; } = new(new(contract, Provider), OperationContractId.Create(

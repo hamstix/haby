@@ -1,5 +1,9 @@
 # Add one independent database/application-login pair
 
+The subsequent [#170 retained-pair slice](170-retained-independent-pair.md) admits
+removing and compatibly returning both Resources of an independent pair while
+another original pair remains active. Last-pair removal and deletion remain unsupported.
+
 Issue #168 extends the [ADR-045](../adr/0045-application-generation-updates-and-resource-continuity.md)
 P2 update boundary. Start with one fully applied pair A, then add one new database
 and one new application-login B on the same exact Provider instance, configuration

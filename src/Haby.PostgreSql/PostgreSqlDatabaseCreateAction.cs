@@ -20,7 +20,9 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
         accepted.Resources.TryGetValue(resource, out var before) && target.Resources.TryGetValue(resource, out var after) &&
         before.Type == after.Type && before.ProviderRef == after.ProviderRef && before.Properties.Equals(after.Properties) &&
         before.DeletionPolicy == after.DeletionPolicy &&
-        PostgreSqlPairResourceAdmission.IsIndependentDatabase(accepted, resource) == PostgreSqlPairResourceAdmission.IsIndependentDatabase(target, resource);
+        PostgreSqlPairResourceAdmission.IsIndependentDatabase(accepted, resource) == PostgreSqlPairResourceAdmission.IsIndependentDatabase(target, resource) &&
+        (Standalone(accepted) || PostgreSqlPairResourceAdmission.IsIndependentDatabase(accepted, resource) ||
+            pair.CanReuse(accepted, target, resource, inputs, configuration));
 
     public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
@@ -32,6 +34,7 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
 
     public bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        PostgreSqlPairResourceAdmission.CanRetainPair(original, target, resource, inputs, configuration) ||
         PostgreSqlPairResourceAdmission.SupportsShape(original, inputs, configuration) &&
         PostgreSqlPairResourceAdmission.SupportsShape(target, inputs, configuration) &&
         PostgreSqlPairResourceAdmission.IsIndependentDatabase(original, resource) &&
