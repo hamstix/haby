@@ -95,6 +95,15 @@ an explicitly breaking implementation, never an automatic reset. ADR-026 still
 requires C#/EF workflow and explicit approval for new server-side functions or
 triggers; no mandatory database-role separation is introduced.
 
+## Shared external systems across catalogs
+
+[ADR-048](0048-environment-scoped-resource-naming.md) extends planning with an
+Environment-to-Provider naming-policy selection before Workload implementation.
+Reservations in this ADR remain local to one catalog: independent installations
+on the same external server do not share ownership, locks or Provider identities.
+Prefixes are neither proof of global name uniqueness nor authorization. External
+collision handling and no-adoption checks remain adapter-owned.
+
 ## Required evidence
 
 - Same-request idempotency, both uniqueness conflicts and concurrent acceptance

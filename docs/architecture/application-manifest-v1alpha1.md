@@ -144,6 +144,8 @@ and `null` are invalid. A registered Resource type may impose a stricter
 schema: the checkpoint `postgresql.database/v1alpha1` contract requires
 `properties.name` as specified by
 [ADR-022](../adr/0022-postgresql-database-checkpoint-execution.md).
+[ADR-048](../adr/0048-environment-scoped-resource-naming.md) accepts a future Environment-to-Provider naming selection: exact mode preserves the literal name; prefixed mode resolves an adapter-owned external name during planning. Implementation is tracked in issue #175; the current parser/planner does not yet implement that selection.
+
 `lifecycle` is optional and defaults to
 `{ "deletionPolicy": "retain" }`. An absent `lifecycle`, `lifecycle: {}` and
 `lifecycle: { "deletionPolicy": "retain" }` have the same normalized value.

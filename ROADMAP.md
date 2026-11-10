@@ -116,7 +116,7 @@ Application generations before starting Workload implementation.
 accepts the update/Resource-continuity contracts. The first unchanged-Resource
 reuse slice is implemented in [issue #158](docs/development/158-resource-reuse-generation-updates.md);
 the unsupported-mutation safety checkpoint is verified in [issue #172](docs/development/172-resource-mutation-refusal.md).
-The separate integrated-update rehearsal below remains incomplete.
+Issue #174 completed the required integrated operator-update checkpoints on main 8b8785a; its overall report remains PARTIAL solely because temporary private-file cleanup was blocked. That operational remainder is separate from functional acceptance. The naming adoption prerequisite below is newly accepted work before P3.
 
 - [x] Support one Application per ChangeSet with ExpectedGeneration preconditions, exact new Plan inputs, atomic desired-state acceptance and explicit execution of a reuse-only next generation from a fully applied baseline. Deferred apply remains separate.
 - [x] Preserve stable identities and confirmed management of unchanged database/login Resources with the exact same Provider configuration revision. Reuse the existing database, role and credential through original confirmed evidence, without repeating creation, generation or privilege work. Catalogs without management records are not backfilled.
@@ -128,7 +128,7 @@ The separate integrated-update rehearsal below remains incomplete.
 - [x] Admit application-version and supported configuration changes; materialize exact new-generation document revisions while previous documents and grants remain scoped to their original revisions until explicit revocation.
 - [x] Support configuration-only generations for the same ManifestRevision when explicitly accepting changed supported Profile/default inputs through a new Plan and Commit. Assignment/default changes alone never mutate accepted generations. [Issue #166 operator path and bounded evidence](docs/development/166-configuration-only-generations.md). Do not couple logging-profile changes to an Application release or promise hot reload in a running process; configuration delivery and P3 restart/rollout are separate concerns.
 - [x] Verify refusal of unsupported existing-Resource mutations, including database-name changes, Provider-instance changes and credential substitution, at their actual import, planning and original-evidence boundaries ([issue #172 evidence matrix](docs/development/172-resource-mutation-refusal.md)). Saved alias changes stale existing Plans; new planning cannot authorize rebinding. Only explicitly supported adapter changes are admitted; no automatic data migration, rotation, replacement or destructive deprovisioning.
-- [ ] Prove v1 writes data -> v2 with changed configuration -> same database/role/credential and preserved data, exact new configuration, and continued old-document access. Cover Resource additions, Component/Binding changes, retained removals and configuration-only updates, with repeat, restart and partial-failure evidence and no blind external-effect replay.
+- [x] Prove the bounded integrated operator-update path through published Native AOT CLI and production Host under issue #174 at main 8b8785a: six generations, actual consumer settings/data, pair addition/retention/return, same-revision configuration changes, repeats/no-op, refusal and restart. Required operator checkpoints passed; private-file teardown remains an explicit operational remainder. Standalone/fault/lock/restore evidence stays separately attributed to automated tests; those scenarios were not independently repeated in this operator run.
 
 Implement the checkpoint sequentially: first reuse unchanged Resources across
 generations, then Resource additions and Component/Binding changes with retained
@@ -154,13 +154,23 @@ Exit evidence:
 - Limited updates preserve existing data and credentials, create only admitted new Resources, retain external resources under explicit ownership when their declarations are removed, and accept configuration-only generations without changing ManifestRevision.
 
 P2's first executable path remains static JSON/local Bindings. Profile parameters,
-Liquid/parameter execution, YAML/text execution, selectors, broad rollout and
+Liquid/parameter execution (priority to be reconsidered after P3), YAML/text execution, selectors, broad rollout and
 cross-Application exports are later slices unless a concrete pilot requirement
 explicitly changes that scope. Kubernetes Runtime Identity is not required to
 prove the initial separately scoped retrieval route. The authenticated
 operator API must never become an unrestricted configuration-reveal endpoint.
 
 Authority: ADR-017/018/034/035/036/037.
+
+### Shared-system naming adoption prerequisite before P3
+
+- [x] Accept [ADR-048](docs/adr/0048-environment-scoped-resource-naming.md): logical Resource declarations, immutable exact/prefixed naming policies selected on Environment-to-Provider bindings, adapter-owned physical names, frozen Plan inputs and no implicit renaming or cross-catalog adoption.
+- [ ] Implement [issue #175](https://github.com/hamstix/haby/issues/175): neutral policy administration/selection, exact planning/freshness/snapshot capture and PostgreSQL database/generated-login resolution. Keep literal exact mode; reject unsupported existing/retained name changes. No Liquid/parameter engine or Provider-specific catalog fields.
+- [ ] Prove two independently bootstrapped Haby catalogs using the same Application revision against one disposable PostgreSQL server with distinct contour prefixes, actual configuration delivery/database access, preserved update/retention evidence and safe overlapping-prefix/external-name conflicts. Reservations remain catalog-local; prefixes are not access control.
+
+This is a concrete P2 adoption extension, scheduled before Workload implementation;
+it does not reopen general Resource relocation, rotation or distributed coordination.
+The previous operator rehearsal does not establish this not-yet-implemented capability.
 
 ## P3 - Workload lifecycle
 
@@ -268,7 +278,7 @@ See [CONTRIBUTING](CONTRIBUTING.md),
 GitHub tracking follows the delivery sequence:
 
 - [P1 - Resource provisioning pilot](https://github.com/hamstix/haby/milestone/2): closed, delivered within the documented pilot boundary.
-- [P2 - Application configuration](https://github.com/hamstix/haby/milestone/3): open, current work including issue #126.
+- [P2 - Application configuration](https://github.com/hamstix/haby/milestone/3): open for the ADR-048 shared-system naming adoption prerequisite; the prior bounded operator-update path is functionally verified by issue #174.
 - [P3 - Workload lifecycle](https://github.com/hamstix/haby/milestone/4): open, planned.
 - [P4 - Standard Providers](https://github.com/hamstix/haby/milestone/5): open, planned; individual needed Providers may be pulled forward.
 
