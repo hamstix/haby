@@ -13,6 +13,7 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 $run='haby179-'+[Guid]::NewGuid().ToString('N').Substring(0,12)
 $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $private=[IO.Path]::GetFullPath((Join-Path $tempRoot $run))
+$listCommand=if($Runtime -eq 'docker'){'ps'}else{'list'}
 $image='rancher/k3s@sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248'
 $record=[Collections.Generic.List[string]]::new()
 $failed=$false; $launchAttempted=$false; $privateOwned=$false
@@ -68,7 +69,7 @@ finally {
             $inspection=Call $Runtime @('inspect',$run)
             if($inspection.ExitCode -ne 0){
                 # A successful bounded full inventory distinguishes absence from an inaccessible daemon.
-                $ids=(RuntimeCall @('list','--all','--quiet','--filter',"name=$run")).Trim()
+                $ids=(RuntimeCall @($listCommand,'--all','--quiet','--filter',"name=$run")).Trim()
                 if($ids){throw 'Partial container inaccessible.'}
                 $record.Add('Run-owned container absent after attempted launch.')
             } else {
@@ -80,7 +81,7 @@ finally {
                 if(@($object.Mounts | Where-Object Type -ne 'volume').Count){throw 'Unexpected mount type; cleanup refused.'}
                 try { RuntimeCall @('stop',$id) | Out-Null } catch { $failed=$true; $record.Add('Container stop: FAIL') }
                 RuntimeCall @('remove','--force','--volumes',$id) | Out-Null
-                $remaining=(RuntimeCall @('list','--all','--quiet','--filter',"id=$id")).Trim()
+                $remaining=(RuntimeCall @($listCommand,'--all','--quiet','--filter',"id=$id")).Trim()
                 if($remaining){throw 'Container remains.'}
                 foreach($volume in $volumes){
                     $present=(RuntimeCall @('volume','list','--quiet','--filter',"name=$volume")) -split "`r?`n" | Where-Object {$_ -eq $volume}

@@ -2,6 +2,7 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
+foreach($runtime in @('wslc','docker')){
 foreach($scenario in @('success','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure')){
     $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@()}
     $runner={param($file,$arguments,$seconds)
@@ -17,7 +18,8 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
             'inspect' {if($scenario -eq 'inspect-failure' -or !$state.Created){$result.ExitCode=17}else{$label=if($scenario -eq 'foreign'){'foreign'}else{$state.Name};$result.Output=ConvertTo-Json -Depth 5 -Compress @(@{Id='owned-id';Config=@{Labels=@{'haby.qualification'=$label}};Mounts=@(@{Type='volume';Name='owned-volume';Destination='/var/lib/rancher/k3s'})})}}
             'stop' {if($scenario -eq 'stop-failure'){$result.ExitCode=17}}
             'remove' {if($scenario -eq 'remove-failure'){$result.ExitCode=17}else{if('--volumes' -notin $arguments -or $arguments[-1] -ne 'owned-id'){throw 'Unsafe removal'};$state.Removed=$true;$state.Volumes=$false}}
-            'list' {if($state.Created -and !$state.Removed){$result.Output='owned-id'}}
+            'list' {if($file -eq 'docker'){throw 'docker list is not a supported alias'};if($state.Created -and !$state.Removed){$result.Output='owned-id'}}
+            'ps' {if($state.Created -and !$state.Removed){$result.Output='owned-id'}}
             'volume' {if($state.Volumes){$result.Output='owned-volume'};if($arguments[-1] -eq 'name=foreign-volume'){$result.Output='foreign-volume'}}
             default {throw 'Unexpected synthetic command'}
         }
@@ -26,13 +28,14 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
     $evidence=Join-Path $PSScriptRoot "../.artifacts/regression-$scenario.txt"
     if($scenario -eq 'evidence-failure'){$evidence=Join-Path $PSScriptRoot '../.artifacts'}
     $caught=$false
-    try{& $launcher -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence | Out-Null}catch{$caught=$true}
+    try{& $launcher -Runtime $runtime -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence | Out-Null}catch{$caught=$true}
     if($caught -ne ($scenario -ne 'success')){throw "Wrong exit: $scenario"}
     if(Test-Path -LiteralPath $state.Private){throw "Private leak: $scenario"}
     if($scenario -in @('success','stop-failure','evidence-failure','partial-launch','readiness-deadline') -and (!$state.Removed -or $state.Volumes)){throw "Owned storage leaked: $scenario"}
     if($scenario -eq 'foreign' -and $state.Removed){throw 'Foreign container deleted'}
     foreach($call in $state.Calls){if('foreign-volume' -in $call -and $call[0] -in @('remove','volume')){throw 'Foreign volume targeted'}}
-    Write-Output "PASS lifecycle $scenario (synthetic)"
+    Write-Output "PASS lifecycle $runtime $scenario (synthetic)"
+}
 }
 # Actual child-process deadline, independent of the fake runtime.
 $clock=[Diagnostics.Stopwatch]::StartNew();$timedOut=$false
