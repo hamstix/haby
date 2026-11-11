@@ -17,6 +17,11 @@ Accept a narrow explicit corrective intent after confirmed ResourcesReady and
 before retirement. This decision does not implement that path, weaken current P2
 admission or authorize generic cancellation, rollback or manifest replacement.
 
+[ADR-053](0053-forward-correction-without-rollback.md) makes forward correction
+the deployment policy: no automatic or dedicated historical-state rollback.
+Historical revisions/images may be selected explicitly only under current rules;
+this ADR remains the bounded escape from an incomplete Workload rollout.
+
 ## Decision
 
 ### 1. External repair and desired change differ

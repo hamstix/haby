@@ -142,6 +142,14 @@ acceptance does not remove current pilot guards or implement them in one slice.
     model policy with explicit catalog implications for each implementation slice,
     never silent resets or historical success/evidence fabrication.
 
+## Forward correction policy
+
+[ADR-053](0053-forward-correction-without-rollback.md) selects explicit forward
+correction rather than a dedicated rollback operation. Historical revision/image
+selection remains subject to current supported update rules and reverses no
+external effects. ADR-052 is the narrow future P3 incomplete-rollout exception;
+ordinary fully-applied baseline and current P2 behavior are unchanged.
+
 ## Required evidence and implementation order
 
 First implement cross-generation reuse of unchanged Resources, then additions and
