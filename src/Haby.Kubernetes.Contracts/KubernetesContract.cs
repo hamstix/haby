@@ -40,7 +40,7 @@ public static class KubernetesContract
         }
         else parsedImage = new WorkloadImage.Composed(Text(image, "name")!, Text(image, "tag"), image.TryGetProperty("tagFrom"u8, out _));
         var ports = Map(root, "ports", p => new ContainerPort(Int(p, "containerPort")!.Value, Text(p, "protocol") ?? "TCP"));
-        foreach (var name in ports.Keys) Require(name.Length <= 15 && Match(name, "[a-z](?:[a-z0-9-]*[a-z0-9])?"), "port.name");
+        foreach (var name in ports.Keys) Require(name.Length <= 15 && Match(name, "[a-z][a-z0-9]*(?:-[a-z0-9]+)*"), "port.name");
         var env = Map<EnvironmentValue>(root, "env", e => e.TryGetProperty("value"u8, out var literal)
             ? new EnvironmentValue.Literal(literal.GetString()!)
             : e.TryGetProperty("configMapKey"u8, out var cm) ? new EnvironmentValue.ConfigMap(Key(cm))
@@ -66,7 +66,7 @@ public static class KubernetesContract
         Require(mounts.Select(x => x.MountPath).Distinct(StringComparer.Ordinal).Count() == mounts.Length, "mount.duplicate");
         var routes = Items(root, "routes").Select(r => new Route(Text(r, "hostLabel")!, Text(r, "path")!, Text(r, "port")!, Text(r, "pathType") ?? "Prefix")).ToImmutableArray();
         Require(routes.Select(x => (x.HostLabel, x.Path)).Distinct().Count() == routes.Length, "route.duplicate");
-        foreach (var r in routes) { Label(r.HostLabel); Port(ports, r.Port); HttpPath(r.Path); }
+        foreach (var r in routes) { Label(r.HostLabel); Port(ports, r.Port); RoutePath(r.Path); }
         var probes = root.TryGetProperty("probes"u8, out var ps)
             ? new Probes(Probe(ps, "startup", ports), Probe(ps, "liveness", ports), Probe(ps, "readiness", ports)) : new Probes(null, null, null);
         var documents = root.TryGetProperty("configuration"u8, out var config)
@@ -166,9 +166,20 @@ public static class KubernetesContract
         return new(port, path, http ? Text(action, "scheme") ?? "HTTP" : null, Int(p, "initialDelaySeconds") ?? 0,
             Int(p, "periodSeconds") ?? 10, Int(p, "timeoutSeconds") ?? 1, success, Int(p, "failureThreshold") ?? 3);
     }
-    private static ObjectKey Key(JsonElement key) => new(Dns(Text(key, "name")!), Text(key, "key")!, Bool(key, "optional") ?? false);
+    private static ObjectKey Key(JsonElement key)
+    {
+        var value = Text(key, "key")!;
+        Require(value != "." && !value.StartsWith("..", StringComparison.Ordinal), "env.selector-key");
+        return new(Dns(Text(key, "name")!), value, Bool(key, "optional") ?? false);
+    }
     private static void Port(ImmutableDictionary<string, ContainerPort> ports, string name) => Require(ports.TryGetValue(name, out var port) && port.Protocol == "TCP", "port.reference");
     private static void HttpPath(string path) => Require(path.StartsWith('/') && !path.Any(char.IsControl) && !path.Contains('?') && !path.Contains('#'), "http.path");
+    private static void RoutePath(string path)
+    {
+        HttpPath(path);
+        Require(!new[] { "//", "/./", "/../", "%2f", "%2F" }.Any(sequence => path.Contains(sequence, StringComparison.Ordinal)) &&
+            !path.EndsWith("/.", StringComparison.Ordinal) && !path.EndsWith("/..", StringComparison.Ordinal), "ingress.path");
+    }
     private static void MountPath(string path, bool absolute)
     {
         Require(path.StartsWith('/') == absolute && !path.Contains('\\') && !path.Any(char.IsControl), "mount.path");
@@ -185,6 +196,7 @@ public static class KubernetesContract
     internal static void Registry(string registry)
     {
         var parts = registry.Split(':'); Require(parts.Length is 1 or 2, "image.registry"); Dns(parts[0]);
+        Require(parts.Length == 2 || parts[0] == "localhost" || parts[0].Contains('.'), "image.ambiguous-registry");
         if (parts.Length == 2) Require(int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port is > 0 and <= 65535, "image.registry-port");
     }
     internal static void Tag(string tag) => Require(Match(tag, "[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}"), "image.tag");
@@ -195,7 +207,7 @@ public static class KubernetesContract
         var rest = value[(slash + 1)..]; var digest = rest.IndexOf('@'); string path;
         if (digest >= 0) { path = rest[..digest]; Require(Match(rest[(digest + 1)..], "sha256:[a-f0-9]{64}"), "image.digest"); }
         else { var colon = rest.LastIndexOf(':'); Require(colon > 0, "image.explicit-tag"); path = rest[..colon]; Tag(rest[(colon + 1)..]); }
-        Require(path.Length <= 256 && Match(path, "[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"), "image.path");
+        Require(path.Length <= 255 && Match(path, "[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"), "image.path");
     }
     internal static bool Match(string value, string pattern) => Regex.IsMatch(value, "\\A(?:" + pattern + ")\\z", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
     internal static void Require(bool condition, string code) { if (!condition) throw new WorkloadContractException(code); }

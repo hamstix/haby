@@ -386,4 +386,121 @@ public sealed class KubernetesPlanningTests
         Assert.Equal(253, Resolve(envelope).Objects.Single(x => x.Kind == "ServiceAccount").Name.Length);
     }
 
+    private static void RefusePipeline(JsonObject envelope)
+    {
+        var parsed = ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(envelope.ToJsonString()), Catalog);
+        Assert.IsType<ManifestParseResult.InvalidManifest>(parsed);
+        Assert.Throws<WorkloadContractException>(() => KubernetesContract.DecodeWorkload(
+            Encoding.UTF8.GetBytes(Workload(envelope)["properties"]!.ToJsonString())));
+    }
+
+    [Fact]
+    public void Ambiguous_registry_tokens_never_resolve_to_implicit_Docker_Hub()
+    {
+        Assert.Throws<WorkloadContractException>(() => Resolve(placements: Inputs(Placement(registry: "registry"))));
+        var envelope = Envelope(); Workload(envelope)["properties"]!["image"] = JsonNode.Parse("""{"reference":"team/orders:v1"}"""u8);
+        RefusePipeline(envelope);
+    }
+
+    [Theory]
+    [InlineData("localhost")]
+    [InlineData("registry:5000")]
+    [InlineData("registry.example")]
+    public void Unambiguous_registry_tokens_are_preserved(string registry)
+    {
+        Assert.Equal(registry + "/product/orders:1.4.2", Resolve(placements: Inputs(Placement(registry: registry))).ImageReference);
+        var envelope = Envelope(); Workload(envelope)["properties"]!["image"] = new JsonObject { ["reference"] = registry + "/orders:v1" };
+        Assert.Equal(registry + "/orders:v1", Resolve(envelope).ImageReference);
+    }
+
+    [Theory]
+    [InlineData("http--api", false)]
+    [InlineData("http-api", true)]
+    public void Port_names_prohibit_adjacent_hyphens(string name, bool valid)
+    {
+        var envelope = Envelope(); Workload(envelope)["properties"]!["ports"] = new JsonObject { [name] = new JsonObject { ["containerPort"] = 8080 } };
+        if (valid) Assert.Equal(8080, Resolve(envelope).Declaration.Ports[name].Number);
+        else RefusePipeline(envelope);
+    }
+
+    [Theory]
+    [InlineData("configMapKey", ".", false)]
+    [InlineData("configMapKey", "..", false)]
+    [InlineData("configMapKey", "..data", false)]
+    [InlineData("secretKey", ".", false)]
+    [InlineData("secretKey", "..", false)]
+    [InlineData("secretKey", "..data", false)]
+    [InlineData("configMapKey", ".config", true)]
+    [InlineData("secretKey", "a.b", true)]
+    public void Selector_keys_prohibit_directory_traversal_prefixes(string source, string key, bool valid)
+    {
+        var envelope = Envelope(); Workload(envelope)["properties"]!["env"] = new JsonObject
+        { ["SETTING"] = new JsonObject { [source] = new JsonObject { ["name"] = "settings", ["key"] = key, ["optional"] = true } } };
+        if (valid) Assert.Single(Resolve(envelope).Declaration.Environment); else RefusePipeline(envelope);
+    }
+
+    [Theory]
+    [InlineData("/api//v1")]
+    [InlineData("/api/../admin")]
+    [InlineData("/api/./v1")]
+    [InlineData("/api%2Fv1")]
+    [InlineData("/api%2fv1")]
+    [InlineData("/api/.")]
+    [InlineData("/api/..")]
+    public void Ingress_paths_reject_invalid_sequences_for_both_supported_path_types(string path)
+    {
+        foreach (var type in new[] { "Exact", "Prefix" })
+        {
+            var envelope = Envelope(Properties); var route = Workload(envelope)["properties"]!["routes"]![0]!;
+            route["path"] = path; route["pathType"] = type; RefusePipeline(envelope);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Complete_image_repository_paths_have_a_255_character_boundary(bool digest)
+    {
+        foreach (var length in new[] { 255, 256 })
+        {
+            var reference = "registry.example/" + new string('a', length) + (digest ? "@sha256:" + new string('a', 64) : ":v1");
+            var envelope = Envelope(); Workload(envelope)["properties"]!["image"] = new JsonObject { ["reference"] = reference };
+            if (length == 255) Assert.Equal(reference, Resolve(envelope).ImageReference); else RefusePipeline(envelope);
+        }
+    }
+
+    [Theory]
+    [InlineData("/api//v1")]
+    [InlineData("/api/../admin")]
+    [InlineData("/api%2Fv1")]
+    public void Ingress_specific_path_rules_do_not_restrict_HTTP_probes(string path)
+    {
+        var envelope = Envelope(Properties);
+        Workload(envelope)["properties"]!["probes"]!["liveness"]!["httpGet"]!["path"] = path;
+        Assert.Equal(path, Resolve(envelope).Declaration.Probes.Liveness!.Path);
+    }
+
+    [Theory]
+    [InlineData("Exact")]
+    [InlineData("Prefix")]
+    public void Ordinary_ingress_paths_survive_schema_snapshot_and_resolution(string type)
+    {
+        var envelope = Envelope(Properties); var route = Workload(envelope)["properties"]!["routes"]![0]!;
+        route["path"] = "/api/v1/"; route["pathType"] = type;
+        var result = Resolve(envelope);
+        Assert.Equal("/api/v1/", Assert.Single(result.Declaration.Routes).Path);
+        Assert.True(result.Settings.Ingress!.Enabled);
+    }
+
+    [Fact]
+    public void Composed_repository_path_is_checked_after_prefix_and_name_are_combined()
+    {
+        var placement = Placement(settings: new JsonObject { ["repositoryPrefix"] = new string('p', 128) }.ToJsonString());
+        var envelope = Envelope();
+        Workload(envelope)["properties"]!["image"] = new JsonObject { ["name"] = new string('a', 126), ["tag"] = "v1" };
+        Assert.Contains(new string('p', 128) + "/" + new string('a', 126), Resolve(envelope, Inputs(placement)).ImageReference, StringComparison.Ordinal);
+        Workload(envelope)["properties"]!["image"]!["name"] = new string('a', 127);
+        Assert.Throws<WorkloadContractException>(() => Resolve(envelope, Inputs(placement)));
+    }
+
 }

@@ -291,10 +291,13 @@ public sealed partial class PostgreSqlApplicationLoginTests
 
             async Task VerifyRestored(string connection)
             {
+                // Startup validates catalog model metadata; delivery must still use only its frozen inputs.
+                trap.ForbidCurrentInputs = false;
                 await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0", "--Haby:ListenAddress=127.0.0.1"],
                     s => s.AddSingleton<TimeProvider>(clock).AddDbContextFactory<ManifestCatalogDbContext>(o => o.AddInterceptors(trap)));
                 await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
                 await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+                trap.ForbidCurrentInputs = true;
                 using var channel = GrpcChannel.ForAddress(host.Urls.Single());
                 var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
                 await RunRuntime(host.Urls.Single(), api.Artifact.RevisionId, credentialFile, scenario);

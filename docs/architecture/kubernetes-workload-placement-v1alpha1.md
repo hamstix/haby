@@ -22,9 +22,9 @@ Strings are ordinal, without trimming, expansion, templating or conversion.
 | image complete | reference (1..512) | Exclusive with name/tag/tagFrom; explicit registry/path and tag or sha256 digest required. |
 | containerName | DNS label, 1..63 | Independent of image and object name; future managed rename refuses. |
 | nameOverride | DNS subdomain, 1..253 | Replaces applicationId-componentId-workloadId completely; no truncation/hash/random fallback. Validate every selected kind separately. |
-| ports | map, 0..32 named entries | Names 1..15 lower-case labels containing a letter; each port has containerPort integer 1..65535 and optional protocol TCP/UDP (default TCP). |
+| ports | map, 0..32 named entries | Names 1..15 lower-case labels starting with a letter, without adjacent hyphens; each port has containerPort integer 1..65535 and optional protocol TCP/UDP (default TCP). |
 | env | map, 0..128 variable names | Name [A-Za-z_][A-Za-z0-9_]*, max 128. Each value is exactly one of value string (0..4096), configMapKey or secretKey. |
-| key reference | name, key, optional | Existing DNS-subdomain name; key 1..253 [A-Za-z0-9._-]; optional boolean defaults false. No ownership or envFrom. |
+| key reference | name, key, optional | Existing DNS-subdomain name; key 1..253 [A-Za-z0-9._-], excluding dot, dot-dot and every leading double dot; optional boolean defaults false. No ownership or envFrom. |
 | probes | startup, liveness, readiness | Optional individual probe objects. Absent probes stay absent. |
 | probe | httpGet or tcpSocket; initialDelaySeconds, periodSeconds, timeoutSeconds, successThreshold, failureThreshold | Exactly one action. Delay 0..3600 default 0; period 1..3600 default 10; timeout 1..3600 default 1; success 1..100 default 1; failure 1..100 default 3. Startup/liveness success must be 1. |
 | httpGet | port, path, scheme | Named declared TCP port; absolute path 1..2048; scheme HTTP/HTTPS default HTTP. No arbitrary headers. |
@@ -34,12 +34,12 @@ Strings are ordinal, without trimming, expansion, templating or conversion.
 | PVC volume | name, readOnly | Existing claim; readOnly defaults false. |
 | mounts | array, 0..64 | volume, mountPath required; readOnly defaults true for ConfigMap/Secret, false for PVC; optional subPath. Unique mountPath. |
 | mount paths | mountPath 1..1024; subPath 1..1024 | Absolute normalized Linux mountPath other than /; relative subPath; no empty/dot/dot-dot segments, backslash or NUL. ConfigMap/Secret cannot be writable; readOnly PVC cannot be mounted writable. Haby runtime-token mounts are not user declarations. |
-| routes | array, 0..32 | Unique (hostLabel,path); hostLabel DNS label; path absolute 1..2048; port references declared TCP port; pathType Exact/Prefix defaults Prefix. |
+| routes | array, 0..32 | Unique (hostLabel,path); hostLabel DNS label; path absolute 1..2048, forbidding //, /./, /../, %2f/%2F and trailing /. or /..; port references declared TCP port; pathType Exact/Prefix defaults Prefix. |
 | configuration | documents | Required nonempty unique array 1..128 Component-local IDs. No body, bearer credential, merge order or implicit all-documents. Absent block means no Haby retrieval/binding/token projection. |
 | overrides | replicas, strategy, minReadySeconds, rolloutSeconds, resources, service, headlessService, ingress | Only these operational fields; no Provider, namespace, image, env or nodeSelector override. |
 | Placement envelope | apiVersion, kind, metadata, spec | apiVersion haby.dev/v1alpha1, kind KubernetesPlacement; metadata name local ID and revision positive integer <=2147483647. Portable content carries no internal UUID. |
 | Placement spec | namespace, registry, repositoryPrefix, nodeSelector, imagePullSecrets, replicas, strategy, minReadySeconds, rolloutSeconds, resources, service, headlessService, ingress | namespace required DNS label; no default namespace. Exact Environment/Provider binding supplied separately to pure resolution. |
-| registry | address string 1..253 | Required for composed image only. Lower-case DNS hostname or localhost, optional decimal port 1..65535. No URL scheme, path, credentials or implicit Docker Hub. |
+| registry | address string 1..253 | Required for composed image only. Unambiguous lower-case dotted hostname/IP, localhost, or single-label host with explicit decimal port 1..65535. No URL scheme, path, credentials or implicit Docker Hub. |
 | repositoryPrefix | string 1..128 | Lower-case repository path, optional; no leading/trailing slash. |
 | nodeSelector | map 0..64 | Kubernetes qualified label keys (optional DNS prefix plus name); values 0..63 alphanumeric with interior -_.; absent empty. |
 | imagePullSecrets | array 0..32 | Unique existing DNS-subdomain names; absent empty. |
@@ -78,8 +78,8 @@ kinds may intentionally share a name. No external object existence is inferred.
 
 Image path components use [a-z0-9]+ separated by single dot, underscore or hyphen;
 slashes separate components. Tags use [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}.
-Complete references require explicit registry/path:tag or registry/path@sha256:
-followed by exactly 64 lowercase hex digits. No tag-plus-digest alternative.
+Complete references require an unambiguous registry token (localhost, a dotted host/IP, or a host with an explicit valid port), then /path:tag or /path@sha256:
+followed by exactly 64 lowercase hex digits. Repository path is at most 255 characters, excluding registry, tag and digest. No tag-plus-digest alternative. Ambiguous forms such as team/orders:v1 and registry=registry refuse instead of silently selecting Docker Hub.
 A static tag is a fixed string, not immutable bytes; a digest identifies content.
 The actual selected ApplicationVersion is passed explicitly: an accepted version
 such as 1.0+build can still be invalid as an image tag and must refuse.
@@ -153,3 +153,19 @@ Managed container/object renames and namespace/Provider relocation remain future
 runtime refusals; the pure layer has no owned-object inventory and grants no adoption.
 
 Object-name constraints follow the [Kubernetes name categories](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/); Service validation does not depend on the optional relaxed-name feature gate.
+
+## Review corrections and schema parity
+
+Both portable schemas and typed decoding reject ambiguous registry tokens,
+adjacent hyphens in named ports, prohibited selector-key prefixes, invalid
+Exact/Prefix Ingress path sequences and repository paths longer than 255.
+Positive controls retain localhost, explicit-port single-label registries,
+`.config` selector keys, ordinary dotted keys and 255-character tagged/digest
+paths. HTTP probes retain their separate path rule; Ingress-specific segment and
+encoded-slash restrictions do not apply to them. Unknown fields still refuse.
+
+These lexical restrictions follow upstream [registry recognition](https://github.com/distribution/reference/blob/main/normalize.go),
+[repository-path bounds](https://github.com/distribution/reference/blob/main/reference.go),
+[port/selector-key validation](https://github.com/kubernetes/apimachinery/blob/master/pkg/util/validation/validation.go)
+and [Ingress path validation](https://github.com/kubernetes/kubernetes/blob/master/pkg/apis/networking/validation/validation.go).
+They are pure contract checks, not real API or registry-access evidence.
