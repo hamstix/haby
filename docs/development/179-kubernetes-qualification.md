@@ -243,3 +243,26 @@ config 263d3e3f948d5e1d785be3581af2921b2ba71ebda4bdeef778f0f4edd758c87f.
 Upstream source and notices: [k3s revision](https://github.com/k3s-io/k3s/tree/a6c6cd15c0c42ec9fce21f8ad5f42aa74fddb4f2)
 and [license](https://github.com/k3s-io/k3s/blob/a6c6cd15c0c42ec9fce21f8ad5f42aa74fddb4f2/LICENSE).
 No worker, projection/rotation, readiness, scheduling or load qualification follows.
+### F5-F6 follow-up corrections
+
+F5 uses one shared resolver selecting the first application path, including when
+both /usr/bin and /bin expose Docker. Docker inventory uses ps; WSLc uses list.
+F6 replaces the any-exception negative oracle with exact invocation identity,
+stage sequence, failure reason/category, and independent cleanup requirements.
+The port scenario must arrange its listener and fail specifically at launch,
+without readiness or harness entry. Readiness must reach its real probe and
+exhaust the configured three-second budget without reaching copy or harness.
+An early child timeout is distinct from exhausting that overall budget.
+
+The previous oracle accepted a harmless fixture representing an unrelated copy
+failure, a late failure and an old report. Focused red checks reproduced these
+false positives before correction. Current controls reject those records, missing
+probe/listener setup, premature timeout, unexpected harness entry and cleanup
+failures. Injected ACL/launch/copy failures through the actual launcher are also
+rejected as readiness evidence. Existing report files are refused before launch
+and preserved; report creation uses CreateNew. Each rehearsal uses a unique
+run directory and each report carries a fresh evidence ID and container run ID.
+The four explicit report filenames under .artifacts/qualification-evidence/
+haby179-control-*/ remain the only uploaded artifacts. No credentials are placed
+in that evidence directory. Clean-source Windows/Linux reruns and refreshed
+exact-SHA independent review are required for these changes.

@@ -38,8 +38,8 @@ jobs:
         with:
           name: kubernetes-qualification
           path: |
-            .artifacts/qualification-success.txt
-            .artifacts/qualification-stock.txt
-            .artifacts/qualification-port-collision.txt
-            .artifacts/qualification-readiness-failure.txt
+            .artifacts/qualification-evidence/haby179-control-*/qualification-success.txt
+            .artifacts/qualification-evidence/haby179-control-*/qualification-stock.txt
+            .artifacts/qualification-evidence/haby179-control-*/qualification-port-collision.txt
+            .artifacts/qualification-evidence/haby179-control-*/qualification-readiness-failure.txt
           if-no-files-found: error

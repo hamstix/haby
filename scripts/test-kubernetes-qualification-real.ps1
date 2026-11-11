@@ -1,6 +1,7 @@
 param([ValidateSet('wslc','docker')][string]$Runtime='wslc')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
+. (Join-Path $PSScriptRoot 'kubernetes-qualification-evidence.ps1')
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 $executable=Resolve-QualificationExecutable $Runtime
 $control='haby179-control-'+[Guid]::NewGuid().ToString('N').Substring(0,12)
@@ -10,25 +11,24 @@ try{
     $controlAttempted=$true
     Run @('volume','create','--label',"haby.qualification.control=$control",$control) | Out-Null
     foreach($scenario in @('success','stock','port-collision','readiness-failure')){
-        $path=Join-Path $PSScriptRoot "../.artifacts/qualification-$scenario.txt"
-        $listener=$null;$caught=$false
+        $path=Join-Path $PSScriptRoot "../.artifacts/qualification-evidence/$control/qualification-$scenario.txt"
+        if(Test-Path -LiteralPath $path){throw 'Rehearsal evidence path already exists'}
+        $evidenceId=[Guid]::NewGuid().ToString('N')
+        $listener=$null;$caught=$false;$arranged=$false
         try{
-            if($scenario -eq 'port-collision'){$listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,16443);$listener.Start()}
-            if($scenario -eq 'stock'){& $launcher -Runtime $Runtime -ProbeStockTls -EvidencePath $path}
+            if($scenario -eq 'port-collision'){$listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,16443);$listener.Start();$arranged=$true}
+            if($scenario -eq 'stock'){& $launcher -Runtime $Runtime -ProbeStockTls -EvidencePath $path -EvidenceId $evidenceId}
             elseif($scenario -eq 'readiness-failure'){
                 $runner={param($file,$arguments,$seconds)
                     if($arguments[0] -eq 'exec'){$arguments[-1]='--raw=/haby-qualification-not-ready'}
                     Invoke-QualificationProcess (Resolve-QualificationExecutable $file) $arguments $seconds
                 }
-                & $launcher -Runtime $Runtime -EvidencePath $path -CommandRunner $runner -ReadinessTimeoutSeconds 3 -CommandTimeoutSeconds 3
-            }else{& $launcher -Runtime $Runtime -EvidencePath $path}
+                & $launcher -Runtime $Runtime -EvidencePath $path -EvidenceId $evidenceId -CommandRunner $runner -ReadinessTimeoutSeconds 3 -CommandTimeoutSeconds 3
+            }else{& $launcher -Runtime $Runtime -EvidencePath $path -EvidenceId $evidenceId}
         }catch{$caught=$true}
         finally{if($listener){$listener.Stop()}}
-        if($caught -ne ($scenario -ne 'success')){throw "Unexpected outcome: $scenario"}
-        $report=Get-Content -LiteralPath $path -Raw
-        $storageAbsent=$report.Contains('anonymous volumes absent.') -or ($scenario -eq 'port-collision' -and $report.Contains('Run-owned container absent after attempted launch.'))
-        if(!$report.Contains('Run-owned private directory removed.') -or !$storageAbsent){throw "Teardown not proven: $scenario"}
-        if($scenario -eq 'stock' -and !$report.Contains('FAIL stock SslCaCerts accepted mismatched server name')){throw 'Stock defect not reproduced'}
+        Assert-QualificationScenario -Path $path -EvidenceId $evidenceId -Scenario $scenario -Caught $caught -ListenerArranged $arranged
+        Write-Output ("Evidence report: "+[IO.Path]::GetFullPath($path))
         $volume=(Run @('volume','inspect',$control) | ConvertFrom-Json)[0]
         if($volume.Labels.'haby.qualification.control' -ne $control){throw 'Control volume changed'}
         "PASS real $Runtime $scenario teardown; foreign control volume preserved."

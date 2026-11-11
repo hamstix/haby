@@ -1,6 +1,7 @@
 param(
     [ValidateSet('wslc','docker')][string]$Runtime='wslc',
-    [string]$EvidencePath='.artifacts/kubernetes-qualification.txt',
+    [string]$EvidencePath='',
+    [string]$EvidenceId=([Guid]::NewGuid().ToString('N')),
     [switch]$ProbeStockTls,
     [ValidateRange(1,120)][int]$CommandTimeoutSeconds=20,
     [ValidateRange(1,300)][int]$ReadinessTimeoutSeconds=120,
@@ -10,6 +11,9 @@ $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 Set-Location (Split-Path $PSScriptRoot -Parent)
+if(!$EvidencePath){$EvidencePath=Join-Path '.artifacts' ($EvidenceId+'.txt')}
+if(Test-Path -LiteralPath $EvidencePath){throw 'Evidence path already exists; fresh report required.'}
+$stage='setup'; $reason='command'
 $run='haby179-'+[Guid]::NewGuid().ToString('N').Substring(0,12)
 $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $private=[IO.Path]::GetFullPath((Join-Path $tempRoot $run))
@@ -17,6 +21,7 @@ $listCommand=if($Runtime -eq 'docker'){'ps'}else{'list'}
 $image='rancher/k3s@sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248'
 $record=[Collections.Generic.List[string]]::new()
 $failed=$false; $launchAttempted=$false; $privateOwned=$false
+$record.Add('Evidence ID: '+$EvidenceId); $record.Add('Run ID: '+$run)
 $record.Add('Source: '+(& git rev-parse HEAD))
 $record.Add('Dirty: '+[bool](& git status --porcelain))
 $record.Add('UTC: '+[DateTimeOffset]::UtcNow.ToString('O'))
@@ -34,7 +39,8 @@ function RuntimeCall([string[]]$Arguments,[int]$Seconds=$CommandTimeoutSeconds) 
 function Save-Evidence {
     try {
         New-Item -ItemType Directory -Force (Split-Path ([IO.Path]::GetFullPath($EvidencePath))) | Out-Null
-        $record | Set-Content -LiteralPath $EvidencePath
+        $stream=[IO.File]::Open([IO.Path]::GetFullPath($EvidencePath),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try{$writer=[IO.StreamWriter]::new($stream); try{foreach($line in $record){$writer.WriteLine($line)}}finally{$writer.Dispose()}}finally{$stream.Dispose()}
     } catch { $script:failed=$true; $record.Add('Evidence write: FAIL') }
 }
 try {
@@ -45,23 +51,28 @@ try {
     if($acl.ExitCode -ne 0){throw 'Private directory permissions failed.'}
     $record.Add('Runtime version: '+(RuntimeCall @('--version')).Trim())
     $sdk=Call 'dotnet' @('--version'); if($sdk.ExitCode -ne 0){throw 'SDK unavailable.'}; $record.Add('SDK: '+$sdk.Output.Trim())
-    $launchAttempted=$true
-    RuntimeCall @('run','-d','--name',$run,'--label',"haby.qualification=$run",'-p','127.0.0.1:16443:6443',$image,'server','--disable-agent','--disable','traefik','--disable','servicelb','--disable','metrics-server','--disable','coredns','--disable','local-storage','--egress-selector-mode','disabled','--tls-san','127.0.0.1','--write-kubeconfig-mode','600') 180 | Out-Null
+    $stage='launch'; $record.Add('Stage: launch-start'); $launchAttempted=$true
+    $launch=Call $Runtime @('run','-d','--name',$run,'--label',"haby.qualification=$run",'-p','127.0.0.1:16443:6443',$image,'server','--disable-agent','--disable','traefik','--disable','servicelb','--disable','metrics-server','--disable','coredns','--disable','local-storage','--egress-selector-mode','disabled','--tls-san','127.0.0.1','--write-kubeconfig-mode','600') 180
+    if($launch.ExitCode -ne 0){$reason='nonzero';throw 'Launch refused.'}
+    $record.Add('Stage: launch-complete'); $stage='readiness'; $record.Add('Stage: readiness-start'); $record.Add('Readiness budget seconds: '+$ReadinessTimeoutSeconds)
     $timer=[Diagnostics.Stopwatch]::StartNew(); $ready=$false
     while($timer.Elapsed.TotalSeconds -lt $ReadinessTimeoutSeconds){
         $remaining=[Math]::Max(1,[int][Math]::Ceiling($ReadinessTimeoutSeconds-$timer.Elapsed.TotalSeconds))
+        $record.Add('Stage: readiness-probe')
         $probe=Call $Runtime @('exec',$run,'/bin/kubectl','--kubeconfig','/etc/rancher/k3s/k3s.yaml','--request-timeout=3s','get','--raw=/readyz') ([Math]::Min($CommandTimeoutSeconds,$remaining))
         if($probe.ExitCode -eq 0){$ready=$true;break}
         Start-Sleep -Milliseconds 200
     }
-    if(!$ready){throw [TimeoutException]::new('Readiness deadline exceeded.')}
+    if(!$ready){$reason='deadline';throw [TimeoutException]::new('Readiness deadline exceeded.')}
+    $record.Add('Stage: readiness-complete'); $stage='copy'; $record.Add('Stage: copy-start')
     foreach($pair in @(@('server-ca.crt','ca.crt'),@('client-admin.crt','admin.crt'),@('client-admin.key','admin.key'))){RuntimeCall @('cp',"${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])",(Join-Path $private $pair[1])) | Out-Null}
+    $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
     [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}else{@()}
     $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-restore','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
     foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
-    if($result.ExitCode -ne 0){throw 'Harness failed.'}
+    if($result.ExitCode -ne 0){$reason='nonzero';throw 'Harness failed.'}
     $record.Add('Harness: PASS')
-} catch { $failed=$true; $record.Add('Run: FAIL; category='+$_.Exception.GetType().Name) }
+} catch { $failed=$true; if($stage -eq 'readiness'){$record.Add('Readiness elapsed milliseconds: '+$timer.ElapsedMilliseconds); if($_.Exception -is [TimeoutException]){$reason=if($timer.Elapsed.TotalSeconds -ge $ReadinessTimeoutSeconds){'deadline'}else{'child-deadline'}}}; $record.Add('Failure: stage='+$stage+'; reason='+$reason+'; category='+$_.Exception.GetType().Name) }
 finally {
     # Each cleanup stage is independent. No evidence/daemon failure suppresses private cleanup.
     if($launchAttempted){
