@@ -48,6 +48,62 @@ public sealed partial class PlacementRevisionPersistenceTests
     [InlineData("create")]
     [InlineData("update")]
     [InlineData("equal")]
+    public async Task Component_CAS_uses_one_pool_connection_and_preserves_exact_checked_audit(string operation)
+    {
+        var (connection, first, second) = await SelectionDatabase();
+        var references = new Dictionary<string, ManifestRevisionRef>();
+        await using (var arrange = Services(connection))
+        {
+            var importer = new ImportApplicationManifest(arrange.GetRequiredService<IManifestImportStore>(), new ManifestContractCatalog([], [], [], []), TimeProvider.System);
+            foreach (var version in new[] { "2", "1" })
+            {
+                var envelope = "{\"applicationVersion\":\"" + version + "\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"assigned\"},\"spec\":{\"components\":{\"api\":{}}}}}";
+                references[version] = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await importer.ExecuteAsync(Bytes(envelope), "importer")).ManifestRevisionRef;
+            }
+        }
+        var target = Target.Create("component", application: "assigned", component: "api");
+        PersistedPlacementSelection? original = null;
+        if (operation != "create")
+        {
+            await using var arrange = Services(connection);
+            original = (await arrange.GetRequiredService<PlacementSelectionAdministration>().ApplyAsync("dev", "cluster", target,
+                "standard-runtime", 1, "2", Absent, "original", default)).Selection!;
+        }
+        PlacementSelectionResult result;
+        var settings = new NpgsqlConnectionStringBuilder(connection) { Pooling = true, MaxPoolSize = 1, Timeout = 1 };
+        await using (var source = NpgsqlDataSource.Create(settings.ConnectionString))
+        {
+            var factory = new SingleConnectionFactory(source); var codec = new KubernetesPlacementCodec();
+            var manifests = new PostgreSqlManifestImportStore(factory);
+            var service = new PlacementSelectionAdministration(new PostgreSqlEnvironmentQuery(factory), new PostgreSqlPlacementSelectionScopeQuery(factory, manifests),
+                new PostgreSqlPlacementRevisionStore(factory, codec), new PostgreSqlPlacementSelectionStore(factory, codec), TimeProvider.System);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            result = await service.ApplyAsync("dev", "cluster", target, "standard-runtime", operation == "update" ? 2 : 1,
+                operation == "create" ? "2" : "1", original is null ? Absent : Match(original), "limited", deadline.Token);
+            var found = await service.GetAsync("dev", "cluster", target, deadline.Token);
+            Assert.Equal(PlacementSelectionOutcome.Found, found.Outcome); Assert.Equal(result.Selection, found.Selection);
+        }
+        Assert.Equal(operation == "create" ? PlacementSelectionOutcome.Created : operation == "update" ? PlacementSelectionOutcome.Updated : PlacementSelectionOutcome.Unchanged, result.Outcome);
+        var accepted = result.Selection!;
+        Assert.Equal(operation == "update" ? second.Key : first.Key, accepted.Reference);
+        Assert.Equal(references[operation == "update" ? "1" : "2"], accepted.Audit.CheckedRevision);
+        if (operation == "equal") Assert.Equal(original, accepted);
+        else { Assert.Equal("limited", accepted.Audit.ActorId); Assert.NotEqual(original?.Token, accepted.Token); }
+        await using var verify = Context(connection); var stored = await verify.PlacementSelections.AsNoTracking().SingleAsync();
+        Assert.Equal(accepted.Token.Value, stored.Token); Assert.Equal(accepted.Audit.ActorId, stored.ActorId); Assert.Equal(accepted.Audit.ChangedAtUtc, stored.ChangedAtUtc);
+        Assert.Equal(operation == "update" ? second.Id : first.Id, stored.RevisionId);
+        Assert.Equal(Guid.Parse(accepted.Audit.CheckedRevision!.ApplicationRecordId.ToString()), stored.CheckedApplicationRecordId);
+        Assert.Equal(accepted.Audit.CheckedRevision.RevisionNumber.Value, stored.CheckedRevisionNumber);
+    }
+    private sealed class SingleConnectionFactory(NpgsqlDataSource source) : IDbContextFactory<ManifestCatalogDbContext>
+    {
+        public ManifestCatalogDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(source).Options);
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("update")]
+    [InlineData("equal")]
     [InlineData("mixed")]
     public async Task Selection_synchronized_CAS_races_have_truthful_reference_token_actor_and_audit(string race)
     {

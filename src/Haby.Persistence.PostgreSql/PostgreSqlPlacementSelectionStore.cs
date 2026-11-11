@@ -13,7 +13,7 @@ public sealed class PostgreSqlPlacementSelectionStore(IDbContextFactory<Manifest
         var row = await Query(db, environment, alias, target).AsNoTracking().SingleOrDefaultAsync(token);
         if (row is null) return null;
         row.Revision = await db.PlacementRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.RevisionId, token) ?? throw new InvalidDataException("Stored Placement selection is unavailable.");
-        return await RehydrateAsync(row, token);
+        return await RehydrateAsync(db, row, token);
     }
     public async ValueTask<PlacementSelectionResult> ApplyAsync(PlacementSelectionTarget target, PlacementRevisionKey reference,
         PlacementSelectionPrecondition precondition, PlacementSelectionAudit audit, CancellationToken token)
@@ -25,7 +25,7 @@ public sealed class PostgreSqlPlacementSelectionStore(IDbContextFactory<Manifest
             var row = await Query(db, reference.Environment, reference.Alias, target).SingleOrDefaultAsync(token);
             if (row is not null) row.Revision = await db.PlacementRevisions.SingleOrDefaultAsync(x => x.Id == row.RevisionId, token)
                 ?? throw new InvalidDataException("Stored Placement selection is unavailable.");
-            var current = row is null ? null : await RehydrateAsync(row, token);
+            var current = row is null ? null : await RehydrateAsync(db, row, token);
             if (precondition switch
             {
                 PlacementSelectionPrecondition.ExpectedAbsence => current is not null,
@@ -67,7 +67,7 @@ public sealed class PostgreSqlPlacementSelectionStore(IDbContextFactory<Manifest
                 row.CheckedApplicationRecordId = audit.CheckedRevision is { } r ? Guid.Parse(r.ApplicationRecordId.ToString()) : null;
                 row.CheckedRevisionNumber = audit.CheckedRevision?.RevisionNumber.Value;
             }
-            var accepted = await RehydrateAsync(row!, token);
+            var accepted = await RehydrateAsync(db, row!, token);
             await db.SaveChangesAsync(token);
             token.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
@@ -84,7 +84,7 @@ public sealed class PostgreSqlPlacementSelectionStore(IDbContextFactory<Manifest
         return db.PlacementSelections.Where(x => x.EnvironmentRecordId == env && x.ProviderAlias == alias.Value && x.TargetKind == target.Kind &&
             x.Selector == target.Selector && x.ApplicationId == target.Application && x.ComponentRef == target.Component);
     }
-    private async ValueTask<PersistedPlacementSelection> RehydrateAsync(PlacementSelectionRow row, CancellationToken token)
+    private async ValueTask<PersistedPlacementSelection> RehydrateAsync(ManifestCatalogDbContext db, PlacementSelectionRow row, CancellationToken token)
     {
         try
         {
@@ -98,7 +98,13 @@ public sealed class PostgreSqlPlacementSelectionStore(IDbContextFactory<Manifest
                 ManifestRevisionNumber.Create(row.CheckedRevisionNumber!.Value)) : null;
             if (check is not null)
             {
-                var manifest = await new PostgreSqlManifestImportStore(contexts).FindAsync(check, token);
+                // Apply owns an active transaction: validate on its connection rather than
+                // renting a second one and waiting on our own pool slot.
+                var checkedApplication = Guid.Parse(check.ApplicationRecordId.ToString());
+                var checkedNumber = check.RevisionNumber.Value;
+                var stored = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == checkedApplication &&
+                    x.LocalRevisionNumber == checkedNumber, token);
+                var manifest = stored is null ? null : PostgreSqlManifestImportStore.Rehydrate(stored);
                 if (manifest is null || manifest.ApplicationId.Value != target.Application ||
                     !manifest.Declaration.Spec.Components.ContainsKey(ManifestLocalId.Create(target.Component))) throw new InvalidDataException();
             }

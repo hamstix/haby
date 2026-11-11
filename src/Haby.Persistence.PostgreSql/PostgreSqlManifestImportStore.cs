@@ -76,7 +76,7 @@ public sealed class PostgreSqlManifestImportStore(IDbContextFactory<ManifestCata
         return row is null ? null : Rehydrate(row);
     }
 
-    private static ManifestRevision Rehydrate(ManifestRevisionRow row)
+    internal static ManifestRevision Rehydrate(ManifestRevisionRow row)
     {
         try
         {

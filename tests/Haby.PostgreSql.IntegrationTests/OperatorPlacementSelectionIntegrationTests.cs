@@ -138,6 +138,8 @@ public sealed partial class OperatorHostIntegrationTests
     [Theory]
     [InlineData("audit")]
     [InlineData("checked-context")]
+    [InlineData("wrong-application")]
+    [InlineData("wrong-component")]
     public async Task Placement_selection_corrupt_audit_or_checked_context_refuses_without_repair(string corruption)
     {
         var connection = await NewDatabaseAsync(); var logs = new ProfileLog();
@@ -146,10 +148,19 @@ public sealed partial class OperatorHostIntegrationTests
         using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         await client.CreateEnvironmentAsync(new() { Name = "pilot" }); await client.ImportPlacementAsync(PlacementPayload(PlacementSamples.Minimal));
         await ImportAssignmentApp(client, "2", "api");
+        var withoutComponent = await ImportAssignmentApp(client, "1", "worker");
+        var foreign = await client.ImportAsync(new() { OriginalEnvelope = ByteString.CopyFromUtf8("""{"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"foreign"},"spec":{"components":{"api":{}}}}}""") });
+        var foreignReference = (foreign.Created ?? foreign.ExistingEquivalent).Revision.Reference;
         var original = (await client.ApplyPlacementSelectionAsync(SelectionApply(SelectionTarget("component"), version: "2"))).Selection;
         await using (var arrange = ProfileContext(connection))
-            await arrange.Database.ExecuteSqlRawAsync(corruption == "audit" ? "UPDATE placement_selections SET actor_id = E'private\\nmarker'" :
+        {
+            if (corruption == "wrong-application") await arrange.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE placement_selections SET checked_application_record_id = {Guid.Parse(foreignReference.ApplicationRecordId)}, checked_revision_number = {foreignReference.RevisionNumber}");
+            else if (corruption == "wrong-component") await arrange.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE placement_selections SET checked_revision_number = {withoutComponent.RevisionNumber}");
+            else await arrange.Database.ExecuteSqlRawAsync(corruption == "audit" ? "UPDATE placement_selections SET actor_id = E'private\\nmarker'" :
                 "UPDATE placement_selections SET checked_application_record_id = '11111111-1111-4111-8111-111111111111'");
+        }
         foreach (var action in new Func<Task>[] {
             async () => await client.GetPlacementSelectionAsync(new() { Environment = "pilot", ProviderAlias = "cluster", Target = SelectionTarget("component") }),
             async () => await client.ApplyPlacementSelectionAsync(SelectionApply(SelectionTarget("component"), 1, original.ConcurrencyToken, "2")) })

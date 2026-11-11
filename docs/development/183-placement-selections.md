@@ -110,7 +110,9 @@ back the whole write; after entering commit the store awaits the database outcom
 without treating late caller cancellation as confirmed rollback.
 
 Exact reads validate target, token, audit, Component checked context and referenced
-adapter contract/content. Corrupt/unsupported present data is unavailable, never
+adapter contract/content. Component audit validation reuses the active catalog
+context/transaction connection and the existing ManifestRevision decoder; it does
+not require an additional connection-pool slot. Corrupt/unsupported present data is unavailable, never
 absence/inheritance, and is neither repaired nor overwritten. Host exceptions use
 the fixed gRPC Internal detail `Placement selection operation failed.` No submitted
 values, driver exceptions or secret material enter errors. Existing immutable
@@ -128,7 +130,8 @@ durable planning and confers no admission or freshness/execution authority.
 Tests cover all four generated RPC/CLI targets, authenticated refusal, imported
 explicit versions in reverse order, missing/renamed Components, equal-context audit
 preservation, stale-equal CAS, same-scope exact revision checks, independent-context
-stored-value assertions, synchronized create/update/equal/mixed races, precommit
+stored-value assertions, single-connection-pool Component create/update/equal/get,
+synchronized create/update/equal/mixed races, precommit
 rollback/cancellation, foreign-key failures, additive upgrade, restart and dump/restore.
 The pure bridge proves named > Component > Application > Environment priority,
 whole revision/settings, missing explicit-selector refusal and alias isolation.
