@@ -17,6 +17,10 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<PlacementReply> ValidatePlacementAsync(PlacementPayloadRequest request, CancellationToken token);
+    Task<PlacementReply> ImportPlacementAsync(PlacementPayloadRequest request, CancellationToken token);
+    Task<PlacementReply> GetPlacementRevisionAsync(PlacementRevisionRequest request, CancellationToken token);
+
     Task<ResourceNamingReply> CreateResourceNamingAsync(CreateResourceNamingRequest request, CancellationToken token);
     Task<ResourceNamingReply> GetResourceNamingAsync(ResourceNamingRequest request, CancellationToken token);
     Task<ResourceNamingReply> GetResourceNamingSelectionAsync(ResourceNamingSelectionRequest request, CancellationToken token);
@@ -114,6 +118,9 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? confi
     public async Task<ResourceNamingReply> GetResourceNamingAsync(ResourceNamingRequest request, CancellationToken token) => await _client.GetResourceNamingAsync(request, headers, cancellationToken: token);
     public async Task<ResourceNamingReply> GetResourceNamingSelectionAsync(ResourceNamingSelectionRequest request, CancellationToken token) => await _client.GetResourceNamingSelectionAsync(request, headers, cancellationToken: token);
     public async Task<ResourceNamingReply> SelectResourceNamingAsync(SelectResourceNamingRequest request, CancellationToken token) => await _client.SelectResourceNamingAsync(request, headers, cancellationToken: token);
+    public async Task<PlacementReply> ValidatePlacementAsync(PlacementPayloadRequest request, CancellationToken token) => await _client.ValidatePlacementAsync(request, headers, cancellationToken: token);
+    public async Task<PlacementReply> ImportPlacementAsync(PlacementPayloadRequest request, CancellationToken token) => await _client.ImportPlacementAsync(request, headers, cancellationToken: token);
+    public async Task<PlacementReply> GetPlacementRevisionAsync(PlacementRevisionRequest request, CancellationToken token) => await _client.GetPlacementRevisionAsync(request, headers, cancellationToken: token);
     private readonly ManifestOperator.ManifestOperatorClient _client = new(channel);
     private readonly ManifestOperator.ManifestOperatorClient _configurationClient = new(configurationChannel ?? channel);
     public async Task<ConfigurationApplicationReply> MaterializeApplicationConfigurationAsync(ConfigurationApplicationRequest request, CancellationToken token) =>

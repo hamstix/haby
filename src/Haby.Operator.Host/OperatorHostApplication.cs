@@ -99,6 +99,9 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<DeliverConfiguration>();
         builder.Services.AddSingleton<ImportApplicationManifest>();
         builder.Services.AddSingleton<ImportConfigurationProfile>();
+        builder.Services.AddSingleton<IPlacementCodec, Haby.Kubernetes.Contracts.KubernetesPlacementCodec>();
+        builder.Services.AddSingleton<IPlacementRevisionStore, PostgreSqlPlacementRevisionStore>();
+        builder.Services.AddSingleton<PlacementAdministration>();
         builder.Services.AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>();
         builder.Services.AddSingleton<PreviewImportedDatabase>();
         builder.Services.AddPostgreSqlManifestCatalog(connection!);

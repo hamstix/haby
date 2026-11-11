@@ -903,6 +903,76 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.PlacementRevisionRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("Contract")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("contract");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<int>("FormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("format_version");
+
+                    b.Property<DateTimeOffset>("ImportedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("imported_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("ProviderAlias")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("provider_alias");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentRecordId", "ProviderAlias", "Name", "Revision")
+                        .IsUnique()
+                        .HasDatabaseName("UX_placement_revision_exact");
+
+                    b.ToTable("placement_revisions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_placement_actor", "length(actor_id) > 0");
+
+                            t.HasCheckConstraint("CK_placement_alias", "provider_alias ~ '^[a-z][a-z0-9]*([.-][a-z0-9]+)*$'");
+
+                            t.HasCheckConstraint("CK_placement_name", "name ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'");
+
+                            t.HasCheckConstraint("CK_placement_revision_positive", "revision > 0");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.PostgreSqlDatabaseRecoveryDecisionRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1877,6 +1947,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.DurableOperationRow", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId", "Generation", "OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.PlacementRevisionRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("EnvironmentRecordId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

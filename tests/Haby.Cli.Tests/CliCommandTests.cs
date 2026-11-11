@@ -51,6 +51,9 @@ public sealed class CliCommandTests
 
     private sealed class FakeClient : IRegistryClient
     {
+        public Task<PlacementReply> ValidatePlacementAsync(PlacementPayloadRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<PlacementReply> ImportPlacementAsync(PlacementPayloadRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<PlacementReply> GetPlacementRevisionAsync(PlacementRevisionRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<ResourceNamingReply> CreateResourceNamingAsync(CreateResourceNamingRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<ResourceNamingReply> GetResourceNamingAsync(ResourceNamingRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<ResourceNamingReply> GetResourceNamingSelectionAsync(ResourceNamingSelectionRequest request, CancellationToken token) => throw new NotSupportedException();

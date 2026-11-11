@@ -41,6 +41,7 @@ internal sealed partial class CliApplication(
         root.Subcommands.Add(ManifestCommands.Create(commands));
         root.Subcommands.Add(Commands.Configuration.ConfigurationCommands.Create(commands));
         root.Subcommands.Add(Commands.Profiles.ProfileCommands.Create(commands));
+        root.Subcommands.Add(Commands.Placements.PlacementCommands.Create(commands));
         root.Subcommands.Add(Commands.Providers.ProviderCommands.Create(commands));
         root.Subcommands.Add(Commands.Providers.ResourceNamingCommands.Create(commands));
         root.Subcommands.Add(Commands.Secrets.SecretCommands.Create(commands));
