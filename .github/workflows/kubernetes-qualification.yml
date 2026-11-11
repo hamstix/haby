@@ -1,0 +1,31 @@
+name: Kubernetes qualification
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/Haby.Kubernetes.Qualification/**'
+      - 'scripts/run-kubernetes-qualification.ps1'
+      - '.github/workflows/kubernetes-qualification.yml'
+permissions:
+  contents: read
+jobs:
+  qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore exact qualification dependencies
+        run: dotnet restore tools/Haby.Kubernetes.Qualification --locked-mode
+      - name: Real isolated Kubernetes API qualification
+        shell: pwsh
+        run: ./scripts/run-kubernetes-qualification.ps1 -Runtime docker
+      - name: Upload sanitized evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-qualification
+          path: .artifacts/kubernetes-qualification.txt
+          if-no-files-found: error
