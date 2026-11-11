@@ -118,9 +118,9 @@ public class ManifestPayloadParserTests
     }
 
     [Theory]
-    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"worker":{"workloads":{"main":{"type":"a/v1","providerRef":"p","profile":"Bad_Id"}}}}}}""", "/spec/components/worker/workloads/main/profile", "workload-profile")]
+    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"worker":{"workloads":{"main":{"type":"a/v1","providerRef":"p","placementRef":"Bad_Id"}}}}}}""", "/spec/components/worker/workloads/main/placementRef", "workload-placement")]
     [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"exports":{"database":{"resourceRef":"database","contract":"a/v1","accessProfile":"Bad_Id"}}}}""", "/spec/exports/database/accessProfile", "access-profile")]
-    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"worker":{"workloads":{"Bad_Id":{"type":"a/v1","providerRef":"p","profile":"worker"}}}}}}""", "/spec/components/worker/workloads/Bad_Id", "workload")]
+    [InlineData("""{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"components":{"worker":{"workloads":{"Bad_Id":{"type":"a/v1","providerRef":"p","placementRef":"worker"}}}}}}""", "/spec/components/worker/workloads/Bad_Id", "workload")]
     public void Invalid_profile_and_workload_ids_use_their_semantic_id_kinds(string manifest, string path, string idKind)
     {
         var diagnostic = Assert.Single(Report(Envelope(manifest)).Diagnostics);
@@ -132,7 +132,7 @@ public class ManifestPayloadParserTests
     [Fact]
     public void Valid_workload_and_access_profile_ids_are_accepted()
     {
-        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"resources":{"database":{"type":"a/v1","providerRef":"p"}},"exports":{"database":{"resourceRef":"database","contract":"a/v1","accessProfile":"read-only"}},"components":{"worker":{"workloads":{"main":{"type":"a/v1","providerRef":"p","profile":"worker"}}}}}}""";
+        var manifest = """{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"example"},"spec":{"resources":{"database":{"type":"a/v1","providerRef":"p"}},"exports":{"database":{"resourceRef":"database","contract":"a/v1","accessProfile":"read-only"}},"components":{"worker":{"workloads":{"main":{"type":"a/v1","providerRef":"p","placementRef":"worker"}}}}}}""";
         Assert.IsType<ManifestParseResult.Valid>(Parse(Envelope(manifest)));
     }
 

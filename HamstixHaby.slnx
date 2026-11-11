@@ -17,6 +17,7 @@
     <Project Path="src/Haby.Configuration.Contracts/Haby.Configuration.Contracts.csproj" />
     <Project Path="src/Haby.Domain/Haby.Domain.csproj" />
     <Project Path="src/Haby.Manifest/Haby.Manifest.csproj" />
+    <Project Path="src/Haby.Kubernetes.Contracts/Haby.Kubernetes.Contracts.csproj" />
     <Project Path="src/Haby.Operator.Contracts/Haby.Operator.Contracts.csproj" />
     <Project Path="src/Haby.Operator.Host/Haby.Operator.Host.csproj" />
     <Project Path="src/Haby.Persistence.PostgreSql/Haby.Persistence.PostgreSql.csproj" />

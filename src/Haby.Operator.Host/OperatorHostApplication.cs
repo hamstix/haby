@@ -83,7 +83,7 @@ public static class OperatorHostApplication
             .AddAuthenticationSchemes(OperatorAuthentication.SchemeName).RequireAuthenticatedUser().Build());
         builder.Services.AddSingleton(PostgreSqlConnectionRendering.CreateCatalog());
         builder.Services.AddSingleton(PostgreSqlConnectionRendering.FormatterCatalog());
-        builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [],
+        builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [Haby.Kubernetes.Contracts.KubernetesContract.Definition],
             [new(OutputContractId.Create(PostgreSqlApplicationConnectionContract.Contract), PostgreSqlConsumerOptions.Schema)],
             [new(PostgreSqlConnectionRendering.Renderer)]));
         builder.Services.AddSingleton(TimeProvider.System);

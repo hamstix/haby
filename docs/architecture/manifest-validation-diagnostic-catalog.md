@@ -93,7 +93,7 @@ resource-export
 binding
 document
 workload
-workload-profile
+workload-placement
 parameter
 provider-alias
 contract
@@ -101,8 +101,8 @@ access-profile
 configuration-slot
 ```
 
-`workload-profile` identifies the Workload `profile` field at
-`/spec/components/{componentId}/workloads/{workloadId}/profile`.
+`workload-placement` identifies the Workload `placementRef` field at
+`/spec/components/{componentId}/workloads/{workloadId}/placementRef`.
 `access-profile` identifies the Resource export `accessProfile` field at
 `/spec/exports/{exportId}/accessProfile`. Both use manifest-local ID syntax.
 Focused tests must assert the diagnostic code, path and `idKind` for each

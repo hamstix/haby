@@ -26,6 +26,10 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
             (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
              await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
             throw new InvalidOperationException("Older naming inputs require an explicitly initialized fresh catalog; external resources remain unchanged.");
+        if (applied.Length > 0 && await context.Revisions.AsNoTracking().AnyAsync(row =>
+                row.NormalizedModelVersion != Haby.Domain.NormalizedApplicationManifest.CurrentModelVersion ||
+                row.SnapshotFormatVersion != Haby.Application.NormalizedSnapshotCodec.FormatVersion, cancellationToken))
+            throw new InvalidOperationException("Unsupported normalized manifest model. Explicitly initialize a fresh catalog; external resources remain unchanged.");
         await context.Database.MigrateAsync(cancellationToken);
     }
 }

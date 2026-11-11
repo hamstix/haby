@@ -222,3 +222,9 @@ requirements are known. Standard Haby codes cover the initial schema boundary.
 - map reports to versioned REST and gRPC contracts in M4;
 - decide persistence and retention for explicit revalidation reports when that
   use case is implemented.
+
+## Current-alpha Workload selector update (#177)
+
+ADR-054 replaces Workload `profile` with `placementRef`; current diagnostics use
+`idKind=workload-placement`. The earlier spelling above is historical. Stored
+diagnostic content is preserved as recorded; no historical parameters are rewritten.

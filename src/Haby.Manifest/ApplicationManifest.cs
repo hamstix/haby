@@ -145,7 +145,7 @@ public sealed class WorkloadDeclaration
 
     [JsonRequired] public required string Type { get; init; }
     [JsonRequired] public required string ProviderRef { get; init; }
-    public string? Profile { get; init; }
+    public string? PlacementRef { get; init; }
     public JsonElement Properties { get => _properties.ValueKind == JsonValueKind.Undefined ? JsonDefaults.EmptyObject : _properties; init => _properties = value; }
 }
 

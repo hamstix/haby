@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-11
 - Scope: Implementation entry packet for P3; contracts and pure resolution first
-- Implementation: Planned in [issue #177](https://github.com/hamstix/haby/issues/177); no runtime change in this decision commit
+- Implementation: Contracts and pure resolution in [issue #177](https://github.com/hamstix/haby/issues/177); see [the field matrix](../architecture/kubernetes-workload-placement-v1alpha1.md). Durable Workload execution remains disabled.
 - Extends: ADR-018/026/033/035/046/047/049/050/051/052/053
 
 ## Context

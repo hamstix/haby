@@ -15,7 +15,7 @@ public sealed class NormalizedApplicationManifestMapperTests
     public void Complete_fixture_maps_all_closed_union_alternatives_to_typed_declarations()
     {
         var mapped = NormalizedApplicationManifestMapper.Map(ReadComplete());
-        Assert.Equal(2, mapped.NormalizedModelVersion);
+        Assert.Equal(3, mapped.NormalizedModelVersion);
         Assert.Equal("haby.dev/v1alpha1", mapped.InputApiVersion);
         Assert.Equal(ApplicationManifestKind.Application, mapped.Kind);
         Assert.Equal("example.service", mapped.ApplicationId.Value);
@@ -67,7 +67,7 @@ public sealed class NormalizedApplicationManifestMapperTests
         var workload = component.Workloads[Id("main")];
         Assert.Equal("kubernetes.workload/v1alpha1", workload.Type.Value);
         Assert.Equal("kubernetes.primary", workload.ProviderRef.Value);
-        Assert.Equal(Id("worker"), workload.Profile);
+        Assert.Equal(Id("worker"), workload.PlacementRef);
         Assert.Equal(ConfigurationNumber.Parse("2"), workload.Properties.Members["replicas"]);
     }
 
@@ -176,7 +176,7 @@ public sealed class NormalizedApplicationManifestMapperTests
     [InlineData("/spec/components/worker/documents/settings/template/count", "2")]
     [InlineData("/spec/components/worker/workloads/main/type", "\"kubernetes.workload/v2\"")]
     [InlineData("/spec/components/worker/workloads/main/providerRef", "\"kubernetes.secondary\"")]
-    [InlineData("/spec/components/worker/workloads/main/profile", "\"other\"")]
+    [InlineData("/spec/components/worker/workloads/main/placementRef", "\"other\"")]
     [InlineData("/spec/components/worker/workloads/main/properties/replicas", "3")]
     public void Every_closed_field_participates_in_equality(string path, string replacement)
     {

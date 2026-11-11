@@ -98,9 +98,9 @@ internal static class NormalizedManifestStructuralComparer
 
     private static bool Workload(NormalizedWorkload left, NormalizedWorkload right) =>
         left.Type == right.Type && left.ProviderRef == right.ProviderRef &&
-        left.Profile == right.Profile && left.Properties.Equals(right.Properties);
+        left.PlacementRef == right.PlacementRef && left.Properties.Equals(right.Properties);
     private static int WorkloadHash(NormalizedWorkload value) =>
-        HashCode.Combine(value.Type, value.ProviderRef, value.Profile, value.Properties);
+        HashCode.Combine(value.Type, value.ProviderRef, value.PlacementRef, value.Properties);
 
     private static bool Parameter(NormalizedParameterDefinition left, NormalizedParameterDefinition right)
     {

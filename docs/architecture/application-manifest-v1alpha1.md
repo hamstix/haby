@@ -217,7 +217,7 @@ collision checks. Import does not resolve Profiles, rules or output support.
 ```
 
 The current v1alpha1 schema identity is unchanged under ADR-033/038. The normalized
-model and internal snapshot format are version 2; superseded snapshots require an
+model and internal snapshot format are version 3; superseded snapshots require an
 explicit fresh catalog. See the [reset requirements](../development/130-binding-configuration-slot.md).
 
 A local target has exactly this closed shape:
@@ -299,7 +299,7 @@ composition or SecretRef interpolation in M2.1.
 
 ## Workloads
 
-> Future P3 change: [ADR-047](../adr/0047-kubernetes-workload-declarations-and-placement.md) accepts replacing `profile` with `placementRef`. [ADR-054](../adr/0054-p3-workload-contracts-and-typed-images.md) defines the typed image.name and independent containerName (default app) entry packet, tracked in [issue #177](https://github.com/hamstix/haby/issues/177). The contract below describes the current implemented alpha; schema, DTO, normalization, snapshot codec and diagnostics will change together in that slice.
+> Issue #177 implements `placementRef` and closed Kubernetes contracts with pure explicit-context resolution. See [the field matrix and API boundary](kubernetes-workload-placement-v1alpha1.md). Durable Workload execution remains refused.
 
 A Workload requires `type` and `providerRef`:
 
@@ -307,12 +307,12 @@ A Workload requires `type` and `providerRef`:
 {
   "type": "kubernetes.workload/v1alpha1",
   "providerRef": "kubernetes.primary",
-  "profile": "worker",
-  "properties": {}
+  "placementRef": "worker",
+  "properties": { "image": { "name": "orders", "tagFrom": "applicationVersion" } }
 }
 ```
 
-`profile` is optional and uses the manifest-local ID syntax. `properties` is an
+`placementRef` is optional and uses the manifest-local ID syntax. `properties` is an
 extension JSON object that defaults to empty. A Workload has no `componentRef`
 because its containing Component defines that relationship structurally.
 
