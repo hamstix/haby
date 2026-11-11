@@ -15,6 +15,8 @@ into one PR. The current durable pilot pins one Resource Provider and rejects
 Workloads; PostgreSQL Resources and Kubernetes Workloads require distinct exact
 resolutions, not an arbitrary first alias or implicit replacement of one Provider.
 
+[ADR-055](0055-p3-implementation-closure-and-coordination.md) closes selection
+scope, credential alternatives, load settings/cadence and coordinator boundaries.
 This packet accepts the implementation shape and initial defaults. Exact closed
 JSON field matrices and engineering bounds accompany the first contract slice.
 It does not claim Workloads, Placement administration or Kubernetes effects exist.
@@ -82,8 +84,8 @@ The composed form uses image.name plus exactly one of:
   revision, NEVER the manifest apiVersion or an inferred latest release;
 - a statically declared tag.
 
-Placement supplies registry address and optional repository prefix, separately
-from existing imagePullSecrets references. For example, name orders, registry
+Placement supplies the required registry address for composed form and optional
+repository prefix, separately from existing imagePullSecrets references. For example, name orders, registry
 registry.customer.local, prefix product and ApplicationVersion 1.4.2 resolve to:
 
 ```text
@@ -154,9 +156,9 @@ not introduce merge/precedence; each document is delivered separately and startu
 requires the mandatory set. No automatic selection of every Component document.
 
 An absent configuration block means the Workload does not retrieve Haby runtime
-configuration. Do not automatically create RuntimeIdentityBinding or Haby token
-projection merely because a Deployment exists. The exact empty-block/list policy
-must be consistent and explicit in the closed contract. No document bytes or static
+configuration. ADR-055 requires a nonempty documents list when the block is present;
+empty object, null and duplicate document IDs refuse. Do not automatically create
+RuntimeIdentityBinding or Haby token projection merely because a Deployment exists. No document bytes or static
 bearer credential is embedded in Workload declarations.
 
 ### 10. Exact Provider resolution set

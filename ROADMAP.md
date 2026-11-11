@@ -182,6 +182,7 @@ using Haby-managed configuration and the same durable state/operation model.
 - [x] Accept the first Workload foundation packet under [ADR-046](docs/adr/0046-kubernetes-workload-foundation-and-rollout-stages.md): unified deployment planning/execution, Kubernetes-specific contracts with neutral core/storage, exact inputs, staged readiness and mandatory retirement cleanup. This is design acceptance, not implementation.
 - [x] Accept Workload declaration and Placement selection rules under [ADR-047](docs/adr/0047-kubernetes-workload-declarations-and-placement.md): immutable Placement revisions, Environment defaults, Application/Component selection, explicit placementRef, bounded overrides, named ports and capability refusal. This is architecture acceptance; concrete schemas, administration and execution remain unimplemented.
 - [x] Accept [ADR-054](docs/adr/0054-p3-workload-contracts-and-typed-images.md): image.name with exact ApplicationVersion/static tag or full reference, Placement registry/prefix, independent containerName default app, explicit defaults/document selection and distinct exact Provider resolutions.
+- [x] Accept [ADR-055](docs/adr/0055-p3-implementation-closure-and-coordination.md): Environment-scoped Providers and alias-scoped Placement selection, namespace authority, explicit credentials/preflight, durable publication/revoke, configurable load defaults, distinct wait/resume, 200-member batch bound, retirement marker and coordinator discretion. Design acceptance only.
 - [ ] Implement [issue #177](https://github.com/hamstix/haby/issues/177): closed current Workload/Placement contracts, placementRef normalization/snapshot preservation, typed immutable models and pure scoped/default/override/name/image resolution with exact Provider inputs. Keep durable Workload admission disabled until its stages are implemented.
 - [ ] Specify closed JSON and reusable placement inheritance/overrides: existing namespace (normally shared per Environment), container/image/ports/env/resources, replicas/strategy/rollout, startup/liveness/readiness probes, nodeSelector, imagePullSecrets and existing ConfigMap/Secret/PVC mounts with optional/readOnly/subPath semantics. Explicit Development Recreate and Production RollingUpdate settings are configuration choices, not Environment-name inference.
 - [ ] Implement Deployment and explicitly selected Service and headless Service (allowed together), plus individual Ingress controlled by placement. No compulsory bundle, arbitrary PodSpec/YAML or ownership of referenced objects; shared product routing remains separate.
@@ -195,7 +196,7 @@ using Haby-managed configuration and the same durable state/operation model.
 - [ ] Implement the ADR-052 corrective intent/Plan/Commit and executor fencing, including failed first rollout, unchanged Resource/Workload identity sets, direct confirmed source reuse and safe eventual retirement. Ordinary updates still require fully applied baseline; no adoption, rollback or replay. Implement planned cleanup with exact inventory/UID/recipient checks.
 - [x] Accept [ADR-050](docs/adr/0050-kubernetes-runtime-identity-and-configuration-publication.md): stable per-ManagedWorkload ServiceAccount/binding, service-account-bound TokenReview, separate exact-document publication/revocation and bounded mass startup. Old Pods may request newer explicitly published revisions; materialization alone grants no access. Design acceptance, not implementation.
 - [ ] Implement exact runtime publication and checked pre-readiness preparation, stable identity/projected token integration, revocation-safe replay and generated delivery clients under ADR-050. Document audience, restore/clone identity and operator procedures using the [mechanism guide](docs/architecture/kubernetes-runtime-configuration.md).
-- [ ] Support and prove at least 150 simultaneously starting runtime clients against a real Kubernetes API: bounded TokenReview rate/concurrency/queue, controlled temporary overload, client backoff/jitter and total startup deadline. Record actual limits, latency, retries and API calls; no positive TokenReview cache or gate reduction.
+- [ ] Implement validated operator-configurable TokenReview concurrency/rate/queue/timeouts and client startup/retry settings under ADR-055. Ordinary CI covers fast deterministic correctness plus existing gates. Separately prove >=150 simultaneous clients, two documents each, against a real Kubernetes API; run manually/periodically before capability acceptance and after material runtime-path changes, not on every commit. Record exact source/settings, latency, retries and API calls; no positive cache or gate reduction.
 - [ ] Implement Kubernetes Runtime Identity and scoped configuration retrieval using the accepted projected-token/TokenReview model.
 - [ ] Support image/version updates through a new accepted desired generation, with observable completion and safe failure behavior.
 - [ ] Separate desired replicas from suspend/resume and temporary operational overrides.
@@ -216,6 +217,27 @@ Provider/reconciler is an integration. Haby still uses PostgreSQL as its default
 source of truth; Kubernetes is not a mandatory runtime for hosting Haby. A CRD
 operator, leader election and Kubernetes-only storage mode are separate later
 capabilities, not prerequisites for this milestone.
+
+### Accepted P3 execution order
+
+Under [ADR-055](docs/adr/0055-p3-implementation-closure-and-coordination.md):
+
+1. Issue #177: contracts and pure resolution.
+2. Kubernetes technical qualification: client/license/API guarantees, isolated Windows/CI runtime and pinned supported/tested versions.
+3. Placement persistence and administration.
+4. Durable multi-Provider inputs and stage checkpoints, including Workload-only empty Resource stages.
+5. Conditional Kubernetes writes and uncertain-result observation.
+6. Runtime Identity/publication/client, operator-configurable limits and separate mass-start proof.
+7. Deployment submission, exact readiness and bounded product/CI batch wait.
+8. Explicit retirement and removal.
+9. Corrective generations with fenced execution and accumulated inventory.
+10. Full operator lifecycle rehearsal.
+
+Qualification may run alongside contract work; production slices are accepted
+sequentially. The coordinator may split narrow issues and choose ordinary technical
+details inside accepted semantics, but ownership/auth/lifecycle/scope/replay changes
+return for architectural approval. This does not change review/gate or Git/merge
+authorization rules. Contract acceptance never enables an incomplete executor.
 
 ## P4 - Standard Providers
 

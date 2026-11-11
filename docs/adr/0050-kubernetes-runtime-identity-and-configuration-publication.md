@@ -205,6 +205,16 @@ latency distribution, retries/rejections and actual Kubernetes TokenReview calls
 Do not replace this with mocked TokenReview or call a run with client failures
 successful merely because the server stayed alive.
 
+[ADR-055](0055-p3-implementation-closure-and-coordination.md) sets initial operator-
+configurable Host/client limits and exact permanent/temporary transport categories.
+Values are validated configuration defaults, not immutable constants; no dynamic
+settings API is required. Its >=150-client healthy rehearsal requests two documents
+per client. Ordinary CI retains fast deterministic correctness checks and existing
+gates; full real-cluster load runs are manual/periodic, mandatory before capability
+acceptance and after material TokenReview/limiter/client changes. Passing ordinary
+CI never substitutes for required load evidence. Stable publication intents and
+conditional revoke/republish semantics are also refined there.
+
 ### 15. Stable identity through rollout and retirement
 
 An Application update keeps its ServiceAccount and binding. Old and new document

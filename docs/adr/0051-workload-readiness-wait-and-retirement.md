@@ -206,6 +206,12 @@ external imagePullSecret repair followed by same-generation completion, bounded
 product/CI batch wait, cleanup retry and retained-data preservation. No client-side
 Kubernetes access, fake readiness or unperformed cleanup success is acceptable.
 
+[ADR-055](0055-p3-implementation-closure-and-coordination.md) refines these
+contracts: wait never starts unsent provisioning; resume can continue authorized
+unfinished stages; batch wait is limited initially to 200 unique exact members.
+A retirement-start marker is persisted before the first destructive action,
+and a different UID after deletion remains a foreign-replacement conflict.
+
 ## Follow-up contracts and limits
 
 Executable status/error/timeout/batch contracts, immutable retirement inventory,

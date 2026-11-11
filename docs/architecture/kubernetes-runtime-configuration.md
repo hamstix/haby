@@ -79,3 +79,17 @@ is retired only after safe recipient/reference checks; P2 static grants are not
 implicitly revoked. A failed cleanup keeps the generation incomplete. Administrators
 can repair external registry access and resume/wait on the same generation without
 recreating resources or changing accepted desired inputs.
+
+## Configuration defaults and load evidence cadence
+
+[ADR-055](../adr/0055-p3-implementation-closure-and-coordination.md) defines
+operator-configurable Host and client defaults, publication/revoke receipts and
+temporary-versus-permanent outcomes. Actual setting keys/ranges and restart/application
+semantics must be documented with implementation; invalid configuration is rejected.
+No dynamic administration API or reload support is implied by configurability.
+
+Ordinary CI tests bounded queue/limiter/cancellation/retry/deadline correctness.
+The full real-cluster >=150-client run (two documents per client) is separate,
+manual or periodic on a developer machine/dedicated runner, and mandatory before
+capability acceptance and after material runtime-path changes. Preserve exact-source,
+configuration/latency/retry/API-rate evidence; green ordinary CI cannot replace it.

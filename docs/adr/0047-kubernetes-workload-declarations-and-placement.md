@@ -32,12 +32,15 @@ because both support reusable settings.
 
 A Kubernetes Provider configuration defines cluster access and exact credential
 references. Namespace and Deployment settings belong to Placement, not Provider
-identity. One Provider may serve several Environments with different namespaces.
+identity. Under [ADR-055](0055-p3-implementation-closure-and-coordination.md),
+ProviderInstance stays Environment-scoped; distinct records may access the same
+external cluster with different namespaces. No global Provider aggregate is implied.
 Provider-specific settings use typed versioned payloads; shared deployment logic
 and persistence acquire no Kubernetes client types or Kubernetes-specific columns.
 
-An Environment configures its Kubernetes Provider alias, existing namespace and
-exact default Placement revision. Applications inherit this configuration without
+Environment + Kubernetes Provider alias scopes the exact default Placement and
+named/scoped selections under ADR-055. Namespace comes from that selected Placement,
+not a competing mutable Environment field. Applications inherit the default without
 individual assignments. Selectors and bulk assignment rules are deferred.
 The existing mandatory Workload.providerRef continues to select a Provider alias;
 planning verifies that resolved placement is compatible with that Provider and
@@ -53,7 +56,8 @@ behind shared identities, without fixed Deployment/Service/Ingress columns.
 
 ### 4. Scoped selection chooses a complete revision
 
-Without an explicit Workload placementRef, selection is:
+Within Environment + Kubernetes Provider alias, without an explicit Workload
+placementRef, selection is:
 
 ```text
 Component assignment
