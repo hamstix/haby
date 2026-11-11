@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - 'tools/Haby.Kubernetes.Qualification/**'
-      - 'scripts/*kubernetes-qualification.ps1'
+      - 'scripts/*kubernetes-qualification*.ps1'
       - '.github/workflows/kubernetes-qualification.yml'
 permissions:
   contents: read
@@ -29,24 +29,17 @@ jobs:
       - name: Check failure propagation
         shell: pwsh
         run: ./scripts/test-kubernetes-qualification.ps1
-      - name: Real isolated Kubernetes API qualification
+      - name: Real API and failure teardown rehearsals
         shell: pwsh
-        run: ./scripts/run-kubernetes-qualification.ps1 -Runtime docker
-      - name: Reproduce stock TLS negative control
-        shell: pwsh
-        run: |
-          $failed = $false
-          try { ./scripts/run-kubernetes-qualification.ps1 -Runtime docker -ProbeStockTls -EvidencePath .artifacts/stock-tls-negative.txt }
-          catch { $failed = $true }
-          $report = Get-Content .artifacts/stock-tls-negative.txt -Raw
-          if (!$failed -or !$report.Contains('FAIL stock SslCaCerts accepted mismatched server name') -or !$report.Contains('Run-owned private directory removed.')) { throw 'Stock TLS negative control did not reproduce safely.' }
-          $global:LASTEXITCODE = 0
+        run: ./scripts/test-kubernetes-qualification-real.ps1 -Runtime docker
       - name: Upload sanitized evidence only
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kubernetes-qualification
           path: |
-            .artifacts/kubernetes-qualification.txt
-            .artifacts/stock-tls-negative.txt
+            .artifacts/qualification-success.txt
+            .artifacts/qualification-stock.txt
+            .artifacts/qualification-port-collision.txt
+            .artifacts/qualification-readiness-failure.txt
           if-no-files-found: error

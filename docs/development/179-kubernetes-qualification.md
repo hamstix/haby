@@ -1,6 +1,6 @@
 # Kubernetes client qualification (#179)
 
-Status: PARTIAL. The qualification tool is outside the production solution and has
+Status: isolated qualification implemented; launcher corrections await final SHA-bound gates and independent review. The qualification tool is outside the production solution and has
 no references from Domain, Application, Manifest, Host or habyctl. No production
 capability, secret persistence, preflight or runtime identity binding is admitted.
 
@@ -51,7 +51,7 @@ Actual Windows process: .NET 10.0.14, resolved SDK 10.0.402 (global.json permits
 `sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248`.
 API reports v1.35.0+k3s1, git a6c6cd15c0c42ec9fce21f8ad5f42aa74fddb4f2.
 The image labels identify Apache-2.0 and the k3s source revision. Full image component
-license inventory remains pending; do not interpret that label as every component's
+license inventory is NOT PERFORMED; do not interpret that label as every component's
 license. No Docker socket or privileged container is used on Windows.
 
 The server runs with its agent disabled. Pods are real API objects with real UIDs
@@ -61,13 +61,13 @@ No arbitrary Kubernetes-version compatibility claim follows.
 
 | Case | Actual local observation | Remaining qualification |
 | --- | --- | --- |
-| A | Named Deployment create returns UID/RV; occupied name 409; original UID retained | Strengthened assertion added; final-source execution pending |
-| B | UID+RV tests; keyed app at index 1; unrelated injected container/annotation preserved; stale RV/wrong UID 422 | Bounded definitive-refusal stabilization added; final-source execution pending |
-| C | UID DELETE, separate GET 404, replacement protected with 409 | Absence polling added; final-source execution pending |
+| A | Named Deployment create returns UID/RV; occupied name 409; original UID retained | Passed on reviewed f31a112; correction revision rerun required |
+| B | UID+RV tests; keyed app at index 1; unrelated injected container/annotation preserved; stale RV/wrong UID 422 | Passed on reviewed f31a112; correction revision rerun required |
+| C | UID DELETE, separate GET 404, replacement protected with 409 | Passed on reviewed f31a112; correction revision rerun required |
 | D | Real bound token validates SA UID/namespace/Pod name+UID/audience; invalid/wrong audience/unbound deny | No owner-chain inference; no production policy implementation |
 | E | Watch cancellation about 2 seconds; accepted marked POST response loss injected, one SDK attempt, exact UID/marker/state GET | Broader transport edge-case analysis |
-| F | mTLS API access; bearer SelfSubjectReview exact SA identity; invalid bearer 401 | Untrusted CA and wrong-key controls passed locally; final-source execution pending |
-| G | Actual Windows WSLc run, initially dirty working-tree evidence | Initial committed Windows/Linux execution passed; updated final-source runs pending |
+| F | mTLS API access; bearer SelfSubjectReview exact SA identity; invalid bearer 401 | All three strict TLS controls passed on reviewed f31a112 |
+| G | Actual Windows WSLc run, initially dirty working-tree evidence | Clean f31a112 passed Windows/Linux; launcher correction reruns required |
 
 The SDK constructor does not install RetryDelegatingHandler. The accepted-response
 loss probe injects failure after a real successful response; it is not a network
@@ -99,14 +99,26 @@ no finalizer is stripped. Container removal destroys this disposable API's stora
 
 ## Validation status
 
-Local solution restore/build passed (0 build warnings/errors); ordinary tests:
-Domain 68, Manifest 282, Persistence 74, Application 493, CLI 338; all passed,
-0 skipped. These ordinary tests do not replace measured PostgreSQL or published AOT.
-Full measured PostgreSQL, published Windows/Linux AOT, dependency security audit,
-formatting, Linux qualification and final SHA-bound local evidence remain pending.
-ROADMAP is intentionally not marked complete. Independent review and a new
-SHA-bound architectural decision are required; #178 approval does not apply.
+At reviewed source f31a11277b78f2ea267bd9771ba153f682e2f3d3, clean Windows and
+Linux A-G execution and the separate expected stock TLS failure passed. Build run
+[43064761342](https://github.com/hamstix/haby/actions/runs/43064761342) passed all
+jobs (synthetic merge e977b680de58e28000a0d4ddb49c3d4f9fe4c412); qualification run
+[43064761469](https://github.com/hamstix/haby/actions/runs/43064761469) checked out
+that exact PR head. Ordinary tests passed 1,255 cases, zero skips; Windows/Linux
+published Native AOT each passed 74 cases with warnings-as-errors publication.
+Full measured PostgreSQL passed 778/778, zero skips, test time 1140.6417616 s,
+wall time 1171.6486064 s, sourceChangedDuringRun=false. Dependency/security and
+format gates passed. These results do not cover later launcher corrections.
 
+The supplemental local full PostgreSQL run started at 331696e and completed with
+774 passed, four failed, zero skipped; sourceChangedDuringRun=true, test time
+1339.0708969 s. Three failures included local socket-address allocation errors;
+one was RPC Internal. Five cases across the four methods passed a fresh targeted
+rerun. This does not replace the complete CI run or prove an environmental cause.
+No production or integration-test code was changed to obtain a green run.
+
+ROADMAP remains incomplete pending final correction gates and renewed independent
+review. #178 architectural approval does not cover this qualification.
 ## Alternative comparison and exact transport boundary
 
 The alternative source inspected is dotnet-kube-client commit
@@ -145,15 +157,6 @@ load. Those require a separately verified worker-capable isolated path. Nothing 
 this qualification installs a system service, modifies firewall/trust or assumes
 WSLc exposes Docker's API. Docker is used only by the Linux CI launcher.
 
-Initial cross-platform evidence at source 331696efd665363d351eb1b42db71a150006c5a1:
-Windows clean checkout passed; Linux qualification run
-[43062134712](https://github.com/hamstix/haby/actions/runs/43062134712) passed on
-merge ref f486b3d29e59836ce049183a9407e5ea266a88cb (.NET 10.0.15). Later qualification
-workflow revisions explicitly check out the PR head SHA to avoid merge-ref ambiguity.
-The initial Build run 43062134630 passed dependency review, validate and both
-published Native AOT jobs; PostgreSQL was still running when this entry was written.
-Local Windows AOT published with warnings-as-errors and 74 published loopback tests
-passed with zero skips. Updated source still requires a final cross-platform run.
 Exact local nupkg SHA-256 (nuspec and packaged-license inspection, not repository-only):
 
 | Package | SHA-256 |
@@ -189,38 +192,54 @@ username namespace, SA UID and the API-returned pod-name/pod-uid extra fields.
 The unbound token may authenticate externally but fails the required Pod policy.
 The temporary audience follows urn:haby:<installation>:<provider> with run-generated
 IDs; these are test fixtures, not persisted installation or Provider records.
-## Stable review handoff status
+## Launcher review corrections
 
-The next published revision adds strict untrusted-root and mismatched-key controls,
-reproducible stock-TLS failure mode, explicit expected HTTP statuses, bounded
-confirmed-refusal patch stabilization, namespace absence observation, watch event
-confirmation, a synthetic launch-failure control, public-only qualification NuGet
-sources and exact-head CI checkout. Some additions have not yet been executed as
-one final-source run. This remains PARTIAL until those executions and required gates
-complete. Source review may start on the published SHA with these pending gates.
+Independent review of f31a112 identified F1-F4. Focused behavioral controls first
+failed against that launcher: anonymous-volume retention, private-directory loss
+of cleanup after inspection failure, partially created container retention, and
+an unbounded readiness child. The corrected controls pass, and remain distinct
+from real Kubernetes evidence.
 
-The local full measured PostgreSQL run started at 331696e while qualification-only
-files were changing. Its eventual sourceChangedDuringRun flag must be retained.
-It is not final clean-source evidence. No production or integration-test source was
-changed and no concurrent build was started during its test phase. Final CI must
-run the complete gates against the stable published revision; earlier counts cannot
-be attributed to that revision. No readiness or merge authorization is requested.
-### Linux evidence and native-exit fixture correction
+- F1: inspect the exact run label and container ID, capture only its image-created
+  anonymous volumes, remove with --force --volumes, and independently observe
+  container and each exact volume absent. Never prune or remove other volumes.
+- F2: independently guard container/storage cleanup, private-key-directory cleanup
+  and sanitized evidence writing. Failure in any stage fails the run without
+  suppressing subsequent cleanup. Permission setup is inside the protected scope.
+- F3: record launch attempt before invoking the engine; inspect after any launch
+  outcome. A successful bounded inventory distinguishes absence from an unavailable
+  daemon. Cleanup refuses an ownership mismatch. Port-collision behavior differs:
+  WSLc leaves no container; Docker can leave an unstarted container and volumes.
+- F4: each child process has a deadline and only its owned process tree is killed.
+  Readiness combines kubectl request timeout with a total stopwatch budget and a
+  remaining-budget child deadline. Cleanup and output draining are also bounded.
 
-At 0835a41e852daf26b713abde4ce4272ecc25db5f, Linux run 43063967956 passed the
-complete strict-factory A-F API checks, all three TLS controls, dependency audit,
-synthetic launch failure and namespace/container/private-directory teardown. The
-separate stock-TLS step failed because GitHub PowerShell's native-error preference
-threw before the expected nonzero probe output was captured. Its sanitized failure
-report and cleanup were retained; this is a harness defect, not a successful stock
-control or a Kubernetes API failure. A focused child-process check reproduced lost
-capture with the preference enabled and retained marker plus exit 1 when disabled.
-The runbook now disables that preference locally and explicitly checks each native
-exit code. A new exact-source Linux stock-control run is required.
-The rerun at 0d2fe4ba0dd188769705fbf61151c93b35ad805a again passed the full
-Linux strict-factory API harness. Retained stock-probe output exposed a second
-fixture defect: PowerShell collapsed the one-element argument array into a scalar,
-then splatted its characters. A focused native argv probe reproduced separate
-characters and proved the repair using an explicitly typed string[] (one exact flag).
-The earlier native-exit diagnosis was incomplete; both fixes are retained. Neither
-failed stock-probe CI step is counted as API qualification success.
+Run synthetic failure controls and the real four-scenario rehearsal:
+
+```powershell
+./scripts/test-kubernetes-qualification.ps1
+./scripts/test-kubernetes-qualification-real.ps1 -Runtime wslc
+# Linux CI runs the same real rehearsal with -Runtime docker.
+```
+
+The real rehearsal covers normal A-F, the expected stock TLS failure, port conflict,
+and readiness failure. It verifies private cleanup and owned storage absence after
+each, while a separately labeled control volume remains intact. The rehearsal
+removes that exact control volume at the end. Only four explicitly named sanitized
+reports are uploaded. Precommit Windows execution passed all four scenarios;
+final clean-source Windows/Linux evidence must be bound to the published revision.
+Earlier runs used plain container removal and may have left anonymous volumes;
+unknown historical volumes must not be guessed or globally pruned.
+
+## Runtime image scope
+
+The upstream-pulled test image is not distributed by Haby. Its full image component
+inventory is NOT PERFORMED, not a claim of complete Apache-2.0 coverage. Mandatory
+commercial qualification covers the selected client and resolved transitive
+packages above. Image identity is linux/amd64: manifest index
+10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248,
+platform manifest 56b7147bf4430ede74e3d658e8bdabe767ebd4a9ea295fc271b05e66eba4de24,
+config 263d3e3f948d5e1d785be3581af2921b2ba71ebda4bdeef778f0f4edd758c87f.
+Upstream source and notices: [k3s revision](https://github.com/k3s-io/k3s/tree/a6c6cd15c0c42ec9fce21f8ad5f42aa74fddb4f2)
+and [license](https://github.com/k3s-io/k3s/blob/a6c6cd15c0c42ec9fce21f8ad5f42aa74fddb4f2/LICENSE).
+No worker, projection/rotation, readiness, scheduling or load qualification follows.
