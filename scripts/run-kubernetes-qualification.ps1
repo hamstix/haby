@@ -4,6 +4,8 @@ param(
     [switch]$ProbeStockTls
 )
 $ErrorActionPreference = 'Stop'
+# Native failures are checked explicitly so expected negative-probe output is retained.
+$PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 $run = 'haby179-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)

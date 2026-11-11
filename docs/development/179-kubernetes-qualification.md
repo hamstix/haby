@@ -205,3 +205,15 @@ It is not final clean-source evidence. No production or integration-test source 
 changed and no concurrent build was started during its test phase. Final CI must
 run the complete gates against the stable published revision; earlier counts cannot
 be attributed to that revision. No readiness or merge authorization is requested.
+### Linux evidence and native-exit fixture correction
+
+At 0835a41e852daf26b713abde4ce4272ecc25db5f, Linux run 43063967956 passed the
+complete strict-factory A-F API checks, all three TLS controls, dependency audit,
+synthetic launch failure and namespace/container/private-directory teardown. The
+separate stock-TLS step failed because GitHub PowerShell's native-error preference
+threw before the expected nonzero probe output was captured. Its sanitized failure
+report and cleanup were retained; this is a harness defect, not a successful stock
+control or a Kubernetes API failure. A focused child-process check reproduced lost
+capture with the preference enabled and retained marker plus exit 1 when disabled.
+The runbook now disables that preference locally and explicitly checks each native
+exit code. A new exact-source Linux stock-control run is required.
