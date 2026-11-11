@@ -356,7 +356,7 @@ public sealed partial class DurableDeploymentPlanningTests
         }
         await using var check = new NpgsqlConnection(setup.Connection); await check.OpenAsync();
         Assert.Equal(1L, await new NpgsqlCommand("SELECT count(*) FROM deployment_plans", check).ExecuteScalarAsync());
-        Assert.Equal(19L, await new NpgsqlCommand("SELECT count(*) FROM \"__EFMigrationsHistory\"", check).ExecuteScalarAsync());
+        Assert.Equal(20L, await new NpgsqlCommand("SELECT count(*) FROM \"__EFMigrationsHistory\"", check).ExecuteScalarAsync());
     }
 
     private static async Task ObserveConfigurationLockWait(string connection, int owner, int contender,
