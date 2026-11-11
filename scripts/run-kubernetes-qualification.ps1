@@ -49,7 +49,7 @@ try {
     foreach ($pair in @(@('server-ca.crt', 'ca.crt'), @('client-admin.crt', 'admin.crt'), @('client-admin.key', 'admin.key'))) {
         Invoke-Runtime @('cp', "${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])", (Join-Path $private $pair[1])) | Out-Null
     }
-    $probeArgs = if ($ProbeStockTls) { @('--probe-stock-tls') } else { @() }
+    [string[]]$probeArgs = if ($ProbeStockTls) { @('--probe-stock-tls') } else { @() }
     $output = & dotnet run --project tools/Haby.Kubernetes.Qualification --no-restore -- https://127.0.0.1:16443 $private @probeArgs 2>&1
     $exit = $LASTEXITCODE
     foreach ($line in $output) { $record.Add([string]$line) }

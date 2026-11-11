@@ -217,3 +217,10 @@ control or a Kubernetes API failure. A focused child-process check reproduced lo
 capture with the preference enabled and retained marker plus exit 1 when disabled.
 The runbook now disables that preference locally and explicitly checks each native
 exit code. A new exact-source Linux stock-control run is required.
+The rerun at 0d2fe4ba0dd188769705fbf61151c93b35ad805a again passed the full
+Linux strict-factory API harness. Retained stock-probe output exposed a second
+fixture defect: PowerShell collapsed the one-element argument array into a scalar,
+then splatted its characters. A focused native argv probe reproduced separate
+characters and proved the repair using an explicitly typed string[] (one exact flag).
+The earlier native-exit diagnosis was incomplete; both fixes are retained. Neither
+failed stock-probe CI step is counted as API qualification success.
