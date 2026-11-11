@@ -67,7 +67,12 @@ public sealed partial class PlacementRevisionPersistenceTests
         Assert.All(results.Where(x => x.Outcome == PlacementSelectionOutcome.Conflict), x => Assert.Null(x.Selection));
         var winner = race == "equal" ? original! : Assert.Single(results, x => x.Outcome is PlacementSelectionOutcome.Created or PlacementSelectionOutcome.Updated).Selection!;
         Assert.Equal(race == "create" || race == "equal" ? first.Key : second.Key, winner.Reference);
-        if (race != "equal") { Assert.StartsWith("actor-", winner.Audit.ActorId); Assert.NotEqual(original?.Token, winner.Token); }
+        if (race != "equal")
+        {
+            var winningRequest = Array.FindIndex(results, x => x.Outcome is PlacementSelectionOutcome.Created or PlacementSelectionOutcome.Updated);
+            Assert.Equal("actor-" + winningRequest, winner.Audit.ActorId);
+            Assert.NotEqual(original?.Token, winner.Token);
+        }
         foreach (var equal in results.Where(x => x.Outcome == PlacementSelectionOutcome.Unchanged)) Assert.Equal(original, equal.Selection);
         var reloaded = (await SelectionService(connection).GetAsync("dev", "cluster", target, default)).Selection;
         Assert.Equal(winner, reloaded);
