@@ -187,6 +187,13 @@ Component/Workload/Binding from a manifest alone is not proof cleanup occurred.
 Do not delete referenced external volumes/secrets or retained databases/roles.
 First-slice rollout does not authorize destructive Resource deprovisioning.
 
+[ADR-051](0051-workload-readiness-wait-and-retirement.md) accepts exact readiness,
+server-only wait/resume and bounded batch observation for product upgrades and CI.
+AppliedGeneration requires planned retirement completion. External infrastructure
+repair may be followed by observation/resume of the same generation without
+replaying effects. Corrective replacement of accepted desired inputs remains a
+separate pending decision; no implicit superseding of incomplete generations.
+
 ## Required evidence and remaining decisions
 
 On a real test cluster prove install v1 -> authorized configuration retrieval and

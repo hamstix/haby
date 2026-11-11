@@ -69,3 +69,13 @@ rehearsal with documented limits/deadline, bounded server/API work and successfu
 completion under the admitted healthy load profile. Concrete configuration keys,
 limits, RPC errors and executable recovery procedures accompany implementation;
 do not infer them from this design document.
+
+## Rollout and access retirement
+
+[ADR-051](../adr/0051-workload-readiness-wait-and-retirement.md) separates readiness
+from mandatory retirement. Product upgrades and CI may submit Applications first
+and wait for their exact generations as a bounded server batch. Old runtime access
+is retired only after safe recipient/reference checks; P2 static grants are not
+implicitly revoked. A failed cleanup keeps the generation incomplete. Administrators
+can repair external registry access and resume/wait on the same generation without
+recreating resources or changing accepted desired inputs.
