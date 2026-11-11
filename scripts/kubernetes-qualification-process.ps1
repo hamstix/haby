@@ -1,3 +1,6 @@
+function Resolve-QualificationExecutable([string]$Name) {
+    return @(Get-Command $Name -CommandType Application -ErrorAction Stop)[0].Source
+}
 # Owns only the process it starts. Output stays private unless explicitly selected.
 function Invoke-QualificationProcess {
     param([string]$File, [string[]]$Arguments, [int]$TimeoutSeconds = 30)

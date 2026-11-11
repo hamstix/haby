@@ -23,7 +23,7 @@ $record.Add('OS: '+[Runtime.InteropServices.RuntimeInformation]::OSDescription)
 $record.Add('Runtime: '+$Runtime); $record.Add('Image: '+$image)
 function Call([string]$File,[string[]]$Arguments,[int]$Seconds=$CommandTimeoutSeconds) {
     if($CommandRunner){return & $CommandRunner $File $Arguments $Seconds}
-    return Invoke-QualificationProcess -File (Get-Command $File -CommandType Application -ErrorAction Stop).Source -Arguments $Arguments -TimeoutSeconds $Seconds
+    return Invoke-QualificationProcess -File (Resolve-QualificationExecutable $File) -Arguments $Arguments -TimeoutSeconds $Seconds
 }
 function RuntimeCall([string[]]$Arguments,[int]$Seconds=$CommandTimeoutSeconds) {
     $result=Call $Runtime $Arguments $Seconds

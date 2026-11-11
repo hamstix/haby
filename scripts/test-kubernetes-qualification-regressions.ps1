@@ -39,3 +39,10 @@ $clock=[Diagnostics.Stopwatch]::StartNew();$timedOut=$false
 try{Invoke-QualificationProcess -File (Get-Process -Id $PID).Path -Arguments @('-NoProfile','-Command','Start-Sleep -Seconds 60') -TimeoutSeconds 1 | Out-Null}catch [TimeoutException]{$timedOut=$true}
 if(!$timedOut -or $clock.Elapsed.TotalSeconds -gt 8){throw 'Child deadline failed'}
 Write-Output 'PASS real owned child process timeout; no global process kill'
+
+# Linux PATH may expose the same executable through both /usr/bin and /bin.
+& {
+    function Get-Command { param($Name,$CommandType,$ErrorAction) @([pscustomobject]@{Source='first-path'},[pscustomobject]@{Source='second-path'}) }
+    if((Resolve-QualificationExecutable 'fixture') -ne 'first-path'){throw 'Executable resolution joined multiple paths'}
+}
+Write-Output 'PASS executable resolution selects one application path'

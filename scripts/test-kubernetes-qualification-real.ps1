@@ -2,7 +2,7 @@ param([ValidateSet('wslc','docker')][string]$Runtime='wslc')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
-$executable=(Get-Command $Runtime -CommandType Application).Source
+$executable=Resolve-QualificationExecutable $Runtime
 $control='haby179-control-'+[Guid]::NewGuid().ToString('N').Substring(0,12)
 function Run([string[]]$Arguments){$r=Invoke-QualificationProcess $executable $Arguments 30;if($r.ExitCode -ne 0){throw 'Rehearsal runtime command failed'};return $r.Output}
 $controlAttempted=$false
@@ -18,7 +18,7 @@ try{
             elseif($scenario -eq 'readiness-failure'){
                 $runner={param($file,$arguments,$seconds)
                     if($arguments[0] -eq 'exec'){$arguments[-1]='--raw=/haby-qualification-not-ready'}
-                    Invoke-QualificationProcess (Get-Command $file -CommandType Application).Source $arguments $seconds
+                    Invoke-QualificationProcess (Resolve-QualificationExecutable $file) $arguments $seconds
                 }
                 & $launcher -Runtime $Runtime -EvidencePath $path -CommandRunner $runner -ReadinessTimeoutSeconds 3 -CommandTimeoutSeconds 3
             }else{& $launcher -Runtime $Runtime -EvidencePath $path}
