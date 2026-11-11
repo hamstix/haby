@@ -74,6 +74,16 @@ git diff --check
 
 Run narrower project or filtered tests first when that gives faster feedback, but do not substitute them for applicable solution validation in the final report.
 
+Linux CI runs `scripts/ensure-native-aot-prerequisites.sh` before Native AOT publication.
+It compiles, links with bfd and zlib, and executes a temporary C probe using the
+installed clang. Only a failed probe triggers a bounded apt installation and a
+mandatory second probe. The resolved compiler path and bfd selection are passed
+explicitly to `dotnet publish`; verbose probe output records the selected linker.
+This avoids unnecessary package-mirror access on provisioned runners. It does not
+replace warnings-as-errors publication, published-binary tests or measured PostgreSQL
+tests. `scripts/test-native-aot-prerequisites.sh` checks fallback/failure propagation
+with isolated fake tools; CI and an actual local Linux probe provide real-tool evidence.
+
 Integration tests that need external infrastructure must be explicitly identifiable and documented. Unit tests must not silently depend on a developer's PostgreSQL, Kubernetes, RabbitMQ or other local service.
 The separate PostgreSQL integration suite and its runtime requirements are
 described in [the PostgreSQL integration-test guide](docs/development/postgresql-integration-tests.md).
