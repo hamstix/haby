@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class PlacementRevisionPersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed partial class PlacementRevisionPersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     [Fact]
     public async Task Restart_exact_scopes_retry_original_identity_and_audit_conflict_and_no_other_state()
@@ -224,6 +224,8 @@ public sealed class PlacementRevisionPersistenceTests(PostgreSqlFixture fixture)
     private static ManifestCatalogDbContext Context(string connection) => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
     private static ServiceProvider Services(string connection) => new ServiceCollection().AddPostgreSqlManifestCatalog(connection)
         .AddSingleton<IPlacementCodec, KubernetesPlacementCodec>().AddSingleton<IPlacementRevisionStore, PostgreSqlPlacementRevisionStore>()
+        .AddSingleton<IPlacementSelectionScopeQuery, PostgreSqlPlacementSelectionScopeQuery>()
+        .AddSingleton<IPlacementSelectionStore, PostgreSqlPlacementSelectionStore>().AddSingleton<PlacementSelectionAdministration>()
         .AddSingleton(TimeProvider.System).AddSingleton<PlacementAdministration>().BuildServiceProvider();
     private sealed class Factory(string connection, params IInterceptor[] interceptors) : IDbContextFactory<ManifestCatalogDbContext>
     {

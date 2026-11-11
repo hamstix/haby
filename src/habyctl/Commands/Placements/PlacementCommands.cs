@@ -51,6 +51,7 @@ internal static class PlacementCommands
             return context.PrintPlacement("placement revision get", reply, environment, request.ProviderAlias);
         }, ct));
         revision.Subcommands.Add(get); group.Subcommands.Add(revision);
+        group.Subcommands.Add(PlacementSelectionCommands.Create(context));
         return group;
     }
 }

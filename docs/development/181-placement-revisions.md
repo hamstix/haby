@@ -30,7 +30,8 @@ lookup and no writes. `import` additionally checks the Environment/alias context
 atomically accepts the immutable revision. The portable JSON carries name/revision,
 never Environment, alias, internal UUIDs or credentials. Names use manifest-local ID
 syntax (lowercase kebab-case, maximum 63 characters); revisions are explicit positive
-Int32 values. There is no latest lookup, update, deletion or assignment command.
+Int32 values. There is no latest lookup, revision update or deletion. Conditional selection
+administration is documented in [issue #183](183-placement-selections.md).
 
 Start with [this complete example](examples/181-placement.json). Optional settings
 may be omitted; see the [closed field matrix](../architecture/kubernetes-workload-placement-v1alpha1.md).
@@ -121,6 +122,7 @@ PostgreSQL, published Windows/Linux Native AOT, security and dependency evidence
 reported separately at the PR's exact source SHA; this document does not claim
 independent review or CI results before those runs exist.
 
-Named/scoped selections and CAS, durable exact input capture/stages, Kubernetes
+Named/scoped selections and CAS are implemented separately by [issue #183](183-placement-selections.md).
+Durable exact input capture/stages, Kubernetes
 access/preflight/SDK integration, writes, publication, readiness, retirement and
 corrective generations remain open. No cluster or load proof is claimed by this slice.

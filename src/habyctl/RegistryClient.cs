@@ -17,6 +17,8 @@ internal sealed class EnvironmentEndpointSource : IEndpointSource
 
 internal interface IRegistryClient : IDisposable
 {
+    Task<PlacementSelectionReply> ApplyPlacementSelectionAsync(ApplyPlacementSelectionRequest request, CancellationToken token);
+    Task<PlacementSelectionReply> GetPlacementSelectionAsync(GetPlacementSelectionRequest request, CancellationToken token);
     Task<PlacementReply> ValidatePlacementAsync(PlacementPayloadRequest request, CancellationToken token);
     Task<PlacementReply> ImportPlacementAsync(PlacementPayloadRequest request, CancellationToken token);
     Task<PlacementReply> GetPlacementRevisionAsync(PlacementRevisionRequest request, CancellationToken token);
@@ -118,6 +120,8 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? confi
     public async Task<ResourceNamingReply> GetResourceNamingAsync(ResourceNamingRequest request, CancellationToken token) => await _client.GetResourceNamingAsync(request, headers, cancellationToken: token);
     public async Task<ResourceNamingReply> GetResourceNamingSelectionAsync(ResourceNamingSelectionRequest request, CancellationToken token) => await _client.GetResourceNamingSelectionAsync(request, headers, cancellationToken: token);
     public async Task<ResourceNamingReply> SelectResourceNamingAsync(SelectResourceNamingRequest request, CancellationToken token) => await _client.SelectResourceNamingAsync(request, headers, cancellationToken: token);
+    public async Task<PlacementSelectionReply> ApplyPlacementSelectionAsync(ApplyPlacementSelectionRequest request, CancellationToken token) => await _client.ApplyPlacementSelectionAsync(request, headers, cancellationToken: token);
+    public async Task<PlacementSelectionReply> GetPlacementSelectionAsync(GetPlacementSelectionRequest request, CancellationToken token) => await _client.GetPlacementSelectionAsync(request, headers, cancellationToken: token);
     public async Task<PlacementReply> ValidatePlacementAsync(PlacementPayloadRequest request, CancellationToken token) => await _client.ValidatePlacementAsync(request, headers, cancellationToken: token);
     public async Task<PlacementReply> ImportPlacementAsync(PlacementPayloadRequest request, CancellationToken token) => await _client.ImportPlacementAsync(request, headers, cancellationToken: token);
     public async Task<PlacementReply> GetPlacementRevisionAsync(PlacementRevisionRequest request, CancellationToken token) => await _client.GetPlacementRevisionAsync(request, headers, cancellationToken: token);
