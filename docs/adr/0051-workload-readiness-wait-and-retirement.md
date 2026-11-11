@@ -15,8 +15,8 @@ confirmed provisioning. Product upgrades need bounded batch waiting as a normal
 operator feature, not merely a CI convenience. The CLI remains API-only.
 
 This ADR accepts those policies. It does not implement Workloads or authorize
-superseding an incomplete generation; corrective rollout replacement needs the
-next explicit decision packet.
+superseding an incomplete generation by itself. The separate bounded corrective
+policy is accepted in [ADR-052](0052-corrective-generations-for-incomplete-workload-rollout.md).
 
 ## Decision
 
@@ -215,7 +215,8 @@ status criteria and object dependencies belong to the adapter. Keep source-gener
 metadata, C#/EF workflow and existing authentication/PostgreSQL/Native AOT gates.
 
 A bad accepted image/manifest can require different desired inputs rather than
-external repair. ADR-045 currently forbids a new generation over an incomplete one.
-Agree an explicit bounded corrective-rollout replacement policy before implementing
-full rollout recovery. This ADR does not silently weaken that rule or claim that
-resume can change accepted image/manifest contents.
+external repair. Ordinary ADR-045 updates still require a fully applied baseline.
+[ADR-052](0052-corrective-generations-for-incomplete-workload-rollout.md) accepts
+a separate explicit corrective generation after confirmed ResourcesReady, without
+uncertain writes and before retirement. Implement that contract deliberately;
+wait/resume never changes accepted image/manifest contents.

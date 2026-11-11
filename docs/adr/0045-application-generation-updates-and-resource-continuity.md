@@ -32,6 +32,9 @@ acceptance does not remove current pilot guards or implement them in one slice.
 2. First admit a new generation only when DesiredGeneration equals
    AppliedGeneration. Imports may happen earlier. An incomplete/uncertain generation
    must be resolved before it can be superseded; no implicit cancellation or rollback.
+   [ADR-052](0052-corrective-generations-for-incomplete-workload-rollout.md) accepts
+   a separate future P3 corrective intent after confirmed ResourcesReady, without
+   uncertain writes and before retirement. Ordinary P2 admission is unchanged.
 
 3. ApplicationVersion and generation are distinct. A new ManifestRevision is a
    new target even if its normalized declaration is equivalent to the previous
@@ -130,7 +133,9 @@ acceptance does not remove current pilot guards or implement them in one slice.
     generation. New effects may already exist after partial failure; the old
     AppliedGeneration is not a claim that infrastructure rolled back. Preserve
     successful results and uncertainty. Do not accept another generation over an
-    incomplete one or blindly retry a post-dispatch external effect.
+    incomplete one through ordinary update, or blindly retry a post-dispatch effect.
+    The explicit bounded P3 exception is ADR-052; it preserves direct confirmed
+    Resource evidence and records supersession without fabricating applied history.
 
 20. Changes to historical diagnostics, reset of existing catalogs, implicit adoption
     and destructive deprovisioning are not authorized. Follow ADR-033's one-current-

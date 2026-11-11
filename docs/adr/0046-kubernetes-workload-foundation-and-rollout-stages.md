@@ -191,8 +191,9 @@ First-slice rollout does not authorize destructive Resource deprovisioning.
 server-only wait/resume and bounded batch observation for product upgrades and CI.
 AppliedGeneration requires planned retirement completion. External infrastructure
 repair may be followed by observation/resume of the same generation without
-replaying effects. Corrective replacement of accepted desired inputs remains a
-separate pending decision; no implicit superseding of incomplete generations.
+replaying effects. [ADR-052](0052-corrective-generations-for-incomplete-workload-rollout.md)
+accepts a separate explicit bounded corrective generation; no implicit superseding
+of incomplete generations or change to ordinary P2 admission is introduced.
 
 ## Required evidence and remaining decisions
 
