@@ -2,7 +2,7 @@
 
 Issue #177, ADR-046/047/049/054/055. This matrix precedes implementation.
 Contracts and pure resolution do not enable durable Workload execution. Every
-Kubernetes effect, Placement administration, publication, readiness, retirement
+Kubernetes effect, Placement selection administration, publication, readiness, retirement
 and corrective generation remains a later slice.
 
 ## Closed field matrix
@@ -144,8 +144,10 @@ Resource Provider aliases before desired-state acceptance. It does not consume t
 new pure result. No AppliedGeneration, Resource provenance, credential, naming or
 configuration-delivery guard is relaxed.
 
-Next implement Placement persistence/administration, then durable exact Provider
-sets and stage checkpoints with explicit freshness. Those slices must deliberately
+[Issue #181](../development/181-placement-revisions.md) adds immutable Placement
+revision validation/import/exact read. Named/scoped selections and conditional
+updates remain separate, followed by durable exact Provider sets and stage
+checkpoints with explicit freshness. Those slices must deliberately
 integrate this result into Plan storage/Commit/runner. Kubernetes access/preflight,
 conditional objects, runtime identity/publication/TokenReview, 150-client proof,
 submission/readiness, retirement and corrective generations remain unimplemented.

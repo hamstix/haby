@@ -22,6 +22,9 @@ service ManifestOperator {
   rpc ValidateProfileAssignment(ProfilePayloadRequest) returns (ProfileAssignmentReply);
   rpc ApplyProfileAssignment(ApplyProfileAssignmentRequest) returns (ProfileAssignmentReply);
   rpc GetProfileAssignment(GetProfileAssignmentRequest) returns (ProfileAssignmentReply);
+  rpc ValidatePlacement(PlacementPayloadRequest) returns (PlacementReply);
+  rpc ImportPlacement(PlacementPayloadRequest) returns (PlacementReply);
+  rpc GetPlacementRevision(PlacementRevisionRequest) returns (PlacementReply);
   rpc ValidateProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc ImportProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc GetProfileRevision(ProfileRevisionRequest) returns (ProfileReply);
@@ -910,4 +913,33 @@ message ConfigurationApplicationReply {
   // Exact selected inventory length; never a truncated page.
   int32 selected_count = 4;
   repeated ConfigurationApplicationItem items = 5;
+}
+
+// Scope is operator context, never embedded in the portable declaration.
+message PlacementPayloadRequest { string environment = 1; string provider_alias = 2; bytes payload = 3; }
+message PlacementRevisionRequest { string environment = 1; string provider_alias = 2; string name = 3; int32 revision = 4; }
+enum PlacementStatus {
+  PLACEMENT_STATUS_UNSPECIFIED = 0;
+  PLACEMENT_STATUS_VALID = 1;
+  PLACEMENT_STATUS_CREATED = 2;
+  PLACEMENT_STATUS_EXISTING_EQUIVALENT = 3;
+  PLACEMENT_STATUS_FOUND = 4;
+  PLACEMENT_STATUS_NOT_FOUND = 5;
+  PLACEMENT_STATUS_INVALID_CONTEXT = 6;
+  PLACEMENT_STATUS_ENVIRONMENT_NOT_FOUND = 7;
+  PLACEMENT_STATUS_INVALID_DECLARATION = 8;
+  PLACEMENT_STATUS_REVISION_CONTENT_CONFLICT = 9;
+}
+message PlacementMetadata {
+  string record_id = 1;
+  string environment_record_id = 2;
+  string technical_actor_id = 3;
+  string imported_at_utc = 4;
+}
+message PlacementReply {
+  PlacementStatus status = 1;
+  PlacementRevisionRequest reference = 2;
+  PlacementMetadata metadata = 3;
+  string diagnostic_code = 4;
+  bytes declaration_json = 5;
 }

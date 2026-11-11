@@ -4,6 +4,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\PlacementSamples.cs" Link="PlacementSamples.cs" />
     <Compile Include="..\ConfigurationRenderingSamples.cs" Link="ConfigurationRenderingSamples.cs" />
     <Compile Include="..\ProfilePersistenceSamples.cs" Link="ProfilePersistenceSamples.cs" />
     <Compile Include="..\ProfileDeclarationBoundarySamples.cs" Link="ProfileDeclarationBoundarySamples.cs" />
