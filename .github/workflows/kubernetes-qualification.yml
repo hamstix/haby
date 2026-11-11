@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - 'tools/Haby.Kubernetes.Qualification/**'
-      - 'scripts/run-kubernetes-qualification.ps1'
+      - 'scripts/*kubernetes-qualification.ps1'
       - '.github/workflows/kubernetes-qualification.yml'
 permissions:
   contents: read
@@ -14,18 +14,39 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
       - name: Restore exact qualification dependencies
         run: dotnet restore tools/Haby.Kubernetes.Qualification --locked-mode
+      - name: Audit qualification dependency closure
+        run: |
+          mkdir -p .artifacts
+          dotnet package list --project tools/Haby.Kubernetes.Qualification --vulnerable --include-transitive --format json > .artifacts/qualification-audit.json
+          jq -e '[.. | objects | select(has("severity"))] | length == 0' .artifacts/qualification-audit.json
+      - name: Check failure propagation
+        shell: pwsh
+        run: ./scripts/test-kubernetes-qualification.ps1
       - name: Real isolated Kubernetes API qualification
         shell: pwsh
         run: ./scripts/run-kubernetes-qualification.ps1 -Runtime docker
+      - name: Reproduce stock TLS negative control
+        shell: pwsh
+        run: |
+          $failed = $false
+          try { ./scripts/run-kubernetes-qualification.ps1 -Runtime docker -ProbeStockTls -EvidencePath .artifacts/stock-tls-negative.txt }
+          catch { $failed = $true }
+          $report = Get-Content .artifacts/stock-tls-negative.txt -Raw
+          if (!$failed -or !$report.Contains('FAIL stock SslCaCerts accepted mismatched server name') -or !$report.Contains('Run-owned private directory removed.')) { throw 'Stock TLS negative control did not reproduce safely.' }
+          $global:LASTEXITCODE = 0
       - name: Upload sanitized evidence only
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kubernetes-qualification
-          path: .artifacts/kubernetes-qualification.txt
+          path: |
+            .artifacts/kubernetes-qualification.txt
+            .artifacts/stock-tls-negative.txt
           if-no-files-found: error

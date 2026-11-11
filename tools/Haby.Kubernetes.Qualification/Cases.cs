@@ -31,18 +31,32 @@ internal static class Cases
             };
             var created = await client.AppsV1.CreateNamespacedDeploymentAsync(deployment, name, cancellationToken: token);
             Check(!string.IsNullOrEmpty(created.Metadata.Uid) && !string.IsNullOrEmpty(created.Metadata.ResourceVersion), "A identity");
-            await Refuses(() => client.AppsV1.CreateNamespacedDeploymentAsync(deployment, name, cancellationToken: token), "A occupied");
-            await Task.Delay(TimeSpan.FromSeconds(2), token);
+            await Refuses(() => client.AppsV1.CreateNamespacedDeploymentAsync(deployment, name, cancellationToken: token), "A occupied", 409);
             var read = await client.AppsV1.ReadNamespacedDeploymentAsync("target", name, cancellationToken: token);
-            Check(read.Metadata.Uid == created.Metadata.Uid, "A unchanged UID");
+            Check(read.Metadata.Uid == created.Metadata.Uid && read.Metadata.Generation == created.Metadata.Generation && read.Metadata.Annotations["haby.dev/operation"] == name && read.Metadata.Annotations["unrelated"] == "preserve" && read.Spec.Template.Spec.Containers.Single(c => c.Name == "app").Image == "registry.k8s.io/pause:3.10", "A unchanged identity and desired state");
             var index = read.Spec.Template.Spec.Containers.ToList().FindIndex(c => c.Name == "app");
             V1Patch Patch(string uid, string rv) => new($$"""
                 [{"op":"test","path":"/metadata/uid","value":"{{uid}}"},{"op":"test","path":"/metadata/resourceVersion","value":"{{rv}}"},{"op":"test","path":"/spec/template/spec/containers/{{index}}/name","value":"app"},{"op":"replace","path":"/spec/template/spec/containers/{{index}}/image","value":"registry.k8s.io/pause:3.9"}]
                 """, V1Patch.PatchType.JsonPatch);
-            var updated = await client.AppsV1.PatchNamespacedDeploymentAsync(Patch(read.Metadata.Uid, read.Metadata.ResourceVersion), "target", name, cancellationToken: token);
+            V1Deployment? updated = null;
+            for (var attempt = 0; attempt < 10 && updated is null; attempt++)
+            {
+                try
+                {
+                    updated = await client.AppsV1.PatchNamespacedDeploymentAsync(Patch(read.Metadata.Uid, read.Metadata.ResourceVersion), "target", name, cancellationToken: token);
+                }
+                catch (HttpOperationException error) when ((int)error.Response.StatusCode == 422)
+                {
+                    var fresh = await client.AppsV1.ReadNamespacedDeploymentAsync("target", name, cancellationToken: token);
+                    if (fresh.Metadata.Uid != read.Metadata.Uid || fresh.Metadata.ResourceVersion == read.Metadata.ResourceVersion) throw;
+                    read = fresh;
+                    await Task.Delay(100, token);
+                }
+            }
+            if (updated is null) throw new InvalidOperationException("bounded patch stabilization exhausted");
             Check(updated.Metadata.Annotations["unrelated"] == "preserve" && updated.Spec.Template.Spec.Containers[0].Name == "injected", "B preserve");
-            await Refuses(() => client.AppsV1.PatchNamespacedDeploymentAsync(Patch(read.Metadata.Uid, read.Metadata.ResourceVersion), "target", name, cancellationToken: token), "B stale RV");
-            await Refuses(() => client.AppsV1.PatchNamespacedDeploymentAsync(Patch(Guid.NewGuid().ToString(), updated.Metadata.ResourceVersion), "target", name, cancellationToken: token), "B wrong UID");
+            await Refuses(() => client.AppsV1.PatchNamespacedDeploymentAsync(Patch(read.Metadata.Uid, read.Metadata.ResourceVersion), "target", name, cancellationToken: token), "B stale RV", 422);
+            await Refuses(() => client.AppsV1.PatchNamespacedDeploymentAsync(Patch(Guid.NewGuid().ToString(), updated.Metadata.ResourceVersion), "target", name, cancellationToken: token), "B wrong UID", 422);
             var after = await client.AppsV1.ReadNamespacedDeploymentAsync("target", name, cancellationToken: token);
             Check(after.Metadata.Uid == updated.Metadata.Uid && after.Metadata.Generation == updated.Metadata.Generation && after.Spec.Template.Spec.Containers[index].Image == updated.Spec.Template.Spec.Containers[index].Image && after.Metadata.Annotations["unrelated"] == "preserve", "B refusals unchanged");
             Console.WriteLine($"B keyed index={index}; default restartPolicy={after.Spec.Template.Spec.RestartPolicy}; strategy={after.Spec.Strategy.Type}");
@@ -50,7 +64,7 @@ internal static class Cases
             await client.CoreV1.DeleteNamespacedConfigMapAsync("replacement", name, new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = map.Metadata.Uid } }, cancellationToken: token);
             await Refuses(() => client.CoreV1.ReadNamespacedConfigMapAsync("replacement", name, cancellationToken: token), "C observed absence", 404);
             var replacement = await client.CoreV1.CreateNamespacedConfigMapAsync(new V1ConfigMap { Metadata = new V1ObjectMeta { Name = "replacement" } }, name, cancellationToken: token);
-            await Refuses(() => client.CoreV1.DeleteNamespacedConfigMapAsync("replacement", name, new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = map.Metadata.Uid } }, cancellationToken: token), "C foreign replacement");
+            await Refuses(() => client.CoreV1.DeleteNamespacedConfigMapAsync("replacement", name, new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = map.Metadata.Uid } }, cancellationToken: token), "C foreign replacement", 409);
             Check((await client.CoreV1.ReadNamespacedConfigMapAsync("replacement", name, cancellationToken: token)).Metadata.Uid == replacement.Metadata.Uid, "C replacement preserved");
             var sa = await client.CoreV1.CreateNamespacedServiceAccountAsync(new V1ServiceAccount { Metadata = new V1ObjectMeta { Name = "runtime" } }, name, cancellationToken: token);
             var pod = await client.CoreV1.CreateNamespacedPodAsync(new V1Pod { Metadata = new V1ObjectMeta { Name = "bound" }, Spec = new V1PodSpec { ServiceAccountName = "runtime", Containers = new List<V1Container> { new() { Name = "app", Image = "registry.k8s.io/pause:3.10" } } } }, name, cancellationToken: token);
@@ -84,14 +98,15 @@ internal static class Cases
             using var watchDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             watchDeadline.CancelAfter(TimeSpan.FromSeconds(2));
             var timer = Stopwatch.StartNew();
+            var watchEvents = 0;
             try
             {
-                await foreach (var item in client.CoreV1.WatchListNamespacedPodAsync(name, timeoutSeconds: 60, cancellationToken: watchDeadline.Token)) { }
+                await foreach (var item in client.CoreV1.WatchListNamespacedPodAsync(name, timeoutSeconds: 60, onError: _ => throw new InvalidOperationException("watch API error"), cancellationToken: watchDeadline.Token)) { watchEvents++; }
                 throw new InvalidOperationException("watch ended without cancellation");
             }
             catch (OperationCanceledException) when (watchDeadline.IsCancellationRequested && !token.IsCancellationRequested)
             {
-                Check(timer.Elapsed < TimeSpan.FromSeconds(10), "E bounded watch cancellation");
+                Check(timer.Elapsed < TimeSpan.FromSeconds(10) && watchEvents > 0, "E bounded watch cancellation after real events");
                 Console.WriteLine($"E watch elapsed milliseconds={timer.ElapsedMilliseconds}");
             }
         }
@@ -101,7 +116,19 @@ internal static class Cases
             var current = await client.CoreV1.ReadNamespaceAsync(name, cancellationToken: cleanup.Token);
             Check(current.Metadata.Uid == ns.Metadata.Uid && current.Metadata.Labels["haby.dev/qualification"] == name, "cleanup ownership");
             await client.CoreV1.DeleteNamespaceAsync(name, new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = ns.Metadata.Uid } }, cancellationToken: cleanup.Token);
-            Console.WriteLine("Namespace DELETE accepted; absence not yet established.");
+            var absent = false;
+            for (var attempt = 0; attempt < 100; attempt++)
+            {
+                try { await client.CoreV1.ReadNamespaceAsync(name, cancellationToken: cleanup.Token); }
+                catch (HttpOperationException error) when ((int)error.Response.StatusCode == 404)
+                {
+                    Console.WriteLine("PASS namespace absence observed after UID DELETE");
+                    absent = true;
+                    break;
+                }
+                await Task.Delay(200, cleanup.Token);
+            }
+            if (!absent) throw new InvalidOperationException("namespace absence deadline exceeded; finalizers retained");
         }
     }
 
@@ -111,10 +138,10 @@ internal static class Cases
         Console.WriteLine("PASS " + label);
     }
 
-    private static async Task Refuses<T>(Func<Task<T>> action, string label, int? expected = null)
+    private static async Task Refuses<T>(Func<Task<T>> action, string label, int expected)
     {
         try { await action(); }
-        catch (HttpOperationException error) when (expected is null || (int)error.Response.StatusCode == expected)
+        catch (HttpOperationException error) when ((int)error.Response.StatusCode == expected)
         {
             Console.WriteLine($"PASS {label}: HTTP {(int)error.Response.StatusCode}");
             return;

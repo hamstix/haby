@@ -1,6 +1,7 @@
 param(
     [ValidateSet('wslc', 'docker')][string]$Runtime = 'wslc',
-    [string]$EvidencePath = '.artifacts/kubernetes-qualification.txt'
+    [string]$EvidencePath = '.artifacts/kubernetes-qualification.txt',
+    [switch]$ProbeStockTls
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -26,9 +27,14 @@ New-Item -ItemType Directory -Force (Split-Path ([IO.Path]::GetFullPath($Evidenc
 $record = [Collections.Generic.List[string]]::new()
 $record.Add('Source: ' + (& git rev-parse HEAD))
 $record.Add('Dirty: ' + [bool](& git status --porcelain))
+$record.Add('UTC: ' + [DateTimeOffset]::UtcNow.ToString('O'))
+$record.Add('OS: ' + [Runtime.InteropServices.RuntimeInformation]::OSDescription)
 $record.Add('Runtime: ' + $Runtime)
 $record.Add('Image: ' + $image)
 try {
+    if (!(Get-Command $Runtime -ErrorAction SilentlyContinue) -or !(Get-Command dotnet -ErrorAction SilentlyContinue)) { throw 'Required runtime or SDK unavailable.' }
+    $record.Add('Runtime version: ' + (& $Runtime --version))
+    $record.Add('SDK: ' + (& dotnet --version))
     Invoke-Runtime @('run', '-d', '--name', $run, '--label', "haby.qualification=$run", '-p', '127.0.0.1:16443:6443', $image, 'server', '--disable-agent', '--disable', 'traefik', '--disable', 'servicelb', '--disable', 'metrics-server', '--disable', 'coredns', '--disable', 'local-storage', '--egress-selector-mode', 'disabled', '--tls-san', '127.0.0.1', '--write-kubeconfig-mode', '600') | Out-Null
     $created = $true
     $ready = $false
@@ -41,13 +47,14 @@ try {
     foreach ($pair in @(@('server-ca.crt', 'ca.crt'), @('client-admin.crt', 'admin.crt'), @('client-admin.key', 'admin.key'))) {
         Invoke-Runtime @('cp', "${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])", (Join-Path $private $pair[1])) | Out-Null
     }
-    $output = & dotnet run --project tools/Haby.Kubernetes.Qualification --no-restore -- https://127.0.0.1:16443 $private 2>&1
+    $probeArgs = if ($ProbeStockTls) { @('--probe-stock-tls') } else { @() }
+    $output = & dotnet run --project tools/Haby.Kubernetes.Qualification --no-restore -- https://127.0.0.1:16443 $private @probeArgs 2>&1
     $exit = $LASTEXITCODE
     foreach ($line in $output) { $record.Add([string]$line) }
     if ($exit -ne 0) { throw "Harness failed (exit $exit)." }
     $record.Add('Harness: PASS')
 } catch {
-    $record.Add('Run: FAIL; ' + $_.Exception.Message)
+    $record.Add('Run: FAIL; category=' + $_.Exception.GetType().Name)
     throw
 } finally {
     $record | Set-Content -LiteralPath $EvidencePath
