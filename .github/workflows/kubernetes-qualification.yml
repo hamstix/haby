@@ -1,0 +1,45 @@
+name: Kubernetes qualification
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/Haby.Kubernetes.Qualification/**'
+      - 'scripts/*kubernetes-qualification*.ps1'
+      - '.github/workflows/kubernetes-qualification.yml'
+permissions:
+  contents: read
+jobs:
+  qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore exact qualification dependencies
+        run: dotnet restore tools/Haby.Kubernetes.Qualification --locked-mode
+      - name: Audit qualification dependency closure
+        run: |
+          mkdir -p .artifacts
+          dotnet package list --project tools/Haby.Kubernetes.Qualification --vulnerable --include-transitive --format json > .artifacts/qualification-audit.json
+          jq -e '[.. | objects | select(has("severity"))] | length == 0' .artifacts/qualification-audit.json
+      - name: Check failure propagation
+        shell: pwsh
+        run: ./scripts/test-kubernetes-qualification.ps1
+      - name: Real API and failure teardown rehearsals
+        shell: pwsh
+        run: ./scripts/test-kubernetes-qualification-real.ps1 -Runtime docker
+      - name: Upload sanitized evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-qualification
+          path: |
+            .artifacts/qualification-evidence/haby179-control-*/qualification-success.txt
+            .artifacts/qualification-evidence/haby179-control-*/qualification-stock.txt
+            .artifacts/qualification-evidence/haby179-control-*/qualification-port-collision.txt
+            .artifacts/qualification-evidence/haby179-control-*/qualification-readiness-failure.txt
+          if-no-files-found: error
