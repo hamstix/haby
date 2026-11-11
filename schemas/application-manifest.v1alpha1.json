@@ -145,7 +145,7 @@
       "properties": {
         "type": { "$ref": "#/$defs/contractId" },
         "providerRef": { "$ref": "#/$defs/applicationId" },
-        "profile": { "$ref": "#/$defs/localId" },
+        "placementRef": { "$ref": "#/$defs/localId" },
         "properties": { "type": "object" }
       },
       "required": ["type", "providerRef"], "additionalProperties": false

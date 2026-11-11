@@ -109,7 +109,7 @@ internal static class NormalizedManifestDiff
     {
         Check(a.Type, b.Type, Child(p, "type"), add);
         Check(a.ProviderRef, b.ProviderRef, Child(p, "providerRef"), add);
-        Check(a.Profile, b.Profile, Child(p, "profile"), add);
+        Check(a.PlacementRef, b.PlacementRef, Child(p, "placementRef"), add);
         Configuration(a.Properties, b.Properties, Child(p, "properties"), add);
     }
     private static void Parameter(NormalizedParameterDefinition a, NormalizedParameterDefinition b, string p, Action<string> add)

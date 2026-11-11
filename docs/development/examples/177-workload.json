@@ -1,0 +1,167 @@
+{
+  "applicationVersion": "1.4.2",
+  "manifest": {
+    "apiVersion": "haby.dev/v1alpha1",
+    "kind": "Application",
+    "metadata": {
+      "id": "orders"
+    },
+    "spec": {
+      "components": {
+        "api": {
+          "documents": {
+            "settings": {
+              "fileName": "settings.json",
+              "format": "json",
+              "template": {}
+            }
+          },
+          "workloads": {
+            "main": {
+              "type": "kubernetes.workload/v1alpha1",
+              "providerRef": "kubernetes.primary",
+              "placementRef": "standard",
+              "properties": {
+                "image": {
+                  "name": "orders",
+                  "tagFrom": "applicationVersion"
+                },
+                "containerName": "orders-service",
+                "ports": {
+                  "http": {
+                    "containerPort": 8080,
+                    "protocol": "TCP"
+                  },
+                  "metrics": {
+                    "containerPort": 9090
+                  }
+                },
+                "env": {
+                  "MODE": {
+                    "value": "safe"
+                  },
+                  "SETTING": {
+                    "configMapKey": {
+                      "name": "settings",
+                      "key": "mode",
+                      "optional": true
+                    }
+                  },
+                  "PASSWORD": {
+                    "secretKey": {
+                      "name": "database",
+                      "key": "password"
+                    }
+                  }
+                },
+                "probes": {
+                  "startup": {
+                    "tcpSocket": {
+                      "port": "http"
+                    },
+                    "failureThreshold": 20
+                  },
+                  "liveness": {
+                    "httpGet": {
+                      "port": "http",
+                      "path": "/live",
+                      "scheme": "HTTPS"
+                    },
+                    "initialDelaySeconds": 2,
+                    "periodSeconds": 4,
+                    "timeoutSeconds": 3,
+                    "successThreshold": 1,
+                    "failureThreshold": 5
+                  },
+                  "readiness": {
+                    "httpGet": {
+                      "port": "http",
+                      "path": "/ready"
+                    },
+                    "successThreshold": 2
+                  }
+                },
+                "volumes": {
+                  "settings": {
+                    "configMap": {
+                      "name": "settings",
+                      "optional": true
+                    }
+                  },
+                  "secret": {
+                    "secret": {
+                      "name": "database"
+                    }
+                  },
+                  "data": {
+                    "persistentVolumeClaim": {
+                      "name": "orders-data",
+                      "readOnly": false
+                    }
+                  }
+                },
+                "mounts": [
+                  {
+                    "volume": "settings",
+                    "mountPath": "/etc/app",
+                    "readOnly": true
+                  },
+                  {
+                    "volume": "secret",
+                    "mountPath": "/etc/password",
+                    "subPath": "password"
+                  },
+                  {
+                    "volume": "data",
+                    "mountPath": "/data",
+                    "readOnly": false
+                  }
+                ],
+                "routes": [
+                  {
+                    "hostLabel": "orders",
+                    "path": "/",
+                    "port": "http",
+                    "pathType": "Prefix"
+                  }
+                ],
+                "configuration": {
+                  "documents": [
+                    "settings"
+                  ]
+                },
+                "overrides": {
+                  "replicas": 2,
+                  "minReadySeconds": 5,
+                  "rolloutSeconds": 1200,
+                  "resources": {
+                    "requests": {
+                      "cpu": "500m",
+                      "memory": "128Mi"
+                    },
+                    "limits": {
+                      "cpu": "2",
+                      "memory": "1Gi"
+                    }
+                  },
+                  "service": {
+                    "enabled": true
+                  },
+                  "headlessService": {
+                    "enabled": true
+                  },
+                  "ingress": {
+                    "enabled": true,
+                    "className": "nginx",
+                    "domain": "example.test",
+                    "tlsSecret": "tls"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

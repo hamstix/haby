@@ -34,7 +34,7 @@
           "readme": { "fileName": "README.txt", "template": "", "format": "text" }
         },
         "workloads": {
-          "main": { "type": "kubernetes.workload/v1alpha1", "providerRef": "kubernetes.primary", "profile": "worker", "properties": { "replicas": 2 } }
+          "main": { "type": "kubernetes.workload/v1alpha1", "providerRef": "kubernetes.primary", "placementRef": "worker", "properties": { "replicas": 2 } }
         }
       }
     }

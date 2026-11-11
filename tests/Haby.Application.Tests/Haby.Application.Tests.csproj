@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Haby.Application\Haby.Application.csproj" />
+    <ProjectReference Include="..\..\src\Haby.Kubernetes.Contracts\Haby.Kubernetes.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Haby.PostgreSql\Haby.PostgreSql.csproj" />
   </ItemGroup>
 </Project>

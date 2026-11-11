@@ -35,6 +35,9 @@ jobs:
         shell: pwsh
         run: ./scripts/test-postgresql-timing-export.ps1
 
+      - name: Verify Native AOT prerequisite fallback and failure propagation
+        run: bash ./scripts/test-native-aot-prerequisites.sh
+
       - name: Audit vulnerable dependencies
         run: |
           dotnet package list --project ./HamstixHaby.slnx --vulnerable --include-transitive --format json > dependency-audit.json
@@ -71,9 +74,17 @@ jobs:
           global-json-file: global.json
       - name: Install Linux Native AOT prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+        shell: bash
+        run: bash ./scripts/ensure-native-aot-prerequisites.sh
       - name: Publish Native AOT executable (warnings as errors)
-        run: dotnet publish ./src/habyctl/habyctl.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true -o ./.artifacts/aot/${{ matrix.rid }}
+        run: |
+          $toolchain = @()
+          if ($IsLinux) {
+            if (-not $env:HABY_AOT_C_COMPILER) { throw 'Validated Native AOT compiler is missing.' }
+            $toolchain = @("-p:CppCompilerAndLinker=$env:HABY_AOT_C_COMPILER", '-p:LinkerFlavor=bfd')
+          }
+          dotnet publish ./src/habyctl/habyctl.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/aot/${{ matrix.rid }}
+          if ($LASTEXITCODE -ne 0) { throw "Native AOT publish failed: $LASTEXITCODE" }
       - name: Execute published help and version
         run: |
           $cli = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
@@ -114,9 +125,11 @@ jobs:
       - name: Verify Docker runtime
         run: docker info
       - name: Install Native AOT prerequisites
-        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+        run: bash ./scripts/ensure-native-aot-prerequisites.sh
       - name: Publish native CLI for persisted planning, commit, execution and recovery rehearsals
-        run: dotnet publish ./src/habyctl/habyctl.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true -o ./.artifacts/aot/linux-x64
+        run: |
+          test -n "$HABY_AOT_C_COMPILER"
+          dotnet publish ./src/habyctl/habyctl.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true "-p:CppCompilerAndLinker=$HABY_AOT_C_COMPILER" -p:LinkerFlavor=bfd -o ./.artifacts/aot/linux-x64
       - name: Run real PostgreSQL integration tests
         shell: pwsh
         env:

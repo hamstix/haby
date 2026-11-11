@@ -1,18 +1,19 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Haby.Domain;
 using Haby.Manifest;
 using ApplicationId = Haby.Domain.ApplicationId;
 
 namespace Haby.Application;
 
-/// <summary>Version 2 of the internal typed declaration snapshot. It is never a manifest input.</summary>
+/// <summary>Version 3 of the internal typed declaration snapshot. It is never a manifest input.</summary>
 internal static class NormalizedSnapshotCodec
 {
-    internal const int FormatVersion = 2;
+    internal const int FormatVersion = 3;
 
-    internal static string Encode(NormalizedApplicationManifest manifest) => new JsonObject
+    internal static string Encode(NormalizedApplicationManifest manifest) => JsonSerializer.Serialize(new JsonObject
     {
         ["format"] = FormatVersion,
         ["api"] = manifest.InputApiVersion,
@@ -41,7 +42,7 @@ internal static class NormalizedSnapshotCodec
             }),
             ["components"] = Entries(manifest.Spec.Components, EncodeComponent)
         }
-    }.ToJsonString();
+    }, NormalizedSnapshotJsonContext.Default.JsonObject);
 
     internal static NormalizedApplicationManifest Decode(string snapshot, string expectedApi, int expectedModel,
         string expectedApplicationId, int formatVersion)
@@ -52,7 +53,7 @@ internal static class NormalizedSnapshotCodec
                 throw new InvalidDataException("Unsupported normalized snapshot format.");
             using (var document = JsonDocument.Parse(snapshot))
                 RejectDuplicateProperties(document.RootElement);
-            var root = Object(JsonNode.Parse(snapshot));
+            var root = Object(JsonSerializer.Deserialize(snapshot, NormalizedSnapshotJsonContext.Default.JsonObject));
             if (Int(root, "format") != FormatVersion || Int(root, "model") != expectedModel ||
                 expectedModel != NormalizedApplicationManifest.CurrentModelVersion ||
                 Text(root, "api") != expectedApi)
@@ -135,7 +136,7 @@ internal static class NormalizedSnapshotCodec
         {
             ["type"] = workload.Type.Value,
             ["provider"] = workload.ProviderRef.Value,
-            ["profile"] = workload.Profile?.Value,
+            ["placementRef"] = workload.PlacementRef?.Value,
             ["properties"] = EncodeValue(workload.Properties)
         })
     };
@@ -179,8 +180,9 @@ internal static class NormalizedSnapshotCodec
             ReadEntries(item, "workloads", value =>
             {
                 var workload = Object(value);
+                if (workload.ContainsKey("profile")) throw new InvalidDataException("Obsolete Workload snapshot member.");
                 return new NormalizedWorkload(WorkloadTypeId.Create(Text(workload, "type")),
-                    ProviderAlias.Create(Text(workload, "provider")), LocalId(OptionalText(workload, "profile")),
+                    ProviderAlias.Create(Text(workload, "provider")), LocalId(OptionalText(workload, "placementRef")),
                     ReadObject(workload, "properties"));
             }));
     }
@@ -364,3 +366,7 @@ internal static class NormalizedSnapshotCodec
             foreach (var item in element.EnumerateArray()) RejectDuplicateProperties(item);
     }
 }
+
+[JsonSerializable(typeof(JsonObject))]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+internal partial class NormalizedSnapshotJsonContext : JsonSerializerContext;

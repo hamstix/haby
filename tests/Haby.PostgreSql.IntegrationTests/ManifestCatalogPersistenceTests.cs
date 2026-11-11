@@ -199,12 +199,13 @@ public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) :
             unsupported.Parameters.AddWithValue("format", unsupportedFormat);
             await unsupported.ExecuteNonQueryAsync();
         }
-        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
         await Assert.ThrowsAsync<InvalidDataException>(async () => await query.FindAsync(result.ManifestRevisionRef));
         await Assert.ThrowsAsync<InvalidDataException>(async () => await Import(services, FirstTime).ExecuteAsync(CompleteEnvelope("v1"), "retry"));
         Assert.Equal(1, await ScalarAsync(check, "SELECT count(*) FROM manifest_revisions"));
         Assert.Equal(unsupportedFormat, await ScalarAsync(check, "SELECT snapshot_format_version FROM manifest_revisions"));
-        await using (var corrupt = new NpgsqlCommand("UPDATE manifest_revisions SET snapshot_format_version=2, snapshot='{bad'", check))
+        await using (var corrupt = new NpgsqlCommand("UPDATE manifest_revisions SET snapshot_format_version=3, snapshot='{bad'", check))
             await corrupt.ExecuteNonQueryAsync();
         await Assert.ThrowsAsync<InvalidDataException>(async () => await query.FindAsync(result.ManifestRevisionRef));
     }

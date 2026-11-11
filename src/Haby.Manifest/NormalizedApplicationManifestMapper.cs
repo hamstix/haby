@@ -112,7 +112,7 @@ internal static class NormalizedApplicationManifestMapper
 
     private static NormalizedWorkload Workload(WorkloadDeclaration value) => new(
         WorkloadTypeId.Create(value.Type), ProviderAlias.Create(value.ProviderRef),
-        value.Profile is null ? null : ManifestLocalId.Create(value.Profile),
+        value.PlacementRef is null ? null : ManifestLocalId.Create(value.PlacementRef),
         OpenObject(value.Properties));
 
     private static ConfigurationObject OpenObject(JsonElement value) =>

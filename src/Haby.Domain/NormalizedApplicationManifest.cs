@@ -9,7 +9,7 @@ public sealed class NormalizedApplicationManifest : IEquatable<NormalizedApplica
     {
         InputApiVersion = inputApiVersion; Metadata = metadata; Spec = spec;
     }
-    public const int CurrentModelVersion = 2;
+    public const int CurrentModelVersion = 3;
     public int NormalizedModelVersion => CurrentModelVersion;
     public string InputApiVersion { get; }
     public ApplicationId ApplicationId => Metadata.Id;
@@ -153,13 +153,13 @@ public sealed class NormalizedTextDocument : NormalizedConfigurationDocument
 
 public sealed class NormalizedWorkload
 {
-    internal NormalizedWorkload(WorkloadTypeId type, ProviderAlias providerRef, ManifestLocalId? profile, ConfigurationObject properties)
+    internal NormalizedWorkload(WorkloadTypeId type, ProviderAlias providerRef, ManifestLocalId? placementRef, ConfigurationObject properties)
     {
-        Type = type; ProviderRef = providerRef; Profile = profile; Properties = properties;
+        Type = type; ProviderRef = providerRef; PlacementRef = placementRef; Properties = properties;
     }
     public WorkloadTypeId Type { get; }
     public ProviderAlias ProviderRef { get; }
-    public ManifestLocalId? Profile { get; }
+    public ManifestLocalId? PlacementRef { get; }
     public ConfigurationObject Properties { get; }
 }
 
