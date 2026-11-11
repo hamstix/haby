@@ -299,7 +299,7 @@ composition or SecretRef interpolation in M2.1.
 
 ## Workloads
 
-> Future P3 change: [ADR-047](../adr/0047-kubernetes-workload-declarations-and-placement.md) accepts replacing `profile` with `placementRef` and defines Placement selection. The contract below describes the current implemented alpha; schema, DTO, normalization, snapshot codec and diagnostics will change together in a dedicated slice.
+> Future P3 change: [ADR-047](../adr/0047-kubernetes-workload-declarations-and-placement.md) accepts replacing `profile` with `placementRef`. [ADR-054](../adr/0054-p3-workload-contracts-and-typed-images.md) defines the typed image.name and independent containerName (default app) entry packet, tracked in [issue #177](https://github.com/hamstix/haby/issues/177). The contract below describes the current implemented alpha; schema, DTO, normalization, snapshot codec and diagnostics will change together in that slice.
 
 A Workload requires `type` and `providerRef`:
 

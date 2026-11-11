@@ -1,8 +1,8 @@
 # Haby delivery roadmap
 
 This roadmap tracks usable outcomes. The initial manifest foundation has been
-delivered; the current delivery milestone is configuration generation and scoped
-retrieval, not M2.1 foundation work.
+delivered; configuration and bounded update/naming outcomes are established in P2.
+The current focus is P3 Workload contracts and pure planning, not M2.1 foundation work.
 
 The delivery stages below reorganize existing commitments. They do not change
 accepted ADRs, stabilize alpha contracts or claim general production readiness.
@@ -14,13 +14,13 @@ and independently reviewable PRs.
 | Delivery milestone | Status | Observable outcome |
 | --- | --- | --- |
 | P1 - Resource provisioning pilot | Delivered within the isolated PostgreSQL pilot | Prepare an Environment, import an Application, Plan/commit/execute, create its database and generated application login, and grant database-owner access. |
-| P2 - Application configuration | In progress | Generate exact configuration documents from applied Resource outputs and shared Profiles; let an explicitly authorized application client retrieve and use them. |
-| P3 - Workload lifecycle | Planned | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
+| P2 - Application configuration | Functionally delivered within the bounded PostgreSQL profile | Generate exact configuration documents from applied Resource outputs and shared Profiles; let an explicitly authorized application client retrieve and use them. |
+| P3 - Workload lifecycle | In progress: contracts/pure planning; runtime not implemented | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
 | P4 - Standard Providers | Planned | Add RabbitMQ, Redis and HTTP/auth integrations and extend PostgreSQL through complete tested application scenarios. |
 
 P1 is a working checkpoint, not a claim that configuration delivery, all
 Providers, general recovery or a complete production release are finished.
-P2 is the current focus. P3/P4 ordering is the main delivery sequence; needed
+P3 is the current implementation focus after the bounded P2 checkpoints. P3/P4 ordering is the main delivery sequence; needed
 Providers and narrow extension seams can be pulled forward for concrete adoption
 requirements. Do not wait for P3 completion or public SDK packaging before
 implementing a necessary adapter behind accepted boundaries.
@@ -175,12 +175,14 @@ the separate naming and shared-system evidence without claiming P3 rollout.
 
 ## P3 - Workload lifecycle
 
-Status: planned. Begin implementation after the limited Application-generation
-update checkpoint in P2 above. Goal: deploy and operate an application using
-Haby-managed configuration and the same durable state/operation model.
+Status: in progress at the contract/pure-planning foundation under issue #177.
+Kubernetes execution remains unimplemented. Goal: deploy and operate an Application
+using Haby-managed configuration and the same durable state/operation model.
 
 - [x] Accept the first Workload foundation packet under [ADR-046](docs/adr/0046-kubernetes-workload-foundation-and-rollout-stages.md): unified deployment planning/execution, Kubernetes-specific contracts with neutral core/storage, exact inputs, staged readiness and mandatory retirement cleanup. This is design acceptance, not implementation.
 - [x] Accept Workload declaration and Placement selection rules under [ADR-047](docs/adr/0047-kubernetes-workload-declarations-and-placement.md): immutable Placement revisions, Environment defaults, Application/Component selection, explicit placementRef, bounded overrides, named ports and capability refusal. This is architecture acceptance; concrete schemas, administration and execution remain unimplemented.
+- [x] Accept [ADR-054](docs/adr/0054-p3-workload-contracts-and-typed-images.md): image.name with exact ApplicationVersion/static tag or full reference, Placement registry/prefix, independent containerName default app, explicit defaults/document selection and distinct exact Provider resolutions.
+- [ ] Implement [issue #177](https://github.com/hamstix/haby/issues/177): closed current Workload/Placement contracts, placementRef normalization/snapshot preservation, typed immutable models and pure scoped/default/override/name/image resolution with exact Provider inputs. Keep durable Workload admission disabled until its stages are implemented.
 - [ ] Specify closed JSON and reusable placement inheritance/overrides: existing namespace (normally shared per Environment), container/image/ports/env/resources, replicas/strategy/rollout, startup/liveness/readiness probes, nodeSelector, imagePullSecrets and existing ConfigMap/Secret/PVC mounts with optional/readOnly/subPath semantics. Explicit Development Recreate and Production RollingUpdate settings are configuration choices, not Environment-name inference.
 - [ ] Implement Deployment and explicitly selected Service and headless Service (allowed together), plus individual Ingress controlled by placement. No compulsory bundle, arbitrary PodSpec/YAML or ownership of referenced objects; shared product routing remains separate.
 - [x] Accept [ADR-049](docs/adr/0049-kubernetes-object-ownership-and-uncertain-writes.md): stable applicationId-componentId-workloadId names with optional nameOverride, exact UID/ownership, bounded managed fields, conditional JSON Patch, conflicts and evidence-based observation after uncertain writes. This is architecture acceptance, not implementation.
@@ -286,8 +288,8 @@ See [CONTRIBUTING](CONTRIBUTING.md),
 GitHub tracking follows the delivery sequence:
 
 - [P1 - Resource provisioning pilot](https://github.com/hamstix/haby/milestone/2): closed, delivered within the documented pilot boundary.
-- [P2 - Application configuration](https://github.com/hamstix/haby/milestone/3): open for the ADR-048 shared-system naming adoption prerequisite; the prior bounded operator-update path is functionally verified by issue #174.
-- [P3 - Workload lifecycle](https://github.com/hamstix/haby/milestone/4): open, planned.
+- [P2 - Application configuration](https://github.com/hamstix/haby/milestone/3): open administratively; bounded configuration/updates and issue #175 naming are implemented. Issue #174 required operator checkpoints passed; its private-file teardown remainder stays separately documented. P3 is the current implementation focus.
+- [P3 - Workload lifecycle](https://github.com/hamstix/haby/milestone/4): open, current contract/pure-planning work in issue #177; no executable Workload support yet.
 - [P4 - Standard Providers](https://github.com/hamstix/haby/milestone/5): open, planned; individual needed Providers may be pulled forward.
 
 The completed [M2.1 - Manifest foundation](https://github.com/hamstix/haby/milestone/1)
@@ -298,6 +300,6 @@ delivery milestone whose observable outcome they advance.
 Issue #126 is delivered by PR #127. Issue #128 implements the Profile/assignment
 JSON boundary accepted in ADR-038. Issue #130 implements the current-alpha
 Application slot and snapshot changes. Secret declaration parsing does not authorize secret resolution or delivery.
-Continue P2 toward real output rendering,
-saved unresolved documents and scoped retrieval; do not repeat foundation work
-or start a general SDK/UI/HA project.
+Continue P3 through the ADR-054 contract/pure-planning slice in issue #177, then
+deliberate Placement/durable multi-Provider/API integration slices. Preserve P2
+runtime guarantees; do not start a general SDK/UI/HA project.

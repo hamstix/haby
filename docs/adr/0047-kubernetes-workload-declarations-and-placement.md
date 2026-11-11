@@ -106,6 +106,11 @@ Plan stores completely resolved effective values and exact selected inputs, with
 no remaining inherit-at-execution placeholders. Concrete schemas, field names,
 per-field defaults and limits must be specified before implementing the contract.
 
+[ADR-054](0054-p3-workload-contracts-and-typed-images.md) accepts the concrete
+entry packet: typed image.name/tag/reference forms, Placement registry/prefix,
+independent containerName default app, initial defaults and first pure-planning slice.
+Image identity never determines Kubernetes container.name or object names.
+
 ### 7. Application-owned container interface
 
 The Workload declares image, named container ports, environment variables,
