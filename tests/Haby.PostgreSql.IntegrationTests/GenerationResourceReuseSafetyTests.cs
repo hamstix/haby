@@ -31,7 +31,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
             : "DELETE FROM operation_outputs WHERE operation_id = 'app-login-access'"));
         var history = await ReuseHistory(scenario.Connection);
         var result = await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId });
-        Assert.Equal(continuityChange ? CommitStatus.PlanStale : CommitStatus.PlanInputUnavailable, result.Status);
+        // Both mutations invalidate the saved checkpoint before the later stale-plan comparison.
+        Assert.Equal(CommitStatus.PlanInputUnavailable, result.Status);
         Assert.Equal(history, await ReuseHistory(scenario.Connection));
         await using var verify = Context(scenario.Connection); Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).DesiredGeneration);
         Assert.Equal(1, await verify.DeploymentGenerations.CountAsync()); await host.StopAsync();

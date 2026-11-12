@@ -140,6 +140,7 @@ restart/retry and dump/restore preserve saved proof and original identities.
 
 | Requirement | Production boundary and focused evidence |
 | --- | --- |
+| No material read inside completion transaction | `GeneratedCredentialCompletionLockTests`: actual SQL result columns for generated producer completion and the final checkpoint |
 | Exact install and immutable replay | `ResourcesReadyCheckpointTests`: independent persisted management/attempt/checkpoint queries, missing-adapter restart, concurrent equivalent replay |
 | No terminal-count or missing-output shortcut | Focused pre-fix failing tests for succeeded rows without confirmed attempts and missing output registration |
 | Reuse/mixed/retained/reintroduced sources | Existing synthetic and PostgreSQL lifecycle tests with added direct proof/source/reference assertions |

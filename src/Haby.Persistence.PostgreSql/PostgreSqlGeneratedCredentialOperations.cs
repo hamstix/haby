@@ -38,7 +38,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             if (!await ValidMaterialAsync(context, input, output.Reference, cancellationToken)) return false;
             await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
             await DurableAggregateCompletion.LockAsync(context, Guid.Parse(producer.DeploymentId.ToString()), cancellationToken);
-            var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(context, new(input.Owner, input.SlotId), input.GenerationProfile, cancellationToken);
+            var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(context, new(input.Owner, input.SlotId), input.GenerationProfile, cancellationToken, validateMaterial: false);
             if (slot?.Outcome != GeneratedCredentialOutcome.Existing || slot.Reference != output.Reference) return false;
             if (!await DependenciesReadyAsync(context, producer, dependencyIds, cancellationToken)) return false;
             var deployment = Guid.Parse(producer.DeploymentId.ToString());

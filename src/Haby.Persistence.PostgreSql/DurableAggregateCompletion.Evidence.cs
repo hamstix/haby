@@ -73,7 +73,7 @@ internal static partial class DurableAggregateCompletion
                         if (outputs.Length != 1 || input is null || credential is null || output.Key != GeneratedCredentialContracts.Password) return null;
                         if (checkCredential)
                         {
-                            var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(db, new(input.Owner, input.SlotId), input.GenerationProfile, token);
+                            var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(db, new(input.Owner, input.SlotId), input.GenerationProfile, token, validateMaterial: false);
                             if (slot?.Outcome != GeneratedCredentialOutcome.Existing || slot.Reference != credential.Reference) return null;
                         }
                         secret = Guid.Parse(credential.Reference.SecretId.ToString()); version = Guid.Parse(credential.Reference.SecretVersionId.ToString());
