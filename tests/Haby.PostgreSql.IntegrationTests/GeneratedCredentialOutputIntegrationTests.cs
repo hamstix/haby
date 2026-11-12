@@ -307,8 +307,10 @@ public sealed partial class ExactActionAdmissionTests
         var right = new PostgreSqlGeneratedCredentialOperations(new OutputFactory(scenario.Connection), services.GetRequiredService<ISecretStore>());
         var results = await Task.WhenAll(left.CompleteAsync(producer, first.AttemptId, output, DateTimeOffset.UtcNow, default).AsTask(),
             right.CompleteAsync(producer, second.AttemptId, output, DateTimeOffset.UtcNow, default).AsTask());
+        Assert.False(results[0]); // Superseded attempts cannot acknowledge the current result.
         Assert.True(results[1]);
-        Assert.True(await left.CompleteAsync(producer, first.AttemptId, output, DateTimeOffset.UtcNow, default));
+        Assert.False(await left.CompleteAsync(producer, first.AttemptId, output, DateTimeOffset.UtcNow, default));
+        Assert.True(await right.CompleteAsync(producer, second.AttemptId, output, DateTimeOffset.UtcNow, default));
         Assert.True(Enumerable.SequenceEqual(original, await CredentialBytes(services, producer, output.Reference)), "Concurrent attempts retain exact material.");
         Array.Clear(original);
         await using var verify = OutputContext(scenario.Connection);
@@ -316,6 +318,9 @@ public sealed partial class ExactActionAdmissionTests
         Assert.Equal(1, await verify.GeneratedCredentialCreationAudits.CountAsync());
         Assert.Equal(1, await verify.DurableOperationAttempts.CountAsync(r => r.Outcome == "Succeeded"));
         Assert.Equal(1, await verify.DurableOperationAttempts.CountAsync(r => r.Outcome == "AbandonedBeforeDispatch"));
+        Assert.Equal(second.AttemptId, (await verify.DurableOperations.AsNoTracking().SingleAsync(r => r.OperationId == producer.OperationId.Value)).CurrentAttemptId);
+        Assert.Equal("Succeeded", (await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.AttemptId == second.AttemptId)).Outcome);
+        Assert.Equal("AbandonedBeforeDispatch", (await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.AttemptId == first.AttemptId)).Outcome);
     }
 
     [Theory]
