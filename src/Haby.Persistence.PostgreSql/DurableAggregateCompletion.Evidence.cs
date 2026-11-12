@@ -90,7 +90,7 @@ internal static partial class DurableAggregateCompletion
 
     private static async Task<bool> ValidateTypedOutputAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
         DurablePlanningInputs inputs, DurableOperationGraph graph, DurableOperationNode node, OperationOutputRow output,
-        IExternalOperationOutputContract validator, IProviderConfigurationCodec[] codecs, CancellationToken token)
+        IExternalOperationOutputContract validator, IProviderConfigurationCodec[] codecs, CancellationToken token, bool publication = false)
     {
         var exact = inputs.Providers.Resource(node.ResourceId);
         var providerId = Guid.Parse(exact.Instance.ToString());
@@ -109,7 +109,10 @@ internal static partial class DurableAggregateCompletion
         var rows = await db.ProviderResourceReservations.AsNoTracking().Where(x => x.EnvironmentRecordId == source.EnvironmentRecordId && x.ApplicationRecordId == source.ApplicationRecordId).ToArrayAsync(token);
         var reservations = rows.Select(x => new ProviderResourceReservation(Haby.Domain.ProviderInstanceId.Parse(x.ProviderInstanceId.ToString()),
             inputs.Environment, inputs.Revision.ApplicationRecordId, Haby.Domain.ManifestLocalId.Create(x.ResourceLocalId), x.Namespace, x.Value)).ToArray();
-        return validator.ValidateReuse(new(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()), Haby.Domain.DeploymentGeneration.Create(source.Generation), node.Id),
-            new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), new(output.Contract, output.Key, output.Payload), references, prepared, reservations);
+        var key = new DurableOperationKey(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()), Haby.Domain.DeploymentGeneration.Create(source.Generation), node.Id);
+        var accepted = new AcceptedOperation(inputs, graph, node, inputs.Configuration!.Manifest.Spec);
+        var evidence = new ExternalOperationOutput(output.Contract, output.Key, output.Payload);
+        return publication ? validator.ValidatePublicationMetadata(key, accepted, evidence, references, prepared, reservations)
+            : validator.ValidateReuse(key, accepted, evidence, references, prepared, reservations);
     }
 }

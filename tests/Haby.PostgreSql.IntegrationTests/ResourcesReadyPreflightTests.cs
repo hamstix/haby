@@ -121,4 +121,67 @@ public sealed partial class PostgreSqlApplicationLoginTests
         else
         { Assert.Equal(DurableExecutionOutcome.InputUnavailable, result.StopOutcome); Assert.Null(result.Progress.AppliedGeneration); Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync()); }
     }
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("wrong")]
+    [InlineData("stale")]
+    [InlineData("finished")]
+    [InlineData("valid")]
+    [InlineData("replay")]
+    [InlineData("wrong-replay")]
+    public async Task Generated_candidate_checks_exact_attempt_before_material_and_exact_publication_replay_is_read_only(string mode)
+    {
+        var scenario = await Prepare(full: true);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await AccessExecute(scenario, "db-create")).Outcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await AccessExecute(scenario, "db-restrict")).Outcome);
+        var producer = scenario.Key("app-login-material");
+        GeneratedCredentialOutput output;
+        var expected = Guid.CreateVersion7();
+        await using (var arrange = OwnerServices(scenario))
+        {
+            var operations = arrange.GetRequiredService<IGeneratedCredentialOperations>();
+            var input = (await operations.FindInputAsync(producer, default))!;
+            var slot = await arrange.GetRequiredService<IGeneratedCredentialSlots>().GetOrCreateAsync(new(input.Owner, input.SlotId), input.GenerationProfile, default);
+            output = new(slot.Reference!);
+            var journal = arrange.GetRequiredService<IDurableOperationJournal>();
+            if (mode != "missing")
+            {
+                var begin = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(producer, DateTimeOffset.UtcNow, default));
+                expected = mode == "wrong" ? Guid.CreateVersion7() : begin.AttemptId;
+                if (mode == "stale") Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(producer, DateTimeOffset.UtcNow, default));
+                if (mode == "finished") Assert.True(await journal.TryCloseAttemptBeforeDispatchAsync(producer, begin.AttemptId,
+                    DurableAttemptOutcome.CanceledBeforeDispatch, null, DateTimeOffset.UtcNow, default));
+                if (mode is "replay" or "wrong-replay")
+                {
+                    Assert.True(await operations.CompleteAsync(producer, begin.AttemptId, output, DateTimeOffset.UtcNow, default));
+                    if (mode == "wrong-replay") expected = Guid.CreateVersion7();
+                }
+            }
+        }
+        var before = await ReadinessHistory(scenario.Connection);
+        var trap = new ReadinessMaterialTrap();
+        var factory = new ReadinessFactory(scenario.Connection, trap);
+        var secrets = new ReadinessSecrets(new PostgreSqlPlaintextSecretStore(factory));
+        await using var services = Services(scenario.Connection, full: true, access: true, queryTrap: trap, secretStore: secrets);
+        var operationsUnderTest = new PostgreSqlGeneratedCredentialOperations(factory, secrets,
+            services.GetServices<IExternalOperationOutputContract>(), services.GetServices<IProviderConfigurationCodec>());
+        var result = await operationsUnderTest.CompleteAsync(producer, expected, output, DateTimeOffset.UtcNow, default);
+        Assert.Equal(mode is "valid" or "replay", result);
+        if (mode == "valid")
+        {
+            Assert.True(trap.MaterialSelects > 0); Assert.True(secrets.Resolves > 0);
+            await using var verify = Context(scenario.Connection);
+            Assert.Equal("Succeeded", (await verify.DurableOperations.AsNoTracking().SingleAsync(x => x.OperationId == producer.OperationId.Value)).State);
+            Assert.Equal(expected, (await verify.DurableOperations.AsNoTracking().SingleAsync(x => x.OperationId == producer.OperationId.Value)).CurrentAttemptId);
+        }
+        else
+        {
+            Assert.Equal(0, trap.MaterialSelects); Assert.Equal(0, secrets.Resolves);
+            Assert.Equal(before, await ReadinessHistory(scenario.Connection));
+        }
+        Assert.Equal(0, trap.LockedMaterialSelects);
+        await using var final = Context(scenario.Connection);
+        Assert.Empty(await final.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+        Assert.Null((await final.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+    }
 }

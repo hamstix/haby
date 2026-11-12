@@ -31,7 +31,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [InlineData("output")]
     [InlineData("attempt")]
     [InlineData("aggregate")]
-    public async Task Role_publication_failure_rolls_back_output_success_exact_attempt_and_aggregate(string mode)
+    public async Task Role_publication_failure_preserves_only_independently_confirmed_results(string mode)
     {
         var scenario = await Prepare(); await Ready(scenario);
         var table = mode == "output" ? "operation_outputs" : mode == "attempt" ? "durable_create_operation_attempts" : "application_deployments";
@@ -39,8 +39,35 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await Sql(scenario.Connection, $"ALTER TABLE {table} ADD CONSTRAINT login_failure CHECK ({predicate})");
         var fault = new Fault("none");
         var result = await Execute(scenario, "app-login-create", fault);
-        Assert.Contains(result.Outcome, new[] { DurableExecutionOutcome.NeedsAttention, DurableExecutionOutcome.DispatchUncertain });
         Assert.True(await Exists(scenario.Role));
+        if (mode == "aggregate")
+        {
+            Assert.Equal(DurableExecutionOutcome.Succeeded, result.Outcome);
+            string payload; Guid attemptId; int attempts;
+            await using (var verify = Context(scenario.Connection))
+            {
+                payload = (await verify.OperationOutputs.AsNoTracking().SingleAsync(r => r.OperationId == "app-login-create")).Payload;
+                var operation = await verify.DurableOperations.AsNoTracking().SingleAsync(r => r.OperationId == "app-login-create");
+                Assert.Equal("Succeeded", operation.State);
+                attemptId = operation.CurrentAttemptId!.Value;
+                Assert.Equal("Succeeded", (await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.AttemptId == attemptId)).Outcome);
+                attempts = await verify.DurableOperationAttempts.CountAsync();
+                Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+                Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            }
+            await Sql(scenario.Connection, "ALTER TABLE application_deployments DROP CONSTRAINT login_failure");
+            await using (var restart = Services(scenario.Connection, fault))
+                Assert.Null((await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default)).StopOutcome);
+            Assert.Equal(1, fault.Markers);
+            await using var final = Context(scenario.Connection);
+            Assert.Equal(payload, (await final.OperationOutputs.AsNoTracking().SingleAsync(r => r.OperationId == "app-login-create")).Payload);
+            Assert.Equal(attemptId, (await final.DurableOperations.AsNoTracking().SingleAsync(r => r.OperationId == "app-login-create")).CurrentAttemptId);
+            Assert.Equal(attempts, await final.DurableOperationAttempts.CountAsync());
+            Assert.Single(await final.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+            Assert.Equal(1, (await final.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            return;
+        }
+        Assert.Contains(result.Outcome, new[] { DurableExecutionOutcome.NeedsAttention, DurableExecutionOutcome.DispatchUncertain });
         await using (var verify = Context(scenario.Connection))
         {
             Assert.False(await verify.OperationOutputs.AnyAsync(r => r.OperationId == "app-login-create"));

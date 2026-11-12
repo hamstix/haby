@@ -17,6 +17,10 @@ public interface IExternalOperationOutputContract
     bool ValidateReuse(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
         IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration,
         IReadOnlyCollection<ProviderResourceReservation> reservations) => Validate(accepted.Node, output);
+    /// <summary>Own confirmed publication metadata only; current-use material validation remains separate.</summary>
+    bool ValidatePublicationMetadata(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
+        IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration,
+        IReadOnlyCollection<ProviderResourceReservation> reservations) => ValidateReuse(key, accepted, output, sources, configuration, reservations);
     /// <summary>Optional adapter-owned validation against the exact accepted context and pinned inputs.</summary>
     ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
         ExternalOperationOutput output, CancellationToken cancellationToken) => new(Validate(accepted.Node, output));

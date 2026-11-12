@@ -65,7 +65,7 @@ public sealed partial class PostgreSqlRestrictTests
             Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
         }
         await Sql(scenario.Connection, "ALTER TABLE application_deployments DROP CONSTRAINT test_publication_failure");
-        await using (var restart = Services(scenario.Connection))
+        await using (var restart = Services(scenario.Connection, standalone: true))
             Assert.Null((await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(scenario.Create.DeploymentId, scenario.Create.Generation, default)).StopOutcome);
         Assert.Equal(external, await Policy(scenario.Database));
         await using var final = Context(scenario.Connection);

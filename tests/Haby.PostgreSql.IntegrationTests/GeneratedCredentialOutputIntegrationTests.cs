@@ -219,7 +219,9 @@ public sealed partial class ExactActionAdmissionTests
         Assert.Null(await outputs.ConsumeAsync(consumer, PasswordSelector with { ProducerOperationId = consumer.OperationId }, default));
         Assert.Equal(DurableExecutionOutcome.Succeeded, (await services.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(producer, default)).Outcome);
         Assert.Equal(output, await outputs.ConsumeAsync(consumer, PasswordSelector, default));
-        Assert.True(await outputs.CompleteAsync(producer, Guid.NewGuid(), output, DateTimeOffset.UtcNow, default)); // identical accepted retry
+        var exactAttempt = (await services.GetRequiredService<IDurableOperationJournal>().FindAsync(producer, default))!.AttemptId!.Value;
+        Assert.True(await outputs.CompleteAsync(producer, exactAttempt, output, DateTimeOffset.UtcNow, default)); // Exact committed replay.
+        Assert.False(await outputs.CompleteAsync(producer, Guid.NewGuid(), output, DateTimeOffset.UtcNow, default));
         Assert.False(await outputs.CompleteAsync(producer, Guid.NewGuid(), new(new(SecretId.New(), SecretVersionId.New())), DateTimeOffset.UtcNow, default));
 
         // A genuine secret for a different Resource/Environment is still unauthorized.

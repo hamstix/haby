@@ -190,6 +190,9 @@ public sealed partial class ExactActionAdmissionTests
         await using (var first = Services(scenario.Connection, boundary))
             Assert.Equal(2, (await first.GetRequiredService<DurableGenerationRunner>().RunAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default)).Progress!.Completed);
         boundary.Mode = null;
+        // GraphCase changes the planner after acceptance. Restore exact current support
+        // so the all-succeeded retry reaches the injected persistence failure.
+        boundary.PlannedName = "jobs";
         await GraphSql(scenario.Connection, "ALTER TABLE application_deployments ADD CONSTRAINT test_reject_applied CHECK (applied_generation IS NULL)");
         await using (var failing = Services(scenario.Connection, boundary))
             await Assert.ThrowsAsync<PostgresException>(() => failing.GetRequiredService<DurableGenerationRunner>()

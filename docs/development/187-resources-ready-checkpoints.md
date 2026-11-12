@@ -80,7 +80,23 @@ resolution and recheck them under the lock. Material validation precedes the loc
 inside the boundary only exact catalog metadata is checked. There is no Provider
 or network I/O or SecretStore resolution under that lock.
 
-Completion first inspects the whole bounded accepted graph and direct original
+Own confirmed-result publication and whole-generation readiness are separate
+boundaries. Publication validates the accepted producer and its frozen dependency
+and output-reference closure, exact current attempt ID/number and phase, unfinished
+state, management identity, mandatory typed output context and credential metadata.
+These checks run before material access and repeat under the aggregate lock with
+the same attempt/output binding. An external confirmed result does not require
+fresh credential resolution to become durable. A missing unrelated reused result
+can prevent readiness without vetoing that valid publication or making its effect
+eligible for redispatch. Local generated producers still validate their own material
+outside the transaction.
+
+Exact already-committed publication replay verifies the same producer, attempt and
+output using saved metadata only. It reads no material, creates no checkpoint and
+changes no history. Wrong or stale attempts refuse before any material access.
+Actual output consumption retains its existing current-use checks.
+
+Whole readiness first inspects the whole bounded accepted graph and direct original
 sources. Required registration uniqueness/identity, exact accepted input and
 management identities, and mandatory result metadata are checked before any
 credential material. A separate complete metadata-only pass checks every generated
@@ -160,6 +176,8 @@ restart/retry and dump/restore preserve saved proof and original identities.
 | --- | --- |
 | Whole-graph metadata refusal before material | `ResourcesReadyPreflightTests`: actual all-succeeded pair runner, missing/mismatched/ambiguous later validator, invalid output/foreign credential reference, missing/corrupt material, positive material-read control, unchanged confirmed history |
 | No material read inside completion transaction | `GeneratedCredentialCompletionLockTests`: actual SQL result columns for generated producer completion and the final checkpoint |
+| Own publication versus readiness | `ResourcesReadyCheckpointTests`: reused peer loss before preflight and at the lock, exact confirmed output/attempt retained, exact peer restoration and no-effect replay |
+| Exact candidate before material | `ResourcesReadyPreflightTests`: missing/wrong/stale/finished attempts, valid control, exact publication replay and wrong replay; actual SQL byte-column and SecretStore spies |
 | Exact install and immutable replay | `ResourcesReadyCheckpointTests`: independent persisted management/attempt/checkpoint queries, missing-adapter restart, concurrent equivalent replay |
 | No terminal-count or missing-output shortcut | Focused pre-fix failing tests for succeeded rows without confirmed attempts and missing output registration |
 | Reuse/mixed/retained/reintroduced sources | Existing synthetic and PostgreSQL lifecycle tests with added direct proof/source/reference assertions |

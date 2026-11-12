@@ -110,8 +110,10 @@ public sealed partial class ExactActionAdmissionTests
         Assert.Equal(2, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
     }
 
-    [Fact]
-    public async Task Confirmed_new_output_survives_reused_peer_loss_at_completion_lock_and_resume_replays_no_effects()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Confirmed_new_output_survives_reused_peer_loss_before_or_at_completion_lock_and_resume_replays_no_effects(bool beforePreflight)
     {
         var boundary = new QueueBoundary { ExternalEvidence = true };
         var scenario = await QueueUpdate(boundary, mixed: true);
@@ -126,16 +128,22 @@ public sealed partial class ExactActionAdmissionTests
         string originalPayload;
         await using (var read = OutputContext(scenario.Connection))
             originalPayload = (await read.OperationOutputs.AsNoTracking().SingleAsync(x => x.Generation == 1)).Payload;
-        await using (var blocker = new NpgsqlConnection(scenario.Connection))
+        if (beforePreflight)
         {
-            await blocker.OpenAsync(); await using var transaction = await blocker.BeginTransactionAsync();
-            await new NpgsqlCommand("SELECT id FROM application_deployments FOR UPDATE", blocker, transaction).ExecuteNonQueryAsync();
-            var publication = services.GetRequiredService<IExternalOperationOutputs>().CompleteAsync(key, attempt.AttemptId, output, DateTimeOffset.UtcNow, default).AsTask();
-            await WaitForCompletionLock(scenario.Connection, 1);
-            await new NpgsqlCommand("SET LOCAL session_replication_role = replica; DELETE FROM operation_outputs WHERE generation = 1", blocker, transaction).ExecuteNonQueryAsync();
-            await transaction.CommitAsync();
-            Assert.True(await publication);
+            await GraphSql(scenario.Connection, "SET session_replication_role = replica; DELETE FROM operation_outputs WHERE generation = 1");
+            Assert.True(await services.GetRequiredService<IExternalOperationOutputs>().CompleteAsync(key, attempt.AttemptId, output, DateTimeOffset.UtcNow, default));
         }
+        else
+            await using (var blocker = new NpgsqlConnection(scenario.Connection))
+            {
+                await blocker.OpenAsync(); await using var transaction = await blocker.BeginTransactionAsync();
+                await new NpgsqlCommand("SELECT id FROM application_deployments FOR UPDATE", blocker, transaction).ExecuteNonQueryAsync();
+                var publication = services.GetRequiredService<IExternalOperationOutputs>().CompleteAsync(key, attempt.AttemptId, output, DateTimeOffset.UtcNow, default).AsTask();
+                await WaitForCompletionLock(scenario.Connection, 1);
+                await new NpgsqlCommand("SET LOCAL session_replication_role = replica; DELETE FROM operation_outputs WHERE generation = 1", blocker, transaction).ExecuteNonQueryAsync();
+                await transaction.CommitAsync();
+                Assert.True(await publication);
+            }
         await using (var verifyBlocked = OutputContext(scenario.Connection))
         {
             Assert.Equal("Succeeded", (await verifyBlocked.DurableOperations.AsNoTracking().SingleAsync(x => x.Generation == 2)).State);

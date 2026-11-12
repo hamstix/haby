@@ -38,19 +38,29 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
         {
             await using var context = await contexts.CreateDbContextAsync(cancellationToken);
             var accepted = await AcceptedAsync(context, producer, cancellationToken);
-            var contract = accepted is null ? null : contracts.SingleOrDefault(c => c.Producer == accepted.Node.Action);
-            if (accepted is null || contract is null || accepted.Node.RequiredOutput != contract.Identity ||
-                contract.Identity != new ExternalOperationOutputIdentity(output.Contract, output.Key) || !contract.Validate(accepted.Node, output)) return false;
-            var metadata = await DurableAggregateCompletion.InspectMetadataAsync(context, Guid.Parse(producer.DeploymentId.ToString()), producer.Generation.Value,
-                contracts, codecs ?? [], cancellationToken, pending: new(producer, output));
-            if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(context, metadata, cancellationToken) ||
-                !await contract.ValidateAcceptedAsync(producer, accepted, output, cancellationToken)) return false;
-            var prepared = await DurableAggregateCompletion.PrepareAsync(context, metadata, cancellationToken);
+            if (accepted is null) return false;
+            var deployment = Guid.Parse(producer.DeploymentId.ToString());
+            var previous = await context.DurableOperations.AsNoTracking().SingleOrDefaultAsync(r => r.DeploymentId == deployment &&
+                r.Generation == producer.Generation.Value && r.OperationId == producer.OperationId.Value, cancellationToken);
+            if (previous?.State == nameof(DurableOperationState.Succeeded))
+                return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
+            var pending = new DurableAggregateCompletion.PendingResult(producer, attempt, output);
+            var metadata = await DurableAggregateCompletion.InspectPublicationAsync(context, pending, contracts, codecs ?? [], cancellationToken);
+            if (metadata?.Candidate is not { } candidate || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(context, metadata, cancellationToken)) return false;
+            // Own confirmed publication is metadata authority. Whole readiness may be
+            // unavailable independently; its absence must not erase this valid result.
+            var prepared = await DurableAggregateCompletion.PrepareAsync(context, deployment, producer.Generation.Value,
+                contracts, codecs ?? [], cancellationToken, pending: pending);
             // Adapter validation may resolve other immutable catalog inputs. Release each read's
             // connection before taking the write transaction, including with a one-connection pool.
             await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-            var deployment = Guid.Parse(producer.DeploymentId.ToString());
             await DurableAggregateCompletion.LockAsync(context, deployment, cancellationToken);
+            if (await context.DurableOperations.AnyAsync(r => r.DeploymentId == deployment && r.Generation == producer.Generation.Value &&
+                r.OperationId == producer.OperationId.Value && r.State == nameof(DurableOperationState.Succeeded), cancellationToken))
+                return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
+            var locked = await DurableAggregateCompletion.InspectPublicationAsync(context, pending, contracts, codecs ?? [], cancellationToken);
+            if (locked is null || !DurableAggregateCompletion.SamePublication(metadata, locked) ||
+                !await DurableAggregateCompletion.CheckCredentialMetadataAsync(context, locked, cancellationToken)) return false;
             var generation = producer.Generation.Value;
             var id = producer.OperationId.Value;
             var dependencies = accepted.Node.Dependencies.Select(d => d.Value).ToArray();
@@ -58,11 +68,12 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 dependencies.Contains(r.OperationId) && r.State == nameof(DurableOperationState.Succeeded), cancellationToken) != dependencies.Length)
                 return false;
             var held = await context.DurableOperations.Where(r => r.DeploymentId == deployment && r.Generation == generation &&
-                r.OperationId == id && r.State == nameof(DurableOperationState.Dispatching) && r.CurrentAttemptId == attempt)
+                r.OperationId == id && r.State == nameof(DurableOperationState.Dispatching) && r.CurrentAttemptId == attempt &&
+                r.AttemptNumber == candidate.AttemptNumber && r.DispatchedAt == candidate.DispatchedAt)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.State, nameof(DurableOperationState.Succeeded))
                     .SetProperty(r => r.FinalizedAt, at).SetProperty(r => r.UpdatedAt, at)
                     .SetProperty(r => r.ReasonCode, (string?)null), cancellationToken);
-            if (held != 1) return await ConfirmAsync(context, producer, attempt, output, cancellationToken, validateAccepted: false);
+            if (held != 1) return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
             var existing = await OutputAsync(context, producer, output.Contract, output.Key, cancellationToken);
             if (existing is not null && existing.Payload != output.Payload) return false;
             if (existing is null) context.OperationOutputs.Add(new()
@@ -76,8 +87,8 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             });
             await context.SaveChangesAsync(cancellationToken);
             var closed = await context.DurableOperationAttempts.Where(r => r.AttemptId == attempt &&
-                r.DeploymentId == deployment && r.Generation == generation && r.OperationId == id &&
-                r.DispatchedAt != null && r.FinishedAt == null)
+                r.DeploymentId == deployment && r.Generation == generation && r.OperationId == id && r.AttemptNumber == candidate.AttemptNumber &&
+                r.DispatchedAt == candidate.DispatchedAt && r.DispatchedAt != null && r.FinishedAt == null && r.Outcome == null)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
                     .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
             if (closed != 1) return false;
@@ -90,7 +101,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
         {
             // A fresh read may confirm this exact publication, never infer an external result.
             await using var confirm = await contexts.CreateDbContextAsync(CancellationToken.None);
-            return await ConfirmAsync(confirm, producer, attempt, output, CancellationToken.None);
+            return await ConfirmPublicationAsync(confirm, producer, attempt, output, CancellationToken.None);
         }
     }
 
@@ -143,6 +154,21 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 await ConfirmAsync(context, producer, attempt, output, cancellationToken, validateAccepted: false) ? output : null;
         }
         catch (InvalidDataException) { return null; }
+    }
+
+    private static async Task<bool> ConfirmPublicationAsync(ManifestCatalogDbContext context, DurableOperationKey key, Guid attempt,
+        ExternalOperationOutput output, CancellationToken token)
+    {
+        var accepted = await AcceptedAsync(context, key, token);
+        if (accepted is null || GeneratedCredentialContracts.IsProducer(accepted.Node) || !accepted.Node.RequiresExternalOutput ||
+            accepted.Node.RequiredOutput != new ExternalOperationOutputIdentity(output.Contract, output.Key)) return false;
+        var row = await OutputAsync(context, key, output.Contract, output.Key, token);
+        if (row is null || row.Payload != output.Payload) return false;
+        return await context.DurableOperations.AnyAsync(r => r.DeploymentId == row.DeploymentId && r.Generation == row.Generation &&
+            r.OperationId == row.OperationId && r.State == nameof(DurableOperationState.Succeeded) && r.CurrentAttemptId == attempt && r.ReasonCode == null &&
+            context.DurableOperationAttempts.Any(a => a.AttemptId == attempt && a.DeploymentId == r.DeploymentId && a.Generation == r.Generation &&
+                a.OperationId == r.OperationId && a.AttemptNumber == r.AttemptNumber && a.Outcome == nameof(DurableAttemptOutcome.Succeeded) &&
+                a.DispatchedAt != null && a.DispatchedAt == r.DispatchedAt && a.FinishedAt != null && a.FinishedAt == r.FinalizedAt), token);
     }
 
     private async Task<bool> ConfirmAsync(ManifestCatalogDbContext context, DurableOperationKey key, Guid attempt,

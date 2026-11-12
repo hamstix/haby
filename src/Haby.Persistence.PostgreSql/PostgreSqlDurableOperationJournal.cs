@@ -312,9 +312,11 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         if (local is not null && (local.Node.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(local.Node) ||
             outputContracts.Any(c => c.Producer == local.Node.Action)))
             return false;
+        if (local is null || local.State != DurableOperationState.Dispatching || local.AttemptId != attemptId) return false;
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
-        var prepared = await DurableAggregateCompletion.PrepareAsync(context, deployment, generation, outputContracts, codecs ?? [], cancellationToken);
+        var prepared = await DurableAggregateCompletion.PrepareAsync(context, deployment, generation, outputContracts, codecs ?? [], cancellationToken,
+            pending: new(key, attemptId, null));
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         await DurableAggregateCompletion.LockAsync(context, deployment, cancellationToken);
         var affected = await context.DurableOperations

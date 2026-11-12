@@ -6,21 +6,36 @@ namespace Haby.Persistence.PostgreSql;
 
 internal static partial class DurableAggregateCompletion
 {
-    internal sealed record PendingResult(DurableOperationKey Key, ExternalOperationOutput Output);
+    internal enum EvidencePurpose { Aggregate, Publication }
+    internal sealed record PendingResult(DurableOperationKey Key, Guid AttemptId, ExternalOperationOutput? Output);
+    internal sealed record ValidatedCandidate(PendingResult Request, long AttemptNumber, DateTimeOffset? DispatchedAt);
+    internal sealed record PreparedCandidate(long Generation, string Operation, Guid AttemptId, long AttemptNumber,
+        string? Contract, string? Key, string? Fingerprint);
     internal sealed record PreparedCredential(long Generation, string Operation, string Fingerprint,
         GeneratedCredentialInput Input, GeneratedCredentialOutput Output);
-    internal sealed record ReadinessSource(DeploymentGenerationRow Row, DurablePlanningInputs Inputs, DurableOperationGraph Graph);
+    internal sealed record ReadinessSource(DeploymentGenerationRow Row, DurablePlanningInputs Inputs, DurableOperationGraph Graph, IReadOnlyList<DurableOperationNode> Nodes);
     internal sealed record ReadinessMetadata(Guid Deployment, long Generation, string Fingerprint,
-        IReadOnlyList<ReadinessSource> Sources, IReadOnlyDictionary<string, Guid> Management, IReadOnlyList<PreparedCredential> Credentials);
+        IReadOnlyList<ReadinessSource> Sources, IReadOnlyDictionary<string, Guid> Management, IReadOnlyList<PreparedCredential> Credentials, EvidencePurpose Purpose, bool Complete, ValidatedCandidate? Candidate);
     internal sealed record ReadinessPreparation(Guid Deployment, long Generation, string Fingerprint,
-        IReadOnlyDictionary<long, string> Sources, IReadOnlyDictionary<string, Guid> Management, IReadOnlyList<PreparedCredential> Credentials);
+        IReadOnlyDictionary<long, string> Sources, IReadOnlyDictionary<string, Guid> Management, IReadOnlyList<PreparedCredential> Credentials, PreparedCandidate? Candidate);
 
     // This first pass is deliberately complete before touching any credential table or
     // material. Only the bounded accepted graph and its direct original sources enter it.
-    internal static async Task<ReadinessMetadata?> InspectMetadataAsync(ManifestCatalogDbContext db, Guid deployment,
+    internal static Task<ReadinessMetadata?> InspectMetadataAsync(ManifestCatalogDbContext db, Guid deployment,
         long generation, IEnumerable<IExternalOperationOutputContract> registrations,
         IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token,
-        DurableActionAdmission? admission = null, PendingResult? pending = null)
+        DurableActionAdmission? admission = null, PendingResult? pending = null) =>
+        InspectMetadataCoreAsync(db, deployment, generation, registrations, codecs, token, admission, pending, EvidencePurpose.Aggregate);
+
+    internal static Task<ReadinessMetadata?> InspectPublicationAsync(ManifestCatalogDbContext db, PendingResult pending,
+        IEnumerable<IExternalOperationOutputContract> registrations, IEnumerable<IProviderConfigurationCodec> codecs,
+        CancellationToken token) => InspectMetadataCoreAsync(db, Guid.Parse(pending.Key.DeploymentId.ToString()),
+            pending.Key.Generation.Value, registrations, codecs, token, null, pending, EvidencePurpose.Publication);
+
+    private static async Task<ReadinessMetadata?> InspectMetadataCoreAsync(ManifestCatalogDbContext db, Guid deployment,
+        long generation, IEnumerable<IExternalOperationOutputContract> registrations,
+        IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token,
+        DurableActionAdmission? admission, PendingResult? pending, EvidencePurpose purpose)
     {
         try
         {
@@ -28,20 +43,37 @@ internal static partial class DurableAggregateCompletion
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deployment, token);
             if (root is null || owner is null) return null;
             var target = DurableOperationGraphCodec.Decode(root.GraphJson);
-            var resourceIds = target.Nodes.Select(x => x.ResourceId.Value).Concat(target.ReusedResources.Select(x => x.Resource.Value))
-                .Concat(target.RetainedResources.Select(x => x.Resource.Value)).Distinct(StringComparer.Ordinal).ToArray();
+            if (pending is not null && (pending.Key.DeploymentId.ToString() != deployment.ToString() || pending.Key.Generation.Value != generation ||
+                target.Nodes.All(x => x.Id != pending.Key.OperationId))) return null;
+            HashSet<OperationId>? closure = null;
+            if (purpose == EvidencePurpose.Publication)
+            {
+                if (pending is null) return null;
+                closure = [];
+                var waiting = new Stack<OperationId>(); waiting.Push(pending.Key.OperationId);
+                while (waiting.TryPop(out var id))
+                {
+                    if (!closure.Add(id)) continue;
+                    var node = target.Nodes.SingleOrDefault(x => x.Id == id);
+                    if (node is null) return null;
+                    foreach (var dependency in node.Dependencies.Concat(node.OutputReferences.Select(x => x.ProducerOperationId))) waiting.Push(dependency);
+                }
+            }
+            var resourceIds = (closure is null
+                ? target.Nodes.Select(x => x.ResourceId.Value).Concat(target.ReusedResources.Select(x => x.Resource.Value)).Concat(target.RetainedResources.Select(x => x.Resource.Value))
+                : target.Nodes.Where(x => closure.Contains(x.Id)).Select(x => x.ResourceId.Value)).Distinct(StringComparer.Ordinal).ToArray();
             var managed = await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && resourceIds.Contains(x.Resource)).ToArrayAsync(token);
             var identities = new Dictionary<string, Guid>(StringComparer.Ordinal);
             foreach (var resource in resourceIds)
             {
-                var reuse = target.ReusedResources.Concat(target.RetainedResources).SingleOrDefault(x => x.Resource.Value == resource);
+                var reuse = closure is null ? target.ReusedResources.Concat(target.RetainedResources).SingleOrDefault(x => x.Resource.Value == resource) : null;
                 var identity = managed.SingleOrDefault(x => x.Resource == resource);
                 if (identity is null || identity.Environment != owner.EnvironmentRecordId || identity.Application != owner.ApplicationRecordId ||
                     identity.SourceGeneration != (reuse?.SourceGeneration ?? generation) || reuse is not null && identity.Id != reuse.ManagementId) return null;
                 identities.Add(resource, identity.Id);
             }
-            if (target.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, deployment, target, token)) return null;
-            var generations = target.ReusedResources.Concat(target.RetainedResources).Select(x => x.SourceGeneration).Append(generation).Distinct().ToArray();
+            if (closure is null && target.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, deployment, target, token)) return null;
+            var generations = closure is null ? target.ReusedResources.Concat(target.RetainedResources).Select(x => x.SourceGeneration).Append(generation).Distinct().ToArray() : [generation];
             if (generations.Any(x => x > generation)) return null;
             var sources = new List<ReadinessSource>();
             var contracts = registrations.ToArray();
@@ -61,7 +93,8 @@ internal static partial class DurableAggregateCompletion
                 var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token);
                 if (revision is null) return null;
                 var spec = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);
-                foreach (var node in graph.Nodes)
+                var selected = closure is null ? graph.Nodes : graph.Nodes.Where(x => closure.Contains(x.Id)).ToArray();
+                foreach (var node in selected)
                 {
                     if (!spec.Spec.Resources.TryGetValue(node.ResourceId, out var resource) || resource.Type != node.Action.Admission.ResourceContract || resource.ProviderRef != inputs.Providers.Resource(node.ResourceId).Alias) return null;
                     var matches = contracts.Where(x => x.Producer == node.Action).ToArray();
@@ -75,34 +108,55 @@ internal static partial class DurableAggregateCompletion
                         : matches.Length != 0 || node.RequiredOutput is not null) return null;
                 }
                 if (admission is not null && !await ValidateSourceGraphAsync(db, row, inputs, graph, typedCodecs, admission, token)) return null;
-                sources.Add(new(row, inputs, graph));
+                sources.Add(new(row, inputs, graph, selected));
             }
             // All registration identities and accepted source contexts above precede
             // even generated-slot metadata reads. Typed result validation is metadata-only.
             var credentials = new List<PreparedCredential>();
+            ValidatedCandidate? validatedCandidate = null;
+            var complete = true;
             foreach (var source in sources)
             {
-                var operations = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation)
-                    .OrderBy(x => x.OperationId).Take(source.Graph.Nodes.Count + 1).ToArrayAsync(token);
+                var ids = source.Nodes.Select(x => x.Id.Value).ToArray();
+                var operationsQuery = db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation);
+                if (closure is not null) operationsQuery = operationsQuery.Where(x => ids.Contains(x.OperationId));
+                var operations = await operationsQuery.OrderBy(x => x.OperationId).Take(source.Nodes.Count + 1).ToArrayAsync(token);
                 var attemptIds = operations.Where(x => x.CurrentAttemptId is not null).Select(x => x.CurrentAttemptId!.Value).ToArray();
                 var attempts = await db.DurableOperationAttempts.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation && attemptIds.Contains(x.AttemptId)).ToArrayAsync(token);
-                var outputs = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation)
-                    .OrderBy(x => x.OperationId).ThenBy(x => x.Contract).ThenBy(x => x.Key).Take(source.Graph.Nodes.Count + 1).ToArrayAsync(token);
-                if (operations.Length != source.Graph.Nodes.Count || outputs.Any(x => source.Graph.Nodes.All(node => node.Id.Value != x.OperationId))) return null;
-                foreach (var node in source.Graph.Nodes)
+                var outputsQuery = db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation);
+                if (closure is not null) outputsQuery = outputsQuery.Where(x => ids.Contains(x.OperationId));
+                var outputs = await outputsQuery.OrderBy(x => x.OperationId).ThenBy(x => x.Contract).ThenBy(x => x.Key).Take(source.Nodes.Count + 1).ToArrayAsync(token);
+                if (operations.Length != source.Nodes.Count || outputs.Any(x => source.Nodes.All(node => node.Id.Value != x.OperationId))) return null;
+                foreach (var node in source.Nodes)
                 {
                     var operation = operations.SingleOrDefault(x => x.OperationId == node.Id.Value);
                     if (operation is null) return null;
-                    var candidate = pending is not null && pending.Key.DeploymentId.ToString() == deployment.ToString() && pending.Key.Generation.Value == source.Row.Generation && pending.Key.OperationId == node.Id ? pending.Output : null;
+                    var candidate = pending is not null && pending.Key.Generation.Value == source.Row.Generation && pending.Key.OperationId == node.Id ? pending : null;
                     var rows = outputs.Where(x => x.OperationId == node.Id.Value).ToArray();
                     if (candidate is not null)
                     {
-                        if (rows.Length != 0 && (rows.Length != 1 || rows[0].Contract != candidate.Contract || rows[0].Key != candidate.Key || rows[0].Payload != candidate.Payload)) return null;
-                        rows = [new OperationOutputRow { DeploymentId = deployment, Generation = source.Row.Generation, OperationId = node.Id.Value, Contract = candidate.Contract, Key = candidate.Key, Payload = candidate.Payload }];
+                        if (operation.CurrentAttemptId != candidate.AttemptId) return null;
+                        var current = attempts.SingleOrDefault(x => x.AttemptId == candidate.AttemptId && x.OperationId == node.Id.Value && x.AttemptNumber == operation.AttemptNumber);
+                        if (current is null) return null;
+                        if (operation.State != nameof(DurableOperationState.Succeeded))
+                        {
+                            var local = GeneratedCredentialContracts.IsProducer(node);
+                            if (operation.State != (local ? nameof(DurableOperationState.Preparing) : nameof(DurableOperationState.Dispatching)) ||
+                                current.FinishedAt is not null || current.Outcome is not null || operation.FinalizedAt is not null || operation.ReasonCode is not null ||
+                                operation.DispatchedAt != current.DispatchedAt || (local ? current.DispatchedAt is not null : current.DispatchedAt is null)) return null;
+                        }
+                        validatedCandidate = new(candidate, current.AttemptNumber, current.DispatchedAt);
+                        if (candidate.Output is { } proposed)
+                        {
+                            if (rows.Length != 0 && (rows.Length != 1 || rows[0].Contract != proposed.Contract || rows[0].Key != proposed.Key || rows[0].Payload != proposed.Payload)) return null;
+                            rows = [new OperationOutputRow { DeploymentId = deployment, Generation = source.Row.Generation, OperationId = node.Id.Value, Contract = proposed.Contract, Key = proposed.Key, Payload = proposed.Payload }];
+                        }
+                        else if (node.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(node) || rows.Length != 0) return null;
                     }
                     if (operation.State != nameof(DurableOperationState.Succeeded) && candidate is null)
                     {
-                        if (source.Row.Generation != generation || rows.Length != 0) return null;
+                        if (purpose == EvidencePurpose.Publication || source.Row.Generation != generation || rows.Length != 0) return null;
+                        complete = false;
                         continue;
                     }
                     if (operation.State == nameof(DurableOperationState.Succeeded))
@@ -123,15 +177,23 @@ internal static partial class DurableAggregateCompletion
                         var validator = contracts.Single(x => x.Producer == node.Action);
                         if (rows is not [var output] || node.RequiredOutput != new ExternalOperationOutputIdentity(output.Contract, output.Key) ||
                             !validator.Validate(node, new(output.Contract, output.Key, output.Payload)) ||
-                            !await ValidateTypedOutputAsync(db, source.Row, source.Inputs, source.Graph, node, output, validator, typedCodecs, token)) return null;
+                            !await ValidateTypedOutputAsync(db, source.Row, source.Inputs, source.Graph, node, output, validator, typedCodecs, token, publication: purpose == EvidencePurpose.Publication)) return null;
                     }
                     else if (rows.Length != 0) return null;
                 }
             }
-            return new(deployment, generation, root.Fingerprint, sources.AsReadOnly(), new System.Collections.ObjectModel.ReadOnlyDictionary<string, Guid>(identities), credentials.AsReadOnly());
+            if (pending is not null && validatedCandidate is null) return null;
+            return new(deployment, generation, root.Fingerprint, sources.AsReadOnly(), new System.Collections.ObjectModel.ReadOnlyDictionary<string, Guid>(identities), credentials.AsReadOnly(), purpose, complete, validatedCandidate);
         }
         catch (Exception error) when (error is InvalidDataException or ArgumentException or System.Text.Json.JsonException) { return null; }
     }
+
+    internal static bool SamePublication(ReadinessMetadata before, ReadinessMetadata locked) =>
+        before.Purpose == EvidencePurpose.Publication && locked.Purpose == EvidencePurpose.Publication &&
+        before.Deployment == locked.Deployment && before.Generation == locked.Generation && before.Fingerprint == locked.Fingerprint &&
+        before.Candidate == locked.Candidate && before.Management.Count == locked.Management.Count &&
+        before.Management.All(x => locked.Management.GetValueOrDefault(x.Key) == x.Value) &&
+        before.Credentials.Count == locked.Credentials.Count && before.Credentials.All(locked.Credentials.Contains);
 
     private static async Task<bool> ValidateSourceGraphAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
         DurablePlanningInputs inputs, DurableOperationGraph graph, IProviderConfigurationCodec[] codecs,
@@ -164,7 +226,9 @@ internal static partial class DurableAggregateCompletion
 
     internal static async Task<ReadinessPreparation?> PrepareAsync(ManifestCatalogDbContext db, ReadinessMetadata? metadata, CancellationToken token)
     {
-        if (metadata is null || !await CheckCredentialMetadataAsync(db, metadata, token)) return null;
+        if (metadata is null || !metadata.Complete) return null;
+        if (metadata.Purpose != EvidencePurpose.Aggregate) throw new InvalidOperationException("Own publication metadata is not aggregate readiness authority.");
+        if (!await CheckCredentialMetadataAsync(db, metadata, token)) return null;
         if (db.Database.CurrentTransaction is not null) throw new InvalidOperationException("Material preflight must precede the completion transaction.");
         foreach (var credential in metadata.Credentials)
         {
@@ -172,7 +236,10 @@ internal static partial class DurableAggregateCompletion
             if (slot?.Outcome != GeneratedCredentialOutcome.Existing || slot.Reference != credential.Output.Reference) return null;
         }
         return new(metadata.Deployment, metadata.Generation, metadata.Fingerprint,
-            new System.Collections.ObjectModel.ReadOnlyDictionary<long, string>(metadata.Sources.ToDictionary(x => x.Row.Generation, x => x.Row.Fingerprint)), metadata.Management, metadata.Credentials);
+            new System.Collections.ObjectModel.ReadOnlyDictionary<long, string>(metadata.Sources.ToDictionary(x => x.Row.Generation, x => x.Row.Fingerprint)), metadata.Management, metadata.Credentials,
+            metadata.Candidate is not { } candidate ? null : new(candidate.Request.Key.Generation.Value, candidate.Request.Key.OperationId.Value,
+                candidate.Request.AttemptId, candidate.AttemptNumber, candidate.Request.Output?.Contract, candidate.Request.Output?.Key,
+                candidate.Request.Output is null ? null : ResourcesReadyCheckpointCodec.Hash(candidate.Request.Output.Payload)));
     }
 
     internal static async Task<ReadinessPreparation?> PrepareAsync(ManifestCatalogDbContext db, Guid deployment, long generation,
@@ -187,11 +254,20 @@ internal static partial class DurableAggregateCompletion
 
     private static bool MatchesPreparation(ReadinessPreparation prepared, Guid deployment, long generation,
         string fingerprint, ResourceReadyResult[] results) =>
-        prepared.Deployment == deployment && prepared.Generation == generation && prepared.Fingerprint == fingerprint &&
+        prepared.Deployment == deployment && prepared.Generation == generation && prepared.Fingerprint == fingerprint && MatchesCandidate(prepared.Candidate, results) &&
         results.All(resource => prepared.Management.GetValueOrDefault(resource.Resource) == resource.ManagementId &&
             prepared.Sources.GetValueOrDefault(resource.SourceGeneration) == resource.SourceFingerprint &&
             resource.Operations.All(operation => operation.Outputs.Where(output => output.SecretId is not null).All(output =>
                 prepared.Credentials.Any(credential => credential.Generation == resource.SourceGeneration && credential.Operation == operation.OperationId &&
                     credential.Fingerprint == output.Fingerprint && Guid.Parse(credential.Output.Reference.SecretId.ToString()) == output.SecretId &&
                     Guid.Parse(credential.Output.Reference.SecretVersionId.ToString()) == output.SecretVersionId))));
+    private static bool MatchesCandidate(PreparedCandidate? candidate, ResourceReadyResult[] results)
+    {
+        if (candidate is null) return true;
+        var operation = results.Where(x => x.SourceGeneration == candidate.Generation).SelectMany(x => x.Operations).SingleOrDefault(x => x.OperationId == candidate.Operation);
+        if (operation is null || operation.AttemptId != candidate.AttemptId || operation.AttemptNumber != candidate.AttemptNumber) return false;
+        return candidate.Contract is null ? operation.Outputs.Count == 0 : operation.Outputs is [var output] &&
+            output.Contract == candidate.Contract && output.Key == candidate.Key && output.Fingerprint == candidate.Fingerprint;
+    }
+
 }

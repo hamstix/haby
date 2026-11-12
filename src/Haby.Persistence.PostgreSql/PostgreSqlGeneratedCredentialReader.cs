@@ -42,6 +42,20 @@ public sealed class PostgreSqlGeneratedCredentialReader(IDbContextFactory<Manife
         catch (Exception e) when (StorageFailure(e)) { return null; }
     }
 
+    internal static async Task<bool> ConfirmPublicationAsync(ManifestCatalogDbContext context, DurableOperationKey producer,
+        Guid attempt, GeneratedCredentialOutput expected, CancellationToken token)
+    {
+        if (await InputAsync(context, producer, token) is null) return false;
+        var row = await OutputAsync(context, producer, token);
+        if (row is null || GeneratedCredentialOutputCodec.Decode(row.Contract, row.Payload) != expected) return false;
+        var deployment = Guid.Parse(producer.DeploymentId.ToString());
+        return await context.DurableOperations.AnyAsync(r => r.DeploymentId == deployment && r.Generation == producer.Generation.Value &&
+            r.OperationId == producer.OperationId.Value && r.State == nameof(DurableOperationState.Succeeded) && r.CurrentAttemptId == attempt && r.ReasonCode == null &&
+            context.DurableOperationAttempts.Any(a => a.AttemptId == attempt && a.DeploymentId == r.DeploymentId && a.Generation == r.Generation &&
+                a.OperationId == r.OperationId && a.AttemptNumber == r.AttemptNumber && a.Outcome == nameof(DurableAttemptOutcome.Succeeded) &&
+                a.DispatchedAt == null && r.DispatchedAt == null && a.FinishedAt != null && a.FinishedAt == r.FinalizedAt), token);
+    }
+
     internal async Task<bool> ConfirmAsync(ManifestCatalogDbContext context, DurableOperationKey producer,
         GeneratedCredentialOutput expected, CancellationToken token)
     {
