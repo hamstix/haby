@@ -193,16 +193,12 @@ public sealed partial class ManifestOperatorService
             EnvironmentRecordId = value.Inputs.Environment.ToString(),
             EnvironmentId = value.Inputs.EnvironmentKey.Value,
             Reference = Reference(value.Inputs.Revision),
-            ProviderAlias = value.Inputs.Alias.Value,
-            Naming = FrozenNaming(value.Inputs.Naming),
-            ProviderInstanceId = value.Inputs.ProviderInstance.ToString(),
-            ConfigurationRevision = value.Inputs.ConfigurationRevision.Value,
-            ImplementationId = value.Inputs.ImplementationId,
             Fingerprint = value.Fingerprint,
             CreatedAtUtc = Utc(value.CreatedAt),
             ExpiresAtUtc = Utc(value.ExpiresAt),
             TechnicalActorId = value.ActorId
         };
+        result.ProviderInputs.AddRange(ProviderInputSummaries(value.Inputs));
         result.Operations.AddRange(OperationSummaries(value.Graph));
         var names = descriptions.Targets(value);
         foreach (var operation in result.Operations)

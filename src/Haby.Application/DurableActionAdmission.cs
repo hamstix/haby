@@ -25,7 +25,7 @@ public sealed record DurableActionExecutionKey(DurableActionAdmissionKey Admissi
 public interface IDurableActionAdmissionHandler
 {
     DurableActionExecutionKey Key { get; }
-    bool Validate(NormalizedResource resource, DurablePlanningInputs inputs);
+    bool Validate(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs);
     IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs);
 
 }
@@ -58,8 +58,12 @@ public abstract class DurableActionAdmissionHandler<TInput> : IDurableActionAdmi
     public abstract DurableActionExecutionKey Key { get; }
     public abstract IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs);
     public abstract TInput? Prepare(NormalizedResource resource, DurableActionInputReferences inputs);
-    public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) =>
-        Prepare(resource, new(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId) { Naming = inputs.Naming }) is not null;
+    public bool Validate(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
+    {
+        var provider = inputs.Providers.Resource(resourceId);
+        return Prepare(resource, new(provider.Environment, provider.Instance, provider.Configuration, provider.Implementation.Value)
+        { Naming = provider.ResourceNaming() }) is not null;
+    }
 }
 
 public abstract class DurableActionHandler<TInput> : DurableActionAdmissionHandler<TInput>, IDurableActionHandler where TInput : class
@@ -70,9 +74,9 @@ public abstract class DurableActionHandler<TInput> : DurableActionAdmissionHandl
     protected DurableOperationNode PrepareNode(OperationId id, ManifestLocalId resourceId,
         NormalizedResource resource, DurablePlanningInputs inputs)
     {
-        var references = new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance,
-            inputs.ConfigurationRevision, inputs.ImplementationId);
-        var input = Prepare(resource, references with { Naming = inputs.Naming }) ?? throw new InvalidDataException("Invalid action input.");
+        var provider = inputs.Providers.Resource(resourceId);
+        var references = new DurableActionInputReferences(provider.Environment, provider.Instance, provider.Configuration, provider.Implementation.Value);
+        var input = Prepare(resource, references with { Naming = provider.ResourceNaming() }) ?? throw new InvalidDataException("Invalid action input.");
         return new(id, resourceId, Key, references, new(InputFormat, JsonSerializer.Serialize(input, InputTypeInfo)), []);
     }
     public bool Supports(DurableOperationNode node) => Decode(node) is not null;
@@ -158,20 +162,26 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         PreparedProviderConfiguration? configuration = null)
     {
         if (!SupportsPilotShape(spec)) return DurablePlanStatus.UnsupportedShape;
-        if (SingleAlias(spec) != inputs.Alias || provider.ImplementationId != inputs.ImplementationId)
+        inputs.Validate();
+        var completeInputs = spec.Resources.Keys.ToHashSet().SetEquals(inputs.Providers.Entries.Keys.OfType<ProviderInput.Resource>().Select(x => x.Id)) &&
+            inputs.Providers.Entries.Keys.All(x => x is ProviderInput.Resource);
+        var pilot = inputs.Providers.RequireUniformResourceProvider();
+        if (SingleAlias(spec) != pilot.Alias || provider.ImplementationId != pilot.Implementation.Value)
             return DurablePlanStatus.ProviderRevisionUnavailable;
         foreach (var resource in spec.Resources)
         {
             var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider));
             if (handler is null) return DurablePlanStatus.ProviderCapabilityMismatch;
-            if (inputs.Naming.Reference is not null && handler is not IResourceNamingPolicyHandler)
-                return DurablePlanStatus.ProviderCapabilityMismatch;
-            if (handler is IResourceNamingPolicyHandler naming && !naming.SupportsNaming(inputs.Naming.Policy))
-                return DurablePlanStatus.UnsupportedShape;
             var valid = handler is IDurableResourcePlanComposer composer && configuration is not null
                 ? composer.Validate(spec, resource.Key, inputs, configuration)
-                : spec.Resources.Count == 1 && SupportsConfigurationComponents(spec) && handler.Validate(resource.Value, inputs);
+                : spec.Resources.Count == 1 && SupportsConfigurationComponents(spec) && handler.Validate(resource.Key, resource.Value, inputs);
             if (!valid) return DurablePlanStatus.UnsupportedShape;
+            if (!completeInputs) return DurablePlanStatus.PlanInputUnavailable;
+            var names = inputs.Providers.Resource(resource.Key).ResourceNaming();
+            if (names.Reference is not null && handler is not IResourceNamingPolicyHandler)
+                return DurablePlanStatus.ProviderCapabilityMismatch;
+            if (handler is IResourceNamingPolicyHandler naming && !naming.SupportsNaming(names.Policy))
+                return DurablePlanStatus.UnsupportedShape;
         }
         return DurablePlanStatus.Planned;
     }
@@ -259,7 +269,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         DurablePlanningInputs original, DurablePlanningInputs proposed, PreparedProviderConfiguration configuration) =>
         registry.Find(new DurableActionAdmissionKey(spec.Resources[resource].Type, provider)) is IDurableResourceNamingCompatibility policy
             ? policy.SameNames(spec, resource, original, proposed, configuration)
-            : original.Naming == proposed.Naming;
+            : original.Providers.Resource(resource).ResourceNaming() == proposed.Providers.Resource(resource).ResourceNaming();
 
     public bool CanReuseResource(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
         ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>

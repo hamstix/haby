@@ -165,6 +165,13 @@ public sealed record ProviderConfigurationContractId : VersionedContractId
     public static ProviderConfigurationContractId Create(string value) => new(value);
 }
 
+/// <summary>Versioned adapter-owned exact non-secret input contract.</summary>
+public sealed record AdapterInputContractId : VersionedContractId
+{
+    private AdapterInputContractId(string value) : base(value) { }
+    public static AdapterInputContractId Create(string value) => new(value);
+}
+
 /// <summary>Opaque implementation identity; distinct from a versioned public contract.</summary>
 public sealed record ProviderImplementationId
 {

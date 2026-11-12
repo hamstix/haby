@@ -66,44 +66,46 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             await ResourceContinuity.LockAsync(context, actual.Id, cancellationToken);
         }
 
-        // FOR SHARE conflicts with the alias store's UPDATE. If a switch wins,
-        // this read sees the new binding; if commit wins, the switch waits until
-        // the immutable generation has pinned the old exact revision.
-        await context.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT environment_record_id FROM provider_aliases WHERE environment_record_id = {change.EnvironmentRecordId} AND alias = {plan.ProviderAlias} FOR SHARE",
-            cancellationToken);
-        var alias = await context.ProviderAliases.AsNoTracking().SingleOrDefaultAsync(row =>
-            row.EnvironmentRecordId == change.EnvironmentRecordId && row.Alias == plan.ProviderAlias,
-            cancellationToken);
-        if (alias is null) return new DurableCommitResult.PlanInputUnavailable();
-        if (alias.ProviderInstanceId != plan.ProviderInstanceId ||
-            alias.RevisionNumber != plan.ConfigurationRevisionNumber)
-            return new DurableCommitResult.PlanStale();
-        var revision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(row =>
-            row.ProviderInstanceId == plan.ProviderInstanceId &&
-            row.RevisionNumber == plan.ConfigurationRevisionNumber &&
-            row.EnvironmentRecordId == change.EnvironmentRecordId && row.IsSealed, cancellationToken);
-        if (revision is null || revision.ImplementationId != plan.ImplementationId)
-            return new DurableCommitResult.PlanInputUnavailable();
-        var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(row =>
-            row.Id == change.EnvironmentRecordId, cancellationToken);
-        if (environment is null) return new DurableCommitResult.PlanInputUnavailable();
-        var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(change.EnvironmentRecordId.ToString()),
-            EnvironmentId.Create(environment.EnvironmentId),
-            ManifestRevisionRef.Create(ApplicationRecordId.Parse(change.ApplicationRecordId.ToString()),
-                ManifestRevisionNumber.Create(change.RevisionNumber)), ProviderAlias.Create(plan.ProviderAlias),
-            ProviderInstanceId.Parse(plan.ProviderInstanceId.ToString()),
-            ProviderConfigurationRevisionNumber.Create(plan.ConfigurationRevisionNumber), plan.ImplementationId);
+        DurablePlanningInputs inputs;
         DurableOperationGraph graph;
+        ProviderConfigurationRevisionRow? revision = null;
         try
         {
-            if (plan.SnapshotFormatVersion != 3) return new DurableCommitResult.PlanInputUnavailable();
-            inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(plan.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(plan.NamingJson) };
-            var naming = await PostgreSqlResourceNamingStore.CaptureAsync(context, change.EnvironmentRecordId, plan.ProviderAlias, cancellationToken);
-            if (naming.Snapshot != inputs.Naming) return new DurableCommitResult.PlanStale();
-            graph = DurableOperationGraphCodec.Decode(plan.GraphJson); graph.ValidateReferences(inputs);
+            inputs = plan.Inputs();
+            graph = DurableOperationGraphCodec.Decode(plan.GraphJson);
+            var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.Id == change.EnvironmentRecordId, cancellationToken);
+            if (environment is null || environment.EnvironmentId != inputs.EnvironmentKey.Value)
+                return new DurableCommitResult.PlanInputUnavailable();
+            // Lock all aliases in a stable order. Naming capture shares the same alias lock.
+            foreach (var frozen in inputs.Providers.Entries.Values.OrderBy(x => x.Alias.Value, StringComparer.Ordinal))
+            {
+                var aliasName = frozen.Alias.Value;
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT environment_record_id FROM provider_aliases WHERE environment_record_id = {change.EnvironmentRecordId} AND alias = {aliasName} FOR SHARE", cancellationToken);
+                var alias = await context.ProviderAliases.AsNoTracking().SingleOrDefaultAsync(x =>
+                    x.EnvironmentRecordId == change.EnvironmentRecordId && x.Alias == aliasName, cancellationToken);
+                if (alias is null) return new DurableCommitResult.PlanInputUnavailable();
+                if (alias.ProviderInstanceId != Guid.Parse(frozen.Instance.ToString()) || alias.RevisionNumber != frozen.Configuration.Value)
+                    return new DurableCommitResult.PlanStale();
+                var exactRevision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x =>
+                    x.ProviderInstanceId == alias.ProviderInstanceId && x.RevisionNumber == alias.RevisionNumber &&
+                    x.EnvironmentRecordId == change.EnvironmentRecordId && x.IsSealed, cancellationToken);
+                if (exactRevision is null || exactRevision.ImplementationId != frozen.Implementation.Value)
+                    return new DurableCommitResult.PlanInputUnavailable();
+                var naming = await PostgreSqlResourceNamingStore.CaptureAsync(context, change.EnvironmentRecordId, aliasName, cancellationToken);
+                if (naming.Snapshot != frozen.ResourceNaming()) return new DurableCommitResult.PlanStale();
+            }
+            // Existing executable pilot admits only one exact Resource context. The loop above
+            // checks the complete set; this restriction is capability admission, not storage.
+            var pilot = inputs.Providers.RequireUniformResourceProvider();
+            var instance = Guid.Parse(pilot.Instance.ToString());
+            revision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.ProviderInstanceId == instance && x.RevisionNumber == pilot.Configuration.Value &&
+                x.EnvironmentRecordId == change.EnvironmentRecordId && x.IsSealed, cancellationToken);
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
+        if (revision is null) return new DurableCommitResult.UnsupportedShape();
         if (actual is null ? graph.Baseline is not null : graph.Baseline is not { } baseline ||
             baseline.Deployment.ToString() != actual.Id.ToString() || baseline.Generation != actual.DesiredGeneration)
             return new DurableCommitResult.PlanInputUnavailable();
@@ -135,7 +137,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
         var spec = declaration.Spec;
         if (!DurableActionAdmission.SupportsPilotShape(spec)) return new DurableCommitResult.UnsupportedShape();
-        if (DurableActionAdmission.SingleAlias(spec)?.Value != plan.ProviderAlias)
+        if (DurableActionAdmission.SingleAlias(spec) != inputs.Providers.RequireUniformResourceProvider().Alias)
             return new DurableCommitResult.PlanStale();
         var admitted = await planner.AdmitAsync(context, spec, revision, inputs, cancellationToken);
         if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
@@ -167,7 +169,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         {
             var previous = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == actual.Id && x.Generation == actual.DesiredGeneration, cancellationToken);
             unchanged = previous.RevisionNumber == plan.RevisionNumber && previous.ConfigurationJson == plan.ConfigurationJson &&
-                previous.ProviderInstanceId == plan.ProviderInstanceId && previous.ConfigurationRevisionNumber == plan.ConfigurationRevisionNumber && previous.ImplementationId == plan.ImplementationId && previous.NamingJson == plan.NamingJson;
+                previous.Inputs().Providers.Equals(inputs.Providers);
             if (unchanged) generation = actual.DesiredGeneration;
             else
             {
@@ -197,14 +199,11 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             RevisionNumber = change.RevisionNumber,
             EnvironmentRecordId = change.EnvironmentRecordId,
             EnvironmentKey = inputs.EnvironmentKey.Value,
-            ProviderAlias = plan.ProviderAlias,
-            ProviderInstanceId = plan.ProviderInstanceId,
-            ConfigurationRevisionNumber = plan.ConfigurationRevisionNumber,
-            ImplementationId = plan.ImplementationId,
+            SnapshotFormatVersion = DurableInputStorage.Version,
+            ProviderInputsJson = plan.ProviderInputsJson,
             Fingerprint = plan.Fingerprint,
             GraphJson = plan.GraphJson,
             ConfigurationJson = plan.ConfigurationJson,
-            NamingJson = plan.NamingJson,
             AcceptedAt = committedAt,
             ActorId = actorId
         });
@@ -267,13 +266,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         if (row is null) return null;
         if (row.Presence != nameof(DesiredPresence.Present))
             throw new InvalidDataException("Generation presence is unsupported.");
-        var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
-            EnvironmentId.Create(row.EnvironmentKey),
-            ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
-                ManifestRevisionNumber.Create(row.RevisionNumber)), ProviderAlias.Create(row.ProviderAlias),
-            ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()),
-            ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(row.NamingJson) };
+        var inputs = row.Inputs();
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
         if (row.Fingerprint != DurableOperationGraphCodec.Fingerprint(inputs, graph))
             throw new InvalidDataException("Generation snapshot is inconsistent.");

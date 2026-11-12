@@ -76,14 +76,14 @@ public sealed partial class PostgreSqlApplicationLoginTests
         {
             var providers = services.GetRequiredService<IProviderConfigurationStore>();
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(scenario.Plan.Inputs.Environment,
-                scenario.Plan.Inputs.ProviderInstance, scenario.Plan.Inputs.ConfigurationRevision, default))!.Configuration;
+                scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Configuration, default))!.Configuration;
             var next = ProviderConfigurationRevisionNumber.Create(1);
             var different = new PostgreSqlProviderConfiguration(1, configuration.Host == "127.0.0.1" ? "localhost" : "127.0.0.1", configuration.Port, configuration.MaintenanceDatabase,
                 configuration.AdministratorUserName, configuration.AdministratorPassword, configuration.ImplementationId);
             var otherInstance = await providers.CreateInstanceAsync(scenario.Plan.Inputs.Environment, different, default);
             await providers.AddRevisionAsync(scenario.Plan.Inputs.Environment, otherInstance, next, different, default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(
-                scenario.Plan.Inputs.Environment, scenario.Plan.Inputs.Alias, new(scenario.Plan.Inputs.ProviderInstance, scenario.Plan.Inputs.ConfigurationRevision),
+                scenario.Plan.Inputs.Environment, scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Alias, new(scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Configuration),
                 new(otherInstance, next), "tester", default)).Outcome);
         }
         // Adapter accepted-context validation must not hold a catalog connection while resolving

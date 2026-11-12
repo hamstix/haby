@@ -309,10 +309,10 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         }
         var newPlan = await planner.CreatePlanAsync(await ChangeSet("new-app"), "actor", default);
         Assert.Equal(DurablePlanStatus.Planned, newPlan.Status);
-        Assert.Equal(3, newPlan.Plan!.Inputs.ConfigurationRevision.Value);
+        Assert.Equal(3, newPlan.Plan!.Inputs.Providers.RequireUniformResourceProvider().Configuration.Value);
         var generation = await committer.FindGenerationAsync(accepted.Commit.DeploymentId, accepted.Commit.Generation, default);
         Assert.Equal(oldPlan.Inputs, generation!.Inputs);
-        Assert.Equal(1, generation.Inputs.ConfigurationRevision.Value);
+        Assert.Equal(1, generation.Inputs.Providers.RequireUniformResourceProvider().Configuration.Value);
         Assert.Equal(persistedOldPlan, await planner.FindPlanAsync(oldPlan.Id, default));
         await using var check = Context(connection);
         var operation = await check.DurableOperations.AsNoTracking().SingleAsync();

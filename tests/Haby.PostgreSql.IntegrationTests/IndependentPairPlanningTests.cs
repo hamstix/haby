@@ -51,7 +51,7 @@ public sealed class IndependentPairPlanningTests
     [InlineData("action")]
     public void Complete_new_pair_graph_rejects_crossed_missing_foreign_and_extra_nodes(string fault)
     {
-        var inputs = Inputs(); var config = PostgreSqlPairPlanningTests.Configuration(); var target = Spec(TwoPairs());
+        var inputs = Inputs(TwoPairs()); var config = PostgreSqlPairPlanningTests.Configuration(); var target = Spec(TwoPairs());
         var admission = new DurableActionAdmission(new(new IDurableActionAdmissionHandler[]
             { new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id) }, []));
         var reuse = Spec(Example()).Resources.Keys.Select(r => new ResourceReuse(r, Guid.NewGuid(), 1, new string('B', 64))).ToArray();
@@ -78,7 +78,7 @@ public sealed class IndependentPairPlanningTests
     public void Independent_pair_update_has_only_resource_scoped_five_step_chain_and_original_reuse()
     {
         var accepted = Spec(Example()); var target = Spec(TwoPairs());
-        var inputs = Inputs(); var configuration = PostgreSqlPairPlanningTests.Configuration();
+        var inputs = Inputs(TwoPairs()); var configuration = PostgreSqlPairPlanningTests.Configuration();
         var admission = new DurableActionAdmission(new(new IDurableActionAdmissionHandler[]
             { new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id) }, []));
         Assert.True(admission.CanReuse(accepted, target, Provider, inputs, configuration));

@@ -45,7 +45,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
         Assert.Equal(1, await verify.DeploymentGenerations.AsNoTracking().CountAsync());
         Assert.Empty(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
-        Assert.Equal(22, (await verify.Database.GetAppliedMigrationsAsync()).Count());
+        // Six explicitly deleted rows leave 23 of 29; keep the non-prefix history
+        // and every startup/direct-migration refusal assertion intact.
+        Assert.Equal(23, (await verify.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [Fact]

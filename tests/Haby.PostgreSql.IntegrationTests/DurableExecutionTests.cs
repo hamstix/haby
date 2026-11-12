@@ -184,13 +184,11 @@ public sealed class DurableExecutionTests(PostgreSqlFixture fixture) : IClassFix
             INSERT INTO application_deployment_generations
                 (deployment_id, generation, presence, plan_id, change_set_id,
                  application_record_id, revision_number, environment_record_id,
-                 environment_key, provider_alias, provider_instance_id,
-                 configuration_revision_number, implementation_id, fingerprint, graph_json, configuration_json, naming_json,
+                 environment_key, snapshot_format_version, provider_inputs_json, fingerprint, graph_json, configuration_json,
                  accepted_at, actor_id)
             SELECT deployment_id, 2, presence, plan_id, change_set_id,
                    application_record_id, revision_number, environment_record_id,
-                   environment_key, provider_alias, provider_instance_id,
-                   configuration_revision_number, implementation_id, fingerprint, graph_json, configuration_json, naming_json,
+                   environment_key, snapshot_format_version, provider_inputs_json, fingerprint, graph_json, configuration_json,
                    now(), actor_id
             FROM application_deployment_generations WHERE generation = 1;
             UPDATE application_deployments

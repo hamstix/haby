@@ -46,15 +46,15 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
             var input = Decode(accepted.Node);
             if (input is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
-                accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
-            if (configuration is null || configuration.ImplementationId != accepted.Inputs.ImplementationId ||
+                accepted.Provider.Instance, accepted.Provider.Configuration, cancellationToken))?.Configuration;
+            if (configuration is null || configuration.ImplementationId != accepted.Provider.Implementation.Value ||
                 configuration.AdministratorUserName != input.ExpectedOwnerUserName ||
                 !(accepted.Graph.Nodes.Count == 2 ? ValidGraph(accepted, input) : PostgreSqlPairExecution.IsSupported(accepted, codec.Encode(configuration)))) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var output = await outputs.ConsumeAsync(key, input.DatabaseSource.ToReference(), cancellationToken);
             var evidence = output is null ? null : PostgreSqlDatabaseOutputContract.Decode(output);
             if (evidence is null || evidence.DatabaseName != input.DatabaseName) return new(DurableExecutionOutcome.InputUnavailable, operation);
-            resolved = new(new(accepted.Inputs.Environment, accepted.Inputs.ProviderInstance,
-                accepted.Inputs.ConfigurationRevision, accepted.Inputs.ImplementationId, input.DatabaseName), evidence, input.ExpectedOwnerUserName);
+            resolved = new(new(accepted.Inputs.Environment, accepted.Provider.Instance,
+                accepted.Provider.Configuration, accepted.Provider.Implementation.Value, input.DatabaseName), evidence, input.ExpectedOwnerUserName);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { return new(DurableExecutionOutcome.InputUnavailable, operation); }
@@ -132,7 +132,7 @@ public sealed class PostgreSqlDatabaseRestrictAction(IDurableOperationJournal jo
             producer.Input.Format != PostgreSqlDatabaseCreateAction.Format || node.Id.Value != "db-restrict" ||
             accepted.Spec.Resources.Count != 1 || accepted.Spec.Components.Count != 0 ||
             !accepted.Spec.Resources.TryGetValue(node.ResourceId, out var resource) ||
-            PostgreSqlResourceNaming.Database(PostgreSqlDatabaseCreateValidation.Name(resource) ?? "", accepted.Inputs.Naming.Policy) != input.DatabaseName) return false;
+            PostgreSqlResourceNaming.Database(PostgreSqlDatabaseCreateValidation.Name(resource) ?? "", accepted.Provider.ResourceNaming().Policy) != input.DatabaseName) return false;
         return JsonSerializer.Deserialize(producer.Input.Json, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)?.DatabaseName == input.DatabaseName;
     }
 

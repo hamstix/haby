@@ -172,11 +172,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
         // Exact committed graph, persisted deployment and pinned revision, never caller metadata.
         var environment = EnvironmentRecordId.Parse(generation.EnvironmentRecordId.ToString());
         var application = ApplicationRecordId.Parse(generation.ApplicationRecordId.ToString());
-        var inputs = new DurablePlanningInputs(environment, EnvironmentId.Create(generation.EnvironmentKey),
-            ManifestRevisionRef.Create(application, ManifestRevisionNumber.Create(generation.RevisionNumber)),
-            ProviderAlias.Create(generation.ProviderAlias), ProviderInstanceId.Parse(generation.ProviderInstanceId.ToString()),
-            ProviderConfigurationRevisionNumber.Create(generation.ConfigurationRevisionNumber), generation.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(generation.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(generation.NamingJson) };
+        var inputs = generation.Inputs();
         if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != generation.Fingerprint) return null;
         var revision = await context.Revisions.AsNoTracking().SingleOrDefaultAsync(r =>
             r.ApplicationRecordId == generation.ApplicationRecordId && r.LocalRevisionNumber == generation.RevisionNumber, token);
@@ -184,7 +180,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
         var spec = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion,
             revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);
         if (!spec.Spec.Resources.TryGetValue(node.ResourceId, out var resource) || resource.Type != node.Action.Admission.ResourceContract ||
-            resource.ProviderRef.Value != generation.ProviderAlias)
+            resource.ProviderRef != inputs.Providers.Resource(node.ResourceId).Alias)
             return null;
         return (node, generation);
     }

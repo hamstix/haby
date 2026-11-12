@@ -296,23 +296,15 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.Property(row => row.EnvironmentKey).HasColumnName("environment_key").HasMaxLength(64).IsRequired();
             entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
             entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
-            entity.Property(row => row.ProviderAlias).HasColumnName("provider_alias").HasMaxLength(128).IsRequired();
-            entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
-            entity.Property(row => row.ConfigurationRevisionNumber).HasColumnName("configuration_revision_number");
-            entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.SnapshotFormatVersion).HasColumnName("snapshot_format_version");
+            entity.Property(row => row.ProviderInputsJson).HasColumnName("provider_inputs_json").IsRequired();
             entity.Property(row => row.GraphJson).HasColumnName("graph_json").IsRequired();
             entity.Property(row => row.ConfigurationJson).HasColumnName("configuration_json").IsRequired();
-            entity.Property(row => row.NamingJson).HasColumnName("naming_json").IsRequired();
             entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.ExpiresAt).HasColumnName("expires_at");
             entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
             entity.HasOne<DurableChangeSetRow>().WithMany().HasForeignKey(row => row.ChangeSetId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<ProviderConfigurationRevisionRow>().WithMany()
-                .HasForeignKey(row => new { row.ProviderInstanceId, RevisionNumber = row.ConfigurationRevisionNumber, row.EnvironmentRecordId })
-                .HasPrincipalKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
-                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<DurablePlanClosureRow>(entity =>
         {
@@ -343,6 +335,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.ToTable("application_deployment_generations", table => table.HasCheckConstraint("CK_deployment_generations_first", "generation > 0 AND presence = 'Present'"));
             entity.HasKey(row => new { row.DeploymentId, row.Generation });
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
+            entity.Property(row => row.SnapshotFormatVersion).HasColumnName("snapshot_format_version");
             entity.Property(row => row.Generation).HasColumnName("generation");
             entity.Property(row => row.Presence).HasColumnName("presence").HasMaxLength(16).IsRequired();
             entity.Property(row => row.PlanId).HasColumnName("plan_id");
@@ -351,13 +344,9 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
             entity.Property(row => row.EnvironmentRecordId).HasColumnName("environment_record_id");
             entity.Property(row => row.EnvironmentKey).HasColumnName("environment_key").HasMaxLength(64).IsRequired();
-            entity.Property(row => row.ProviderAlias).HasColumnName("provider_alias").HasMaxLength(128).IsRequired();
-            entity.Property(row => row.ProviderInstanceId).HasColumnName("provider_instance_id");
-            entity.Property(row => row.ConfigurationRevisionNumber).HasColumnName("configuration_revision_number");
-            entity.Property(row => row.ImplementationId).HasColumnName("implementation_id").HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ProviderInputsJson).HasColumnName("provider_inputs_json").IsRequired();
             entity.Property(row => row.GraphJson).HasColumnName("graph_json").IsRequired();
             entity.Property(row => row.ConfigurationJson).HasColumnName("configuration_json").IsRequired();
-            entity.Property(row => row.NamingJson).HasColumnName("naming_json").IsRequired();
             entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(67).IsRequired();
             entity.Property(row => row.AcceptedAt).HasColumnName("accepted_at");
             entity.Property(row => row.ActorId).HasColumnName("actor_id").HasMaxLength(256).IsRequired();
@@ -366,10 +355,6 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.HasOne<DurableChangeSetRow>().WithMany().HasForeignKey(row => row.ChangeSetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ManifestRevisionRow>().WithMany().HasForeignKey(row => new { row.ApplicationRecordId, row.RevisionNumber })
                 .HasPrincipalKey(row => new { row.ApplicationRecordId, row.LocalRevisionNumber }).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<ProviderConfigurationRevisionRow>().WithMany()
-                .HasForeignKey(row => new { row.ProviderInstanceId, RevisionNumber = row.ConfigurationRevisionNumber, row.EnvironmentRecordId })
-                .HasPrincipalKey(row => new { row.ProviderInstanceId, row.RevisionNumber, row.EnvironmentRecordId })
-                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ChangeSetCommitRow>(entity =>
         {
@@ -556,15 +541,11 @@ internal sealed class DurablePlanRow
     public required string EnvironmentKey { get; set; }
     public Guid ApplicationRecordId { get; set; }
     public long RevisionNumber { get; set; }
-    public required string ProviderAlias { get; set; }
-    public Guid ProviderInstanceId { get; set; }
-    public long ConfigurationRevisionNumber { get; set; }
-    public required string ImplementationId { get; set; }
     public int SnapshotFormatVersion { get; set; }
     public required string Fingerprint { get; set; }
-    public string GraphJson { get; set; } = null!;
-    public string ConfigurationJson { get; set; } = null!;
-    public string NamingJson { get; set; } = Haby.Application.ResourceNamingCodec.Encode(Haby.Application.ResourceNamingSnapshot.Default);
+    public required string GraphJson { get; set; }
+    public required string ConfigurationJson { get; set; }
+    public required string ProviderInputsJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public required string ActorId { get; set; }
@@ -590,6 +571,7 @@ internal sealed class ApplicationDeploymentRow
 internal sealed class DeploymentGenerationRow
 {
     public Guid DeploymentId { get; set; }
+    public int SnapshotFormatVersion { get; set; }
     public long Generation { get; set; }
     public required string Presence { get; set; }
     public Guid PlanId { get; set; }
@@ -598,14 +580,10 @@ internal sealed class DeploymentGenerationRow
     public long RevisionNumber { get; set; }
     public Guid EnvironmentRecordId { get; set; }
     public required string EnvironmentKey { get; set; }
-    public required string ProviderAlias { get; set; }
-    public Guid ProviderInstanceId { get; set; }
-    public long ConfigurationRevisionNumber { get; set; }
-    public required string ImplementationId { get; set; }
     public required string Fingerprint { get; set; }
-    public string GraphJson { get; set; } = null!;
-    public string ConfigurationJson { get; set; } = null!;
-    public string NamingJson { get; set; } = Haby.Application.ResourceNamingCodec.Encode(Haby.Application.ResourceNamingSnapshot.Default);
+    public required string GraphJson { get; set; }
+    public required string ConfigurationJson { get; set; }
+    public required string ProviderInputsJson { get; set; }
     public DateTimeOffset AcceptedAt { get; set; }
     public required string ActorId { get; set; }
 }

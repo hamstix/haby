@@ -117,14 +117,14 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             Assert.NotNull(operation);
             Assert.Equal(DurableOperationState.Pending, operation.State);
             Assert.Equal(ManifestLocalId.Create("db"), operation.Node.ResourceId);
-            Assert.Equal(winningPlan.Inputs.ProviderInstance, operation.ProviderInstance);
-            Assert.Equal(winningPlan.Inputs.ConfigurationRevision, operation.ConfigurationRevision);
-            Assert.Equal(winningPlan.Inputs.ImplementationId, operation.ImplementationId);
+            Assert.Equal(winningPlan.Inputs.Providers.RequireUniformResourceProvider().Instance, operation.ProviderInstance);
+            Assert.Equal(winningPlan.Inputs.Providers.RequireUniformResourceProvider().Configuration, operation.ConfigurationRevision);
+            Assert.Equal(winningPlan.Inputs.Providers.RequireUniformResourceProvider().Implementation.Value, operation.ImplementationId);
             Assert.Null(await restarted.GetRequiredService<IDurableOperationQuery>().FindAsync(
                 operation.Key with { OperationId = OperationId.Create("other") }, default));
             Assert.Equal(original, await committer.FindCommitAsync(changeSetId, default));
             Assert.Equal(firstBinding.RevisionNumber, (await committer.FindGenerationAsync(original.DeploymentId,
-                original.Generation, default))!.Inputs.ConfigurationRevision);
+                original.Generation, default))!.Inputs.Providers.RequireUniformResourceProvider().Configuration);
             Assert.Equal(original, Assert.IsType<DurableCommitResult.Committed>(
                 await committer.CommitAsync(changeSetId, retryPlan.Id, "after-restart", default)).Commit);
         }
@@ -227,7 +227,7 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM durable_create_operations", database).ExecuteScalarAsync())!);
         }
         var newPlan = (await planner.CreatePlanAsync(changeSetId, "tester", default)).Plan!;
-        Assert.Equal(secondBinding.RevisionNumber, newPlan.Inputs.ConfigurationRevision);
+        Assert.Equal(secondBinding.RevisionNumber, newPlan.Inputs.Providers.RequireUniformResourceProvider().Configuration);
         Assert.IsType<DurableCommitResult.Committed>(await committer.CommitAsync(changeSetId, newPlan.Id, "tester", default));
     }
 
@@ -422,8 +422,8 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
                     oldBinding, "tester", default)).Outcome);
             first = Assert.IsType<DurablePlan>((await planner.CreatePlanAsync(changeSetId, "tester", default)).Plan);
             Assert.Equal(time.GetUtcNow().AddHours(24), first.ExpiresAt);
-            Assert.Equal(oldBinding.InstanceId, first.Inputs.ProviderInstance);
-            Assert.Equal(oldBinding.RevisionNumber, first.Inputs.ConfigurationRevision);
+            Assert.Equal(oldBinding.InstanceId, first.Inputs.Providers.RequireUniformResourceProvider().Instance);
+            Assert.Equal(oldBinding.RevisionNumber, first.Inputs.Providers.RequireUniformResourceProvider().Configuration);
             Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(first.Id, default));
         }
         await using (var restarted = Services(connection, time))
@@ -437,8 +437,8 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             Assert.Equal(DurablePlanCurrentStatus.PlanStale, await planner.CheckPlanAsync(first.Id, default));
             var second = Assert.IsType<DurablePlan>((await planner.CreatePlanAsync(changeSetId, "tester", default)).Plan);
             Assert.NotEqual(first.Id, second.Id);
-            Assert.Equal(newBinding.RevisionNumber, second.Inputs.ConfigurationRevision);
-            Assert.Equal(oldBinding.RevisionNumber, (await planner.FindPlanAsync(first.Id, default))!.Inputs.ConfigurationRevision);
+            Assert.Equal(newBinding.RevisionNumber, second.Inputs.Providers.RequireUniformResourceProvider().Configuration);
+            Assert.Equal(oldBinding.RevisionNumber, (await planner.FindPlanAsync(first.Id, default))!.Inputs.Providers.RequireUniformResourceProvider().Configuration);
             var concurrent = await Task.WhenAll(Enumerable.Range(0, 2).Select(async _ =>
                 await planner.CreatePlanAsync(changeSetId, "tester", default)));
             Assert.All(concurrent, result => Assert.Equal(DurablePlanStatus.Planned, result.Status));

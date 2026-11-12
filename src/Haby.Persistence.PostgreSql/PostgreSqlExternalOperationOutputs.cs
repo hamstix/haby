@@ -21,12 +21,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
         var accepted = await PostgreSqlGeneratedCredentialOperations.AcceptedAsync(context, key, token);
         if (accepted is null) return null;
         var generation = accepted.Value.Generation;
-        var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(generation.EnvironmentRecordId.ToString()),
-            EnvironmentId.Create(generation.EnvironmentKey), ManifestRevisionRef.Create(
-                ApplicationRecordId.Parse(generation.ApplicationRecordId.ToString()), ManifestRevisionNumber.Create(generation.RevisionNumber)),
-            ProviderAlias.Create(generation.ProviderAlias), ProviderInstanceId.Parse(generation.ProviderInstanceId.ToString()),
-            ProviderConfigurationRevisionNumber.Create(generation.ConfigurationRevisionNumber), generation.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(generation.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(generation.NamingJson) };
+        var inputs = generation.Inputs();
         var graph = DurableOperationGraphCodec.Decode(generation.GraphJson);
         graph.ValidateReferences(inputs);
         var revision = await context.Revisions.AsNoTracking().SingleAsync(r =>

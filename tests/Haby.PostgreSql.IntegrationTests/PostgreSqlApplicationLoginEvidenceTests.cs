@@ -135,14 +135,14 @@ public sealed partial class PostgreSqlApplicationLoginTests
             await using var services = Services(scenario.Connection);
             return await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(Reservation(provider, owner), default);
         }
-        var provider = scenario.Plan.Inputs.ProviderInstance;
+        var provider = scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance;
         var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Reserve(provider, scenario.Owner)));
         Assert.All(results, Assert.True);
         await using (var services = Services(scenario.Connection))
         {
             var providers = services.GetRequiredService<IProviderConfigurationStore>();
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(scenario.Plan.Inputs.Environment,
-                provider, scenario.Plan.Inputs.ConfigurationRevision, default))!.Configuration;
+                provider, scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Configuration, default))!.Configuration;
             var other = await providers.CreateInstanceAsync(scenario.Plan.Inputs.Environment, configuration, default);
             Assert.True(await Reserve(other, scenario.Owner));
         }
@@ -157,7 +157,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     public async Task Shared_reservations_treat_different_adapter_namespaces_and_values_as_opaque()
     {
         var scenario = await Prepare();
-        var original = Reservation(scenario.Plan.Inputs.ProviderInstance, scenario.Owner);
+        var original = Reservation(scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, scenario.Owner);
         var other = original with { Namespace = "sample.queue-user", Value = "opaque/Case-sensitive identity: 42" };
         await using (var services = Services(scenario.Connection))
         {
@@ -184,7 +184,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     public async Task Shared_reservation_unique_constraint_and_EF_immutability_preserve_the_winner()
     {
         var scenario = await Prepare();
-        var original = Reservation(scenario.Plan.Inputs.ProviderInstance, scenario.Owner) with
+        var original = Reservation(scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, scenario.Owner) with
         { Namespace = "sample.queue-user", Value = "opaque-value" };
         async Task<bool> Reserve(ProviderResourceReservation input)
         {
@@ -233,7 +233,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var reference = await Password(scenario); var bytes = await Material(scenario, reference);
         try
         {
-            var opaque = Reservation(scenario.Plan.Inputs.ProviderInstance, scenario.Owner) with
+            var opaque = Reservation(scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, scenario.Owner) with
             { Namespace = "sample.queue-user", Value = "independent-opaque-identity" };
             await using (var services = Services(scenario.Connection))
                 Assert.True(await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(opaque, default));
@@ -248,7 +248,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 await using (var services = Services(restored.Connection))
                 {
                     await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
-                    Assert.True(await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(Reservation(restored.Plan.Inputs.ProviderInstance, restored.Owner), default));
+                    Assert.True(await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(Reservation(restored.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, restored.Owner), default));
                     Assert.True(await services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(opaque, default));
                 }
                 Assert.Equal(expected, (await Execute(restored, "app-login-create", new Fault("trap"))).Outcome);
@@ -338,7 +338,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var providers = services.GetRequiredService<IProviderConfigurationStore>();
             var inputs = scenario.Plan.Inputs;
             var saved = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(inputs.Environment,
-                inputs.ProviderInstance, inputs.ConfigurationRevision, default))!.Configuration;
+                inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration, default))!.Configuration;
             var next = ProviderConfigurationRevisionNumber.Create(2);
             var alternateName = "alternate_admin_" + Guid.NewGuid().ToString("N");
             var alternateSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
@@ -354,10 +354,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
             finally { Array.Clear(bytes); }
             var alternate = new PostgreSqlProviderConfiguration(1, saved.Host, saved.Port, saved.MaintenanceDatabase,
                 alternateName, alternateSecret, saved.ImplementationId);
-            await providers.AddRevisionAsync(inputs.Environment, inputs.ProviderInstance, next, alternate, default);
+            await providers.AddRevisionAsync(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, next, alternate, default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(
-                inputs.Environment, inputs.Alias, new(inputs.ProviderInstance, inputs.ConfigurationRevision),
-                new(inputs.ProviderInstance, next), "tester", default)).Outcome);
+                inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Alias, new(inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration),
+                new(inputs.Providers.RequireUniformResourceProvider().Instance, next), "tester", default)).Outcome);
         }
         Assert.Equal(DurableExecutionOutcome.Succeeded, (await Execute(scenario, "app-login-create")).Outcome);
     }

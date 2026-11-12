@@ -34,8 +34,15 @@ public sealed class DescribeDurablePlan(IManifestRevisionQuery revisions, IEnume
 {
     private readonly IPlanActionDescriber[] _describers = describers.ToArray();
 
-    public IReadOnlyList<PlannedOperationTarget> Targets(DurablePlan plan) => Targets(plan.Inputs.ImplementationId, plan.Graph);
-    public IReadOnlyList<PlannedOperationTarget> Targets(string implementation, DurableOperationGraph graph) =>
+    public IReadOnlyList<PlannedOperationTarget> Targets(DurablePlan plan) => Targets(plan.Inputs, plan.Graph);
+    public IReadOnlyList<PlannedOperationTarget> Targets(DurablePlanningInputs inputs, DurableOperationGraph graph)
+    {
+        graph.ValidateReferences(inputs);
+        return graph.Nodes.GroupBy(n => inputs.Providers.Resource(n.ResourceId).Implementation.Value)
+            .SelectMany(group => Targets(group.Key, graph).Where(t => group.Any(n => n.Id == t.Operation)))
+            .OrderBy(t => t.Operation.Value, StringComparer.Ordinal).ToArray();
+    }
+    private IReadOnlyList<PlannedOperationTarget> Targets(string implementation, DurableOperationGraph graph) =>
         _describers.Where(d => d.ImplementationId == implementation).Take(2).ToArray() is [IPlanOperationTargetDescriber names]
             ? names.DescribeTargets(graph) : [];
 
@@ -47,8 +54,17 @@ public sealed class DescribeDurablePlan(IManifestRevisionQuery revisions, IEnume
         catch (InvalidDataException) { return new(PlanDescriptionStatus.InputCorrupt); }
         if (revision is null) return new(PlanDescriptionStatus.RevisionNotFound);
         if (revision.Reference != plan.Inputs.Revision) return new(PlanDescriptionStatus.PinnedInputMismatch);
+        if (!revision.Declaration.Equals(plan.Inputs.Providers.Declaration)) return new(PlanDescriptionStatus.PinnedInputMismatch);
         if (plan.Graph?.Baseline is not null) return new(PlanDescriptionStatus.OperationGraph);
-        var matches = _describers.Where(item => item.ImplementationId == plan.Inputs.ImplementationId).Take(2).ToArray();
+        // The existing intended-action field is deliberately bounded to one Resource.
+        // Larger exact sets are described by their keyed inputs and operation inventory.
+        if (plan.Inputs.Providers.Entries.Count == 0) return new(PlanDescriptionStatus.UnsupportedShape);
+        if (plan.Inputs.Providers.Entries.Count != 1 || plan.Inputs.Providers.Entries.Keys.Any(x => x is ProviderInput.Workload))
+            return new(PlanDescriptionStatus.OperationGraph);
+        var implementations = plan.Inputs.Providers.Entries.Values.Select(x => x.Implementation.Value).Distinct().ToArray();
+        if (implementations.Length == 0) return new(PlanDescriptionStatus.UnsupportedShape);
+        if (implementations is not [var implementation]) return new(PlanDescriptionStatus.OperationGraph);
+        var matches = _describers.Where(item => item.ImplementationId == implementation).Take(2).ToArray();
         if (matches.Length != 1) return new(PlanDescriptionStatus.ActionDescriberUnavailable);
         return matches[0].Describe(revision, plan.Inputs, plan.Graph!);
     }

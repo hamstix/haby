@@ -33,10 +33,9 @@ public sealed class DurablePlanDescriptionTests
         var (_, replacement) = await Setup(databaseName: "other_db");
         var altered = replacement with { Reference = plan.Inputs.Revision };
         var result = await new DescribeDurablePlan(new Query(altered), [new PostgreSqlPlanActionDescriber()]).ExecuteAsync(plan, default);
-        // This is review metadata, not historical authentication. Physical names come
-        // from saved operation inputs even if a trusted declaration row is replaced.
-        Assert.Equal(PlanDescriptionStatus.Available, result.Status);
-        Assert.Equal("sample_db", result.Action!.Target.Name);
+        // A changed declaration cannot replace the exact set bound to the saved graph.
+        Assert.Equal(PlanDescriptionStatus.PinnedInputMismatch, result.Status);
+        Assert.Null(result.Action);
     }
 
     [Theory]
@@ -54,8 +53,19 @@ public sealed class DurablePlanDescriptionTests
             Reference = ManifestRevisionRef.Create(
             revision.Reference.ApplicationRecordId, ManifestRevisionNumber.Create(2))
         };
-        if (fault == "wrongAlias") plan = plan with { Inputs = plan.Inputs with { Alias = ProviderAlias.Create("other") } };
-        if (fault == "wrongImplementation") plan = plan with { Inputs = plan.Inputs with { ImplementationId = "secret-sentinel" } };
+        if (fault == "wrongAlias")
+        {
+            var (_, other) = await Setup(databaseName: "different");
+            plan = plan with
+            {
+                Inputs = plan.Inputs with
+                {
+                    Providers = Haby.Tests.DurableInputSamples.ForManifest(other.Declaration, plan.Inputs.Environment,
+                plan.Inputs.EnvironmentKey, plan.Inputs.Revision, ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(7), "sample/v1").Providers
+                }
+            };
+        }
+        if (fault == "wrongImplementation") plan = plan with { Inputs = plan.Inputs with { Providers = new(plan.Inputs.Providers.Declaration, plan.Inputs.Environment, plan.Inputs.Providers.Entries.Values.Select(x => x with { Implementation = ProviderImplementationId.Create("secret-sentinel") })) } };
         var query = new Query(fault == "missing" ? null : revision) { Corrupt = fault == "corrupt" };
         var result = await new DescribeDurablePlan(query, [new PostgreSqlPlanActionDescriber()]).ExecuteAsync(plan, default);
         Assert.Equal(expected, result.Status);
@@ -131,11 +141,10 @@ public sealed class DurablePlanDescriptionTests
         var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(
             store, catalog, TimeProvider.System).ExecuteAsync(Encoding.UTF8.GetBytes(envelope), "actor"));
         var revision = store.Find(imported.ManifestRevisionRef)!;
-        var inputs = new DurablePlanningInputs(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"), revision.Reference,
-            ProviderAlias.Create("main"), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(7),
-            implementation);
+        var inputs = Haby.Tests.DurableInputSamples.ForManifest(revision.Declaration, EnvironmentRecordId.New(), EnvironmentId.Create("pilot"), revision.Reference,
+            ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(7), implementation);
         var node = new DurableOperationNode(OperationId.Create("database-create"), ManifestLocalId.Create("database"),
-            PostgreSqlDatabaseCreateAction.RegistrationKey, new(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId),
+            PostgreSqlDatabaseCreateAction.RegistrationKey, new(inputs.Environment, unsupported ? ProviderInstanceId.New() : inputs.Providers.Resource(ManifestLocalId.Create("database")).Instance, ProviderConfigurationRevisionNumber.Create(7), implementation),
             new(PostgreSqlDatabaseCreateAction.Format, System.Text.Json.JsonSerializer.Serialize(new PostgreSqlDatabaseActionInput(databaseName),
                 PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), []);
         return (new DurablePlan(DeploymentPlanId.New(), DeploymentChangeSetId.New(), inputs, "unchanged-fingerprint",

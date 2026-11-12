@@ -33,10 +33,14 @@ public sealed partial class CliLoopbackTests
             EnvironmentRecordId = "environment-record",
             EnvironmentId = "pilot",
             Reference = Change.Reference,
-            ProviderAlias = "postgresql.primary",
-            ProviderInstanceId = "provider-instance",
-            ConfigurationRevision = 4,
-            ImplementationId = "implementation",
+            ProviderInputs = {
+                new FrozenProviderInput { Kind = "resource", ResourceId = "database", EnvironmentRecordId = "environment-record",
+                    ProviderAlias = "postgresql.primary", ProviderInstanceId = "provider-instance", ConfigurationRevision = 4, ImplementationId = "implementation" },
+                new FrozenProviderInput { Kind = "workload", ComponentId = "api", WorkloadId = "main", EnvironmentRecordId = "environment-record",
+                    ProviderAlias = "runtime", ProviderInstanceId = "runtime-instance", ConfigurationRevision = 7, ImplementationId = "runtime-implementation" },
+                new FrozenProviderInput { Kind = "workload", ComponentId = "worker", WorkloadId = "main", EnvironmentRecordId = "environment-record",
+                    ProviderAlias = "runtime", ProviderInstanceId = "runtime-instance", ConfigurationRevision = 7, ImplementationId = "runtime-implementation" }
+            },
             IntendedWork = new PlanDescription
             {
                 Status = PlanDescriptionStatus.Available,
@@ -89,8 +93,7 @@ public sealed partial class CliLoopbackTests
                     PlanId = PlanId,
                     Reference = Change.Reference,
                     EnvironmentId = "pilot",
-                    ProviderInstanceId = Plan.ProviderInstanceId,
-                    ConfigurationRevision = 4
+                    ProviderInputs = { Plan.ProviderInputs }
                 }
             });
         }
@@ -216,6 +219,18 @@ public sealed partial class CliLoopbackTests
                         Assert.Equal(1, document.RootElement.GetProperty("formatVersion"u8).GetInt32());
                         Assert.Equal(command, document.RootElement.GetProperty("command"u8).GetString());
                         Assert.Equal(outcome, document.RootElement.GetProperty("outcome"u8).GetString());
+                        var data = document.RootElement.GetProperty("data"u8);
+                        foreach (var name in new[] { "plan", "desiredGeneration" })
+                        {
+                            if (!data.TryGetProperty(name, out var snapshot) || snapshot.ValueKind != JsonValueKind.Object) continue;
+                            Assert.False(snapshot.TryGetProperty("providerInstanceId"u8, out _));
+                            var inputs = snapshot.GetProperty("providerInputs"u8).EnumerateArray().ToArray();
+                            Assert.Equal(3, inputs.Length);
+                            Assert.Equal("provider-instance", inputs.Single(x => x.GetProperty("kind"u8).GetString() == "resource").GetProperty("providerInstanceId"u8).GetString());
+                            Assert.Equal(["api", "worker"], inputs.Where(x => x.GetProperty("kind"u8).GetString() == "workload")
+                                .Select(x => x.GetProperty("componentId"u8).GetString()!).ToArray());
+                            Assert.All(inputs.Where(x => x.GetProperty("kind"u8).GetString() == "workload"), x => Assert.Equal(7, x.GetProperty("configurationRevision"u8).GetInt64()));
+                        }
                     }
                 }
         }

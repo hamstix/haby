@@ -16,7 +16,13 @@ public sealed class DurableOperationGraphTests
         Assert.Equal(original, Assert.Single(retained.RetainedResources));
         var reintroduced = new DurableOperationGraph([], [original with { Reintroduced = true }], baseline);
         Assert.Equal(reintroduced, DurableOperationGraphCodec.Decode(DurableOperationGraphCodec.Encode(reintroduced)));
-        Assert.NotEqual(DurableOperationGraphCodec.Fingerprint(Inputs, retained), DurableOperationGraphCodec.Fingerprint(Inputs, reintroduced));
+        var empty = Haby.Tests.DurableInputSamples.Create(Inputs.Environment, Inputs.EnvironmentKey, Inputs.Revision,
+            Inputs.Providers.RequireUniformResourceProvider().Alias, Inputs.Providers.RequireUniformResourceProvider().Instance,
+            Inputs.Providers.RequireUniformResourceProvider().Configuration, Inputs.Providers.RequireUniformResourceProvider().Implementation.Value);
+        var active = Haby.Tests.DurableInputSamples.Create(Inputs.Environment, Inputs.EnvironmentKey, Inputs.Revision,
+            Inputs.Providers.RequireUniformResourceProvider().Alias, Inputs.Providers.RequireUniformResourceProvider().Instance,
+            Inputs.Providers.RequireUniformResourceProvider().Configuration, Inputs.Providers.RequireUniformResourceProvider().Implementation.Value, "extra");
+        Assert.NotEqual(DurableOperationGraphCodec.Fingerprint(empty, retained), DurableOperationGraphCodec.Fingerprint(active, reintroduced));
         Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], [original], baseline, [original]));
         Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], baseline: baseline, retainedResources: [original with { Reintroduced = true }]));
         Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], retainedResources: [original]));
@@ -51,13 +57,13 @@ public sealed class DurableOperationGraphTests
         Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([], [reused with { EvidenceFingerprint = "corrupt" }], baseline));
     }
 
-    private static readonly DurablePlanningInputs Inputs = new(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
+    private static readonly DurablePlanningInputs Inputs = Haby.Tests.DurableInputSamples.Create(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
         ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), ProviderAlias.Create("sample.primary"),
-        ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample.impl/v1");
+        ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample.impl/v1", "one-resource");
     private static DurableOperationNode Node(string id, params string[] dependencies) => new(OperationId.Create(id),
         ManifestLocalId.Create("one-resource"), new(new(ResourceTypeId.Create("sample.resource/v1"),
             new("sample/v1", "sample.configuration/v1", "sample.impl/v1")), OperationContractId.Create("sample.action/v1")),
-        new(Inputs.Environment, Inputs.ProviderInstance, Inputs.ConfigurationRevision, Inputs.ImplementationId),
+        new(Inputs.Environment, Inputs.Providers.RequireUniformResourceProvider().Instance, Inputs.Providers.RequireUniformResourceProvider().Configuration, Inputs.Providers.RequireUniformResourceProvider().Implementation.Value),
         new("sample.input/v1", "{\"count\":3}"), dependencies.Select(OperationId.Create).ToArray());
 
     [Fact]
@@ -112,6 +118,6 @@ public sealed class DurableOperationGraphTests
         Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Decode("{\"Version\":99,\"Nodes\":[]}"));
         Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Decode("{\"Version\":1,\"Nodes\":null}"));
         var graph = new DurableOperationGraph([Node("a")]);
-        Assert.Throws<InvalidDataException>(() => graph.ValidateReferences(Inputs with { ProviderInstance = ProviderInstanceId.New() }));
+        Assert.Throws<InvalidDataException>(() => graph.ValidateReferences(Inputs with { Providers = new(Inputs.Providers.Declaration, Inputs.Environment, Inputs.Providers.Entries.Values.Select(x => x with { Instance = ProviderInstanceId.New() })) }));
     }
 }

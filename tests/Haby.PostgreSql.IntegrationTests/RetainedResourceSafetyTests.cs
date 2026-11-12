@@ -17,7 +17,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     {
         private readonly IDurableActionAdmissionHandler inner = handler ?? new PostgreSqlDatabaseCreateAdmission();
         public DurableActionExecutionKey Key => inner.Key;
-        public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) => inner.Validate(resource, inputs);
+        public bool Validate(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => inner.Validate(resourceId, resource, inputs);
         public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resource, NormalizedResource value, DurablePlanningInputs inputs) => inner.Plan(resource, value, inputs);
         public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => ((IDurableResourcePlanComposer)inner).Validate(spec, resource, inputs, configuration);
         public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => ((IDurableResourcePlanComposer)inner).Plan(spec, resource, inputs, configuration);
@@ -87,10 +87,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
         if (mutation == "provider-revision")
         {
             var inputs = scenario.Plan.Inputs; var providers = host.Services.GetRequiredService<IProviderConfigurationStore>();
-            var original = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, default))!;
-            await providers.AddRevisionAsync(inputs.Environment, inputs.ProviderInstance, ProviderConfigurationRevisionNumber.Create(2), original.Configuration, default);
-            Assert.Equal(ProviderAliasChangeOutcome.Changed, (await host.Services.GetRequiredService<IProviderAliasStore>().ChangeAsync(inputs.Environment, inputs.Alias,
-                new(inputs.ProviderInstance, inputs.ConfigurationRevision), new(inputs.ProviderInstance, ProviderConfigurationRevisionNumber.Create(2)), "tester", default)).Outcome);
+            var original = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration, default))!;
+            await providers.AddRevisionAsync(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, ProviderConfigurationRevisionNumber.Create(2), original.Configuration, default);
+            Assert.Equal(ProviderAliasChangeOutcome.Changed, (await host.Services.GetRequiredService<IProviderAliasStore>().ChangeAsync(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Alias,
+                new(inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration), new(inputs.Providers.RequireUniformResourceProvider().Instance, ProviderConfigurationRevisionNumber.Create(2)), "tester", default)).Outcome);
         }
         var envelope = MixedEnvelope(scenario, 4, name); var spec = envelope["manifest"]!["spec"]!;
         switch (mutation)

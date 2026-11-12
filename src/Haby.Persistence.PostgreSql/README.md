@@ -1,5 +1,11 @@
 # PostgreSQL manifest catalog
 
+Durable Plan/generation format 4 stores an authoritative declaration-keyed Provider
+input set, without singleton Provider columns or global naming. See the
+[exact-set contract and catalog reset boundary](../../docs/development/185-durable-provider-input-sets.md).
+The supported single-alias PostgreSQL pilot and all external-resource ownership
+restrictions remain explicit.
+
 The current catalog also stores immutable unresolved ConfigurationDocumentRevisions.
 See [materialization and preview](../../docs/development/146-configuration-materialization-preview.md)
 for the additive current-catalog migration, exact target uniqueness, bounded generic
@@ -159,8 +165,8 @@ Database constraints remain the final integrity guard. A failed database write
 propagates as an infrastructure error; it is not converted into a content
 conflict.
 
-The declaration snapshot is internal JSON **format version 2**. It records the
-complete typed normalized graph under **normalized model version 2**, with
+The declaration snapshot is internal JSON **format version 3**. It records the
+complete typed normalized graph under **normalized model version 3**, with
 exact numbers encoded as canonical decimal coefficient and exponent text.
 Input API version, historical warnings and first-import actor/time are retained
 alongside it. Rehydration checks the format and model versions and fails on
@@ -193,8 +199,9 @@ within deployment + generation; Resource ownership and exact versioned action
 contract remain separate node fields. Explicit dependencies and frozen typed,
 versioned non-secret payloads participate in the deterministic fingerprint.
 Execution decodes those payloads without consulting current aliases, manifest
-properties or current planning behavior. Production still plans exactly one
-PostgreSQL database Create. Multi-step actions are test-only.
+properties or current planning behavior. Production retains the supported
+standalone database and database/application-login Resource shapes and bounded
+P2 updates; executable Workload admission remains disabled.
 
 `AddPostgreSqlDurableOperationJournal()` registers the per-node journal.
 `AddPostgreSqlDurableOperationExecution()` registers exact dispatch and the internal

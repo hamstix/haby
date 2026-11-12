@@ -52,10 +52,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
         {
             var providers = host.Services.GetRequiredService<IProviderConfigurationStore>();
             var inputs = scenario.Plan.Inputs;
-            var original = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, default))!;
-            await providers.AddRevisionAsync(inputs.Environment, inputs.ProviderInstance, ProviderConfigurationRevisionNumber.Create(2), original.Configuration, default);
-            Assert.Equal(ProviderAliasChangeOutcome.Changed, (await host.Services.GetRequiredService<IProviderAliasStore>().ChangeAsync(inputs.Environment, inputs.Alias,
-                new(inputs.ProviderInstance, inputs.ConfigurationRevision), new(inputs.ProviderInstance, ProviderConfigurationRevisionNumber.Create(2)), "tester", default)).Outcome);
+            var original = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration, default))!;
+            await providers.AddRevisionAsync(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, ProviderConfigurationRevisionNumber.Create(2), original.Configuration, default);
+            Assert.Equal(ProviderAliasChangeOutcome.Changed, (await host.Services.GetRequiredService<IProviderAliasStore>().ChangeAsync(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Alias,
+                new(inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration), new(inputs.Providers.RequireUniformResourceProvider().Instance, ProviderConfigurationRevisionNumber.Create(2)), "tester", default)).Outcome);
         }
         if (plan is not null)
         {

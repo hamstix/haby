@@ -29,13 +29,13 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         public DurableOperationKey Key(string id) => new(Commit.DeploymentId, Commit.Generation, OperationId.Create(id));
         public ManagedResourceKey Owner => new(Plan.Inputs.Environment, Plan.Inputs.Revision.ApplicationRecordId, ManifestLocalId.Create("app-login"));
         public string DeclaredDatabase { get; init; } = Database;
-        public string Role => PostgreSqlResourceNaming.Role(Owner, Plan.Inputs.Naming.Policy)!;
+        public string Role => PostgreSqlResourceNaming.Role(Owner, Plan.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy)!;
     }
     private sealed class Prefix(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer
     {
         private readonly PostgreSqlPairResourceAdmission pair = new(contract);
         public DurableActionExecutionKey Key => pair.Key;
-        public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) => false;
+        public bool Validate(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => false;
         public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resource, NormalizedResource value, DurablePlanningInputs inputs) => throw new NotSupportedException();
         public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => pair.Validate(spec, resource, inputs, configuration);
         public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
@@ -132,7 +132,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         var plan = (await planner.FindPlanAsync(planned.Id, default))!;
         Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(plan.Id, default));
         var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
-        return new(connection, PostgreSqlResourceNaming.Database(name, plan.Inputs.Naming.Policy)!, (await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(change.Id, default))!, plan) { DeclaredDatabase = name };
+        return new(connection, PostgreSqlResourceNaming.Database(name, plan.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy)!, (await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(change.Id, default))!, plan) { DeclaredDatabase = name };
     }
     private static async Task<DurableExecutionResult> Execute(Scenario scenario, string id, IPostgreSqlLoginFaultHooks? fault = null, CancellationToken token = default)
     {

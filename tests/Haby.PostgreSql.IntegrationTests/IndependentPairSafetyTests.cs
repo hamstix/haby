@@ -161,7 +161,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var owner = scenario.Owner;
             var name = PostgreSqlPairResourceAdmission.RoleName(owner with { ResourceLocalId = ManifestLocalId.Create("login-b") });
             Assert.True(await host.Services.GetRequiredService<IProviderResourceReservations>().TryReserveAsync(new(
-                scenario.Plan.Inputs.ProviderInstance, owner.EnvironmentRecordId, owner.ApplicationRecordId, ManifestLocalId.Create("foreign-owner"),
+                scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, owner.EnvironmentRecordId, owner.ApplicationRecordId, ManifestLocalId.Create("foreign-owner"),
                 PostgreSqlApplicationLoginAction.RoleReservationNamespace, name), default));
         }
         Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Status);

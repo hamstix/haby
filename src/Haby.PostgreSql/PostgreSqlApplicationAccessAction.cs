@@ -50,7 +50,7 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
             if (accepted is null) return new(DurableExecutionOutcome.InputUnavailable, operation);
             var input = Decode(accepted.Node);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
-                accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
+                accepted.Provider.Instance, accepted.Provider.Configuration, cancellationToken))?.Configuration;
             if (input is null || configuration is null || !PostgreSqlPairExecution.IsSupported(accepted, codec.Encode(configuration)))
                 return new(DurableExecutionOutcome.InputUnavailable, operation);
             var progress = await journal.ProgressAsync(key.DeploymentId, key.Generation, cancellationToken);
@@ -69,12 +69,12 @@ public sealed class PostgreSqlApplicationAccessAction(IDurableOperationJournal j
             var roleOutput = await outputs.ConsumeAsync(key, input.RoleSource.ToReference(), cancellationToken);
             var role = roleOutput is null ? null : PostgreSqlRoleEvidenceContract.Decode(roleOutput);
             var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
-            if (role is null || role.RoleName != PostgreSqlResourceNaming.Role(owner, accepted.Inputs.Naming.Policy))
+            if (role is null || role.RoleName != PostgreSqlResourceNaming.Role(owner, accepted.Provider.ResourceNaming().Policy))
                 return new(DurableExecutionOutcome.InputUnavailable, operation);
-            resolved = new(new(new(accepted.Inputs.Environment, accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision,
-                accepted.Inputs.ImplementationId, input.DatabaseName), evidence, configuration.AdministratorUserName,
+            resolved = new(new(new(accepted.Inputs.Environment, accepted.Provider.Instance, accepted.Provider.Configuration,
+                accepted.Provider.Implementation.Value, input.DatabaseName), evidence, configuration.AdministratorUserName,
                 owner, role.RoleName, password.Reference)
-            { Naming = accepted.Inputs.Naming.Policy }, role, input.Schema);
+            { Naming = accepted.Provider.ResourceNaming().Policy }, role, input.Schema);
             connectionOutput = new(configuration.Host, configuration.Port, input.DatabaseName, input.Schema, role.RoleName, password.Reference);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

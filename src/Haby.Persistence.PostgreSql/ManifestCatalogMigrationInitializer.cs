@@ -16,6 +16,11 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
         if (applied.Length > 0 && (currentBaseLength == 0 || applied.Length < currentBaseLength ||
             applied.Length > expected.Length || !applied.SequenceEqual(expected.Take(applied.Length))))
             throw new InvalidOperationException("Unsupported catalog schema. Explicitly initialize a fresh catalog; external resources remain unchanged.");
+        var setBaseLength = Array.IndexOf(expected, "20261112002755_PersistExactProviderInputSets") + 1;
+        if (applied.Length > 0 && applied.Length < setBaseLength &&
+            (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
+             await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
+            throw new InvalidOperationException("Superseded singleton durable inputs require an explicitly initialized fresh catalog; external resources remain unchanged.");
         var frozenBaseLength = Array.IndexOf(expected, "20261107101422_PinConfigurationRendering") + 1;
         if (applied.Length >= currentBaseLength && applied.Length < frozenBaseLength &&
             (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
@@ -31,5 +36,8 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
                 row.SnapshotFormatVersion != Haby.Application.NormalizedSnapshotCodec.FormatVersion, cancellationToken))
             throw new InvalidOperationException("Unsupported normalized manifest model. Explicitly initialize a fresh catalog; external resources remain unchanged.");
         await context.Database.MigrateAsync(cancellationToken);
+        if (await context.DurablePlans.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken) ||
+            await context.DeploymentGenerations.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken))
+            throw new InvalidOperationException("Unsupported durable input format. Explicitly initialize a fresh catalog; external resources remain unchanged.");
     }
 }

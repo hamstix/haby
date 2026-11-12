@@ -33,7 +33,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             if (source is null) return new(ConfigurationDocumentStatus.NotFound, target);
             if (source.EnvironmentRecordId != owner.EnvironmentRecordId || source.ApplicationRecordId != owner.ApplicationRecordId || source.EnvironmentKey != selection.Environment.Value)
                 throw new InvalidDataException("Stored deployment owner is inconsistent.");
-            var frozen = Frozen(source);
+            var frozen = Layout(source);
             if (!await Eligible(db, source, token)) return new(ConfigurationDocumentStatus.NotApplied, target);
             var count = frozen.Layouts.Sum(x => (long)x.Documents.Count);
             if (count > ConfigurationApplicationLimits.MaxItems || !ConfigurationApplicationLimits.Fits((int)count))
@@ -65,7 +65,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         if (source is null) return new(ConfigurationDocumentStatus.NotFound, Target: target);
         if (source.EnvironmentRecordId != owner.EnvironmentRecordId || source.ApplicationRecordId != owner.ApplicationRecordId || source.EnvironmentKey != selection.Environment.Value)
             throw new InvalidDataException("Stored deployment owner is inconsistent.");
-        var frozen = Frozen(source);
+        var frozen = Layout(source);
         if (!HasDocument(frozen, target)) return new(ConfigurationDocumentStatus.NotFound, Target: target);
         if (selection.Generation is null && !await Complete(db, source, token))
             return new(ConfigurationDocumentStatus.NotApplied, Target: target);
@@ -144,6 +144,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {inputs.DeploymentId} FOR SHARE", token);
             var current = await Source(db, target, token) ?? throw new InvalidDataException();
             if (InputFingerprint(current) != metadata.FrozenInputFingerprint) return new(ConfigurationDocumentStatus.IntegrityConflict, Target: target);
+            _ = current.Inputs();
             var winner = await Row(db, target, token);
             if (winner is not null)
             {
@@ -186,8 +187,10 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
     private static ConfigurationDocumentResult Existing(ConfigurationDocumentRow row, DeploymentGenerationRow source, ConfigurationDocumentTarget target)
     {
         var saved = Decode(row, target);
-        return saved.FrozenInputs == source.ConfigurationJson && saved.Metadata.FrozenInputFingerprint == InputFingerprint(source) ?
-            new(ConfigurationDocumentStatus.Existing, saved, target) : new(ConfigurationDocumentStatus.IntegrityConflict, Target: target);
+        if (saved.FrozenInputs != source.ConfigurationJson || saved.Metadata.FrozenInputFingerprint != InputFingerprint(source))
+            return new(ConfigurationDocumentStatus.IntegrityConflict, Target: target);
+        _ = source.Inputs();
+        return new(ConfigurationDocumentStatus.Existing, saved, target);
     }
     private static ConfigurationDocumentRevision Decode(ConfigurationDocumentRow row, ConfigurationDocumentTarget target)
     {
@@ -195,7 +198,10 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         if (saved.Metadata.Target != target || saved.Metadata.Id.ToString() != row.Id.ToString()) throw new InvalidDataException("Stored configuration identity is inconsistent.");
         return saved;
     }
-    private static ConfigurationPlanningSnapshot Frozen(DeploymentGenerationRow source) => ConfigurationPlanningSnapshotCodec.Decode(source.ConfigurationJson,
+    private static ConfigurationPlanningSnapshot Frozen(DeploymentGenerationRow source) => source.Inputs().Configuration!;
+    // Layout-only selection grants no materialization or delivery authority. Actual
+    // materialization validates the entire accepted input set, including fast repeats.
+    private static ConfigurationPlanningSnapshot Layout(DeploymentGenerationRow source) => ConfigurationPlanningSnapshotCodec.Decode(source.ConfigurationJson,
         ManifestRevisionRef.Create(ApplicationRecordId.Parse(source.ApplicationRecordId.ToString()), ManifestRevisionNumber.Create(source.RevisionNumber)));
     private static bool HasDocument(ConfigurationPlanningSnapshot frozen, ConfigurationDocumentTarget target) =>
         frozen.Layouts.Any(x => x.Component == target.Component && x.Documents.Any(d => d.Definition.Id == target.Document));
@@ -207,7 +213,8 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         var query = db.DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == id && x.Generation == target.Generation.Value);
         // Read lengths on the server before allocating a protected frozen payload. Its
         // encoded revision cannot fit if even the source character count exceeds the budget.
-        if (await query.AnyAsync(x => x.ConfigurationJson.Length > ConfigurationDocumentCodec.MaxBytes || x.GraphJson.Length > ConfigurationDocumentCodec.MaxBytes, token))
+        if (await query.AnyAsync(x => x.ConfigurationJson.Length > ConfigurationDocumentCodec.MaxBytes || x.GraphJson.Length > ConfigurationDocumentCodec.MaxBytes ||
+            x.ProviderInputsJson.Length > ConfigurationDocumentCodec.MaxBytes, token))
             throw new ConfigurationDocumentLimitException();
         return await query.SingleOrDefaultAsync(token);
     }

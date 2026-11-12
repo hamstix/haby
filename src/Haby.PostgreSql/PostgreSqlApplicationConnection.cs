@@ -52,9 +52,9 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
         if (candidates.Length != 1 || GeneratedCredentialOutputCodec.Decode(candidates[0].Output.Contract, candidates[0].Output.Payload) is not { } password) return false;
         var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
         return Decode(output) == new PostgreSqlApplicationConnection(configuration.Host, configuration.Port, input.DatabaseName,
-            input.Schema, PostgreSqlResourceNaming.Role(owner, accepted.Inputs.Naming.Policy)!, password.Reference) &&
-            await reservations.ContainsAsync(new(accepted.Inputs.ProviderInstance, owner.EnvironmentRecordId, owner.ApplicationRecordId,
-                owner.ResourceLocalId, PostgreSqlApplicationLoginAction.RoleReservationNamespace, PostgreSqlResourceNaming.Role(owner, accepted.Inputs.Naming.Policy)!), cancellationToken);
+            input.Schema, PostgreSqlResourceNaming.Role(owner, accepted.Provider.ResourceNaming().Policy)!, password.Reference) &&
+            await reservations.ContainsAsync(new(accepted.Provider.Instance, owner.EnvironmentRecordId, owner.ApplicationRecordId,
+                owner.ResourceLocalId, PostgreSqlApplicationLoginAction.RoleReservationNamespace, PostgreSqlResourceNaming.Role(owner, accepted.Provider.ResourceNaming().Policy)!), cancellationToken);
     }
 
     public async ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
@@ -62,14 +62,14 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
     {
         if (!Validate(accepted.Node, output)) return false;
         var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
-            accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
+            accepted.Provider.Instance, accepted.Provider.Configuration, cancellationToken))?.Configuration;
         if (configuration is null || !PostgreSqlPairExecution.IsSupported(accepted, codec.Encode(configuration))) return false;
         var input = PostgreSqlApplicationAccessAction.Decode(accepted.Node)!;
         var password = await generated.ConsumeAsync(key, input.PasswordSource.ToReference(), cancellationToken);
         if (password is null) return false;
         var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
         return Decode(output) == new PostgreSqlApplicationConnection(configuration.Host, configuration.Port, input.DatabaseName,
-            input.Schema, PostgreSqlResourceNaming.Role(owner, accepted.Inputs.Naming.Policy)!, password.Reference);
+            input.Schema, PostgreSqlResourceNaming.Role(owner, accepted.Provider.ResourceNaming().Policy)!, password.Reference);
     }
 }
 
