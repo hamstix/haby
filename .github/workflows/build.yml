@@ -141,6 +141,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: postgresql-timing-${{ github.sha }}-${{ github.run_attempt }}
-          path: .artifacts/postgresql-measurement/safe/
+          path: |
+            .artifacts/postgresql-measurement/safe/measurement.json
+            .artifacts/postgresql-measurement/safe/cases.json
+            .artifacts/postgresql-measurement/safe/counts.json
+            .artifacts/postgresql-measurement/safe/top-duration.csv
+            .artifacts/postgresql-measurement/safe/class-duration.csv
+            .artifacts/postgresql-measurement/safe/setup.csv
+            .artifacts/postgresql-measurement/safe/results.trx
+            .artifacts/postgresql-measurement/safe/failure-evidence.json
           if-no-files-found: error
           retention-days: 14

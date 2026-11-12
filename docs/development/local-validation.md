@@ -73,7 +73,10 @@ outputs and must be reviewed/verified for the current source and venue.
 4. Run `scripts/test-postgresql-timing-export.ps1` and
    `scripts/test-native-aot-prerequisites.sh` for safety/redaction/failure-propagation
    and fallback controls. Keep real-tool Linux prerequisite proof separately from
-   its fake-tool controls. Use the existing sanitized exporter unchanged.
+   its fake-tool controls. Use the sanitized exporter and its closed
+   [failure-evidence sidecar](188-safe-failure-evidence.md); retain its exact
+   version, omission counts and parsed-signature provenance. Synthetic fixtures
+   are separate from real integration results.
 5. Run a current complete transitive vulnerability audit and record restore/audit
    sources, tool status and full closure. Follow repository policies, including
    any stricter no-advisory threshold in the workflow. Source/network failure is

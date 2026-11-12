@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+& "$PSScriptRoot/test-postgresql-failure-evidence.ps1"
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('haby-timing-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $directory | Out-Null
 try {
@@ -20,6 +21,11 @@ try {
 '@
     $xml.Replace('SENTINEL', $sentinel) | Set-Content $raw
     & "$PSScriptRoot/export-postgresql-timing.ps1" -TrxPath $raw -OutputDirectory $safe
+    $failure = Get-Content (Join-Path $safe 'failure-evidence.json') -Raw | ConvertFrom-Json
+    if ($failure.schemaVersion -ne 1 -or $failure.failedCases -ne 1 -or $failure.records.Count -ne 1 -or
+        $failure.records[0].classificationMode -ne 'unavailable' -or $failure.records[0].rootCause -ne 'unknown') {
+        throw 'Missing conservative failure evidence.'
+    }
     foreach ($file in Get-ChildItem $safe -File) {
         if ((Get-Content $file.FullName -Raw).Contains($sentinel)) { throw 'Protected content escaped.' }
     }
@@ -37,6 +43,7 @@ try {
     @'
 function global:dotnet {
     if ($args[0] -eq '--version') { '10.0.test'; return }
+    if ($args[0] -eq 'build' -and $env:HABY_TIMING_TEST_VALID_TRX -eq 'build-failure') { $global:LASTEXITCODE = 19; return }
     if ($args[0] -eq 'test') {
         $index = [Array]::IndexOf($args, '--results-directory')
         if ($env:HABY_TIMING_TEST_VALID_TRX -eq '1') {
@@ -53,12 +60,20 @@ exit $LASTEXITCODE
 '@ | Set-Content $child
     $env:HABY_TIMING_TEST_RUNNER = Join-Path $PSScriptRoot 'test-postgresql-measured.ps1'
     $env:HABY_TIMING_TEST_TRX = $raw
-    foreach ($valid in @('1', '0', 'report-failure')) {
-        $env:HABY_TIMING_TEST_VALID_TRX = $(if ($valid -eq '0') { '0' } else { '1' })
+    foreach ($valid in @('1', '0', 'report-failure', 'build-failure')) {
+        $env:HABY_TIMING_TEST_VALID_TRX = $(if ($valid -in @('0', 'build-failure')) { $valid } else { '1' })
         $env:HABY_TIMING_TEST_REPORT_FAILURE = $(if ($valid -eq 'report-failure') { '1' } else { '0' })
         $env:HABY_TIMING_TEST_DESTINATION = Join-Path $directory "failed-run-$valid"
         & (Join-Path $PSHOME 'pwsh') -NoProfile -File $child *> (Join-Path $directory "child-$valid.log")
-        if ($LASTEXITCODE -ne 17) { throw 'Test exit code was masked by timing export.' }
+        $expectedExit = if ($valid -eq 'build-failure') { 19 } else { 17 }
+        if ($LASTEXITCODE -ne $expectedExit) { throw 'Original process exit code was masked by timing export.' }
+        $console = Get-Content (Join-Path $directory "child-$valid.log") -Raw
+        if ($console.Contains($sentinel)) { throw 'Protected fake-runner console content escaped.' }
+        $runSafe = Join-Path $env:HABY_TIMING_TEST_DESTINATION 'safe'
+        foreach ($file in Get-ChildItem $runSafe -File) {
+            if ((Get-Content $file.FullName -Raw).Contains($sentinel)) { throw 'Protected measured artifact escaped.' }
+        }
+        if ($valid -ne '1' -and (Test-Path (Join-Path $runSafe 'failure-evidence.json'))) { throw 'Failed export retained a plausible sidecar.' }
         if ($valid -eq 'report-failure') { continue }
         $manifest = Join-Path $env:HABY_TIMING_TEST_DESTINATION 'safe/measurement.json'
         if (-not (Test-Path $manifest)) {
@@ -67,7 +82,15 @@ exit $LASTEXITCODE
             throw ('Measurement manifest absent; safe runner locations: ' + ($locations -join ', '))
         }
         $metadata = Get-Content $manifest -Raw | ConvertFrom-Json
-        if ($metadata.testExitCode -ne 17) { throw 'Recorded failure code changed.' }
+        if ($metadata.testExitCode -ne $expectedExit) { throw 'Recorded failure code changed.' }
+        if ($valid -eq '1') {
+            $evidence = Get-Content (Join-Path $runSafe 'failure-evidence.json') -Raw | ConvertFrom-Json
+            if ($evidence.failedCases -ne 1 -or $evidence.records[0].rootCause -cne 'unknown') { throw 'Measured failure evidence changed.' }
+        } else {
+            if (Test-Path (Join-Path $runSafe 'counts.json')) { throw 'Missing TRX fabricated counts.' }
+            if (@($metadata.phases | Where-Object { $_.phase -eq 'artifact-export' -and $_.exitCode -eq 1 }).Count -ne 1) { throw 'Export failure phase absent.' }
+        }
+        if ($valid -eq 'build-failure' -and @($metadata.phases | Where-Object phase -eq test).Count) { throw 'Failed build fabricated test phase.' }
     }
     Write-Output 'Timing exporter: redaction, distinct parameterized cases, failed outcomes and duplicate refusal passed.'
     Write-Output 'Measured runner: failing test exit survives successful and failed artifact export.'
