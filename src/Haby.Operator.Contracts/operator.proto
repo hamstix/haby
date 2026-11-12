@@ -25,6 +25,8 @@ service ManifestOperator {
   rpc ValidatePlacement(PlacementPayloadRequest) returns (PlacementReply);
   rpc ImportPlacement(PlacementPayloadRequest) returns (PlacementReply);
   rpc GetPlacementRevision(PlacementRevisionRequest) returns (PlacementReply);
+  rpc ApplyPlacementSelection(ApplyPlacementSelectionRequest) returns (PlacementSelectionReply);
+  rpc GetPlacementSelection(GetPlacementSelectionRequest) returns (PlacementSelectionReply);
   rpc ValidateProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc ImportProfile(ProfilePayloadRequest) returns (ProfileReply);
   rpc GetProfileRevision(ProfileRevisionRequest) returns (ProfileReply);
@@ -943,3 +945,33 @@ message PlacementReply {
   string diagnostic_code = 4;
   bytes declaration_json = 5;
 }
+
+// Closed target: unused fields must be empty; kind determines required members.
+message PlacementSelectionTarget { string kind = 1; string selector = 2; string application_id = 3; string component_ref = 4; }
+message GetPlacementSelectionRequest { string environment = 1; string provider_alias = 2; PlacementSelectionTarget target = 3; }
+message ApplyPlacementSelectionRequest {
+  string environment = 1; string provider_alias = 2; PlacementSelectionTarget target = 3;
+  string placement_name = 4; int32 revision = 5; optional string application_version = 6;
+  optional bool expected_absence = 7; optional string expected_token = 8;
+}
+enum PlacementSelectionStatus {
+  PLACEMENT_SELECTION_STATUS_UNSPECIFIED = 0;
+  PLACEMENT_SELECTION_STATUS_CREATED = 1;
+  PLACEMENT_SELECTION_STATUS_UPDATED = 2;
+  PLACEMENT_SELECTION_STATUS_UNCHANGED = 3;
+  PLACEMENT_SELECTION_STATUS_FOUND = 4;
+  PLACEMENT_SELECTION_STATUS_NOT_FOUND = 5;
+  PLACEMENT_SELECTION_STATUS_CONFLICT = 6;
+  PLACEMENT_SELECTION_STATUS_INVALID_CONTEXT = 7;
+  PLACEMENT_SELECTION_STATUS_ENVIRONMENT_NOT_FOUND = 8;
+  PLACEMENT_SELECTION_STATUS_APPLICATION_NOT_FOUND = 9;
+  PLACEMENT_SELECTION_STATUS_APPLICATION_VERSION_NOT_FOUND = 10;
+  PLACEMENT_SELECTION_STATUS_COMPONENT_NOT_FOUND = 11;
+  PLACEMENT_SELECTION_STATUS_REVISION_NOT_FOUND = 12;
+}
+message PlacementSelectionState {
+  PlacementSelectionTarget target = 1; PlacementRevisionRequest reference = 2;
+  string environment_record_id = 3; string concurrency_token = 4;
+  string technical_actor_id = 5; string changed_at_utc = 6; RevisionReference checked_revision = 7;
+}
+message PlacementSelectionReply { PlacementSelectionStatus status = 1; PlacementSelectionState selection = 2; }

@@ -41,6 +41,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         ConfigureConfigurationDocuments(modelBuilder);
         ConfigureProfileRevisions(modelBuilder);
         ConfigurePlacementRevisions(modelBuilder);
+        ConfigurePlacementSelections(modelBuilder);
         ConfigureProfileAssignments(modelBuilder);
         ConfigureProviderResourceReservations(modelBuilder);
         modelBuilder.Entity<ApplicationRow>(entity =>

@@ -57,7 +57,7 @@ public sealed class PostgreSqlPlacementRevisionStore(IDbContextFactory<ManifestC
         return row is null ? null : Rehydrate(row);
     }
 
-    private AcceptedPlacementRevision Rehydrate(PlacementRevisionRow row)
+    internal AcceptedPlacementRevision Rehydrate(PlacementRevisionRow row)
     {
         try
         {

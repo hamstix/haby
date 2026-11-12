@@ -45,7 +45,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
         Assert.Equal(1, await verify.DeploymentGenerations.AsNoTracking().CountAsync());
         Assert.Empty(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
-        Assert.Equal(21, (await verify.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(22, (await verify.Database.GetAppliedMigrationsAsync()).Count());
     }
 
     [Fact]

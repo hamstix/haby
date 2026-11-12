@@ -973,6 +973,76 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.PlacementSelectionRow", b =>
+                {
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("ProviderAlias")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("provider_alias");
+
+                    b.Property<string>("TargetKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("target_kind");
+
+                    b.Property<string>("Selector")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("selector");
+
+                    b.Property<string>("ApplicationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("application_id");
+
+                    b.Property<string>("ComponentRef")
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("component_ref");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor_id");
+
+                    b.Property<DateTimeOffset>("ChangedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("changed_at_utc");
+
+                    b.Property<Guid?>("CheckedApplicationRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("checked_application_record_id");
+
+                    b.Property<long?>("CheckedRevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("checked_revision_number");
+
+                    b.Property<Guid>("RevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
+
+                    b.Property<Guid>("Token")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid")
+                        .HasColumnName("token");
+
+                    b.HasKey("EnvironmentRecordId", "ProviderAlias", "TargetKind", "Selector", "ApplicationId", "ComponentRef");
+
+                    b.HasIndex("RevisionId", "EnvironmentRecordId", "ProviderAlias");
+
+                    b.ToTable("placement_selections", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_placement_selection_audit", "length(actor_id) > 0 AND token <> '00000000-0000-0000-0000-000000000000'::uuid AND ((target_kind = 'component' AND checked_application_record_id IS NOT NULL AND checked_revision_number > 0 AND checked_revision_number IS NOT NULL) OR (target_kind <> 'component' AND checked_application_record_id IS NULL AND checked_revision_number IS NULL))");
+
+                            t.HasCheckConstraint("CK_placement_selection_target", "(target_kind = 'named' AND selector ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' AND application_id = '' AND component_ref = '') OR (target_kind = 'environment' AND selector = '' AND application_id = '' AND component_ref = '') OR (target_kind = 'application' AND selector = '' AND application_id ~ '^[a-z][a-z0-9]*([.-][a-z0-9]+)*$' AND component_ref = '') OR (target_kind = 'component' AND selector = '' AND application_id ~ '^[a-z][a-z0-9]*([.-][a-z0-9]+)*$' AND component_ref ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$')");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.PostgreSqlDatabaseRecoveryDecisionRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1958,6 +2028,18 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasForeignKey("EnvironmentRecordId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.PlacementSelectionRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.PlacementRevisionRow", "Revision")
+                        .WithMany()
+                        .HasForeignKey("RevisionId", "EnvironmentRecordId", "ProviderAlias")
+                        .HasPrincipalKey("Id", "EnvironmentRecordId", "ProviderAlias")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Revision");
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.PostgreSqlDatabaseRecoveryDecisionRow", b =>
