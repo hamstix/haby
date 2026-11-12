@@ -227,7 +227,8 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         return await query.SingleOrDefaultAsync(token);
     }
     private static async Task<bool> Eligible(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) =>
-        await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.AppliedGeneration >= source.Generation, token) && await Complete(db, source, token);
+        await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.AppliedGeneration >= source.Generation, token) &&
+        await DurableAggregateCompletion.HasProofAsync(db, source.DeploymentId, source.Generation, token) && await Complete(db, source, token);
     private static async Task<bool> Complete(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);

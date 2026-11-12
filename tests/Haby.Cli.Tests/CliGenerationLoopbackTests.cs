@@ -13,6 +13,15 @@ namespace Haby.Cli.Tests;
 
 public sealed partial class CliLoopbackTests
 {
+    private static ResourceStageCheckpointSummary ResourceCheckpoint() => new()
+    {
+        CheckpointId = "019d0000-0000-7000-8000-000000000001",
+        FormatVersion = 1,
+        InputFingerprint = "v4:" + new string('A', 64),
+        ConfirmedAtUtc = "2026-11-12T00:00:00.0000000+00:00",
+        ActiveResources = 1,
+        OriginalResults = 1
+    };
     private sealed class GenerationRegistry : ManifestOperator.ManifestOperatorBase
     {
         internal static int Executions;
@@ -33,6 +42,7 @@ public sealed partial class CliLoopbackTests
                     Generation = 1,
                     DesiredGeneration = 1,
                     AppliedGeneration = 1,
+                    ResourcesReady = ResourceCheckpoint(),
                     Completed = 1,
                     Total = 1
                 };
@@ -159,6 +169,8 @@ public sealed partial class CliLoopbackTests
         reply.Progress.Nodes.Add(new GenerationNodeProgress { Operation = CliOperationTests.Snapshot(OperationStatus.Found, OperationState.Dispatching).Operation });
         Assert.Throws<InvalidDataException>(() => GenerationPresentation.Exit(reply));
         reply.Progress.Nodes[0].Operation.State = OperationState.Succeeded;
+        Assert.Throws<InvalidDataException>(() => GenerationPresentation.Exit(reply));
+        reply.Progress.ResourcesReady = ResourceCheckpoint();
         Assert.Equal(0, GenerationPresentation.Exit(reply));
     }
 
@@ -175,6 +187,7 @@ public sealed partial class CliLoopbackTests
         reply.Status = GenerationExecutionStatus.InputUnavailable;
         Assert.Equal(1, GenerationPresentation.Exit(reply));
         reply.Status = GenerationExecutionStatus.Succeeded; reply.Progress.AppliedGeneration = 2;
+        reply.Progress.ResourcesReady = ResourceCheckpoint();
         Assert.Equal(0, GenerationPresentation.Exit(reply));
     }
 
@@ -188,6 +201,7 @@ public sealed partial class CliLoopbackTests
         };
         Assert.Throws<InvalidDataException>(() => GenerationPresentation.Exit(reply));
         reply.Progress.AppliedGeneration = 2;
+        reply.Progress.ResourcesReady = ResourceCheckpoint();
         Assert.Equal(0, GenerationPresentation.Exit(reply));
         Assert.Equal(2, GenerationPresentation.Progress(reply.Progress)!.ReusedResources);
         reply.Progress.ReusedResources = 0;

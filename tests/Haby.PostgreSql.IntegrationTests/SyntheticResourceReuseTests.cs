@@ -105,6 +105,21 @@ public sealed partial class ExactActionAdmissionTests
             Assert.Contains(plan.Inputs.Configuration.RenderPins, p => p.ResourceLocalId.Value == (mixed && version >= 3 && !absent ? "extra" : "jobs"));
             var result = await services.GetRequiredService<DurableGenerationRunner>().RunAsync(commit.Commit.DeploymentId, commit.Commit.Generation, default);
             Assert.Null(result.StopOutcome); Assert.Equal(version, result.Progress!.AppliedGeneration); Assert.Equal(mixed && version == 2 ? dependent ? 2 : 1 : 0, result.Progress.Total);
+            await using (var proofContext = OutputContext(scenario.Connection))
+            {
+                var checkpoint = await proofContext.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.Generation == version);
+                var proof = ResourcesReadyCheckpointCodec.Decode(checkpoint.EvidenceJson);
+                Assert.Equal(version, proof.Generation); Assert.Equal(plan.Fingerprint, proof.InputFingerprint);
+                Assert.Equal(mixed ? dependent ? 3 : 2 : 1, proof.Resources.Count);
+                foreach (var resourceProof in proof.Resources)
+                {
+                    Assert.Equal(resourceProof.Resource == "jobs" ? 1 : 2, resourceProof.SourceGeneration);
+                    Assert.Equal(resourceProof.Resource != "jobs" && absent, resourceProof.Retained);
+                    Assert.Equal(resourceProof.Resource != "jobs" && retain && version == 5, resourceProof.Reintroduced);
+                    var attempts = await proofContext.DurableOperationAttempts.AsNoTracking().Where(x => x.Generation == resourceProof.SourceGeneration).ToArrayAsync();
+                    Assert.All(resourceProof.Operations, operation => Assert.Contains(attempts, x => x.OperationId == operation.OperationId && x.AttemptId == operation.AttemptId));
+                }
+            }
             var output = await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(new(commit.Commit.DeploymentId, commit.Commit.Generation, QueueEvidenceProducerId),
                 new(scenario.Plan.Inputs.Environment, imported.ManifestRevisionRef.ApplicationRecordId, ManifestLocalId.Create("jobs")), Key,
                 QueueEvidenceContract.Contract, "receipt", default);

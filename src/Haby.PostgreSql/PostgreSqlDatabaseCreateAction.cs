@@ -58,7 +58,8 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
         var references = new DurableActionInputReferences(provider.Environment, provider.Instance, provider.Configuration, provider.Implementation.Value);
         var input = Prepare(resource, references with { Naming = provider.ResourceNaming() }) ?? throw new InvalidDataException("Invalid database input.");
         return [new(OperationId.Create(resourceId.Value + "-create"), resourceId, Key, references,
-            new(PostgreSqlDatabaseCreateAction.Format, JsonSerializer.Serialize(input, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), [])];
+            new(PostgreSqlDatabaseCreateAction.Format, JsonSerializer.Serialize(input, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), [])
+            { RequiresExternalOutput = true, RequiredOutput = new(PostgreSqlDatabaseOutputContract.Contract, PostgreSqlDatabaseOutputContract.Key) }];
     }
 
     private readonly PostgreSqlPairResourceAdmission pair = new(PostgreSqlDatabaseContract.Id);
@@ -88,6 +89,7 @@ public sealed class PostgreSqlDatabaseCreateAction(PostgreSqlDurableOperationExe
         new(PostgreSqlDatabaseContract.Id, new("postgresql/v1", "haby.postgresql.connection/v1",
             PostgreSqlDatabaseCheckpointCapability.ImplementationId)), Contract);
     public override bool RequiresExternalOutput => true;
+    public override ExternalOperationOutputIdentity OutputIdentity => new(PostgreSqlDatabaseOutputContract.Contract, PostgreSqlDatabaseOutputContract.Key);
     public override DurableActionExecutionKey Key => RegistrationKey;
 
     public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) =>

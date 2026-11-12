@@ -99,8 +99,8 @@ public interface IDurableOperationJournal
     ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
         DurableActionAdmission admission, CancellationToken cancellationToken) => new(false);
 
-    /// <summary>Completes an all-reuse or mixed generation only after its combined locked evidence checks.</summary>
-    ValueTask<bool> TryCompleteReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+    /// <summary>Completes a supported Resource-only generation through its locked, persisted evidence boundary.</summary>
+    ValueTask<bool> TryCompleteGenerationAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
         DurableActionAdmission admission, CancellationToken cancellationToken) => new(false);
 
     ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment,

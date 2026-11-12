@@ -139,7 +139,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         });
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
         var reply = await client.MaterializeConfigurationAsync(DocumentRequest(scenario));
-        Assert.Equal(mode == "incomplete" ? Status.NotApplied : Status.InputUnavailable, reply.Status);
+        Assert.Equal(mode == "unavailable-renderer" ? Status.InputUnavailable : Status.NotApplied, reply.Status);
         Assert.Null(reply.Artifact); Assert.True(reply.PreviewJson.IsEmpty);
         Assert.Equal(before, await ConfigurationState(scenario));
         await using var verify = Context(scenario.Connection); Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());

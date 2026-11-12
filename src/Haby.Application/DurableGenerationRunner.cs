@@ -9,6 +9,7 @@ public sealed record DurableGenerationProgress(ApplicationDeploymentId Deploymen
     public int Reused { get; init; }
     public int Retained { get; init; }
     public int Reintroduced { get; init; }
+    public ResourcesReadyCheckpoint? ResourcesReady { get; init; }
     public int Completed => Nodes.Count(n => n.Operation.State == DurableOperationState.Succeeded);
     public int Total => Nodes.Count;
     public DurableNodeProgress? StoppedAt => Nodes.FirstOrDefault(n => n.Operation.State is
@@ -48,13 +49,12 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
             if (progress is null) return new(null);
             if (progress.Reused > 0 && !await journal.ValidateReuseAsync(deployment, generation, admission, cancellationToken))
                 return new(progress, StopOutcome: DurableExecutionOutcome.InputUnavailable);
-            if (progress.Reused > 0 && progress.Completed == progress.Total)
+            if (progress.Completed == progress.Total)
             {
-                var complete = await journal.TryCompleteReuseAsync(deployment, generation, admission, cancellationToken);
+                var complete = await journal.TryCompleteGenerationAsync(deployment, generation, admission, cancellationToken);
                 return new(await ProgressAsync(deployment, generation, CancellationToken.None),
                     StopOutcome: complete ? null : DurableExecutionOutcome.InputUnavailable);
             }
-            if (progress.Completed == progress.Total) return new(progress);
             // Existing uncertainty/failure stops the pass even if independent pending work is ready.
             var stop = progress.Nodes.FirstOrDefault(n => n.Operation.State is DurableOperationState.Dispatching
                 or DurableOperationState.NeedsAttention or DurableOperationState.Failed);

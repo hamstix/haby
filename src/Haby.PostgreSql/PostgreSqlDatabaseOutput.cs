@@ -12,6 +12,7 @@ public sealed class PostgreSqlDatabaseOutputContract : IExternalOperationOutputC
     public const string Contract = "postgresql.database-output/v1alpha1";
     public const string Key = "database";
     public DurableActionExecutionKey Producer => PostgreSqlDatabaseCreateAction.RegistrationKey;
+    public ExternalOperationOutputIdentity Identity => new(Contract, Key);
     public static ExternalOperationOutput Encode(PostgreSqlDatabaseOutput output) => new(Contract, Key,
         JsonSerializer.Serialize(output, PostgreSqlDatabaseOutputJsonContext.Default.PostgreSqlDatabaseOutput));
     public static PostgreSqlDatabaseOutput? Decode(ExternalOperationOutput output)

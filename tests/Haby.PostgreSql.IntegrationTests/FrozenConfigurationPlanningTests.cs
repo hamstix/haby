@@ -356,9 +356,9 @@ public sealed partial class DurableDeploymentPlanningTests
         }
         await using var check = new NpgsqlConnection(setup.Connection); await check.OpenAsync();
         Assert.Equal(1L, await new NpgsqlCommand("SELECT count(*) FROM deployment_plans", check).ExecuteScalarAsync());
-        // The seven explicitly removed migrations leave 22 of the current 29 rows;
+        // The seven explicitly removed migrations leave 23 of the current 30 rows;
         // the Provider-input-set migration remains, so this is still a non-prefix history.
-        Assert.Equal(22L, await new NpgsqlCommand("SELECT count(*) FROM \"__EFMigrationsHistory\"", check).ExecuteScalarAsync());
+        Assert.Equal(23L, await new NpgsqlCommand("SELECT count(*) FROM \"__EFMigrationsHistory\"", check).ExecuteScalarAsync());
     }
 
     private static async Task ObserveConfigurationLockWait(string connection, int owner, int contender,

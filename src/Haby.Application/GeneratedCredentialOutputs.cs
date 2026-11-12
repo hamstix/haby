@@ -89,14 +89,19 @@ internal sealed record CredentialOutputDocument(string Secret, string Version);
 [JsonSerializable(typeof(CredentialOutputDocument))]
 internal partial class GeneratedOutputJsonContext : JsonSerializerContext;
 
-/// <summary>Trusted internal catalog boundary. All identities are rederived from committed state.</summary>
-public interface IGeneratedCredentialOperations
+/// <summary>Owner-scoped exact credential evidence and current-use material validation.</summary>
+public interface IGeneratedCredentialReader
 {
     ValueTask<GeneratedCredentialInput?> FindInputAsync(DurableOperationKey producer, CancellationToken cancellationToken);
-    ValueTask<bool> CompleteAsync(DurableOperationKey producer, Guid attempt, GeneratedCredentialOutput output,
-        DateTimeOffset at, CancellationToken cancellationToken);
     ValueTask<GeneratedCredentialOutput?> ConsumeAsync(DurableOperationKey consumer, OperationOutputRef selector,
         CancellationToken cancellationToken);
+}
+
+/// <summary>Trusted catalog completion boundary; all identities come from committed state.</summary>
+public interface IGeneratedCredentialOperations : IGeneratedCredentialReader
+{
+    ValueTask<bool> CompleteAsync(DurableOperationKey producer, Guid attempt, GeneratedCredentialOutput output,
+        DateTimeOffset at, CancellationToken cancellationToken);
 }
 
 /// <summary>Exact local action; no Provider connection, external dispatch marker or independent generation.</summary>

@@ -716,6 +716,17 @@ message GenerationProgress {
   int32 reused_resources = 9;
   int32 retained_resources = 10;
   int32 reintroduced_resources = 11;
+  ResourceStageCheckpointSummary resources_ready = 12;
+}
+// Actual saved Resource stage only; no Workload readiness or later-stage assertion.
+message ResourceStageCheckpointSummary {
+  string checkpoint_id = 1;
+  int32 format_version = 2;
+  string input_fingerprint = 3;
+  string confirmed_at_utc = 4;
+  int32 active_resources = 5;
+  int32 retained_resources = 6;
+  int32 original_results = 7;
 }
 enum GenerationExecutionStatus {
   GENERATION_EXECUTION_STATUS_UNSPECIFIED = 0;

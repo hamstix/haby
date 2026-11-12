@@ -18,6 +18,29 @@ public sealed partial class OperatorHostIntegrationTests
     private const string RecoveryNote = "Provenance independently verified by the test operator";
 
     [Fact]
+    public async Task Recovery_checkpoint_failure_rolls_back_decision_operation_and_applied_with_original_uncertain_attempt()
+    {
+        await using var scenario = await ExecutionScenarioAsync();
+        var request = await UncertainRecoveryOperation(scenario, created: true);
+        await using var host = await StartAsync(scenario.Connection, scenario.CertificatePath);
+        using var channel = Channel(host, scenario.Certificate);
+        var client = OperatorTestCredentials.Client(channel);
+        Assert.Equal(OperationStatus.NeedsAttention, (await client.ExecuteOperationAsync(request)).Status);
+        var assignment = RecoveryAssignment(await client.InspectOperationRecoveryAsync(request));
+        var before = await RecoveryCatalog(scenario);
+        await AlterRecoveryLogin(scenario, "NOCREATEDB");
+        await ExecutionSql(scenario.Connection, "ALTER TABLE generation_stage_checkpoints ADD CONSTRAINT test_reject_checkpoint CHECK (generation < 0)");
+        await Assert.ThrowsAsync<RpcException>(async () => await client.AssignExistingOperationAsync(assignment));
+        Assert.Equal(before, await RecoveryCatalog(scenario));
+        Assert.Equal(0L, await ExecutionScalar(scenario.Connection, "SELECT count(*) FROM generation_stage_checkpoints"));
+        Assert.Equal("Uncertain", await ExecutionScalar(scenario.Connection, "SELECT outcome FROM durable_create_operation_attempts"));
+        Assert.Equal("NeedsAttention", await ExecutionScalar(scenario.Connection, "SELECT state FROM durable_create_operations"));
+        await ExecutionSql(scenario.Connection, "ALTER TABLE generation_stage_checkpoints DROP CONSTRAINT test_reject_checkpoint");
+        Assert.Equal(RecoveryStatus.Assigned, (await client.AssignExistingOperationAsync(assignment)).Status);
+        await AssertRecoveredCatalog(scenario);
+    }
+
+    [Fact]
     public async Task Recovery_rpc_is_read_only_then_atomically_assigns_once_and_returns_original_receipt_after_restart()
     {
         await using var scenario = await ExecutionScenarioAsync();
@@ -407,6 +430,13 @@ public sealed partial class OperatorHostIntegrationTests
         Assert.Equal("Uncertain", await ExecutionScalar(scenario.Connection, "SELECT outcome FROM durable_create_operation_attempts"));
         Assert.Equal(RecoveryNote, await ExecutionScalar(scenario.Connection, "SELECT note FROM postgresql_database_recovery_decisions"));
         Assert.Equal(true, await ExecutionScalar(scenario.Connection, "SELECT acknowledged FROM postgresql_database_recovery_decisions"));
+        Assert.Equal(1L, await ExecutionScalar(scenario.Connection, "SELECT count(*) FROM generation_stage_checkpoints WHERE stage = 'ResourcesReady'"));
+        var proof = ResourcesReadyCheckpointCodec.Decode((string)(await ExecutionScalar(scenario.Connection, "SELECT evidence_json FROM generation_stage_checkpoints"))!);
+        var result = Assert.Single(Assert.Single(proof.Resources).Operations);
+        Assert.Equal("db-create", result.OperationId);
+        Assert.Equal((Guid)(await ExecutionScalar(scenario.Connection, "SELECT id FROM postgresql_database_recovery_decisions"))!, result.RecoveryDecisionId);
+        Assert.Equal((Guid)(await ExecutionScalar(scenario.Connection, "SELECT attempt_id FROM durable_create_operation_attempts"))!, result.AttemptId);
+        Assert.Empty(result.Outputs); // Accepted standalone recovery intentionally has no original success output.
     }
 
     private static async Task AlterRecoveryLogin(ExecutionScenario scenario, string alteration)

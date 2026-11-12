@@ -36,6 +36,7 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            await DurableAggregateCompletion.LockAsync(context, deployment, cancellationToken);
             // Lock the exact operation before deciding. The second concurrent caller sees the
             // committed decision after the first transaction releases this row lock.
             var operation = await context.DurableOperations.FromSqlInterpolated($"""
@@ -57,6 +58,7 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                 .SingleOrDefaultAsync(cancellationToken);
             if (existing is not null)
             {
+                if (!await DurableAggregateCompletion.HasProofAsync(context, deployment, generation, cancellationToken)) return Rejected();
                 await transaction.CommitAsync(cancellationToken);
                 return new(PostgreSqlDatabaseAssignmentOutcome.AlreadyAssigned,
                     ToAudit(key, existing).Receipt);
@@ -95,7 +97,7 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                 Acknowledged = command.Acknowledged,
                 DecidedAt = at,
                 OperationState = nameof(DurableOperationState.Succeeded),
-                AppliedGeneration = null
+                AppliedGeneration = generation
             };
 
             var updated = await context.DurableOperations
@@ -110,11 +112,11 @@ public sealed class PostgreSqlDatabaseRecoveryJournal(IDbContextFactory<Manifest
                     .SetProperty(row => row.UpdatedAt, at), cancellationToken);
             if (updated != 1) return Rejected();
 
-            if (!await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken)) return Rejected();
-            decision.AppliedGeneration = await context.ApplicationDeployments.AsNoTracking().Where(r => r.Id == deployment)
-                .Select(r => r.AppliedGeneration).SingleAsync(cancellationToken);
+            // Insert the real immutable authority before building its proof. The decision,
+            // terminal transition, checkpoint and Applied pointer commit or roll back together.
             context.PostgreSqlDatabaseRecoveryDecisions.Add(decision);
             await context.SaveChangesAsync(cancellationToken);
+            if (!await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken)) return Rejected();
             await transaction.CommitAsync(CancellationToken.None);
             return new(PostgreSqlDatabaseAssignmentOutcome.Assigned, ToAudit(key, decision).Receipt);
         }

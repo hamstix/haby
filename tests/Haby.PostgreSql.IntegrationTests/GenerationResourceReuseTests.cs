@@ -177,6 +177,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 var executed = await client.ExecuteGenerationAsync(request);
                 Assert.Equal(GenerationExecutionStatus.Succeeded, executed.Status); Assert.Equal(0, executed.Progress.Total);
                 Assert.Equal(generation, executed.Progress.AppliedGeneration); Assert.Equal(2, executed.Progress.ReusedResources);
+                Assert.NotNull(executed.Progress.ResourcesReady);
+                Assert.Equal(1, executed.Progress.ResourcesReady.FormatVersion);
+                Assert.Equal(2, executed.Progress.ResourcesReady.ActiveResources);
+                Assert.Equal(5, executed.Progress.ResourcesReady.OriginalResults);
                 Assert.Equal(executed, await client.ExecuteGenerationAsync(request));
                 var selection = DocumentRequest(scenario); selection.Generation = generation;
                 var batch = await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = selection.ApplicationId, Generation = generation });
@@ -230,6 +234,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             await host.StopAsync();
         }
         var restored = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("reuse_restore_")));
+        var checkpointHistory = await ReadCheckpointHistory(scenario.Connection);
         var directory = "/tmp/haby-reuse-" + Guid.NewGuid().ToString("N"); var dump = directory + "/catalog.dump";
         await fixture.RunClientUtilityAsync("mkdir", "-m", "700", directory);
         try
@@ -245,9 +250,16 @@ public sealed partial class PostgreSqlApplicationLoginTests
             for (var generation = 2; generation <= 3; generation++) Assert.Equal(GenerationExecutionStatus.Succeeded,
                 (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = generation })).Status);
             Assert.Equal(history, await ReuseHistory(restored));
+            Assert.Equal(checkpointHistory, await ReadCheckpointHistory(restored));
             await host.StopAsync();
         }
         finally { await fixture.RunClientUtilityAsync("rm", "-f", dump); await fixture.RunClientUtilityAsync("rmdir", directory); }
+
+        async Task<string[]> ReadCheckpointHistory(string connection)
+        {
+            await using var verify = Context(connection);
+            return await verify.GenerationStageCheckpoints.AsNoTracking().OrderBy(x => x.Generation).Select(x => x.EvidenceJson).ToArrayAsync();
+        }
 
         async Task<string> ReceivedConnection(GrpcChannel channel, ConfigurationDocumentReply document, ConfigurationAccessReply grant, int timeout)
         {

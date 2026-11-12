@@ -39,7 +39,8 @@ public sealed partial class PostgreSqlRestrictTests(PostgreSqlFixture fixture) :
             var name = ((ConfigurationString)spec.Resources[resource].Properties.Members["name"]).Value;
             var admin = JsonDocument.Parse(configuration.PayloadJson).RootElement.GetProperty("AdministratorUserName"u8).GetString()!;
             return [new(OperationId.Create("db-create"), resource, Key, references, new(PostgreSqlDatabaseCreateAction.Format,
-                "{\"DatabaseName\":\"" + name + "\"}"), []),
+                "{\"DatabaseName\":\"" + name + "\"}"), [])
+                { RequiresExternalOutput = true, RequiredOutput = new(PostgreSqlDatabaseOutputContract.Contract, PostgreSqlDatabaseOutputContract.Key) },
                 new(OperationId.Create("db-restrict"), resource, PostgreSqlDatabaseRestrictAction.RegistrationKey, references,
                     new(PostgreSqlDatabaseRestrictAction.Format, "{\"databaseName\":\"" + name + "\",\"databaseSource\":{\"producerOperationId\":\"db-create\",\"outputContract\":\"" +
                     Selector.OutputContract + "\",\"outputKey\":\"database\"},\"expectedOwnerUserName\":\"" + admin + "\"}"), [Selector.ProducerOperationId])

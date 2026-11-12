@@ -5,15 +5,22 @@ namespace Haby.Application;
 /// <summary>Non-secret, adapter-encoded evidence. Concrete fields remain adapter-owned.</summary>
 public sealed record ExternalOperationOutput(string Contract, string Key, string Payload);
 public sealed record ConfirmedOperationOutput(OperationId Producer, ExternalOperationOutput Output);
+public sealed record ExternalOperationOutputIdentity(string Contract, string Key);
 
 /// <summary>Explicit registration for an external producer requiring atomic evidence publication.</summary>
 public interface IExternalOperationOutputContract
 {
     DurableActionExecutionKey Producer { get; }
+    ExternalOperationOutputIdentity Identity { get; }
     bool Validate(DurableOperationNode node, ExternalOperationOutput output);
     /// <summary>Catalog metadata only: no Provider I/O or secret-material resolution. Sources have confirmed original attempts.</summary>
-    ValueTask<bool> ValidateReuseAsync(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
-        IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration, CancellationToken cancellationToken) => new(Validate(accepted.Node, output));
+    bool ValidateReuse(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
+        IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration,
+        IReadOnlyCollection<ProviderResourceReservation> reservations) => Validate(accepted.Node, output);
+    /// <summary>Own confirmed publication metadata only; current-use material validation remains separate.</summary>
+    bool ValidatePublicationMetadata(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
+        IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration,
+        IReadOnlyCollection<ProviderResourceReservation> reservations) => ValidateReuse(key, accepted, output, sources, configuration, reservations);
     /// <summary>Optional adapter-owned validation against the exact accepted context and pinned inputs.</summary>
     ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
         ExternalOperationOutput output, CancellationToken cancellationToken) => new(Validate(accepted.Node, output));

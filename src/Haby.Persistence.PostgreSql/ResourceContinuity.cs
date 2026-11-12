@@ -30,6 +30,14 @@ internal static class ResourceContinuity
         IEnumerable<IProviderConfigurationCodec> codecs, DurableActionAdmission admission, DurablePlanningInputs target, CancellationToken token, bool validateMaterial = false, long? creationGeneration = null)
     {
         var contracts = registrations.ToArray();
+        // Adapter validation consumes this transaction's snapshot, never rents another
+        // connection while completion holds the aggregate/continuity locks.
+        var environment = Guid.Parse(target.Environment.ToString());
+        var application = Guid.Parse(target.Revision.ApplicationRecordId.ToString());
+        var reservationRows = await db.ProviderResourceReservations.AsNoTracking().Where(x =>
+            x.EnvironmentRecordId == environment && x.ApplicationRecordId == application).ToArrayAsync(token);
+        var reservations = reservationRows.Select(x => new ProviderResourceReservation(ProviderInstanceId.Parse(x.ProviderInstanceId.ToString()),
+            target.Environment, target.Revision.ApplicationRecordId, ManifestLocalId.Create(x.ResourceLocalId), x.Namespace, x.Value)).ToArray();
         foreach (var generation in reuse.ReusedResources.Concat(reuse.RetainedResources).Select(x => x.SourceGeneration).Concat(creationGeneration is { } g ? [g] : []).Distinct())
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
@@ -59,7 +67,7 @@ internal static class ResourceContinuity
             {
                 var outputs = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation && x.OperationId == node.Id.Value).ToArrayAsync(token);
                 var validators = contracts.Where(x => x.Producer == node.Action).ToArray();
-                if (validators.Length > 1 || (validators.Length == 1 && outputs.Length != 1)) return false;
+                if (validators.Length > 1 || (validators.Length == 1 && (outputs.Length != 1 || node.RequiredOutput != validators[0].Identity))) return false;
                 foreach (var output in outputs)
                 {
                     if (GeneratedCredentialContracts.IsProducer(node))
@@ -73,8 +81,8 @@ internal static class ResourceContinuity
                     }
                     var value = new ExternalOperationOutput(output.Contract, output.Key, output.Payload);
                     if (validators.Length != 1 || !validators[0].Validate(node, value) ||
-                        !await validators[0].ValidateReuseAsync(new(ApplicationDeploymentId.Parse(deployment.ToString()), DeploymentGeneration.Create(generation), node.Id),
-                            new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), value, references, configuration, token)) return false;
+                        !validators[0].ValidateReuse(new(ApplicationDeploymentId.Parse(deployment.ToString()), DeploymentGeneration.Create(generation), node.Id),
+                            new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), value, references, configuration, reservations)) return false;
                 }
             }
         }
@@ -93,6 +101,7 @@ internal static class ResourceContinuity
         // completed; inspect this Resource's original nodes directly, never recurse.
         if (requireApplied && !await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == management.Deployment &&
             x.AppliedGeneration >= management.SourceGeneration, token)) return null;
+        if (requireApplied && !await DurableAggregateCompletion.HasProofAsync(db, management.Deployment, management.SourceGeneration, token)) return null;
         if (graph.ReusedResources.Any(r => r.Resource.Value == management.Resource)) return null;
         var ids = graph.Nodes.Select(x => x.Id.Value).ToArray();
         if (await db.DurableOperations.CountAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token) != ids.Length ||

@@ -22,12 +22,11 @@ public sealed partial class PostgreSqlRestrictTests
     [Theory]
     [InlineData("output")]
     [InlineData("attempt")]
-    [InlineData("aggregate")]
-    public async Task Confirmed_CREATE_catalog_failure_rolls_back_output_success_attempt_and_aggregate_without_replay(string mode)
+    public async Task Confirmed_CREATE_publication_failure_rolls_back_output_success_and_attempt_without_replay(string mode)
     {
         var scenario = await Prepare(standalone: true);
-        var table = mode == "output" ? "operation_outputs" : mode == "attempt" ? "durable_create_operation_attempts" : "application_deployments";
-        var condition = mode == "output" ? "false" : mode == "attempt" ? "outcome IS NULL" : "applied_generation IS NULL";
+        var table = mode == "output" ? "operation_outputs" : "durable_create_operation_attempts";
+        var condition = mode == "output" ? "false" : "outcome IS NULL";
         await Sql(scenario.Connection, $"ALTER TABLE {table} ADD CONSTRAINT test_publication_failure CHECK ({condition})");
         var result = await Execute(scenario, false);
         Assert.Equal(DurableExecutionOutcome.DispatchUncertain, result.Outcome);
@@ -50,21 +49,57 @@ public sealed partial class PostgreSqlRestrictTests
     }
 
     [Fact]
-    public async Task Restrict_catalog_aggregate_failure_retains_uncertainty_and_never_replays_committed_ACL_SQL()
+    public async Task Confirmed_CREATE_aggregate_failure_preserves_exact_output_and_resumes_without_replay()
+    {
+        var scenario = await Prepare(standalone: true);
+        await Sql(scenario.Connection, "ALTER TABLE application_deployments ADD CONSTRAINT test_publication_failure CHECK (applied_generation IS NULL)");
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await Execute(scenario, false)).Outcome);
+        var external = await Policy(scenario.Database);
+        string payload;
+        await using (var verify = Context(scenario.Connection))
+        {
+            payload = (await verify.OperationOutputs.AsNoTracking().SingleAsync()).Payload;
+            Assert.Equal("Succeeded", (await verify.DurableOperations.AsNoTracking().SingleAsync()).State);
+            Assert.Equal("Succeeded", (await verify.DurableOperationAttempts.AsNoTracking().SingleAsync()).Outcome);
+            Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+            Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        }
+        await Sql(scenario.Connection, "ALTER TABLE application_deployments DROP CONSTRAINT test_publication_failure");
+        await using (var restart = Services(scenario.Connection, standalone: true))
+            Assert.Null((await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(scenario.Create.DeploymentId, scenario.Create.Generation, default)).StopOutcome);
+        Assert.Equal(external, await Policy(scenario.Database));
+        await using var final = Context(scenario.Connection);
+        Assert.Equal(payload, (await final.OperationOutputs.AsNoTracking().SingleAsync()).Payload);
+        Assert.Single(await final.DurableOperationAttempts.AsNoTracking().ToArrayAsync());
+        Assert.Single(await final.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+        Assert.Equal(1, (await final.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+    }
+
+    [Fact]
+    public async Task Restrict_catalog_aggregate_failure_preserves_confirmed_ACL_and_never_replays_SQL()
     {
         var scenario = await Prepare(); Assert.Equal(DurableExecutionOutcome.Succeeded, (await Execute(scenario, false)).Outcome);
         await Sql(scenario.Connection, "ALTER TABLE application_deployments ADD CONSTRAINT test_restrict_failure CHECK (applied_generation IS NULL)");
         var fault = new Fault("none");
-        Assert.Equal(DurableExecutionOutcome.NeedsAttention, (await Execute(scenario, true, fault)).Outcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await Execute(scenario, true, fault)).Outcome);
         await AssertPublicDenied(scenario.Database);
+        await using (var blocked = Context(scenario.Connection))
+        {
+            Assert.Null((await blocked.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            Assert.Empty(await blocked.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+            Assert.Equal("Succeeded", (await blocked.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.OperationId == "db-restrict")).Outcome);
+        }
         await Sql(scenario.Connection, "ALTER TABLE application_deployments DROP CONSTRAINT test_restrict_failure");
-        Assert.Equal(DurableExecutionOutcome.NeedsAttention, (await Execute(scenario, true, fault)).Outcome);
+        await using (var restart = Services(scenario.Connection))
+            Assert.Null((await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(scenario.Create.DeploymentId, scenario.Create.Generation, default)).StopOutcome);
+        Assert.Equal(DurableExecutionOutcome.Succeeded, (await Execute(scenario, true, fault)).Outcome);
         Assert.Equal(1, fault.Dispatches);
+        await AssertPublicDenied(scenario.Database);
         await using var verify = Context(scenario.Connection);
-        Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
-        Assert.Equal("Uncertain", (await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.OperationId == "db-restrict")).Outcome);
+        Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        Assert.Single(await verify.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+        Assert.Equal("Succeeded", (await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.OperationId == "db-restrict")).Outcome);
     }
-
     private sealed class LostPublication : DbTransactionInterceptor
     {
         public bool Thrown;
@@ -97,7 +132,7 @@ public sealed partial class PostgreSqlRestrictTests
         // Ordinary journal success cannot bypass the mandatory publication.
         Assert.False(await journal.TryRecordSuccessAsync(scenario.Create, started.AttemptId, DateTimeOffset.UtcNow, default));
         var lost = new LostPublication();
-        var store = new PostgreSqlExternalOperationOutputs(new PublicationFactory(scenario.Connection, lost), [new PostgreSqlDatabaseOutputContract()]);
+        var store = new PostgreSqlExternalOperationOutputs(new PublicationFactory(scenario.Connection, lost), [new PostgreSqlDatabaseOutputContract()], services.GetServices<IProviderConfigurationCodec>());
         Assert.True(await store.CompleteAsync(scenario.Create, started.AttemptId, output, DateTimeOffset.UtcNow, default)); Assert.True(lost.Thrown);
         Assert.True(await store.CompleteAsync(scenario.Create, started.AttemptId, output, DateTimeOffset.UtcNow, default));
         Assert.False(await store.CompleteAsync(scenario.Create, Guid.NewGuid(), output, DateTimeOffset.UtcNow, default));

@@ -63,6 +63,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             await context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {actual.Id} FOR UPDATE", cancellationToken);
             actual = await context.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == actual.Id, cancellationToken);
             if (actual.AppliedGeneration != actual.DesiredGeneration) return new DurableCommitResult.PlanInputUnavailable();
+            if (!await DurableAggregateCompletion.HasProofAsync(context, actual.Id, actual.DesiredGeneration, cancellationToken))
+                return new DurableCommitResult.PlanInputUnavailable();
             await ResourceContinuity.LockAsync(context, actual.Id, cancellationToken);
         }
 
