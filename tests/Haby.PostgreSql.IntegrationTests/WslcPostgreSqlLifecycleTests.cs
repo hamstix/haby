@@ -102,6 +102,12 @@ public sealed class WslcPostgreSqlLifecycleTests(ITestOutputHelper output)
             Assert.Contains(nameof(IOException), text, StringComparison.Ordinal);
             Assert.Contains(ControlledCli.PrivateFailureMarker, text, StringComparison.Ordinal);
             Assert.Contains(nameof(ControlledCli.RunAsync), text, StringComparison.Ordinal);
+            var capture = Environment.GetEnvironmentVariable("HABY_TEST_PRIVATE_EVIDENCE_DIRECTORY");
+            if (capture is not null)
+            {
+                Assert.True(Path.IsPathFullyQualified(capture) && Directory.Exists(capture));
+                File.Copy(evidence, Path.Combine(capture, context.Run.RunId + "-cleanup-failure-private.txt"));
+            }
         }
     }
 
