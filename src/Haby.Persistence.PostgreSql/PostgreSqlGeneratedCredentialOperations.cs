@@ -7,19 +7,12 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Internal catalog-only producer completion and exact, owner-scoped consumption.</summary>
 public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    ISecretStore secrets) : IGeneratedCredentialOperations
+    ISecretStore secrets, IEnumerable<IExternalOperationOutputContract>? contracts = null,
+    IEnumerable<IProviderConfigurationCodec>? codecs = null) : IGeneratedCredentialOperations
 {
-    public async ValueTask<GeneratedCredentialInput?> FindInputAsync(DurableOperationKey producer, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var context = await contexts.CreateDbContextAsync(cancellationToken);
-            var accepted = await AcceptedAsync(context, producer, cancellationToken);
-            return accepted is not null && GeneratedCredentialContracts.IsProducer(accepted.Value.Node)
-                ? GeneratedCredentialInputCodec.Decode(accepted.Value.Node.Input) : null;
-        }
-        catch (Exception e) when (StorageFailure(e)) { return null; }
-    }
+    private readonly PostgreSqlGeneratedCredentialReader reader = new(contexts, secrets);
+
+    public ValueTask<GeneratedCredentialInput?> FindInputAsync(DurableOperationKey producer, CancellationToken token) => reader.FindInputAsync(producer, token);
 
     public async ValueTask<bool> CompleteAsync(DurableOperationKey producer, Guid attempt, GeneratedCredentialOutput output,
         DateTimeOffset at, CancellationToken cancellationToken)
@@ -33,9 +26,15 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             var input = GeneratedCredentialInputCodec.Decode(accepted.Value.Node.Input)!;
             var dependencyIds = accepted.Value.Node.Dependencies.Select(d => d.Value).ToArray();
             if (!await DependenciesReadyAsync(context, producer, dependencyIds, cancellationToken)) return false;
+            var metadata = await DurableAggregateCompletion.InspectMetadataAsync(context, Guid.Parse(producer.DeploymentId.ToString()), producer.Generation.Value,
+                contracts ?? [], codecs ?? [], cancellationToken, pending: new(producer,
+                    new(GeneratedCredentialContracts.OutputContract, GeneratedCredentialContracts.Password, GeneratedCredentialOutputCodec.Encode(output))));
+            if (metadata is null) return false;
+            var prepared = await DurableAggregateCompletion.PrepareAsync(context, metadata, cancellationToken);
+            if (prepared is null) return false;
             // Resolve material before the aggregate lock. Inside the transaction recheck
             // exact slot metadata on this connection; never resolve secrets under that lock.
-            if (!await ValidMaterialAsync(context, input, output.Reference, cancellationToken)) return false;
+            if (!await reader.ValidMaterialAsync(context, input, output.Reference, cancellationToken)) return false;
             await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
             await DurableAggregateCompletion.LockAsync(context, Guid.Parse(producer.DeploymentId.ToString()), cancellationToken);
             var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(context, new(input.Owner, input.SlotId), input.GenerationProfile, cancellationToken, validateMaterial: false);
@@ -55,9 +54,9 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             {
                 await transaction.RollbackAsync(cancellationToken);
                 await transaction.DisposeAsync();
-                return await ConfirmAsync(context, producer, output, cancellationToken);
+                return await reader.ConfirmAsync(context, producer, output, cancellationToken);
             }
-            var existing = await OutputAsync(context, producer, cancellationToken);
+            var existing = await PostgreSqlGeneratedCredentialReader.OutputAsync(context, producer, cancellationToken);
             if (existing is not null && GeneratedCredentialOutputCodec.Decode(existing.Contract, existing.Payload) != output)
                 return false;
             if (existing is null)
@@ -77,7 +76,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
                     .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
             if (closed != 1) return false;
-            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken);
+            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs, prepared);
             cancellationToken.ThrowIfCancellationRequested();
             committing = true;
             await transaction.CommitAsync(CancellationToken.None);
@@ -91,32 +90,14 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             try
             {
                 await using var reread = await contexts.CreateDbContextAsync(CancellationToken.None);
-                return await ConfirmAsync(reread, producer, output, CancellationToken.None);
+                return await reader.ConfirmAsync(reread, producer, output, CancellationToken.None);
             }
             catch (Exception reread) when (StorageFailure(reread)) { return false; }
         }
     }
 
-    public async ValueTask<GeneratedCredentialOutput?> ConsumeAsync(DurableOperationKey consumer, OperationOutputRef selector,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var context = await contexts.CreateDbContextAsync(cancellationToken);
-            var accepted = await AcceptedAsync(context, consumer, cancellationToken);
-            if (accepted is null || !accepted.Value.Node.OutputReferences.Contains(selector)) return null;
-            var producer = consumer with { OperationId = selector.ProducerOperationId };
-            var input = await InputAsync(context, producer, cancellationToken);
-            if (input is null || selector.OutputContract != GeneratedCredentialContracts.OutputContract ||
-                selector.OutputKey != GeneratedCredentialContracts.Password ||
-                input.Owner != new ManagedResourceKey(EnvironmentRecordId.Parse(accepted.Value.Generation.EnvironmentRecordId.ToString()),
-                    ApplicationRecordId.Parse(accepted.Value.Generation.ApplicationRecordId.ToString()), accepted.Value.Node.ResourceId)) return null;
-            var row = await OutputAsync(context, producer, cancellationToken);
-            var output = row is null ? null : GeneratedCredentialOutputCodec.Decode(row.Contract, row.Payload);
-            return output is not null && await ConfirmAsync(context, producer, output, cancellationToken) ? output : null;
-        }
-        catch (Exception e) when (StorageFailure(e)) { return null; }
-    }
+    public ValueTask<GeneratedCredentialOutput?> ConsumeAsync(DurableOperationKey consumer, OperationOutputRef selector, CancellationToken token) =>
+        reader.ConsumeAsync(consumer, selector, token);
 
     private static async Task<bool> DependenciesReadyAsync(ManifestCatalogDbContext context, DurableOperationKey producer,
         string[] dependencyIds, CancellationToken token)
@@ -125,52 +106,6 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
         return await context.DurableOperations.CountAsync(r => r.DeploymentId == deployment &&
             r.Generation == producer.Generation.Value && dependencyIds.Contains(r.OperationId) &&
             r.State == nameof(DurableOperationState.Succeeded), token) == dependencyIds.Length;
-    }
-
-    private async Task<bool> ConfirmAsync(ManifestCatalogDbContext context, DurableOperationKey producer,
-        GeneratedCredentialOutput expected, CancellationToken token)
-    {
-        var input = await InputAsync(context, producer, token);
-        if (input is null) return false;
-        var row = await OutputAsync(context, producer, token);
-        if (row is null || GeneratedCredentialOutputCodec.Decode(row.Contract, row.Payload) != expected) return false;
-        var deployment = Guid.Parse(producer.DeploymentId.ToString());
-        if (!await context.DurableOperations.AnyAsync(r => r.DeploymentId == deployment && r.Generation == producer.Generation.Value &&
-            r.OperationId == producer.OperationId.Value && r.State == nameof(DurableOperationState.Succeeded) &&
-            context.DurableOperationAttempts.Any(a => a.AttemptId == r.CurrentAttemptId && a.DeploymentId == r.DeploymentId &&
-                a.Generation == r.Generation && a.OperationId == r.OperationId && a.Outcome == nameof(DurableAttemptOutcome.Succeeded) &&
-                a.FinishedAt != null && a.DispatchedAt == null), token)) return false;
-        return await ValidMaterialAsync(context, input, expected.Reference, token);
-    }
-
-    private async Task<bool> ValidMaterialAsync(ManifestCatalogDbContext context, GeneratedCredentialInput input,
-        SecretRef reference, CancellationToken token)
-    {
-        var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(context, new(input.Owner, input.SlotId), input.GenerationProfile, token);
-        if (slot?.Outcome != GeneratedCredentialOutcome.Existing || slot.Reference != reference) return false;
-        var definition = new SecretDefinition(new SecretOwner.Resource(input.Owner), SecretPurpose.ApplicationLogin);
-        // Reuse the selected catalog backend's transaction/connection, including one-connection pools.
-        // Other SecretStore implementations retain their own owner-scoped exact resolution boundary.
-        using var material = secrets is PostgreSqlPlaintextSecretStore plaintext
-            ? await plaintext.ResolveAsync(context, definition, reference, token)
-            : await secrets.ResolveAsync(definition, reference, token);
-        return material is not null;
-    }
-
-    private static async Task<GeneratedCredentialInput?> InputAsync(ManifestCatalogDbContext context,
-        DurableOperationKey key, CancellationToken token)
-    {
-        var accepted = await AcceptedAsync(context, key, token);
-        return accepted is not null && GeneratedCredentialContracts.IsProducer(accepted.Value.Node)
-            ? GeneratedCredentialInputCodec.Decode(accepted.Value.Node.Input) : null;
-    }
-
-    private static Task<OperationOutputRow?> OutputAsync(ManifestCatalogDbContext context, DurableOperationKey key, CancellationToken token)
-    {
-        var deployment = Guid.Parse(key.DeploymentId.ToString());
-        return context.OperationOutputs.AsNoTracking().SingleOrDefaultAsync(r => r.DeploymentId == deployment &&
-            r.Generation == key.Generation.Value && r.OperationId == key.OperationId.Value &&
-            r.Contract == GeneratedCredentialContracts.OutputContract && r.Key == GeneratedCredentialContracts.Password, token);
     }
 
     internal static async Task<(DurableOperationNode Node, DeploymentGenerationRow Generation)?> AcceptedAsync(

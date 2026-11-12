@@ -16,7 +16,7 @@ internal static partial class DurableAggregateCompletion
     // Recovery decisions deliberately use TryAdvanceAsync directly instead.
     internal static async Task<bool> TryAdvanceConfirmedAsync(ManifestCatalogDbContext context, Guid deployment,
         long generation, CancellationToken token, IEnumerable<IExternalOperationOutputContract>? contracts = null,
-        IEnumerable<IProviderConfigurationCodec>? codecs = null)
+        IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null)
     {
         var transaction = context.Database.CurrentTransaction ?? throw new InvalidOperationException("Completion requires a transaction.");
         const string savepoint = "haby_resources_ready";
@@ -25,7 +25,7 @@ internal static partial class DurableAggregateCompletion
         bool advanced;
         try
         {
-            advanced = await TryAdvanceAsync(context, deployment, generation, token, contracts, codecs: codecs);
+            advanced = await TryAdvanceAsync(context, deployment, generation, token, contracts, codecs: codecs, prepared: prepared);
         }
         catch (Exception error) when (error is PostgresException or DbUpdateException { InnerException: PostgresException })
         {
@@ -47,7 +47,7 @@ internal static partial class DurableAggregateCompletion
 
     internal static async Task<bool> TryAdvanceAsync(ManifestCatalogDbContext context, Guid deployment,
         long generation, CancellationToken token, IEnumerable<IExternalOperationOutputContract>? contracts = null,
-        DurableActionAdmission? admission = null, IEnumerable<IProviderConfigurationCodec>? codecs = null)
+        DurableActionAdmission? admission = null, IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null)
     {
         await LockAsync(context, deployment, token);
         var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(r => r.Id == deployment, token);
@@ -67,6 +67,8 @@ internal static partial class DurableAggregateCompletion
             // Applied is never an authority for backfilling evidence.
             if (owner.DesiredGeneration != generation || owner.AppliedGeneration >= generation ||
                 graph.Baseline?.Generation != owner.AppliedGeneration) return false;
+            if (prepared is null && graph.Baseline is not null) return false;
+            if (prepared is not null && await InspectMetadataAsync(context, deployment, generation, contracts ?? [], codecs ?? [], token, admission) is null) return false;
             if (graph.Baseline is not null)
             {
                 if (admission is null) return false;
@@ -75,8 +77,10 @@ internal static partial class DurableAggregateCompletion
                     !await ResourceContinuity.ValidateOutputsAsync(context, deployment, graph, contracts ?? [], codecs ?? [],
                         admission, inputs, token, creationGeneration: graph.Nodes.Count > 0 ? generation : null)) return false;
             }
-            var results = await BuildResultsAsync(context, source, graph, contracts?.ToArray() ?? [], codecs?.ToArray() ?? [], token, checkCredential: true);
-            if (results is null) return false;
+            var results = await BuildResultsAsync(context, source, graph, contracts?.ToArray() ?? [], codecs?.ToArray() ?? [], token, checkCredential: prepared is not null);
+            if (results is null || (prepared is null
+                ? !results.SelectMany(x => x.Operations).All(x => x.RecoveryDecisionId is not null)
+                : !MatchesPreparation(prepared, deployment, generation, source.Fingerprint, results))) return false;
             var at = DateTimeOffset.UtcNow;
             at = at.AddTicks(-(at.Ticks % TimeSpan.TicksPerMicrosecond));
             var proof = new ResourcesReadyCheckpoint(Guid.CreateVersion7(), deployment, generation, source.Fingerprint, at, results);

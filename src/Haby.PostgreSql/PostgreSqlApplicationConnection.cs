@@ -9,7 +9,7 @@ namespace Haby.PostgreSql;
 public sealed record PostgreSqlApplicationConnection(string Host, int Port, string DatabaseName, string Schema, string UserName, SecretRef Password);
 
 public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurationStore providers, PostgreSqlProviderConfigurationCodec codec,
-    IGeneratedCredentialOperations generated) : IExternalOperationOutputContract
+    IGeneratedCredentialReader generated) : IExternalOperationOutputContract
 {
     public const string Contract = "postgresql.application-login-output/v1alpha1";
     public const string Key = "connection";

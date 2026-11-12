@@ -80,6 +80,24 @@ resolution and recheck them under the lock. Material validation precedes the loc
 inside the boundary only exact catalog metadata is checked. There is no Provider
 or network I/O or SecretStore resolution under that lock.
 
+Completion first inspects the whole bounded accepted graph and direct original
+sources. Required registration uniqueness/identity, exact accepted input and
+management identities, and mandatory result metadata are checked before any
+credential material. A separate complete metadata-only pass checks every generated
+slot, owner, version, profile and output-reference association before material is
+selected. Runner completion also revalidates current execution and
+creation-graph support. Material validation then runs outside the completion
+transaction. Its internal preparation contains only exact source fingerprints,
+management IDs, generated output hashes and SecretRefs. The locked completion
+rechecks metadata and those bindings; no material bytes enter that preparation.
+
+`IGeneratedCredentialOperations` retains its existing method set through the new
+read-only `IGeneratedCredentialReader` base interface. Its persistence reader owns
+the existing consumption/current-use validation. Output validators depend on that
+reader, avoiding a dependency cycle when completion inspects current output
+registrations. Current alpha adapters are rebuilt against these contracts; no
+binary compatibility shim is introduced. There is no service location or deferred
+registry discovery.
 Historical checkpoint reads do not require continued secret-material availability.
 They are evidence of completion at the saved time, not a promise of indefinite
 external-object or secret availability. Existing reuse, rendering and delivery
@@ -140,6 +158,7 @@ restart/retry and dump/restore preserve saved proof and original identities.
 
 | Requirement | Production boundary and focused evidence |
 | --- | --- |
+| Whole-graph metadata refusal before material | `ResourcesReadyPreflightTests`: actual all-succeeded pair runner, missing/mismatched/ambiguous later validator, invalid output/foreign credential reference, missing/corrupt material, positive material-read control, unchanged confirmed history |
 | No material read inside completion transaction | `GeneratedCredentialCompletionLockTests`: actual SQL result columns for generated producer completion and the final checkpoint |
 | Exact install and immutable replay | `ResourcesReadyCheckpointTests`: independent persisted management/attempt/checkpoint queries, missing-adapter restart, concurrent equivalent replay |
 | No terminal-count or missing-output shortcut | Focused pre-fix failing tests for succeeded rows without confirmed attempts and missing output registration |

@@ -40,8 +40,12 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             var accepted = await AcceptedAsync(context, producer, cancellationToken);
             var contract = accepted is null ? null : contracts.SingleOrDefault(c => c.Producer == accepted.Node.Action);
             if (accepted is null || contract is null || accepted.Node.RequiredOutput != contract.Identity ||
-                contract.Identity != new ExternalOperationOutputIdentity(output.Contract, output.Key) || !contract.Validate(accepted.Node, output) ||
+                contract.Identity != new ExternalOperationOutputIdentity(output.Contract, output.Key) || !contract.Validate(accepted.Node, output)) return false;
+            var metadata = await DurableAggregateCompletion.InspectMetadataAsync(context, Guid.Parse(producer.DeploymentId.ToString()), producer.Generation.Value,
+                contracts, codecs ?? [], cancellationToken, pending: new(producer, output));
+            if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(context, metadata, cancellationToken) ||
                 !await contract.ValidateAcceptedAsync(producer, accepted, output, cancellationToken)) return false;
+            var prepared = await DurableAggregateCompletion.PrepareAsync(context, metadata, cancellationToken);
             // Adapter validation may resolve other immutable catalog inputs. Release each read's
             // connection before taking the write transaction, including with a one-connection pool.
             await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
@@ -77,7 +81,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
                     .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
             if (closed != 1) return false;
-            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs);
+            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs, prepared: prepared);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             return true;

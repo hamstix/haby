@@ -132,7 +132,7 @@ public sealed partial class PostgreSqlRestrictTests
         // Ordinary journal success cannot bypass the mandatory publication.
         Assert.False(await journal.TryRecordSuccessAsync(scenario.Create, started.AttemptId, DateTimeOffset.UtcNow, default));
         var lost = new LostPublication();
-        var store = new PostgreSqlExternalOperationOutputs(new PublicationFactory(scenario.Connection, lost), [new PostgreSqlDatabaseOutputContract()]);
+        var store = new PostgreSqlExternalOperationOutputs(new PublicationFactory(scenario.Connection, lost), [new PostgreSqlDatabaseOutputContract()], services.GetServices<IProviderConfigurationCodec>());
         Assert.True(await store.CompleteAsync(scenario.Create, started.AttemptId, output, DateTimeOffset.UtcNow, default)); Assert.True(lost.Thrown);
         Assert.True(await store.CompleteAsync(scenario.Create, started.AttemptId, output, DateTimeOffset.UtcNow, default));
         Assert.False(await store.CompleteAsync(scenario.Create, Guid.NewGuid(), output, DateTimeOffset.UtcNow, default));

@@ -19,6 +19,8 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
     public async ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, DurableActionAdmission admission, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+        var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, Guid.Parse(deployment.ToString()), generation.Value, outputContracts, codecs ?? [], cancellationToken, admission);
+        if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, cancellationToken)) return false;
         await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
         try
         {
@@ -35,12 +37,13 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
     public async ValueTask<bool> TryCompleteGenerationAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, DurableActionAdmission admission, CancellationToken cancellationToken)
     {
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
-        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
         var id = Guid.Parse(deployment.ToString());
         try
         {
+            var prepared = await DurableAggregateCompletion.PrepareAsync(db, id, generation.Value, outputContracts, codecs ?? [], cancellationToken, admission);
+            await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
             if (!await DurableAggregateCompletion.TryAdvanceAsync(db, id, generation.Value, cancellationToken,
-                outputContracts, admission, codecs)) return false;
+                outputContracts, admission, codecs, prepared)) return false;
             cancellationToken.ThrowIfCancellationRequested();
             await tx.CommitAsync(CancellationToken.None);
             return true;
@@ -311,6 +314,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             return false;
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        var prepared = await DurableAggregateCompletion.PrepareAsync(context, deployment, generation, outputContracts, codecs ?? [], cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         await DurableAggregateCompletion.LockAsync(context, deployment, cancellationToken);
         var affected = await context.DurableOperations
@@ -335,7 +339,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
                 .SetProperty(row => row.Outcome, nameof(DurableAttemptOutcome.Succeeded)),
             cancellationToken);
         if (closed != 1) throw new InvalidOperationException("Create operation attempt is inconsistent.");
-        _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, outputContracts, codecs: codecs);
+        _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, outputContracts, codecs: codecs, prepared: prepared);
         await transaction.CommitAsync(CancellationToken.None);
         return true;
     }

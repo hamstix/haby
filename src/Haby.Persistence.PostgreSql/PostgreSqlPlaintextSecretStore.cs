@@ -192,6 +192,7 @@ public static class PlaintextSecretStoreServiceCollectionExtensions
     {
         services.AddSingleton<ISecretStore, PostgreSqlPlaintextSecretStore>();
         services.AddSingleton<IGeneratedCredentialSlots, PostgreSqlGeneratedCredentialSlots>();
+        services.AddSingleton<IGeneratedCredentialReader, PostgreSqlGeneratedCredentialReader>();
         return services;
     }
 }
