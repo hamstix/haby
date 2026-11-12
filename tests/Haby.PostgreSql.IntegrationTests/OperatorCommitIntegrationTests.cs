@@ -172,7 +172,7 @@ public sealed partial class OperatorHostIntegrationTests
                 AssertIntendedDatabase(staleDescription.Plan);
                 generation = (await client.GetGenerationAsync(new GenerationRequest { DeploymentId = original.DeploymentId, Generation = 1 })).DesiredGeneration;
                 Assert.Equal(original.PlanId, generation.PlanId);
-                Assert.Equal(2, generation.ConfigurationRevision);
+                Assert.Equal(2, generation.ProviderInputs.Single().ConfigurationRevision);
                 Assert.Equal(reference, generation.Reference);
                 Assert.Equal("Present", generation.DesiredPresence);
             }

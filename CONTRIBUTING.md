@@ -84,6 +84,10 @@ replace warnings-as-errors publication, published-binary tests or measured Postg
 tests. `scripts/test-native-aot-prerequisites.sh` checks fallback/failure propagation
 with isolated fake tools; CI and an actual local Linux probe provide real-tool evidence.
 
+When hosted runners are unavailable under the approved temporary P3 protocol,
+follow the [local validation runbook](docs/development/local-validation.md). It
+requires exact-source Windows/Linux evidence and preserves all applicable gates.
+
 Integration tests that need external infrastructure must be explicitly identifiable and documented. Unit tests must not silently depend on a developer's PostgreSQL, Kubernetes, RabbitMQ or other local service.
 The separate PostgreSQL integration suite and its runtime requirements are
 described in [the PostgreSQL integration-test guide](docs/development/postgresql-integration-tests.md).

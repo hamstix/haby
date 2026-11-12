@@ -43,7 +43,7 @@ public sealed partial class ExactActionAdmissionTests
             ExternalOperationOutput output, CancellationToken cancellationToken)
         {
             var configuration = await configurations.FindRevisionAsync<SampleConfiguration>(accepted.Inputs.Environment,
-                accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken);
+                accepted.Inputs.Providers.RequireUniformResourceProvider().Instance, accepted.Inputs.Providers.RequireUniformResourceProvider().Configuration, cancellationToken);
             return !boundary.RejectAcceptedOutput && Validate(accepted.Node, output) &&
                 accepted.Spec.Resources[accepted.Node.ResourceId].Type == QueueContract &&
                 Decode(output)?.BrokerTarget == configuration?.Configuration.Target &&
@@ -115,12 +115,12 @@ public sealed partial class ExactActionAdmissionTests
             spec.Resources.Count > 0 && spec.Resources.Count <= (boundary.DependentResources ? 3 : 2) && spec.Components.Values.All(x => x.Workloads.Count == 0) && spec.Resources.TryGetValue(resource, out var declared) &&
             (boundary.DependentResources && resource.Value == "extra-peer"
                 ? declared.Properties.Members.Count == 1 && declared.Properties.Members.GetValueOrDefault("parentRef") is ConfigurationString { Value: "extra" } && spec.Resources.ContainsKey(ManifestLocalId.Create("extra"))
-                : Validate(declared, inputs)) && configuration.ProviderKindId == "sample/v1" && configuration.ShapeId == "sample.configuration/v1" &&
+                : Validate(resource, declared, inputs)) && configuration.ProviderKindId == "sample/v1" && configuration.ShapeId == "sample.configuration/v1" &&
             configuration.ImplementationId == "sample.impl/v1";
         public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
             PreparedProviderConfiguration configuration) => boundary.DependentResources && resource.Value == "extra-peer"
                 ? [new(OperationId.Create("extra-peer-subscribe"), resource, QueueSubscribeKey,
-                    new(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId),
+                    new(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration, inputs.Providers.RequireUniformResourceProvider().Implementation.Value),
                     new("sample.queue-subscribe/v1", JsonSerializer.Serialize(new QueueSubscribeInput("jobs"), QueueEvidenceJsonContext.Default.QueueSubscribeInput)),
                     [OperationId.Create("extra-create")]) { OutputReferences = [new(OperationId.Create("extra-create"), QueueEvidenceContract.Contract, "receipt")] }]
                 : Plan(resource, spec.Resources[resource], inputs);

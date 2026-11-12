@@ -5,13 +5,13 @@ namespace Haby.Application.Tests;
 
 public sealed class GeneratedCredentialOutputTests
 {
-    private static readonly DurablePlanningInputs Inputs = new(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
+    private static readonly DurablePlanningInputs Inputs = Haby.Tests.DurableInputSamples.Create(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
         ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), ProviderAlias.Create("sample.primary"),
-        ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample.impl/v1");
+        ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample.impl/v1", "queue-user");
     private static DurableOperationNode Producer(string id = "material") => new(OperationId.Create(id),
-        ManifestLocalId.Create("queue-user"), new(new(ResourceTypeId.Create("sample.user/v1"),
+        ManifestLocalId.Create("queue-user"), new(new(ResourceTypeId.Create("sample.resource/v1"),
             new("sample/v1", "sample.configuration/v1", "sample.impl/v1")), OperationContractId.Create(GeneratedCredentialContracts.Action)),
-        new(Inputs.Environment, Inputs.ProviderInstance, Inputs.ConfigurationRevision, Inputs.ImplementationId),
+        new(Inputs.Environment, Inputs.Providers.RequireUniformResourceProvider().Instance, Inputs.Providers.RequireUniformResourceProvider().Configuration, Inputs.Providers.RequireUniformResourceProvider().Implementation.Value),
         GeneratedCredentialInputCodec.Encode(new(new(Inputs.Environment, Inputs.Revision.ApplicationRecordId, ManifestLocalId.Create("queue-user")),
             GeneratedCredentialSlot.ApplicationPassword, GeneratedCredentialSlot.RandomPasswordV1)), []);
     private static DurableOperationNode Consumer() => Producer("consumer") with

@@ -47,7 +47,7 @@ public sealed partial class OperatorHostIntegrationTests
     {
         private readonly PostgreSqlDatabaseCreateAdmission database = new();
         public DurableActionExecutionKey Key => database.Key;
-        public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) => database.Validate(resource, inputs);
+        public bool Validate(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => database.Validate(resourceId, resource, inputs);
         public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
         {
             var node = database.Plan(resourceId, resource, inputs).Single();

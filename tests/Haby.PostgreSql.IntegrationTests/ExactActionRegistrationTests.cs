@@ -56,7 +56,7 @@ public sealed class ExactActionRegistrationTests
         public DurableActionExecutionKey Key => key;
         public bool Supports(DurableOperationNode node) => true;
         public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => throw new NotSupportedException();
-        public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) => throw new NotSupportedException();
+        public bool Validate(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => throw new NotSupportedException();
         public ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation,
             CancellationToken cancellationToken) => throw new NotSupportedException();
     }

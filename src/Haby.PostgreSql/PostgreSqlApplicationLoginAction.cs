@@ -55,7 +55,7 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
             if (accepted.Graph.Nodes.Any(n => n.Action == PostgreSqlApplicationAccessAction.RegistrationKey) && access is null) return new(DurableExecutionOutcome.HandlerUnavailable, operation);
             var input = Decode(accepted.Node);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
-                accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision, cancellationToken))?.Configuration;
+                accepted.Provider.Instance, accepted.Provider.Configuration, cancellationToken))?.Configuration;
             if (input is null || configuration is null || !PostgreSqlPairExecution.IsSupported(accepted, codec.Encode(configuration)))
                 return new(DurableExecutionOutcome.InputUnavailable, operation);
             var progress = await journal.ProgressAsync(key.DeploymentId, key.Generation, cancellationToken);
@@ -67,10 +67,10 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
             if (evidence is null || evidence.DatabaseName != input.DatabaseName || password is null)
                 return new(DurableExecutionOutcome.InputUnavailable, operation);
             var owner = new ManagedResourceKey(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId, accepted.Node.ResourceId);
-            resolved = new(new(accepted.Inputs.Environment, accepted.Inputs.ProviderInstance, accepted.Inputs.ConfigurationRevision,
-                accepted.Inputs.ImplementationId, input.DatabaseName), evidence, configuration.AdministratorUserName,
+            resolved = new(new(accepted.Inputs.Environment, accepted.Provider.Instance, accepted.Provider.Configuration,
+                accepted.Provider.Implementation.Value, input.DatabaseName), evidence, configuration.AdministratorUserName,
                 owner, input.RoleName, password.Reference)
-            { Naming = accepted.Inputs.Naming.Policy };
+            { Naming = accepted.Provider.ResourceNaming().Policy };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception) { return new(DurableExecutionOutcome.InputUnavailable, operation); }

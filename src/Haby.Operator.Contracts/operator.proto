@@ -323,16 +323,16 @@ message PlannedOperationSummary {
   repeated string dependencies = 4;
 }
 message DurablePlanSummary {
-  FrozenResourceNaming naming = 20;
+  reserved 20; // Superseded singleton input; no compatibility projection.
   string plan_id = 1;
   string change_set_id = 2;
   string environment_record_id = 3;
   string environment_id = 4;
   RevisionReference reference = 5;
-  string provider_alias = 6;
-  string provider_instance_id = 7;
-  int64 configuration_revision = 8;
-  string implementation_id = 9;
+  reserved 6; // Superseded singleton input; no compatibility projection.
+  reserved 7; // Superseded singleton input; no compatibility projection.
+  reserved 8; // Superseded singleton input; no compatibility projection.
+  reserved 9; // Superseded singleton input; no compatibility projection.
   string fingerprint = 10;
   string created_at_utc = 11;
   string expires_at_utc = 12;
@@ -343,6 +343,7 @@ message DurablePlanSummary {
   repeated PlannedOperationSummary operations = 17;
   repeated ReusedResourceSummary reused_resources = 18;
   repeated ReusedResourceSummary retained_resources = 19;
+  repeated FrozenProviderInput provider_inputs = 21;
 }
 message ReusedResourceSummary {
   string resource_id = 1;
@@ -416,7 +417,7 @@ message DurableCommitSummary {
 }
 // Immutable desired snapshot, never a claim about current applied/operation state.
 message DesiredGenerationSummary {
-  FrozenResourceNaming naming = 18;
+  reserved 18; // Superseded singleton input; no compatibility projection.
   string deployment_id = 1;
   int64 generation = 2;
   string desired_presence = 3;
@@ -427,22 +428,32 @@ message DesiredGenerationSummary {
   string environment_record_id = 8;
   string environment_id = 9;
   RevisionReference reference = 10;
-  string provider_alias = 11;
-  string provider_instance_id = 12;
-  int64 configuration_revision = 13;
-  string implementation_id = 14;
+  reserved 11; // Superseded singleton input; no compatibility projection.
+  reserved 12; // Superseded singleton input; no compatibility projection.
+  reserved 13; // Superseded singleton input; no compatibility projection.
+  reserved 14; // Superseded singleton input; no compatibility projection.
   repeated PlannedOperationSummary operations = 15;
   repeated ReusedResourceSummary reused_resources = 16;
   repeated ReusedResourceSummary retained_resources = 17;
+  repeated FrozenProviderInput provider_inputs = 19;
 }
-message FrozenResourceNaming {
-  int32 version = 1;
-  optional string name = 2;
-  optional int64 revision = 3;
-  string mode = 4;
-  optional string prefix = 5;
-  optional string selection_token = 6;
+// Exact declaration-keyed non-secret inputs, never live alias resolution.
+message FrozenProviderInput {
+  string kind = 1;
+  string resource_id = 2;
+  string component_id = 3;
+  string workload_id = 4;
+  string environment_record_id = 5;
+  string provider_alias = 6;
+  string provider_instance_id = 7;
+  int64 configuration_revision = 8;
+  string implementation_id = 9;
+  string naming_contract = 10;
+  string naming_json = 11;
+  string placement_contract = 12;
+  string placement_json = 13;
 }
+
 message CommitReply {
   CommitStatus status = 1;
   DurableCommitSummary commit = 2;

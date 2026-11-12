@@ -242,9 +242,9 @@ public sealed partial class OperatorHostIntegrationTests
             _ => OperationState.Succeeded
         }, history.Operation.Operation.State);
         Assert.Equal(1, history.Generation.DesiredGeneration.Generation);
-        Assert.Equal(history.Plan.ProviderInstanceId, history.Operation.Operation.ProviderInstanceId);
-        Assert.Equal(history.Plan.ConfigurationRevision, history.Operation.Operation.ConfigurationRevision);
-        Assert.Equal(history.Plan.ImplementationId, history.Operation.Operation.ImplementationId);
+        Assert.Equal(history.Plan.ProviderInputs.Single().ProviderInstanceId, history.Operation.Operation.ProviderInstanceId);
+        Assert.Equal(history.Plan.ProviderInputs.Single().ConfigurationRevision, history.Operation.Operation.ConfigurationRevision);
+        Assert.Equal(history.Plan.ProviderInputs.Single().ImplementationId, history.Operation.Operation.ImplementationId);
         if (state == "pending") Assert.Empty(history.Operation.Attempts);
         else
         {

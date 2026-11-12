@@ -23,7 +23,7 @@ public sealed class PostgreSqlPlanActionDescriber : IPlanActionDescriber, IPlanO
         if (!CheckpointDatabaseShape.IsSupported(revision.Declaration.Spec))
             return new(PostgreSqlPairResourceAdmission.DescribeGraph(revision.Declaration.Spec, inputs, graph));
         var resource = revision.Declaration.Spec.Resources.Single();
-        if (resource.Value.ProviderRef != inputs.Alias || inputs.ImplementationId != ImplementationId)
+        if (resource.Value.ProviderRef != inputs.Providers.Resource(resource.Key).Alias || inputs.Providers.Resource(resource.Key).Implementation.Value != ImplementationId)
             return new(PlanDescriptionStatus.PinnedInputMismatch);
         var name = DescribeTargets(graph).SingleOrDefault(x => x.Operation.Value == resource.Key.Value + "-create")?.Name;
         if (name is null) return new(PlanDescriptionStatus.PinnedInputMismatch);

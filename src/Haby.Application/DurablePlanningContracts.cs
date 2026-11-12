@@ -2,13 +2,20 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
-/// <summary>Exact, non-secret inputs; the alias is retained only as selection provenance.</summary>
+/// <summary>Exact non-secret inputs; aliases retain selection provenance under each declaration key.</summary>
 public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, EnvironmentId EnvironmentKey,
-    ManifestRevisionRef Revision, ProviderAlias Alias, ProviderInstanceId ProviderInstance,
-    ProviderConfigurationRevisionNumber ConfigurationRevision, string ImplementationId)
+    ManifestRevisionRef Revision, ExactProviderResolutionSet Providers)
 {
     public ConfigurationPlanningSnapshot? Configuration { get; init; }
-    public ResourceNamingSnapshot Naming { get; init; } = ResourceNamingSnapshot.Default;
+
+    public void Validate()
+    {
+        if (Providers.Environment != Environment || Configuration is { } frozen &&
+            (frozen.Revision != Revision || !frozen.Manifest.Equals(Providers.Declaration)))
+            throw new InvalidDataException("Durable Provider inputs do not match the accepted declaration.");
+        foreach (var entry in Providers.Entries.Values.Where(x => x.Input is ProviderInput.Resource))
+            _ = entry.ResourceNaming();
+    }
 }
 
 /// <summary>A Plan is immutable; closure is stored separately from its original record.</summary>
@@ -55,7 +62,7 @@ public interface IDurableDeploymentPlanner
     ValueTask<DurablePlanCurrentStatus> CheckPlanAsync(DeploymentPlanId id, CancellationToken cancellationToken);
 }
 
-/// <summary>The persisted first desired generation and its exact, non-secret Plan inputs.</summary>
+/// <summary>An immutable desired generation and its exact non-secret Plan inputs.</summary>
 public sealed record DurableDesiredGeneration(ApplicationDeploymentId DeploymentId,
     DeploymentGeneration Generation, DesiredPresence Presence, DurablePlanningInputs Inputs, DeploymentPlanId PlanId,
     DeploymentChangeSetId ChangeSetId, DateTimeOffset AcceptedAt, string ActorId)

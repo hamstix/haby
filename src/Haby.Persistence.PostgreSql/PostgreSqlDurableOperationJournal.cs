@@ -77,6 +77,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         var id = Guid.Parse(deployment.ToString());
         var gen = await context.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(r => r.DeploymentId == id && r.Generation == generation.Value, cancellationToken);
         if (gen is null) return null;
+        _ = gen.Inputs();
         var graph = DurableOperationGraphCodec.Decode(gen.GraphJson);
         var owner = await context.ApplicationDeployments.AsNoTracking().SingleAsync(r => r.Id == id, cancellationToken);
         var operations = new List<DurableOperation>();
@@ -371,16 +372,18 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         var row = joined.operation;
         if (joined.gen.Presence != nameof(DesiredPresence.Present))
             throw new InvalidDataException("Stored create operation is inconsistent.");
+        var inputs = joined.gen.Inputs();
+        var node = DurableOperationGraphCodec.Decode(joined.gen.GraphJson).Nodes.Single(n => n.Id == key.OperationId);
+        var provider = inputs.Providers.Resource(node.ResourceId);
         return new DurableOperation(key, ParseState(row.State),
             EnvironmentRecordId.Parse(joined.gen.EnvironmentRecordId.ToString()),
             ApplicationRecordId.Parse(joined.gen.ApplicationRecordId.ToString()),
             ManifestRevisionRef.Create(ApplicationRecordId.Parse(joined.gen.ApplicationRecordId.ToString()),
                 ManifestRevisionNumber.Create(joined.gen.RevisionNumber)),
-            ProviderInstanceId.Parse(joined.gen.ProviderInstanceId.ToString()),
-            ProviderConfigurationRevisionNumber.Create(joined.gen.ConfigurationRevisionNumber),
-            joined.gen.ImplementationId, row.CreatedAt, row.UpdatedAt, ParseReason(row.ReasonCode),
+            provider.Instance, provider.Configuration,
+            provider.Implementation.Value, row.CreatedAt, row.UpdatedAt, ParseReason(row.ReasonCode),
             row.CurrentAttemptId, row.AttemptNumber, row.DispatchedAt, row.FinalizedAt)
-        { Node = DurableOperationGraphCodec.Decode(joined.gen.GraphJson).Nodes.Single(n => n.Id == key.OperationId) };
+        { Node = node };
     }
 
     private static (Guid Deployment, long Generation, string OperationId) Identity(

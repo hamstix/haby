@@ -113,16 +113,16 @@ public sealed partial class PostgreSqlApplicationLoginTests
             plan = await UpdatePlan(client, revision, 1);
             var inputs = scenario.Plan.Inputs;
             var providers = host.Services.GetRequiredService<IProviderConfigurationStore>();
-            var original = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, default))!;
-            var instance = differentInstance ? await providers.CreateInstanceAsync(inputs.Environment, original.Configuration, default) : inputs.ProviderInstance;
+            var original = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration, default))!;
+            var instance = differentInstance ? await providers.CreateInstanceAsync(inputs.Environment, original.Configuration, default) : inputs.Providers.RequireUniformResourceProvider().Instance;
             var number = ProviderConfigurationRevisionNumber.Create(differentInstance ? 1 : 2);
             await providers.AddRevisionAsync(inputs.Environment, instance, number, original.Configuration, default);
             // Real generated administration performs its own valid preflight; identical payload is still a NEW exact binding.
             var switched = await client.SetProviderAliasAsync(new()
             {
                 Environment = "pilot",
-                Alias = inputs.Alias.Value,
-                Expected = new() { InstanceId = inputs.ProviderInstance.ToString(), Revision = inputs.ConfigurationRevision.Value },
+                Alias = inputs.Providers.RequireUniformResourceProvider().Alias.Value,
+                Expected = new() { InstanceId = inputs.Providers.RequireUniformResourceProvider().Instance.ToString(), Revision = inputs.Providers.RequireUniformResourceProvider().Configuration.Value },
                 Target = new() { InstanceId = instance.ToString(), Revision = number.Value }
             });
             Assert.Equal(ProviderAccessStatus.Changed, switched.Status);

@@ -101,7 +101,10 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 var plan = nativePlan is { } p ? await client.GetPlanAsync(new() { PlanId = p.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("planId"u8).GetString()! }) :
                     await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
                 Assert.NotNull(plan.Plan);
-                Assert.Equal(prefix, plan.Plan.Naming.Prefix); Assert.Equal(1, plan.Plan.Naming.Revision);
+                using var plannedNaming = JsonDocument.Parse(JsonDocument.Parse(plan.Plan.ProviderInputs.Single(x => x.ResourceId == "db").NamingJson).RootElement.GetProperty("snapshot"u8).GetString()!);
+                Assert.Equal(prefix, plannedNaming.RootElement.GetProperty("policy"u8).GetProperty("prefix"u8).GetString());
+                Assert.Equal(1, plannedNaming.RootElement.GetProperty("reference"u8).GetProperty("revision"u8).GetInt64());
+                Assert.Equal(2, plan.Plan.ProviderInputs.Count);
                 _ = await NativeReuseCommand(host.Urls.Single(), "plan", "check", plan.Plan.PlanId);
                 _ = await NativeReuseCommand(host.Urls.Single(), "changeset", "commit", change.ChangeSet.ChangeSetId, "--plan", plan.Plan.PlanId);
                 var commit = await client.CommitDesiredStateAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId, PlanId = plan.Plan.PlanId });
@@ -135,8 +138,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
                 await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
                 using var channel = GrpcChannel.ForAddress(host.Urls.Single()); var client = OperatorTestCredentials.Client(channel);
                 var pending = await client.GetGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = 1 });
-                Assert.Equal(1, pending.DesiredGeneration.Naming.Revision);
-                Assert.Equal(scenario.Plan.Inputs.Naming.Policy.Prefix, pending.DesiredGeneration.Naming.Prefix);
+                using var acceptedNaming = JsonDocument.Parse(JsonDocument.Parse(pending.DesiredGeneration.ProviderInputs.Single(x => x.ResourceId == "db").NamingJson).RootElement.GetProperty("snapshot"u8).GetString()!);
+                Assert.Equal(1, acceptedNaming.RootElement.GetProperty("reference"u8).GetProperty("revision"u8).GetInt64());
+                Assert.Equal(scenario.Plan.Inputs.Providers.Resource(ManifestLocalId.Create("db")).ResourceNaming().Policy.Prefix, acceptedNaming.RootElement.GetProperty("policy"u8).GetProperty("prefix"u8).GetString());
                 _ = await NativeReuseCommand(host.Urls.Single(), "deployment", "generation", "execute", scenario.Commit.DeploymentId.ToString(), "1");
                 Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = 1 })).Status);
                 _ = await NativeReuseCommand(host.Urls.Single(), "configuration", "materialize", DocumentRequest(scenario).ApplicationId, "--all", "--generation", "1");

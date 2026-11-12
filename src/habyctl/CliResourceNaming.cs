@@ -83,20 +83,6 @@ internal sealed partial class CliCommandContext
 }
 
 internal sealed record CliNamingState(string? Name, long? Revision, string Mode, string? Prefix, string? Token, string Actor, string ChangedAtUtc);
-internal sealed record CliFrozenNaming(int Version, string? Name, long? Revision, string Mode, string? Prefix, string? SelectionToken);
-internal static class NamingPresentation
-{
-    internal static CliFrozenNaming? Map(FrozenResourceNaming? value)
-    {
-        if (value is null) return null;
-        if (value.Version != 1 || value.Mode is not ("exact" or "prefixed") || value.HasName != value.HasRevision ||
-            value.HasName != value.HasSelectionToken || value.HasRevision && value.Revision <= 0 ||
-            value.Mode == "exact" && value.HasPrefix || value.Mode == "prefixed" && (!value.HasPrefix || value.Prefix.Length is 0 or > 128) ||
-            !value.HasName && value.Mode != "exact") throw new InvalidDataException("Invalid frozen naming metadata.");
-        return new(value.Version, value.HasName ? value.Name : null, value.HasRevision ? value.Revision : null,
-            value.Mode, value.HasPrefix ? value.Prefix : null, value.HasSelectionToken ? value.SelectionToken : null);
-    }
-}
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CliEnvelope<CliNamingState>))]
 internal partial class CliNamingJsonContext : JsonSerializerContext;

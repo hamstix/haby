@@ -66,8 +66,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         const string sentinelB = "pair-b-created-in-generation-2";
         var scenario = await Prepare(full: true, render: true, namingPrefix: namingPrefix);
         var declaredB = "pair_b_" + Guid.NewGuid().ToString("N");
-        var databaseB = PostgreSqlResourceNaming.Database(declaredB, scenario.Plan.Inputs.Naming.Policy)!;
-        var roleB = PostgreSqlResourceNaming.Role(scenario.Owner with { ResourceLocalId = ManifestLocalId.Create("login-b") }, scenario.Plan.Inputs.Naming.Policy)!;
+        var databaseB = PostgreSqlResourceNaming.Database(declaredB, scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy)!;
+        var roleB = PostgreSqlResourceNaming.Role(scenario.Owner with { ResourceLocalId = ManifestLocalId.Create("login-b") }, scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy)!;
         var retained = new List<(ConfigurationDocumentReply Document, ConfigurationAccessReply Grant, bool B, int Timeout, int Command)>();
         string? identityA = null, historyA = null, completeHistory = null, identityB = null;
         RevisionReference? revision = null;

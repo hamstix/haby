@@ -16,7 +16,7 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
 
     public bool SameNames(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs original,
         DurablePlanningInputs proposed, PreparedProviderConfiguration configuration) =>
-        PostgreSqlResourceNaming.SameNames(spec, resource, original.Naming.Policy, proposed.Naming.Policy);
+        PostgreSqlResourceNaming.SameNames(spec, resource, original.Providers.Resource(resource).ResourceNaming().Policy, proposed.Providers.Resource(resource).ResourceNaming().Policy);
 
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
@@ -54,8 +54,9 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
         PostgreSqlDatabaseCreateValidation.Name(resource) is { } name && PostgreSqlResourceNaming.Database(name, inputs.Naming.Policy) is { } physical ? new(physical) : null;
     public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
     {
-        var references = new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId);
-        var input = Prepare(resource, references with { Naming = inputs.Naming }) ?? throw new InvalidDataException("Invalid database input.");
+        var provider = inputs.Providers.Resource(resourceId);
+        var references = new DurableActionInputReferences(provider.Environment, provider.Instance, provider.Configuration, provider.Implementation.Value);
+        var input = Prepare(resource, references with { Naming = provider.ResourceNaming() }) ?? throw new InvalidDataException("Invalid database input.");
         return [new(OperationId.Create(resourceId.Value + "-create"), resourceId, Key, references,
             new(PostgreSqlDatabaseCreateAction.Format, JsonSerializer.Serialize(input, PostgreSqlActionJsonContext.Default.PostgreSqlDatabaseActionInput)), [])];
     }
@@ -68,7 +69,7 @@ public sealed class PostgreSqlDatabaseCreateAdmission : DurableActionAdmissionHa
         PostgreSqlPairResourceAdmission.IsIndependentDatabase(spec, resource);
     public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
         PreparedProviderConfiguration configuration) => StandaloneResource(spec, resource, inputs, configuration)
-            ? spec.Resources.ContainsKey(resource) && Validate(spec.Resources[resource], inputs)
+            ? spec.Resources.ContainsKey(resource) && Validate(resource, spec.Resources[resource], inputs)
             : pair.Validate(spec, resource, inputs, configuration);
     public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => StandaloneResource(spec, resource, inputs, configuration)

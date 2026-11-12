@@ -6,11 +6,9 @@ internal sealed record CliChangeSet(string ChangeSetId, string EnvironmentRecord
     string Precondition, string CreatedAtUtc, string TechnicalActorId)
 { public long? ExpectedGeneration { get; init; } }
 internal sealed record CliPlan(string PlanId, string ChangeSetId, string EnvironmentRecordId, string EnvironmentId,
-    CliReference Reference, string ProviderAlias, string ProviderInstanceId, long ConfigurationRevision,
-    string ImplementationId, string Fingerprint, string CreatedAtUtc, string ExpiresAtUtc,
+    CliReference Reference, CliProviderInput[] ProviderInputs, string Fingerprint, string CreatedAtUtc, string ExpiresAtUtc,
     string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork, CliPlannedOperation[] Operations)
 {
-    public CliFrozenNaming? Naming { get; init; }
     public CliReusedResource[] ReusedResources { get; init; } = [];
     public CliReusedResource[] RetainedResources { get; init; } = [];
 }
@@ -26,7 +24,7 @@ internal sealed record CliPlanningData(CliChangeSet? ChangeSet, CliPlan? Plan)
     public string[] ConfigurationErrorCodes { get; init; } = [];
 }
 
-internal static class PlanningPresentation
+internal static partial class PlanningPresentation
 {
     internal static string Outcome(PlanningStatus status) => status switch
     {
@@ -87,11 +85,11 @@ internal static class PlanningPresentation
         { ExpectedGeneration = change.HasExpectedGeneration ? change.ExpectedGeneration : null },
         reply.Plan is not { } plan ? null : new CliPlan(plan.PlanId, plan.ChangeSetId, plan.EnvironmentRecordId,
             plan.EnvironmentId, new CliReference(plan.Reference.ApplicationRecordId, plan.Reference.RevisionNumber),
-            plan.ProviderAlias, plan.ProviderInstanceId, plan.ConfigurationRevision, plan.ImplementationId,
+            ProviderInputs(plan.ProviderInputs),
             plan.Fingerprint, plan.CreatedAtUtc, plan.ExpiresAtUtc, plan.TechnicalActorId,
             plan.HasClosedAtUtc ? plan.ClosedAtUtc : null,
             plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations))
-        { Naming = NamingPresentation.Map(plan.Naming), ReusedResources = Reuse(plan.ReusedResources), RetainedResources = Reuse(plan.RetainedResources) })
+        { ReusedResources = Reuse(plan.ReusedResources), RetainedResources = Reuse(plan.RetainedResources) })
     { ConfigurationErrorCodes = reply.ConfigurationErrorCodes.ToArray() };
 
     internal static CliReusedResource[] Reuse(IEnumerable<ReusedResourceSummary> reuse) =>
@@ -161,14 +159,13 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine($"Plan: {plan.PlanId}; ChangeSet: {plan.ChangeSetId}");
             _output.WriteLine($"Environment: {plan.EnvironmentId}; record: {plan.EnvironmentRecordId}");
             _output.WriteLine($"Revision: {plan.Reference.ApplicationRecordId} {plan.Reference.RevisionNumber}");
-            if (plan.Naming is { } naming) _output.WriteLine($"Naming: {naming.Mode}; policy: {naming.Name ?? "canonical default"}; revision: {naming.Revision}; prefix: {naming.Prefix}");
             foreach (var node in plan.Operations)
                 _output.WriteLine($"Operation: {node.OperationId}; Resource: {node.ResourceId}; action: {node.ActionContract}; dependencies: {string.Join(", ", node.Dependencies)}; target: {node.TargetName}");
             foreach (var resource in plan.ReusedResources)
                 _output.WriteLine($"Reuse Resource: {resource.ResourceId}; reintroduced: {resource.Reintroduced}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
             foreach (var resource in plan.RetainedResources)
                 _output.WriteLine($"Retain Resource: {resource.ResourceId}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}; no external deletion or drift check");
-            _output.WriteLine($"Provider: {plan.ProviderAlias} -> {plan.ProviderInstanceId} revision {plan.ConfigurationRevision}; implementation: {plan.ImplementationId}");
+            foreach (var provider in plan.ProviderInputs) PrintProviderInput(provider);
             _output.WriteLine("Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.");
             if (plan.IntendedWork.Action is { } action)
                 _output.WriteLine($"Intended action: Create; Resource: {action.ResourceId}; type: {action.ResourceType}; target: {action.Target.Name}");

@@ -103,7 +103,7 @@ public sealed partial class ExactActionAdmissionTests(PostgreSqlFixture fixture)
             Assert.All(results, result => Assert.Equal(DurableExecutionOutcome.Succeeded, result.Outcome));
             Assert.Equal(1, boundary.Calls);
             Assert.Equal(naming ? "contour/jobs" : "jobs", boundary.Input!.QueueName);
-            Assert.Equal(naming ? new ResourceNamingPolicy("prefixed", "contour/") : ResourceNamingPolicy.Exact, plan.Inputs.Naming.Policy);
+            Assert.Equal(naming ? new ResourceNamingPolicy("prefixed", "contour/") : ResourceNamingPolicy.Exact, plan.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy);
         }
         // Terminal history needs neither a handler nor a configuration reader.
         await using (var missing = Services(connection, boundary, installed: false, codec: false))

@@ -15,6 +15,33 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
+    [Fact]
+    public async Task Persisted_pair_refuses_conflicting_same_alias_entries_before_read_check_or_commit()
+    {
+        var setup = await Prepare();
+        Assert.Equal(2, setup.Plan.Inputs.Providers.Entries.Count);
+        await using (var arrange = new NpgsqlConnection(setup.Connection))
+        {
+            await arrange.OpenAsync();
+            // Canonical set order is app-login then db. Corrupt only the second
+            // exact resolution; checking a singleton projection would miss this.
+            await new NpgsqlCommand("""
+                SET session_replication_role = replica;
+                UPDATE deployment_plans SET provider_inputs_json =
+                    jsonb_set(provider_inputs_json::jsonb, '{Entries,1,Configuration}', '2'::jsonb)::text;
+                """, arrange).ExecuteNonQueryAsync();
+        }
+        await using (var act = Services(setup.Connection))
+        {
+            var planner = act.GetRequiredService<IDurableDeploymentPlanner>();
+            await Assert.ThrowsAsync<InvalidDataException>(async () => await planner.FindPlanAsync(setup.Plan.Id, default));
+            Assert.Equal(DurablePlanCurrentStatus.PlanInputUnavailable, await planner.CheckPlanAsync(setup.Plan.Id, default));
+            Assert.IsType<DurableCommitResult.PlanInputUnavailable>(await act.GetRequiredService<IDurableDesiredStateCommitter>()
+                .CommitAsync(setup.Change.Id, setup.Plan.Id, "tester", default));
+        }
+        await AssertNoEffects(setup.Connection, setup.Policy);
+    }
+
     private sealed class Clock : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(2026, 11, 2, 16, 0, 0, TimeSpan.Zero);
@@ -126,14 +153,17 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
                 .CommitAsync(setup.Change.Id, plan.Id, "tester", default)).Commit;
             var providers = restart.GetRequiredService<IProviderConfigurationStore>();
             var pinned = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(plan.Inputs.Environment,
-                plan.Inputs.ProviderInstance, plan.Inputs.ConfigurationRevision, default))!;
+                plan.Inputs.Providers.RequireUniformResourceProvider().Instance, plan.Inputs.Providers.RequireUniformResourceProvider().Configuration, default))!;
             var next = ProviderConfigurationRevisionNumber.Create(2);
-            await providers.AddRevisionAsync(plan.Inputs.Environment, plan.Inputs.ProviderInstance, next, pinned.Configuration, default);
+            await providers.AddRevisionAsync(plan.Inputs.Environment, plan.Inputs.Providers.RequireUniformResourceProvider().Instance, next, pinned.Configuration, default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await restart.GetRequiredService<IProviderAliasStore>().ChangeAsync(
-                plan.Inputs.Environment, plan.Inputs.Alias, new(plan.Inputs.ProviderInstance, plan.Inputs.ConfigurationRevision),
-                new(plan.Inputs.ProviderInstance, next), "tester", default)).Outcome);
+                plan.Inputs.Environment, plan.Inputs.Providers.RequireUniformResourceProvider().Alias, new(plan.Inputs.Providers.RequireUniformResourceProvider().Instance, plan.Inputs.Providers.RequireUniformResourceProvider().Configuration),
+                new(plan.Inputs.Providers.RequireUniformResourceProvider().Instance, next), "tester", default)).Outcome);
             var saved = (await restart.GetRequiredService<IDurableDesiredStateCommitter>().FindGenerationAsync(commit.DeploymentId, commit.Generation, default))!;
             Assert.Equal(plan.Inputs, saved.Inputs);
+            Assert.Equal(["app-login", "db"], saved.Inputs.Providers.Entries.Keys.OfType<ProviderInput.Resource>().Select(x => x.Id.Value).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal(saved.Inputs.Providers.Resource(ManifestLocalId.Create("db")).Instance,
+                saved.Inputs.Providers.Resource(ManifestLocalId.Create("app-login")).Instance);
             Assert.Equal(plan.Graph, saved.Graph);
         }
         await using (var production = Services(setup.Connection, pair: false))

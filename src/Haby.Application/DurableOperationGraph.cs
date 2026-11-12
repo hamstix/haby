@@ -94,14 +94,21 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
 
     public void ValidateReferences(DurablePlanningInputs inputs)
     {
+        inputs.Validate();
+        var active = Nodes.Select(n => n.ResourceId).Concat(ReusedResources.Select(r => r.Resource)).ToHashSet();
+        if (!active.SetEquals(inputs.Providers.Declaration.Spec.Resources.Keys))
+            throw new InvalidDataException("Graph Resource coverage does not match the exact input set.");
         foreach (var node in Nodes)
         {
+            var provider = inputs.Providers.Resource(node.ResourceId);
+            if (node.Action.Admission.ResourceContract != inputs.Providers.Declaration.Spec.Resources[node.ResourceId].Type)
+                throw new InvalidDataException("Graph Resource contract does not match the declaration.");
             if (GeneratedCredentialContracts.IsProducer(node) &&
                 GeneratedCredentialInputCodec.Decode(node.Input)?.Owner != new ManagedResourceKey(inputs.Environment, inputs.Revision.ApplicationRecordId, node.ResourceId))
                 throw new InvalidDataException("Inconsistent generated credential owner.");
-            if (node.References != new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance,
-                    inputs.ConfigurationRevision, inputs.ImplementationId) ||
-                node.Action.Admission.ImplementationId.Value != inputs.ImplementationId)
+            if (node.References != new DurableActionInputReferences(provider.Environment, provider.Instance,
+                    provider.Configuration, provider.Implementation.Value) ||
+                node.Action.Admission.ImplementationId != provider.Implementation)
                 throw new InvalidDataException("Inconsistent graph references.");
         }
     }
@@ -149,12 +156,11 @@ public static class DurableOperationGraphCodec
     {
         graph.ValidateReferences(inputs);
         if (inputs.Configuration is { } frozen && frozen.Revision != inputs.Revision) throw new InvalidDataException("Configuration revision mismatch.");
-        var text = string.Join('\n', "haby-operation-plan/v3", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
+        var text = string.Join('\n', "haby-operation-plan/v4", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
             inputs.Revision.ApplicationRecordId.ToString(), inputs.Revision.RevisionNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            inputs.Alias.Value, inputs.ProviderInstance.ToString(),
-            inputs.ConfigurationRevision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), inputs.ImplementationId, ResourceNamingCodec.Encode(inputs.Naming), Encode(graph),
+            ExactProviderResolutionSetCodec.Encode(inputs.Providers), Encode(graph),
             inputs.Configuration is { } configuration ? ConfigurationPlanningSnapshotCodec.Encode(configuration) : "unprepared");
-        return "v3:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+        return "v4:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 }
 

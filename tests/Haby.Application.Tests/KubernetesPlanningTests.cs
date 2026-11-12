@@ -353,7 +353,7 @@ public sealed class KubernetesPlanningTests
     {
         var manifest = Parse(Envelope());
         var resolution = Providers(manifest).Entries.Values.Single();
-        var opaque = new ExactAdapterInput(ProviderConfigurationContractId.Create("example.placement/v1"),
+        var opaque = new ExactAdapterInput(AdapterInputContractId.Create("example.placement/v1"),
             new ConfigurationObject(new Dictionary<string, ConfigurationValue> { ["opaque"] = new ConfigurationString("exact-revision") }));
         var set = new ExactProviderResolutionSet(manifest, Environment, [resolution with { Placement = opaque, Naming = opaque }]);
         Assert.Equal(opaque, Assert.Single(set.Entries).Value.Placement);

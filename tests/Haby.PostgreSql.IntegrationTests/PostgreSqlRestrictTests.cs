@@ -29,13 +29,13 @@ public sealed partial class PostgreSqlRestrictTests(PostgreSqlFixture fixture) :
     private sealed class Admission : IDurableActionAdmissionHandler, IDurableResourcePlanComposer
     {
         public DurableActionExecutionKey Key => PostgreSqlDatabaseCreateAction.RegistrationKey;
-        public bool Validate(NormalizedResource resource, DurablePlanningInputs inputs) => true;
+        public bool Validate(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => true;
         public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) => throw new NotSupportedException();
         public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
             spec.Resources.Count == 1 && spec.Components.Count == 0 && spec.Resources[resource].Type == PostgreSqlDatabaseContract.Id;
         public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
         {
-            var references = new DurableActionInputReferences(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId);
+            var references = new DurableActionInputReferences(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration, inputs.Providers.RequireUniformResourceProvider().Implementation.Value);
             var name = ((ConfigurationString)spec.Resources[resource].Properties.Members["name"]).Value;
             var admin = JsonDocument.Parse(configuration.PayloadJson).RootElement.GetProperty("AdministratorUserName"u8).GetString()!;
             return [new(OperationId.Create("db-create"), resource, Key, references, new(PostgreSqlDatabaseCreateAction.Format,

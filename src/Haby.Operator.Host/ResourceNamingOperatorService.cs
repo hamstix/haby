@@ -7,14 +7,6 @@ namespace Haby.Operator.Host;
 
 public sealed partial class ManifestOperatorService
 {
-    private static FrozenResourceNaming FrozenNaming(ResourceNamingSnapshot value)
-    {
-        var result = new FrozenResourceNaming { Version = value.Version, Mode = value.Policy.Mode };
-        if (value.Reference is { } reference) { result.Name = reference.Name; result.Revision = reference.Revision; }
-        if (value.Policy.Prefix is { } prefix) result.Prefix = prefix;
-        if (value.SelectionToken is { } token) result.SelectionToken = token;
-        return result;
-    }
     public override Task<ResourceNamingReply> CreateResourceNaming(CreateResourceNamingRequest request, ServerCallContext context) =>
         NamingOperation(request.Reference?.Environment, async (environment, token) =>
             await naming.CreateAsync(environment, NamingReference(request.Reference!.Name, request.Reference.Revision),

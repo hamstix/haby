@@ -16,10 +16,11 @@ public sealed class PostgreSqlPairPlanningTests
         var envelope = Example();
         envelope["manifest"]!["spec"]!["resources"]!["extra"] = new JsonObject
         {
-            ["type"] = "postgresql.database/v1alpha1", ["providerRef"] = "postgresql.primary",
+            ["type"] = "postgresql.database/v1alpha1",
+            ["providerRef"] = "postgresql.primary",
             ["properties"] = new JsonObject { ["name"] = "sample_extra" }
         };
-        var spec = Spec(envelope); var inputs = Inputs(); var configuration = Configuration();
+        var spec = Spec(envelope); var inputs = Inputs(envelope); var configuration = Configuration();
         IDurableActionAdmissionHandler[] handlers =
             [new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id)];
         var admission = new DurableActionAdmission(new DurableActionRegistry(handlers, []));
@@ -50,10 +51,11 @@ public sealed class PostgreSqlPairPlanningTests
         var added = sameOperationId ? "db" : "extra";
         envelope["manifest"]!["spec"]!["resources"]![added] = new JsonObject
         {
-            ["type"] = "postgresql.database/v1alpha1", ["providerRef"] = "postgresql.primary",
+            ["type"] = "postgresql.database/v1alpha1",
+            ["providerRef"] = "postgresql.primary",
             ["properties"] = new JsonObject { ["name"] = "sample_extra" }
         };
-        var target = Spec(envelope); var inputs = Inputs(); var configuration = Configuration();
+        var target = Spec(envelope); var inputs = Inputs(envelope); var configuration = Configuration();
         var admission = new DurableActionAdmission(new DurableActionRegistry([
             new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id)], []));
         Assert.True(admission.CanReuse(accepted, target, Provider, inputs, configuration));
@@ -84,9 +86,13 @@ public sealed class PostgreSqlPairPlanningTests
     internal static PreparedProviderConfiguration Configuration() => new PostgreSqlProviderConfigurationCodec(new PostgreSqlDatabaseCheckpointCapability())
         .Encode(new PostgreSqlProviderConfiguration(1, "localhost", 5432, "postgres", "postgres",
             new(SecretId.New(), SecretVersionId.New()), Provider.ImplementationId));
-    internal static DurablePlanningInputs Inputs() => new(EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
-        ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), ProviderAlias.Create("postgresql.primary"),
-        ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), Provider.ImplementationId);
+    internal static DurablePlanningInputs Inputs(JsonObject? envelope = null)
+    {
+        var manifest = ((ManifestCandidateResult.Valid)ManifestCandidatePipeline.Prepare(Bytes(envelope ?? Example()), Catalog)).Candidate.Declaration;
+        return Haby.Tests.DurableInputSamples.ForManifest(manifest, EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
+            ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), ProviderInstanceId.New(),
+            ProviderConfigurationRevisionNumber.Create(1), Provider.ImplementationId);
+    }
 
     [Fact]
     public async Task Pair_description_uses_operation_graph_instead_of_unsupported_single_action()
@@ -163,10 +169,11 @@ public sealed class PostgreSqlPairPlanningTests
             resources.Remove("app-login"); resources["other-login"] = duplicate; resources["app-login"] = duplicate.DeepClone();
         }
         else resources["other-login"] = duplicate;
-        var spec = Spec(envelope); var inputs = Inputs(); var configuration = Configuration(); var admission = Admission();
+        var spec = Spec(envelope); var inputs = Inputs(envelope); var configuration = Configuration(); var admission = Admission();
         Assert.False(PostgreSqlPairResourceAdmission.HasSingleOwner(spec));
         Assert.Equal(DurablePlanStatus.UnsupportedShape, admission.Admit(spec, Provider, inputs, configuration));
-        var original = admission.Plan(Spec(Example()), Provider, inputs, configuration);
+        var originalInputs = Inputs();
+        var original = admission.Plan(Spec(Example()), Provider, originalInputs, configuration);
         Assert.False(admission.ValidateGraph(spec, Provider, inputs, configuration, original));
         Assert.True(PostgreSqlPairResourceAdmission.HasSingleOwner(Spec(Example())));
     }
@@ -259,7 +266,7 @@ public sealed class PostgreSqlPairPlanningTests
         {
             var valid = Assert.IsType<ManifestCandidateResult.Valid>(result);
             Assert.Equal(mode == "alias" ? DurablePlanStatus.ProviderRevisionUnavailable : DurablePlanStatus.UnsupportedShape,
-                Admission().Admit(valid.Candidate.Declaration.Spec, Provider, Inputs(), config));
+                Admission().Admit(valid.Candidate.Declaration.Spec, Provider, mode == "extra-resource" ? Inputs(e) : Inputs(), config));
         }
     }
 

@@ -133,10 +133,10 @@ public sealed partial class OperatorHostIntegrationTests
                 AssertIntendedDatabase(original);
                 Assert.Equal("pilot", original.EnvironmentId);
                 Assert.Equal(environment.ToString(), original.EnvironmentRecordId);
-                Assert.Equal("postgresql.primary", original.ProviderAlias);
-                Assert.Equal(PostgreSqlDatabaseCheckpointCapability.ImplementationId, original.ImplementationId);
-                Assert.Equal(1, original.ConfigurationRevision);
-                Assert.Equal(instance.ToString(), original.ProviderInstanceId);
+                Assert.Equal("postgresql.primary", original.ProviderInputs.Single().ProviderAlias);
+                Assert.Equal(PostgreSqlDatabaseCheckpointCapability.ImplementationId, original.ProviderInputs.Single().ImplementationId);
+                Assert.Equal(1, original.ProviderInputs.Single().ConfigurationRevision);
+                Assert.Equal(instance.ToString(), original.ProviderInputs.Single().ProviderInstanceId);
                 Assert.Equal(reference, original.Reference);
                 Assert.Equal(TimeSpan.FromHours(24), DateTimeOffset.Parse(original.ExpiresAtUtc) - DateTimeOffset.Parse(original.CreatedAtUtc));
                 var planRequest = new PlanRequest { PlanId = original.PlanId };
@@ -147,8 +147,8 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(original, (await client.GetPlanAsync(planRequest)).Plan);
                 replacement = (await client.CreatePlanAsync(changeRequest)).Plan;
                 AssertIntendedDatabase(replacement);
-                Assert.Equal(nextInstance.ToString(), replacement.ProviderInstanceId);
-                Assert.Equal(2, replacement.ConfigurationRevision);
+                Assert.Equal(nextInstance.ToString(), replacement.ProviderInputs.Single().ProviderInstanceId);
+                Assert.Equal(2, replacement.ProviderInputs.Single().ConfigurationRevision);
                 Assert.NotEqual(original.PlanId, replacement.PlanId);
                 Assert.Equal(PlanningStatus.Closed, (await client.ClosePlanAsync(planRequest)).Status);
                 Assert.Equal(PlanningStatus.AlreadyClosed, (await client.ClosePlanAsync(planRequest)).Status);
@@ -329,8 +329,9 @@ public sealed partial class OperatorHostIntegrationTests
             using var historical = JsonDocument.Parse(await Run(0, "plan", "get", original.PlanId, "-o", "json"));
             Assert.Equal("closed", historical.RootElement.GetProperty("outcome"u8).GetString());
             var historicalPlan = historical.RootElement.GetProperty("data"u8).GetProperty("plan"u8);
-            Assert.Equal(original.ProviderInstanceId, historicalPlan.GetProperty("providerInstanceId"u8).GetString());
-            Assert.Equal(1, historicalPlan.GetProperty("configurationRevision"u8).GetInt64());
+            var historicalProvider = historicalPlan.GetProperty("providerInputs"u8).EnumerateArray().Single(x => x.GetProperty("resourceId"u8).GetString() == "db");
+            Assert.Equal(original.ProviderInputs.Single().ProviderInstanceId, historicalProvider.GetProperty("providerInstanceId"u8).GetString());
+            Assert.Equal(1, historicalProvider.GetProperty("configurationRevision"u8).GetInt64());
             Assert.Equal("sample_db", historicalPlan.GetProperty("intendedWork"u8).GetProperty("action"u8)
                 .GetProperty("target"u8).GetProperty("name"u8).GetString());
             var expiredText = await Run(0, "plan", "get", expiredId);
@@ -345,10 +346,11 @@ public sealed partial class OperatorHostIntegrationTests
             using var planJson = JsonDocument.Parse(planned);
             var plan = planJson.RootElement.GetProperty("data"u8).GetProperty("plan"u8);
             var planId = plan.GetProperty("planId"u8).GetString()!;
-            Assert.Equal(2, plan.GetProperty("configurationRevision"u8).GetInt64());
+            var provider = plan.GetProperty("providerInputs"u8).EnumerateArray().Single(x => x.GetProperty("resourceId"u8).GetString() == "db");
+            Assert.Equal(2, provider.GetProperty("configurationRevision"u8).GetInt64());
             Assert.Equal("pilot", plan.GetProperty("environmentId"u8).GetString());
-            Assert.Equal(providerInstance, plan.GetProperty("providerInstanceId"u8).GetString());
-            Assert.Equal("haby.postgresql.database/v1alpha1", plan.GetProperty("implementationId"u8).GetString());
+            Assert.Equal(providerInstance, provider.GetProperty("providerInstanceId"u8).GetString());
+            Assert.Equal("haby.postgresql.database/v1alpha1", provider.GetProperty("implementationId"u8).GetString());
             var intended = plan.GetProperty("intendedWork"u8);
             Assert.Equal("available", intended.GetProperty("status"u8).GetString());
             var action = intended.GetProperty("action"u8);

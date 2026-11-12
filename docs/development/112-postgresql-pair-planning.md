@@ -52,7 +52,9 @@ producer/action/output contracts are checked by the adapter's graph validator;
 legacy single-Resource registrations cannot admit arbitrary non-secret selectors.
 There is no common PostgreSQL output-contract switch.
 
-The current persisted planning input still selects exactly one Provider alias.
+The current executable pilot still requires exactly one Provider alias.
+[Durable input sets](185-durable-provider-input-sets.md) retain each declared
+Resource under its own exact key; storage cardinality does not expand admission.
 Distinct aliases are rejected, even if they happen to resolve to the same target.
 Each node must match its actual Resource contract and the exact Provider envelope.
 This does not support combined independent PostgreSQL/RabbitMQ Applications.

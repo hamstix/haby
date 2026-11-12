@@ -31,16 +31,29 @@ public sealed class ConfigurationPlanningSnapshotTests
     private static ConfigurationPlanningSnapshot Snapshot(NormalizedApplicationManifest manifest, ConfigurationProfileRevision profile, AssignmentToken token) =>
         ConfigurationPlanningSnapshot.Prepare(Revision, manifest, Scopes(manifest, token, new ProfileDecision.Use(profile.Reference)), [profile], Haby.Tests.ConfigurationRenderingSamples.Catalog(), Haby.Tests.ConfigurationRenderingSamples.Producers(manifest.Spec)).Snapshot!;
 
+    [Fact]
+    public void Graph_refuses_an_operation_owned_by_an_undeclared_resource()
+    {
+        var snapshot = Snapshot(Manifest(), Parse(Profile()), AssignmentToken.New());
+        var inputs = Haby.Tests.DurableInputSamples.ForManifest(snapshot.Manifest, EnvironmentRecordId.New(), EnvironmentId.Create("pilot"),
+            snapshot.Revision, ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample/v1") with
+        { Configuration = snapshot };
+        var node = new DurableOperationNode(OperationId.Create("create"), ManifestLocalId.Create("undeclared"),
+            new(new(ResourceTypeId.Create("sample.resource/v1"), ProviderKindId.Create("sample/v1"),
+                ProviderConfigurationContractId.Create("sample.configuration/v1"), ProviderImplementationId.Create("sample/v1")), OperationContractId.Create("sample.create/v1")),
+            new(inputs.Environment, inputs.Providers.Resource(ManifestLocalId.Create("resource")).Instance, inputs.Providers.Resource(ManifestLocalId.Create("resource")).Configuration, inputs.Providers.Resource(ManifestLocalId.Create("resource")).Implementation.Value), new("sample/v1", "{}"), []);
+        Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Fingerprint(inputs, new([node])));
+    }
+
     internal static string Fingerprint(ConfigurationPlanningSnapshot snapshot)
     {
-        var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse("019a2b70-1234-7123-8123-123456789abc"), EnvironmentId.Create("pilot"),
-            snapshot.Revision, ProviderAlias.Create("available"), ProviderInstanceId.Parse("019a2b70-1234-7123-8123-123456789abd"),
-            ProviderConfigurationRevisionNumber.Create(1), "sample/v1")
+        var inputs = Haby.Tests.DurableInputSamples.ForManifest(snapshot.Manifest, EnvironmentRecordId.Parse("019a2b70-1234-7123-8123-123456789abc"), EnvironmentId.Create("pilot"),
+            snapshot.Revision, ProviderInstanceId.Parse("019a2b70-1234-7123-8123-123456789abd"), ProviderConfigurationRevisionNumber.Create(1), "sample/v1") with
         { Configuration = snapshot };
         var node = new DurableOperationNode(OperationId.Create("create"), ManifestLocalId.Create("resource"),
             new(new(ResourceTypeId.Create("sample.resource/v1"), ProviderKindId.Create("sample/v1"),
                 ProviderConfigurationContractId.Create("sample.configuration/v1"), ProviderImplementationId.Create("sample/v1")), OperationContractId.Create("sample.create/v1")),
-            new(inputs.Environment, inputs.ProviderInstance, inputs.ConfigurationRevision, inputs.ImplementationId), new("sample/v1", "{}"), []);
+            new(inputs.Environment, inputs.Providers.Resource(ManifestLocalId.Create("resource")).Instance, inputs.Providers.Resource(ManifestLocalId.Create("resource")).Configuration, inputs.Providers.Resource(ManifestLocalId.Create("resource")).Implementation.Value), new("sample/v1", "{}"), []);
         return DurableOperationGraphCodec.Fingerprint(inputs, new([node]));
     }
     [Fact]

@@ -23,15 +23,7 @@ internal static class ResourceContinuity
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT v.id FROM secret_versions v JOIN generated_credential_slots s ON s.version_id = v.id JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF v", token);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT p.secret_version_id FROM secret_payloads p JOIN generated_credential_slots s ON s.version_id = p.secret_version_id JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF p", token);
     }
-    internal static DurablePlanningInputs Inputs(DeploymentGenerationRow row)
-    {
-        var inputs = new DurablePlanningInputs(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()), EnvironmentId.Create(row.EnvironmentKey),
-            ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()), ManifestRevisionNumber.Create(row.RevisionNumber)),
-            ProviderAlias.Create(row.ProviderAlias), ProviderInstanceId.Parse(row.ProviderInstanceId.ToString()), ProviderConfigurationRevisionNumber.Create(row.ConfigurationRevisionNumber), row.ImplementationId);
-        inputs = inputs with { Configuration = ConfigurationPlanningSnapshotCodec.Decode(row.ConfigurationJson, inputs.Revision), Naming = ResourceNamingCodec.Decode(row.NamingJson) };
-        if (DurableOperationGraphCodec.Fingerprint(inputs, DurableOperationGraphCodec.Decode(row.GraphJson)) != row.Fingerprint) throw new InvalidDataException();
-        return inputs;
-    }
+    internal static DurablePlanningInputs Inputs(DeploymentGenerationRow row) => row.Inputs();
 
     internal static async Task<bool> ValidateOutputsAsync(ManifestCatalogDbContext db, Guid deployment,
         DurableOperationGraph reuse, IEnumerable<IExternalOperationOutputContract> registrations,
@@ -42,16 +34,18 @@ internal static class ResourceContinuity
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
             var inputs = Inputs(source);
-            var provider = await db.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.ProviderInstanceId == source.ProviderInstanceId &&
-                x.RevisionNumber == source.ConfigurationRevisionNumber && x.EnvironmentRecordId == source.EnvironmentRecordId && x.IsSealed, token);
-            var instance = await db.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(x => x.Id == source.ProviderInstanceId && x.EnvironmentRecordId == source.EnvironmentRecordId, token);
-            if (provider is null || instance is null || provider.ImplementationId != source.ImplementationId) return false;
+            var sourceProvider = inputs.Providers.RequireUniformResourceProvider();
+            var providerId = Guid.Parse(sourceProvider.Instance.ToString());
+            var provider = await db.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.ProviderInstanceId == providerId &&
+                x.RevisionNumber == sourceProvider.Configuration.Value && x.EnvironmentRecordId == source.EnvironmentRecordId && x.IsSealed, token);
+            var instance = await db.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(x => x.Id == providerId && x.EnvironmentRecordId == source.EnvironmentRecordId, token);
+            if (provider is null || instance is null || provider.ImplementationId != sourceProvider.Implementation.Value) return false;
             var matches = codecs.Where(x => x.ProviderKindId == instance.ProviderKindId && x.ShapeId == provider.ConfigurationShapeId && x.PayloadFormatVersion == provider.PayloadFormatVersion).ToArray();
             if (matches.Length != 1) return false;
             PreparedProviderConfiguration configuration;
             try { configuration = matches[0].Encode(matches[0].Decode(provider.PayloadJson)); }
             catch (Exception e) when (e is ArgumentException or InvalidOperationException or JsonException) { return false; }
-            if (configuration.PayloadJson != provider.PayloadJson || configuration.ImplementationId != source.ImplementationId) return false;
+            if (configuration.PayloadJson != provider.PayloadJson || configuration.ImplementationId != sourceProvider.Implementation.Value) return false;
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
             var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
             if (!admission.Supports(graph) || !admission.ValidateCreationGraph(inputs.Configuration!.Manifest.Spec, adapter, inputs, configuration, graph)) return false;
@@ -138,6 +132,7 @@ internal static class ResourceContinuity
             x.DeploymentId == deployment && x.Generation == baseline.Generation, token);
         if (previous?.Fingerprint != baseline.Fingerprint) return false;
         var accepted = Inputs(previous);
+        var previousProvider = accepted.Providers.RequireUniformResourceProvider();
         var previousGraph = DurableOperationGraphCodec.Decode(previous.GraphJson);
         var inventory = accepted.Configuration!.Manifest.Spec.Resources.Keys.Concat(previousGraph.RetainedResources.Select(x => x.Resource)).ToHashSet();
         var requirements = graph.ReusedResources.Concat(graph.RetainedResources).ToArray();
@@ -150,8 +145,9 @@ internal static class ResourceContinuity
                 await EvidenceAsync(db, managed, token) != reuse.EvidenceFingerprint) return false;
             if (graph.ReusedResources.Contains(reuse) && reuse.Reintroduced != previousGraph.RetainedResources.Any(x => x.Resource == reuse.Resource)) return false;
             var original = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == reuse.SourceGeneration, token);
-            if (original.ProviderInstanceId != previous.ProviderInstanceId || original.ConfigurationRevisionNumber != previous.ConfigurationRevisionNumber ||
-                original.ImplementationId != previous.ImplementationId) return false;
+            var originalProvider = Inputs(original).Providers.Resource(reuse.Resource);
+            if (originalProvider.Instance != previousProvider.Instance || originalProvider.Configuration != previousProvider.Configuration ||
+                originalProvider.Implementation != previousProvider.Implementation) return false;
         }
         return graph.ReusedResources.Count > 0;
     }

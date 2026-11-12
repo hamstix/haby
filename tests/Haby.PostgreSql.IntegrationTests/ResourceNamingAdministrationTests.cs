@@ -100,7 +100,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var logical = (string)envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"]!;
         Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = receipt.DeploymentId.ToString(), Generation = 1 })).Status);
         Assert.NotNull(await DatabaseOid(logical));
-        Assert.Equal(ResourceNamingPolicy.Exact, saved.Inputs.Naming.Policy);
+        Assert.Equal(ResourceNamingPolicy.Exact, saved.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy);
         await using var verify = Context(catalog.Connection);
         Assert.Equal(3, await verify.ResourceNamingPolicies.CountAsync());
         Assert.Equal(returned.Token, (await verify.ResourceNamingSelections.AsNoTracking().SingleAsync(x => x.Alias == "postgresql.primary")).Token.ToString("D"));

@@ -20,7 +20,10 @@ public interface IExternalOperationOutputContract
 }
 
 public sealed record AcceptedOperation(DurablePlanningInputs Inputs, DurableOperationGraph Graph,
-    DurableOperationNode Node, NormalizedManifestSpec Spec);
+    DurableOperationNode Node, NormalizedManifestSpec Spec)
+{
+    public ExactProviderResolution Provider => Inputs.Providers.Resource(Node.ResourceId);
+}
 
 /// <summary>Trusted catalog boundary; no current aliases, inferred evidence or external calls.</summary>
 public interface IExternalOperationOutputs

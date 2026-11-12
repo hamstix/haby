@@ -265,10 +265,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("text")
                         .HasColumnName("configuration_json");
 
-                    b.Property<long>("ConfigurationRevisionNumber")
-                        .HasColumnType("bigint")
-                        .HasColumnName("configuration_revision_number");
-
                     b.Property<string>("EnvironmentKey")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -290,17 +286,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("text")
                         .HasColumnName("graph_json");
 
-                    b.Property<string>("ImplementationId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("implementation_id");
-
-                    b.Property<string>("NamingJson")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("naming_json");
-
                     b.Property<Guid>("PlanId")
                         .HasColumnType("uuid")
                         .HasColumnName("plan_id");
@@ -311,19 +296,18 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("presence");
 
-                    b.Property<string>("ProviderAlias")
+                    b.Property<string>("ProviderInputsJson")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("provider_alias");
-
-                    b.Property<Guid>("ProviderInstanceId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("provider_instance_id");
+                        .HasColumnType("text")
+                        .HasColumnName("provider_inputs_json");
 
                     b.Property<long>("RevisionNumber")
                         .HasColumnType("bigint")
                         .HasColumnName("revision_number");
+
+                    b.Property<int>("SnapshotFormatVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("snapshot_format_version");
 
                     b.HasKey("DeploymentId", "Generation");
 
@@ -332,8 +316,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasIndex("PlanId");
 
                     b.HasIndex("ApplicationRecordId", "RevisionNumber");
-
-                    b.HasIndex("ProviderInstanceId", "ConfigurationRevisionNumber", "EnvironmentRecordId");
 
                     b.ToTable("application_deployment_generations", null, t =>
                         {
@@ -579,10 +561,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("text")
                         .HasColumnName("configuration_json");
 
-                    b.Property<long>("ConfigurationRevisionNumber")
-                        .HasColumnType("bigint")
-                        .HasColumnName("configuration_revision_number");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -612,26 +590,10 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("text")
                         .HasColumnName("graph_json");
 
-                    b.Property<string>("ImplementationId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("implementation_id");
-
-                    b.Property<string>("NamingJson")
+                    b.Property<string>("ProviderInputsJson")
                         .IsRequired()
                         .HasColumnType("text")
-                        .HasColumnName("naming_json");
-
-                    b.Property<string>("ProviderAlias")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("provider_alias");
-
-                    b.Property<Guid>("ProviderInstanceId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("provider_instance_id");
+                        .HasColumnName("provider_inputs_json");
 
                     b.Property<long>("RevisionNumber")
                         .HasColumnType("bigint")
@@ -644,8 +606,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ChangeSetId");
-
-                    b.HasIndex("ProviderInstanceId", "ConfigurationRevisionNumber", "EnvironmentRecordId");
 
                     b.ToTable("deployment_plans", (string)null);
                 });
@@ -1896,13 +1856,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasPrincipalKey("ApplicationRecordId", "LocalRevisionNumber")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("Haby.Persistence.PostgreSql.ProviderConfigurationRevisionRow", null)
-                        .WithMany()
-                        .HasForeignKey("ProviderInstanceId", "ConfigurationRevisionNumber", "EnvironmentRecordId")
-                        .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.DurableChangeSetRow", b =>
@@ -1959,13 +1912,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.DurableChangeSetRow", null)
                         .WithMany()
                         .HasForeignKey("ChangeSetId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Haby.Persistence.PostgreSql.ProviderConfigurationRevisionRow", null)
-                        .WithMany()
-                        .HasForeignKey("ProviderInstanceId", "ConfigurationRevisionNumber", "EnvironmentRecordId")
-                        .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

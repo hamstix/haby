@@ -45,6 +45,23 @@ public sealed record ResourceNamingSnapshot(int Version,
 
 public static class ResourceNamingCodec
 {
+    private static readonly AdapterInputContractId Contract = AdapterInputContractId.Create("haby.resource-naming/v1");
+
+    public static ExactAdapterInput Exact(ResourceNamingSnapshot snapshot)
+        => new(Contract, new ConfigurationObject([new("snapshot", new ConfigurationString(Encode(snapshot)))]));
+
+    public static ResourceNamingSnapshot ResourceNaming(this ExactProviderResolution input) => ReadNaming(input.Naming);
+    public static ResourceNamingSnapshot ResourceNaming(this UniformResourceProviderContext input) => ReadNaming(input.Naming);
+
+    private static ResourceNamingSnapshot ReadNaming(ExactAdapterInput? input)
+    {
+        if (input is not { } naming || naming.Contract.Value != Contract.Value)
+            throw new InvalidDataException("Resource naming input is unavailable.");
+        if (naming.Value.Members.Count != 1 || !naming.Value.Members.TryGetValue("snapshot", out var value) || value is not ConfigurationString snapshot)
+            throw new InvalidDataException("Resource naming input is unavailable.");
+        return Decode(snapshot.Value);
+    }
+
     public static string Encode(ResourceNamingSnapshot value)
     {
         value.Validate();
