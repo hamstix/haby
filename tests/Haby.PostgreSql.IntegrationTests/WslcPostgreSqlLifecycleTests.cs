@@ -1,10 +1,110 @@
 using System.Text.Json;
+using System.Diagnostics;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class WslcPostgreSqlLifecycleTests
+public sealed class WslcPostgreSqlLifecycleTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task Recovery_reports_every_fixture_after_multiple_command_failures()
+    {
+        using var context = new OwnedControl();
+        var run = context.Run with { WslcPath = Path.Combine(context.Run.LocalDirectory, "missing-owned-cli-" + Guid.NewGuid().ToString("N")) };
+        for (var index = 0; index < 3; index++) _ = new WslcPostgreSqlServer(run);
+        var expected = Directory.GetDirectories(run.LocalDirectory).Select(Path.GetFileName).Order().ToArray();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => WslcPostgreSqlServer.RecoverRunAsync(run));
+        var text = await File.ReadAllTextAsync(Path.Combine(run.LocalDirectory, "supervisor-recovery-result.json"));
+        output.WriteLine("RECOVERY_FAILURE_CONTROL " + text);
+        var result = JsonSerializer.Deserialize(text, WslcPostgreSqlJson.Default.WslcPostgreSqlRecoveryResult)!;
+        Assert.Equal(expected, result.AttemptedFixtureDirectories.Order());
+        Assert.Equal(expected, result.UnreconciledFixtureDirectories.Order());
+        Assert.Equal(3, Directory.GetFiles(run.LocalDirectory, "*.lifecycle.txt", SearchOption.AllDirectories).Length);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(7, false)]
+    [InlineData(0, true)]
+    public async Task Owned_relay_exit_before_disposal_preserves_failure_and_continues_backend_cleanup(int exitCode, bool recoverWithoutChild)
+    {
+        using var context = new OwnedControl();
+        var cli = new ControlledCli(context, null, wrongLabel: false, existingResources: true);
+        _ = new WslcPostgreSqlServer(context.Run, cli);
+        var allocated = context.State with
+        {
+            HostPort = 1234,
+            ContainerId = new string('a', 64),
+            StartAttempted = true,
+            StartConclusive = true,
+            VolumeAttempted = true,
+            VolumeConclusive = true
+        };
+        context.Persist(allocated);
+        var server = new WslcPostgreSqlServer(context.Run, allocated, cli);
+        var signal = Path.Combine(context.Run.LocalDirectory, "exit.signal");
+        var script = Path.Combine(context.Run.LocalDirectory, "owned-child.ps1");
+        File.WriteAllText(script, "param([string]$Signal,[int]$Code);while(-not (Test-Path -LiteralPath $Signal)){Start-Sleep -Milliseconds 20};exit $Code");
+        using var child = new Process
+        {
+            StartInfo = new ProcessStartInfo(OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh")
+            { UseShellExecute = false, CreateNoWindow = true }
+        };
+        string[] arguments = OperatingSystem.IsWindows()
+            ? ["-NoProfile", "-NonInteractive", "-File", script, signal, exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture), context.Run.RunId, context.State.FixtureId]
+            : ["-c", "while [ ! -f \"$1\" ]; do sleep 0.02; done; exit \"$2\"", "owned-relay-control", signal, exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture), context.Run.RunId, context.State.FixtureId];
+        foreach (var argument in arguments) child.StartInfo.ArgumentList.Add(argument);
+        Assert.True(child.Start());
+        var childDisposed = false;
+        try
+        {
+            server.RegisterRelay(child);
+            output.WriteLine("RELAY_BEFORE " + JsonSerializer.Serialize(context.State, WslcPostgreSqlJson.Default.WslcPostgreSqlState));
+            File.WriteAllText(signal, "exit");
+            await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(exitCode, child.ExitCode);
+            var pid = child.Id;
+            if (recoverWithoutChild)
+            {
+                child.Dispose();
+                childDisposed = true;
+                server = new WslcPostgreSqlServer(context.Run, context.State, cli);
+            }
+            var failure = await Record.ExceptionAsync(server.DisposeAsync);
+            output.WriteLine($"RELAY_EXIT_CONTROL pid={pid} exit={exitCode} recovered={recoverWithoutChild} failed={failure is not null} cleaned={context.State.Cleaned} backendStops={cli.Stops} volumeRemovals={cli.VolumeRemovals}");
+            output.WriteLine("RELAY_AFTER " + JsonSerializer.Serialize(context.State, WslcPostgreSqlJson.Default.WslcPostgreSqlState));
+            Assert.Equal(1, cli.Stops);
+            Assert.Equal(1, cli.VolumeRemovals);
+            if (recoverWithoutChild)
+            {
+                Assert.Null(context.State.RelayExitCode);
+                Assert.Contains("Unverified", context.State.RelayExitStatus, StringComparison.Ordinal);
+            }
+            else Assert.Equal(exitCode, context.State.RelayExitCode);
+            if (exitCode != 0 || recoverWithoutChild)
+            {
+                Assert.IsType<InvalidOperationException>(failure);
+                Assert.False(context.State.Cleaned);
+                Assert.Equal(pid, context.State.RelayPid);
+            }
+            else
+            {
+                Assert.Null(failure);
+                Assert.True(context.State.Cleaned);
+                Assert.Null(context.State.RelayPid);
+            }
+        }
+        finally
+        {
+            if (!childDisposed)
+            {
+                if (!child.HasExited) child.Kill();
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -44,6 +144,10 @@ public sealed class WslcPostgreSqlLifecycleTests
             File.ReadAllText(Directory.GetFiles(Run.LocalDirectory, "fixture.json", SearchOption.AllDirectories).Single()),
             WslcPostgreSqlJson.Default.WslcPostgreSqlState)!;
 
+        internal void Persist(WslcPostgreSqlState state) => File.WriteAllText(
+            Directory.GetFiles(Run.LocalDirectory, "fixture.json", SearchOption.AllDirectories).Single(),
+            JsonSerializer.Serialize(state, WslcPostgreSqlJson.Default.WslcPostgreSqlState));
+
         internal OwnedControl()
         {
             var id = Guid.NewGuid().ToString("N");
@@ -59,11 +163,11 @@ public sealed class WslcPostgreSqlLifecycleTests
 
     // Structured command controls exercise the real startup/recovery/disposal
     // code. They never launch a container or invoke private members reflectively.
-    private sealed class ControlledCli(OwnedControl context, CancellationTokenSource? cancel, bool wrongLabel)
+    private sealed class ControlledCli(OwnedControl context, CancellationTokenSource? cancel, bool wrongLabel, bool existingResources = false)
         : WslcPostgreSqlProcess(context.Run.LocalDirectory)
     {
-        private bool _container;
-        private bool _volume;
+        private bool _container = existingResources;
+        private bool _volume = existingResources;
         internal int Stops { get; private set; }
         internal int VolumeRemovals { get; private set; }
 

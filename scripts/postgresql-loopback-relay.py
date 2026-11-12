@@ -48,7 +48,12 @@ async def main(args):
         addresses={item[4][0] for item in socket.getaddrinfo('localhost',port,type=socket.SOCK_STREAM)}
         if not addresses or not addresses <= {'127.0.0.1','::1'}: raise RuntimeError('localhost does not resolve exclusively to owned loopback listeners')
         await ipv4.start_serving(); await ipv6.start_serving()
-        ready.write_text(json.dumps(dict(runId=args.run_id,fixtureId=args.fixture_id,pid=os.getpid(),port=port,loopbackFamilies=['IPv4','IPv6'],startedUtc=utc()))+'\n')
+        publication=ready.with_name(ready.name+'.tmp')
+        try:
+            publication.write_text(json.dumps(dict(runId=args.run_id,fixtureId=args.fixture_id,pid=os.getpid(),port=port,loopbackFamilies=['IPv4','IPv6'],startedUtc=utc()))+'\n')
+            publication.replace(ready) # Same directory; publish only after write/close.
+        finally:
+            publication.unlink(missing_ok=True)
         event('ready',loopbackFamilies=['IPv4','IPv6'])
         loop=asyncio.get_running_loop()
         for sig in (signal.SIGTERM,signal.SIGINT): loop.add_signal_handler(sig,shutdown.set)

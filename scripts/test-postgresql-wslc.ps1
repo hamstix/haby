@@ -95,8 +95,20 @@ try {
     try {
         $assembly = [IO.Path]::GetFullPath($TestAssemblyPath)
         if (-not (Test-Path -LiteralPath $assembly)) { throw 'Cleanup assembly is unavailable.' }
+        $runDirectory = Split-Path $ConfigurationPath -Parent
+        $fixtures = @(Get-ChildItem -LiteralPath $runDirectory -Directory -Force -ErrorAction Stop)
+        # RecoverRunAsync visits records serially, including after failures.
+        # Each DisposeAsync allows 65s for its gate and 60s for cleanup; reserve
+        # 10s for bounded process/pipe drains, 5s for bookkeeping and 15s for startup.
+        # CancellationTokenSource's maximum finite interval is UInt32.MaxValue-1 ms.
+        $maximumSeconds = [long][Math]::Floor(([uint32]::MaxValue - 1) / 1000)
+        $maximumFixtures = [long][Math]::Floor(($maximumSeconds - 15) / 140)
+        if ($fixtures.LongLength -gt $maximumFixtures) { throw 'Recorded work exceeds the finite recovery budget.' }
+        $cleanupSeconds = [int](15L + 140L * $fixtures.LongLength)
+        [ordered]@{ fixtureDirectories = @($fixtures.Name); count = $fixtures.LongLength; perFixtureSeconds = 140; gateSeconds = 65; cleanupSeconds = 60; terminationDrainSeconds = 10; bookkeepingSeconds = 5; startupSeconds = 15; budgetSeconds = $cleanupSeconds } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDirectory 'supervisor-recovery-plan.json') -Encoding utf8
         $code = 'Add-Type -Path ' + (Quote-Value $assembly) + ';[Haby.PostgreSql.IntegrationTests.PostgreSqlFixtureRunCleanup]::RunAsync().GetAwaiter().GetResult()'
-        $null = Invoke-PrivateClient (Get-Process -Id $PID).Path @('-NoProfile', '-NonInteractive', '-EncodedCommand', (Windows-Code $code)) (Join-Path (Split-Path $ConfigurationPath -Parent) 'supervisor-cleanup') 90
+        $null = Invoke-PrivateClient (Get-Process -Id $PID).Path @('-NoProfile', '-NonInteractive', '-EncodedCommand', (Windows-Code $code)) (Join-Path $runDirectory 'supervisor-cleanup') $cleanupSeconds
     } catch { $cleanupFailed = $true; Write-Warning 'Owned fixture cleanup is incomplete; private run records retained.' }
     $env:HABY_POSTGRESQL_EPHEMERAL_EXTERNAL = $previousMode
     $env:HABY_POSTGRESQL_EPHEMERAL_RUN = $previousRun

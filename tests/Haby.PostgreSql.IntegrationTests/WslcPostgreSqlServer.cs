@@ -39,7 +39,7 @@ internal sealed class WslcPostgreSqlServer
         Persist(); // Both nonces exist before any allocation or process launch.
     }
 
-    private WslcPostgreSqlServer(WslcPostgreSqlRun run, WslcPostgreSqlState state)
+    internal WslcPostgreSqlServer(WslcPostgreSqlRun run, WslcPostgreSqlState state, WslcPostgreSqlProcess? process = null)
     {
         run.Validate();
         if (state.FormatVersion != 1 || state.RunId != run.RunId || !Guid.TryParseExact(state.FixtureId, "N", out _) ||
@@ -50,7 +50,7 @@ internal sealed class WslcPostgreSqlServer
         _directory = Path.Combine(run.LocalDirectory, state.FixtureId);
         if (File.ReadAllText(Path.Combine(_directory, ".fixture-id")) != state.FixtureId)
             throw new InvalidOperationException("Owned fixture recovery nonce is invalid.");
-        _process = new(_directory);
+        _process = process ?? new(_directory);
     }
 
     internal string ConnectionString => _connection ?? throw new InvalidOperationException("Owned fixture is not ready.");
@@ -285,7 +285,7 @@ internal sealed class WslcPostgreSqlServer
             "--events", Path.Combine(_directory, "relay-events.jsonl") })
             _relay.StartInfo.ArgumentList.Add(argument);
         if (!_relay.Start()) throw new InvalidOperationException();
-        _state = _state with { RelayPid = _relay.Id, RelayStartTicks = _relay.StartTime.ToUniversalTime().Ticks }; Persist();
+        RegisterRelay(_relay);
         _relayOutput = WslcPostgreSqlProcess.ReadBoundedAsync(_relay.StandardOutput, Path.Combine(_directory, "relay.stdout"), _relayPipes.Token);
         _relayError = WslcPostgreSqlProcess.ReadBoundedAsync(_relay.StandardError, Path.Combine(_directory, "relay.stderr"), _relayPipes.Token);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(10));
@@ -303,27 +303,60 @@ internal sealed class WslcPostgreSqlServer
         return port;
     }
 
+    // Also permits an explicitly owned child in lifecycle fault controls.
+    internal void RegisterRelay(Process relay)
+    {
+        _relay = relay;
+        _state = _state with { RelayPid = relay.Id, RelayStartTicks = relay.StartTime.ToUniversalTime().Ticks }; Persist();
+    }
+
     private async Task StopRelayAsync(CancellationToken token)
     {
         if (_state.RelayPid is null) return;
         Process? process = _relay;
+        var absenceVerified = false;
         try
         {
             process ??= Process.GetProcessById(_state.RelayPid.Value);
-            if (process.HasExited) { ClearRelay(); return; }
+            if (process.HasExited)
+            {
+                absenceVerified = true;
+                if (_relay is null)
+                {
+                    RecordRelayExit(null, "ExitedUnverified");
+                    throw new InvalidOperationException("Recovered relay is absent; its exit result is unverified.");
+                }
+                RecordRelayExit(process.ExitCode, process.ExitCode == 0 ? "ExitedSuccessfully" : "AbnormalExit");
+                if (process.ExitCode != 0) throw new InvalidOperationException("Owned relay exited abnormally before cleanup.");
+                ClearRelay();
+                return;
+            }
             if (!OperatingSystem.IsLinux() || process.StartTime.ToUniversalTime().Ticks != _state.RelayStartTicks ||
                 !File.ReadAllText($"/proc/{process.Id}/cmdline").Contains(_state.RunId, StringComparison.Ordinal) ||
                 !File.ReadAllText($"/proc/{process.Id}/cmdline").Contains(_state.FixtureId, StringComparison.Ordinal)) throw new InvalidDataException();
             var stopped = await _process.RunAsync("/bin/kill", ["-TERM", process.Id.ToString(CultureInfo.InvariantCulture)], "relay-stop", TimeSpan.FromSeconds(5), token);
             if (stopped.ExitCode != 0 || stopped.TimedOut || !stopped.Complete) throw new InvalidDataException();
             await process.WaitForExitAsync(token).WaitAsync(TimeSpan.FromSeconds(5), token);
+            absenceVerified = true;
+            if (_relay is null)
+            {
+                RecordRelayExit(null, "StoppedExitUnverified");
+                throw new InvalidOperationException("Recovered relay stopped; its exit result is unverified.");
+            }
+            RecordRelayExit(process.ExitCode, process.ExitCode == 0 ? "StoppedSuccessfully" : "AbnormalExit");
             if (process.ExitCode != 0) throw new InvalidDataException();
             ClearRelay();
         }
-        catch (ArgumentException) when (_relay is null) { ClearRelay(); } // Recorded PID is already absent.
+        catch (ArgumentException) when (_relay is null)
+        {
+            absenceVerified = true;
+            RecordRelayExit(null, "AbsentExitUnverified");
+            throw new InvalidOperationException("Recorded relay is absent; its exit result is unverified.");
+        }
         finally
         {
             _relayPipes?.Cancel();
+            if (absenceVerified) File.Delete(Path.Combine(_directory, "relay-ready.json.tmp"));
             if (_relayOutput is not null)
             {
                 try { await Task.WhenAll(_relayOutput, _relayError!).WaitAsync(TimeSpan.FromSeconds(2), token); }
@@ -332,6 +365,13 @@ internal sealed class WslcPostgreSqlServer
             }
             if (_relay is null) process?.Dispose();
         }
+    }
+
+    private void RecordRelayExit(int? exitCode, string status)
+    {
+        // A later recovery cannot erase an already observed child exit result.
+        if (exitCode is null && _state.RelayExitCode is not null) return;
+        _state = _state with { RelayExitCode = exitCode, RelayExitStatus = status }; Persist();
     }
 
     private void ClearRelay()
@@ -385,9 +425,11 @@ internal sealed class WslcPostgreSqlServer
     internal static async Task RecoverRunAsync(WslcPostgreSqlRun run)
     {
         run.Validate();
-        var failed = false;
+        var attempted = new List<string>();
+        var unreconciled = new List<string>();
         foreach (var directory in Directory.EnumerateDirectories(run.LocalDirectory))
         {
+            attempted.Add(Path.GetFileName(directory));
             try
             {
                 if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out _) ||
@@ -404,9 +446,11 @@ internal sealed class WslcPostgreSqlServer
                 var server = new WslcPostgreSqlServer(run, state);
                 await server.DisposeAsync();
             }
-            catch (Exception failure) when (failure is not OutOfMemoryException) { failed = true; }
+            catch (Exception failure) when (failure is not OutOfMemoryException) { unreconciled.Add(Path.GetFileName(directory)); }
         }
-        if (failed) throw new InvalidOperationException("Owned fixture run cleanup is incomplete; private records retained.");
+        await File.WriteAllTextAsync(Path.Combine(run.LocalDirectory, "supervisor-recovery-result.json"),
+            JsonSerializer.Serialize(new(1, run.RunId, [.. attempted], [.. unreconciled]), WslcPostgreSqlJson.Default.WslcPostgreSqlRecoveryResult));
+        if (unreconciled.Count != 0) throw new InvalidOperationException("Owned fixture run cleanup is incomplete; private records retained.");
     }
 }
 

@@ -67,10 +67,15 @@ internal sealed record WslcPostgreSqlState(int FormatVersion, string RunId, stri
     string Name, string VolumeName, string HostAddress, int HostPort, string? ContainerId = null,
     bool VolumeAttempted = false, bool VolumeConclusive = false, bool StartAttempted = false, bool StartConclusive = false,
     int? RelayPid = null, long? RelayStartTicks = null, bool Ready = false, bool Cleaned = false,
-    string? FailureCode = null, string? SystemIdentifier = null);
+    string? FailureCode = null, string? SystemIdentifier = null,
+    int? RelayExitCode = null, string? RelayExitStatus = null);
+
+internal sealed record WslcPostgreSqlRecoveryResult(int FormatVersion, string RunId,
+    string[] AttemptedFixtureDirectories, string[] UnreconciledFixtureDirectories);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, WriteIndented = true)]
 [JsonSerializable(typeof(WslcPostgreSqlRun))]
 [JsonSerializable(typeof(WslcPostgreSqlState))]
+[JsonSerializable(typeof(WslcPostgreSqlRecoveryResult))]
 internal sealed partial class WslcPostgreSqlJson : JsonSerializerContext;

@@ -127,6 +127,38 @@ ownership fails visibly and retains the private manifest. Cleanup never prunes
 or touches unrelated containers, volumes, processes or daemon settings. The
 supervisor preserves a failed test exit and reports cleanup failure separately.
 
+Supervisor recovery visits every recorded fixture after individual failures. Its
+finite aggregate allowance is 15 seconds plus 140 seconds per recorded directory:
+the existing 65-second gate bound, 60-second cleanup bound, 10 seconds for bounded
+process/pipe drains and 5 seconds of
+bookkeeping. Counts exceeding the platform timer limit are refused before launch.
+The private recovery plan lists the recorded work; the recovery result lists
+attempted and unreconciled fixture directories. An unreconciled fixture can have
+absent resources while retaining an observed relay failure or an unverified exit.
+An owned child's nonzero exit remains a cleanup failure; an absent recovered
+non-child does not establish a successful exit. Backend and volume cleanup are
+still attempted after a relay error.
+
+Relay readiness is published by writing and closing a sibling temporary file,
+then atomically replacing the final readiness path. Failed publication removes
+only its own temporary file. The fixture also removes that exact temporary path
+after it has verified relay process absence.
+
+Focused supervisor and actual-Linux relay controls require no PostgreSQL server:
+
+```powershell
+./scripts/test-postgresql-wslc-supervisor.ps1 -ResultsDirectory <fresh-control-directory>
+```
+
+```sh
+python3 ./scripts/test-postgresql-loopback-relay.py
+```
+
+The supervisor control replaces only the subprocess boundary with structured
+virtual-time results; it exercises the actual supervisor budget and exit flow
+without waiting for real cleanup timeouts. The relay controls delay an actual
+owned publisher halfway through its write and retain the child outcome in output.
+
 The helper exercises the same real-PostgreSQL assertions as CI. Direct `dotnet test` from Windows without
 a Docker-compatible endpoint or the helper is not evidence of a provider bug.
 
