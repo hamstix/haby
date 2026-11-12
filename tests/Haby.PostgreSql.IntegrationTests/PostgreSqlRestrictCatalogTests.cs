@@ -233,15 +233,26 @@ public sealed partial class PostgreSqlRestrictTests
                 Assert.Empty((await read.GetRequiredService<IDurableOperationJournal>().FindAttemptsAsync(scenario.Restrict, default)));
                 return;
             }
+            if (mode == "resource")
+                Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Fingerprint(accepted.Inputs, graph));
             await using var connection = new NpgsqlConnection(scenario.Connection); await connection.OpenAsync();
             await new NpgsqlCommand("SET session_replication_role = replica", connection).ExecuteNonQueryAsync();
             await using var command = new NpgsqlCommand("UPDATE application_deployment_generations SET graph_json = $1, fingerprint = $2", connection);
             command.Parameters.AddWithValue(DurableOperationGraphCodec.Encode(graph));
-            command.Parameters.AddWithValue(DurableOperationGraphCodec.Fingerprint(accepted.Inputs, graph));
+            // An undeclared owner has no valid fingerprint. Persist the corrupt graph
+            // with the original fingerprint and retain the dispatch/effect refusal oracle.
+            command.Parameters.AddWithValue(DurableOperationGraphCodec.Fingerprint(accepted.Inputs, mode == "resource" ? accepted.Graph : graph));
             await command.ExecuteNonQueryAsync();
         }
         var before = await Policy(scenario.Database); var fault = new Fault("trap");
-        Assert.Equal(DurableExecutionOutcome.InputUnavailable, (await Execute(scenario, true, fault)).Outcome);
+        if (mode == "resource")
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() => Execute(scenario, true, fault));
+            await using var verify = Services(scenario.Connection);
+            Assert.Empty(await verify.GetRequiredService<IDurableOperationJournal>().FindAttemptsAsync(scenario.Restrict, default));
+        }
+        else
+            Assert.Equal(DurableExecutionOutcome.InputUnavailable, (await Execute(scenario, true, fault)).Outcome);
         Assert.Equal(0, fault.Dispatches); Assert.Equal(before, await Policy(scenario.Database));
     }
 

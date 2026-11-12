@@ -75,6 +75,23 @@ public sealed partial class ExactActionAdmissionTests
             Assert.All(plan.Graph.RetainedResources, r => Assert.Equal(2, r.SourceGeneration));
             Assert.All(plan.Graph.ReusedResources, r => Assert.Equal(r.Resource.Value == "jobs" ? 1 : 2, r.SourceGeneration));
             if (dependent && version == 5) Assert.All(plan.Graph.ReusedResources.Where(r => r.SourceGeneration == 2), r => Assert.True(r.Reintroduced));
+            if (absent)
+            {
+                // Removed keys are absent from the target. Their authority remains the
+                // actual original generation, read independently from persisted storage.
+                await using var readOriginal = OutputContext(scenario.Connection);
+                var source = await readOriginal.DeploymentGenerations.AsNoTracking().SingleAsync(x =>
+                    x.DeploymentId == Guid.Parse(scenario.Commit.DeploymentId.ToString()) && x.Generation == 2);
+                var originalInputs = source.Inputs();
+                Assert.All(plan.Graph.RetainedResources, retainedResource =>
+                {
+                    var originalProvider = originalInputs.Providers.Resource(retainedResource.Resource);
+                    Assert.Equal(new ProviderInput.Resource(retainedResource.Resource), originalProvider.Input);
+                    Assert.False(plan.Inputs.Providers.Entries.ContainsKey(originalProvider.Input));
+                    Assert.Equal(scenario.Plan.Inputs.Providers.Resource(ManifestLocalId.Create("jobs")).Instance, originalProvider.Instance);
+                    Assert.Equal(2, retainedResource.SourceGeneration);
+                });
+            }
             var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default));
             Assert.Equal(version, commit.Commit.Generation.Value);
             Assert.Equal(component, Assert.Single(plan.Inputs.Configuration!.Layouts).Component.Value);

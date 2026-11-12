@@ -226,7 +226,7 @@ public sealed partial class OperatorHostIntegrationTests
                 foreach (var (value, outcome) in new[]
                 {
                     ("{corrupt-secret-sentinel", DescriptionStatus.InputCorrupt),
-                    (snapshot.Replace("sample_db", "invalid-secret-sentinel", StringComparison.Ordinal), DescriptionStatus.UnsupportedShape)
+                    (snapshot.Replace("sample_db", "invalid-secret-sentinel", StringComparison.Ordinal), DescriptionStatus.PinnedInputMismatch)
                 })
                 {
                     await SetSnapshot(value);
@@ -244,14 +244,15 @@ public sealed partial class OperatorHostIntegrationTests
                     Assert.Equal(PlanningStatus.Expired, (await client.GetPlanAsync(expiredRequest)).Status);
                 }
                 // Explicit storage trust-boundary regression: a valid-content mutation cannot
-                // be authenticated from a revision reference alone. Review still displays
-                // the physical name saved in the accepted operation, never a replacement.
+                // be authenticated from a revision reference alone. The closed input set
+                // refuses a changed declaration without describing replacement work.
                 await SetSnapshot(snapshot.Replace("sample_db", "other_db", StringComparison.Ordinal));
                 var trustedRead = await client.GetPlanAsync(new PlanRequest { PlanId = original.PlanId });
                 Assert.Equal(PlanningStatus.Closed, trustedRead.Status);
                 Assert.Equal(original.Fingerprint, trustedRead.Plan.Fingerprint);
-                Assert.Equal(DescriptionStatus.Available, trustedRead.Plan.IntendedWork.Status);
-                Assert.Equal("sample_db", trustedRead.Plan.IntendedWork.Action.Target.Name);
+                Assert.Equal(DescriptionStatus.PinnedInputMismatch, trustedRead.Plan.IntendedWork.Status);
+                Assert.Null(trustedRead.Plan.IntendedWork.Action);
+                Assert.DoesNotContain("other_db", trustedRead.ToString());
                 await SetSnapshot(snapshot);
                 Assert.Equal(original, WithoutClosure((await client.GetPlanAsync(new PlanRequest { PlanId = original.PlanId })).Plan));
             }
