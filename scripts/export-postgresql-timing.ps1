@@ -26,8 +26,12 @@ $ns.AddNamespace('t', 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010')
 $definitions = @{}
 foreach ($definition in $document.SelectNodes('//t:TestDefinitions/t:UnitTest', $ns)) {
     $method = $definition.TestMethod
-    $qualified = $method.className + '.' + $method.name
-    if ($qualified -notmatch '^[A-Za-z0-9_.+`]+$') { throw 'Unsafe test method identity; report withheld.' }
+    # Read attributes explicitly: XmlElement.Name otherwise masks a missing name.
+    $className = $method.GetAttribute('className')
+    $methodName = $method.GetAttribute('name')
+    $qualified = $className + '.' + $methodName
+    if ([string]::IsNullOrEmpty($className) -or [string]::IsNullOrEmpty($methodName) -or
+        $qualified -notmatch '^[A-Za-z0-9_.+`]+$') { throw 'Unsafe test method identity; report withheld.' }
     if ($definitions.ContainsKey([string]$definition.id)) { throw 'Duplicate test definition.' }
     $definitions[[string]$definition.id] = $qualified
 }

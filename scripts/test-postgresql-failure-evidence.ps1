@@ -96,6 +96,11 @@ try {
     $raw = Join-Path $directory 'raw.trx'
     $valid = Get-Content $raw -Raw
     foreach ($invalid in @(
+        $valid.Replace('className="Haby.Tests.Fixture" name="Case"', 'className="A" name=""'),
+        $valid.Replace('className="Haby.Tests.Fixture"', 'className=""'),
+        $valid.Replace(' className="Haby.Tests.Fixture"', ''),
+        $valid.Replace('name="Case"', 'name=""'),
+        $valid.Replace(' name="Case"', ''),
         $valid.Replace('name="Case"', ('name="' + $sentinel + ' /"')),
         $valid.Replace('</TestDefinitions>', '<UnitTest id="one"><TestMethod className="Haby.Tests.Fixture" name="Other" /></UnitTest></TestDefinitions>'),
         $valid.Replace('total="1"', 'total="2"'),

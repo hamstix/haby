@@ -12,6 +12,11 @@ join each record's `method` and `case` to a **Failed** entry in the same run's
 `cases.json`. The case hash is unchanged: SHA-256 of the existing qualified
 method, newline and original test name. No diagnostic message is hashed.
 `measurement.json` remains the source/assembly/run attribution for the directory.
+Every definition must have explicit nonempty `className` and `name` attributes;
+incomplete identities reject the report through the fixed safe-error path,
+including removal of stale exporter-owned files. Normal method/case IDs are
+unchanged. The XML element's own name is never a substitute for a missing method
+name attribute.
 
 The envelope contains `schemaVersion`, `failedCases`, `emittedRecords`,
 `omittedRecords`, `truncated`, the four limit fields and `records` (always an
