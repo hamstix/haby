@@ -86,6 +86,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             return new(DurablePlanStatus.ChangeSetStale);
         if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
             return new(DurablePlanStatus.PlanInputUnavailable);
+        if (baseline is not null && !await DurableAggregateCompletion.HasProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
+            return new(DurablePlanStatus.PlanInputUnavailable);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
         var revision = await revisions.FindAsync(reference, cancellationToken);
@@ -264,6 +266,8 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             return (DurablePlanStatus.ChangeSetStale, null);
         if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
             return (DurablePlanStatus.PlanInputUnavailable, null);
+        if (baseline is not null && !await DurableAggregateCompletion.HasProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
+            return (DurablePlanStatus.PlanInputUnavailable, null);
         var revision = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
         var manifest = await revisions.FindAsync(revision, cancellationToken);
@@ -431,6 +435,7 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ?? throw new InvalidDataException();
         if (owner.AppliedGeneration != owner.DesiredGeneration || baseline.EnvironmentRecordId != owner.EnvironmentRecordId ||
             baseline.ApplicationRecordId != owner.ApplicationRecordId) throw new InvalidDataException();
+        if (!await DurableAggregateCompletion.HasProofAsync(db, owner.Id, baseline.Generation, token)) throw new InvalidDataException();
         var baselineInputs = ResourceContinuity.Inputs(baseline);
         var baselineProvider = baselineInputs.Providers.RequireUniformResourceProvider();
         var targetProvider = inputs.Providers.RequireUniformResourceProvider();

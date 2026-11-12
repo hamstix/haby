@@ -33,6 +33,7 @@ public sealed partial class ManifestOperatorService
                     DurableExecutionOutcome.HandlerUnavailable => GenerationExecutionStatus.HandlerUnavailable,
                     DurableExecutionOutcome.OperationNotFound => GenerationExecutionStatus.NotFound,
                     null when (result.Progress.Total > 0 || result.Progress.Reused > 0) && result.Progress.Completed == result.Progress.Total &&
+                        result.Progress.ResourcesReady is not null &&
                         result.Progress.AppliedGeneration >= generation.Value => GenerationExecutionStatus.Succeeded,
                     null => GenerationExecutionStatus.Blocked,
                     _ => throw new InvalidOperationException("Unknown generation outcome.")
@@ -58,6 +59,16 @@ public sealed partial class ManifestOperatorService
             ReintroducedResources = value.Reintroduced
         };
         if (value.AppliedGeneration is { } applied) progress.AppliedGeneration = applied;
+        if (value.ResourcesReady is { } ready) progress.ResourcesReady = new()
+        {
+            CheckpointId = ready.Id.ToString(),
+            FormatVersion = ResourcesReadyCheckpoint.FormatVersion,
+            InputFingerprint = ready.InputFingerprint,
+            ConfirmedAtUtc = ready.ConfirmedAt.ToString("O"),
+            ActiveResources = ready.Resources.Count(x => !x.Retained),
+            RetainedResources = ready.Resources.Count(x => x.Retained),
+            OriginalResults = ready.Resources.Sum(x => x.Operations.Count)
+        };
         if (value.StoppedAt is { } stopped) progress.StoppedOperationId = stopped.Operation.Key.OperationId.Value;
         foreach (var node in value.Nodes)
         {

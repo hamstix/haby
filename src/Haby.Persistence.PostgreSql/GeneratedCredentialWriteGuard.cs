@@ -6,6 +6,7 @@ public sealed partial class ManifestCatalogDbContext
 {
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        ValidateCheckpointWrites();
         // The synchronous branch performs synchronous queries and never waits on asynchronous I/O.
         ValidateGeneratedWritesAsync(false, default).GetAwaiter().GetResult();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -13,6 +14,7 @@ public sealed partial class ManifestCatalogDbContext
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        ValidateCheckpointWrites();
         await ValidateGeneratedWritesAsync(true, cancellationToken);
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }

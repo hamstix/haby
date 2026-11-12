@@ -18,6 +18,7 @@ public sealed class PostgreSqlApplicationLoginAction(IDurableOperationJournal jo
         PostgreSqlDatabaseCreateAction.RegistrationKey.Admission with { ResourceContract = PostgreSqlApplicationLoginContract.Id },
         OperationContractId.Create("postgresql.application-login.create/v1alpha1"));
     public bool RequiresExternalOutput => true;
+    public ExternalOperationOutputIdentity OutputIdentity => new(PostgreSqlRoleEvidenceContract.Contract, PostgreSqlRoleEvidenceContract.Key);
     public DurableActionExecutionKey Key => RegistrationKey;
     public bool Supports(DurableOperationNode node) => Decode(node) is not null;
     internal static PostgreSqlLoginCreateInput? Decode(DurableOperationNode node)

@@ -6,6 +6,22 @@ namespace Haby.Application.Tests;
 public sealed class DurableOperationGraphTests
 {
     [Fact]
+    public void Accepted_output_obligation_is_exact_fingerprinted_and_required_in_graph_format_three()
+    {
+        var plain = new DurableOperationGraph([Node("create")]);
+        var required = new DurableOperationGraph([Node("create") with
+        { RequiresExternalOutput = true, RequiredOutput = new("sample.result/v1", "receipt") }]);
+        var changedKey = new DurableOperationGraph([required.Nodes[0] with { RequiredOutput = new("sample.result/v1", "other") }]);
+        Assert.NotEqual(DurableOperationGraphCodec.Fingerprint(Inputs, plain), DurableOperationGraphCodec.Fingerprint(Inputs, required));
+        Assert.NotEqual(DurableOperationGraphCodec.Fingerprint(Inputs, changedKey), DurableOperationGraphCodec.Fingerprint(Inputs, required));
+        var encoded = DurableOperationGraphCodec.Encode(required);
+        Assert.Equal(required, DurableOperationGraphCodec.Decode(encoded));
+        Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Decode(encoded.Replace("\"Version\":3", "\"Version\":2", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Decode(encoded.Replace("\"RequiresExternalOutput\":true,", "", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([Node("create") with { RequiresExternalOutput = true }]));
+    }
+
+    [Fact]
     public void Retained_membership_and_reintroduction_are_immutable_distinct_direct_source_requirements()
     {
         var baseline = new ResourceReuseBaseline(ApplicationDeploymentId.New(), 4, "v2:" + new string('A', 64));

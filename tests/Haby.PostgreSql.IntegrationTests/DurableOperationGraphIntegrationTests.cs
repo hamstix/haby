@@ -202,6 +202,7 @@ public sealed partial class ExactActionAdmissionTests
             Assert.Equal("Dispatching", operation.State);
             var attempt = await context.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.AttemptId == operation.CurrentAttemptId);
             Assert.Null(attempt.FinishedAt); Assert.Null(attempt.Outcome);
+            Assert.Empty(await context.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
         }
         await GraphSql(scenario.Connection, "ALTER TABLE application_deployments DROP CONSTRAINT test_reject_applied");
         await using var restart = Services(scenario.Connection, boundary);

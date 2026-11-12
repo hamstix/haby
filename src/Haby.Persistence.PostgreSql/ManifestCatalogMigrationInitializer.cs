@@ -17,6 +17,11 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
             applied.Length > expected.Length || !applied.SequenceEqual(expected.Take(applied.Length))))
             throw new InvalidOperationException("Unsupported catalog schema. Explicitly initialize a fresh catalog; external resources remain unchanged.");
         var setBaseLength = Array.IndexOf(expected, "20261112002755_PersistExactProviderInputSets") + 1;
+        var checkpointBaseLength = Array.IndexOf(expected, "20261112035955_PersistResourcesReadyCheckpoints") + 1;
+        if (applied.Length > 0 && applied.Length < checkpointBaseLength &&
+            (await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken) ||
+             await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken)))
+            throw new InvalidOperationException("Superseded generation checkpoint history requires an explicitly initialized fresh catalog; external resources remain unchanged.");
         if (applied.Length > 0 && applied.Length < setBaseLength &&
             (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
              await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))

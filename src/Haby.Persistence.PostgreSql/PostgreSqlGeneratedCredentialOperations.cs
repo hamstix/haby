@@ -28,16 +28,21 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
         try
         {
             await using var context = await contexts.CreateDbContextAsync(cancellationToken);
-            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
             var accepted = await AcceptedAsync(context, producer, cancellationToken);
             if (accepted is null || !GeneratedCredentialContracts.IsProducer(accepted.Value.Node)) return false;
+            var input = GeneratedCredentialInputCodec.Decode(accepted.Value.Node.Input)!;
+            // Resolve material before the aggregate lock. Inside the transaction recheck
+            // exact slot metadata on this connection; never resolve secrets under that lock.
+            if (!await ValidMaterialAsync(context, input, output.Reference, cancellationToken)) return false;
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            await DurableAggregateCompletion.LockAsync(context, Guid.Parse(producer.DeploymentId.ToString()), cancellationToken);
+            var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(context, new(input.Owner, input.SlotId), input.GenerationProfile, cancellationToken);
+            if (slot?.Outcome != GeneratedCredentialOutcome.Existing || slot.Reference != output.Reference) return false;
             var dependencyIds = accepted.Value.Node.Dependencies.Select(d => d.Value).ToArray();
             var deploymentId = Guid.Parse(producer.DeploymentId.ToString());
             if (await context.DurableOperations.CountAsync(r => r.DeploymentId == deploymentId &&
                 r.Generation == producer.Generation.Value && dependencyIds.Contains(r.OperationId) &&
                 r.State == nameof(DurableOperationState.Succeeded), cancellationToken) != dependencyIds.Length) return false;
-            var input = GeneratedCredentialInputCodec.Decode(accepted.Value.Node.Input)!;
-            if (!await ValidMaterialAsync(context, input, output.Reference, cancellationToken)) return false;
             var deployment = Guid.Parse(producer.DeploymentId.ToString());
             var generation = producer.Generation.Value;
             var id = producer.OperationId.Value;
@@ -49,7 +54,11 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
                     .SetProperty(r => r.FinalizedAt, at).SetProperty(r => r.UpdatedAt, at)
                     .SetProperty(r => r.ReasonCode, (string?)null), cancellationToken);
             if (held != 1)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                await transaction.DisposeAsync();
                 return await ConfirmAsync(context, producer, output, cancellationToken);
+            }
             var existing = await OutputAsync(context, producer, cancellationToken);
             if (existing is not null && GeneratedCredentialOutputCodec.Decode(existing.Contract, existing.Payload) != output)
                 return false;
@@ -69,8 +78,8 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
                 r.DispatchedAt == null && r.FinishedAt == null)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
                     .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
-            if (closed != 1 || !await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken))
-                return false;
+            if (closed != 1) return false;
+            _ = await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             committing = true;
             await transaction.CommitAsync(CancellationToken.None);

@@ -246,7 +246,17 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
             string[] dependencies, params OperationOutputRefDocument[] outputs) =>
             new(OperationId.Create(id), resource, new(Key.Admission, OperationContractId.Create(action)), references,
                 new(format, JsonSerializer.Serialize(input, metadata)), dependencies.Select(OperationId.Create).ToArray())
-            { OutputReferences = outputs.Select(o => o.ToReference()).ToArray() };
+            {
+                OutputReferences = outputs.Select(o => o.ToReference()).ToArray(),
+                RequiresExternalOutput = action != "postgresql.database.restrict/v1alpha1",
+                RequiredOutput = action switch
+                {
+                    "postgresql.database.create/v1alpha1" => new(PostgreSqlDatabaseOutputContract.Contract, PostgreSqlDatabaseOutputContract.Key),
+                    "postgresql.application-login.create/v1alpha1" => new(PostgreSqlRoleEvidenceContract.Contract, PostgreSqlRoleEvidenceContract.Key),
+                    "postgresql.application-login.configure-access/v1alpha1" => new(PostgreSqlApplicationConnectionContract.Contract, PostgreSqlApplicationConnectionContract.Key),
+                    _ => null
+                }
+            };
         var dbCreate = pair.Database.Value + "-create";
         var dbRestrict = pair.Database.Value + "-restrict";
         var loginMaterial = pair.Login.Value + "-material";
@@ -293,6 +303,8 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
         var actual = graph.Nodes.Where(n => n.ResourceId == resource).ToArray();
         return expected.Length == actual.Length && expected.Zip(actual).All(p =>
             p.First.Id == p.Second.Id && p.First.Action == p.Second.Action && p.First.References == p.Second.References &&
+            p.First.RequiresExternalOutput == p.Second.RequiresExternalOutput &&
+            p.First.RequiredOutput == p.Second.RequiredOutput &&
             p.First.Input == p.Second.Input && p.First.Dependencies.OrderBy(d => d.Value, StringComparer.Ordinal).SequenceEqual(p.Second.Dependencies) &&
             p.First.OutputReferences.OrderBy(o => o.ProducerOperationId.Value, StringComparer.Ordinal).ThenBy(o => o.OutputContract, StringComparer.Ordinal)
                 .ThenBy(o => o.OutputKey, StringComparer.Ordinal).SequenceEqual(p.Second.OutputReferences));

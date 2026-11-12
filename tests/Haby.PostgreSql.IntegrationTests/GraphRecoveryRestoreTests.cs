@@ -52,6 +52,8 @@ public sealed partial class OperatorHostIntegrationTests
         {
             var node = database.Plan(resourceId, resource, inputs).Single();
             return [node, node with { Id = OperationId.Create("z-sibling"), Action = SiblingKey,
+                RequiresExternalOutput = false,
+                RequiredOutput = null,
                 Input = new("test.graph.sibling-input/v1", "{\"Count\":7}"), Dependencies = [node.Id] }];
         }
     }

@@ -7,7 +7,7 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Atomic external evidence, exact attempt closure and aggregate completion.</summary>
 public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    IEnumerable<IExternalOperationOutputContract> contracts) : IExternalOperationOutputs, IConfigurationOutputEvidence
+    IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec>? codecs = null) : IExternalOperationOutputs, IConfigurationOutputEvidence
 {
     public async ValueTask<AcceptedOperation?> FindAcceptedAsync(DurableOperationKey key, CancellationToken cancellationToken)
     {
@@ -39,12 +39,14 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             await using var context = await contexts.CreateDbContextAsync(cancellationToken);
             var accepted = await AcceptedAsync(context, producer, cancellationToken);
             var contract = accepted is null ? null : contracts.SingleOrDefault(c => c.Producer == accepted.Node.Action);
-            if (accepted is null || contract is null || !contract.Validate(accepted.Node, output) ||
+            if (accepted is null || contract is null || accepted.Node.RequiredOutput != contract.Identity ||
+                contract.Identity != new ExternalOperationOutputIdentity(output.Contract, output.Key) || !contract.Validate(accepted.Node, output) ||
                 !await contract.ValidateAcceptedAsync(producer, accepted, output, cancellationToken)) return false;
             // Adapter validation may resolve other immutable catalog inputs. Release each read's
             // connection before taking the write transaction, including with a one-connection pool.
             await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
             var deployment = Guid.Parse(producer.DeploymentId.ToString());
+            await DurableAggregateCompletion.LockAsync(context, deployment, cancellationToken);
             var generation = producer.Generation.Value;
             var id = producer.OperationId.Value;
             var dependencies = accepted.Node.Dependencies.Select(d => d.Value).ToArray();
@@ -74,7 +76,8 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 r.DispatchedAt != null && r.FinishedAt == null)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
                     .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
-            if (closed != 1 || !await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken)) return false;
+            if (closed != 1) return false;
+            _ = await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             return true;
@@ -143,7 +146,8 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
     {
         var accepted = await AcceptedAsync(context, key, token);
         var contract = accepted is null ? null : contracts.SingleOrDefault(c => c.Producer == accepted.Node.Action);
-        if (accepted is null || contract is null || !contract.Validate(accepted.Node, output) ||
+        if (accepted is null || contract is null || accepted.Node.RequiredOutput != contract.Identity ||
+            contract.Identity != new ExternalOperationOutputIdentity(output.Contract, output.Key) || !contract.Validate(accepted.Node, output) ||
             (validateAccepted && !await contract.ValidateAcceptedAsync(key, accepted, output, token))) return false;
         var row = await OutputAsync(context, key, output.Contract, output.Key, token);
         if (row is null || row.Payload != output.Payload) return false;

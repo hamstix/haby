@@ -46,6 +46,7 @@ public interface IDurableActionHandler
 {
     /// <summary>Execution requires exactly one registered atomic external-output validator for this producer.</summary>
     bool RequiresExternalOutput => false;
+    ExternalOperationOutputIdentity? OutputIdentity => null;
     DurableActionExecutionKey Key { get; }
     ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation,
         CancellationToken cancellationToken);
@@ -69,6 +70,7 @@ public abstract class DurableActionAdmissionHandler<TInput> : IDurableActionAdmi
 public abstract class DurableActionHandler<TInput> : DurableActionAdmissionHandler<TInput>, IDurableActionHandler where TInput : class
 {
     public virtual bool RequiresExternalOutput => false;
+    public virtual ExternalOperationOutputIdentity? OutputIdentity => null;
     public abstract string InputFormat { get; }
     public abstract JsonTypeInfo<TInput> InputTypeInfo { get; }
     protected DurableOperationNode PrepareNode(OperationId id, ManifestLocalId resourceId,
@@ -77,7 +79,8 @@ public abstract class DurableActionHandler<TInput> : DurableActionAdmissionHandl
         var provider = inputs.Providers.Resource(resourceId);
         var references = new DurableActionInputReferences(provider.Environment, provider.Instance, provider.Configuration, provider.Implementation.Value);
         var input = Prepare(resource, references with { Naming = provider.ResourceNaming() }) ?? throw new InvalidDataException("Invalid action input.");
-        return new(id, resourceId, Key, references, new(InputFormat, JsonSerializer.Serialize(input, InputTypeInfo)), []);
+        return new(id, resourceId, Key, references, new(InputFormat, JsonSerializer.Serialize(input, InputTypeInfo)), [])
+        { RequiresExternalOutput = RequiresExternalOutput, RequiredOutput = OutputIdentity };
     }
     public bool Supports(DurableOperationNode node) => Decode(node) is not null;
     public TInput? Decode(DurableOperationNode node)
@@ -102,6 +105,7 @@ public sealed class DurableActionRegistry
     private readonly Dictionary<DurableActionAdmissionKey, IDurableActionAdmissionHandler> admissions = [];
     private readonly Dictionary<DurableActionExecutionKey, IDurableActionHandler> handlers = [];
     private readonly HashSet<DurableActionExecutionKey> outputProducers;
+    private readonly Dictionary<DurableActionExecutionKey, ExternalOperationOutputIdentity> outputIdentities;
 
     public DurableActionRegistry(IEnumerable<IDurableActionAdmissionHandler> registrations,
         IEnumerable<IDurableActionHandler> executors, IEnumerable<IExternalOperationOutputContract>? outputs = null)
@@ -110,6 +114,7 @@ public sealed class DurableActionRegistry
         if (contracts.GroupBy(c => c.Producer).Any(g => g.Count() != 1))
             throw new InvalidOperationException("External output registration is ambiguous.");
         outputProducers = contracts.Select(c => c.Producer).ToHashSet();
+        outputIdentities = contracts.ToDictionary(c => c.Producer, c => c.Identity);
         foreach (var handler in registrations)
         {
             var key = handler.Key;
@@ -127,8 +132,26 @@ public sealed class DurableActionRegistry
     }
 
     public IDurableActionAdmissionHandler? Find(DurableActionAdmissionKey key) => admissions.GetValueOrDefault(key);
+    internal DurableOperationNode FreezeEvidence(DurableOperationNode node)
+    {
+        // Exact registered metadata wins while planning. Absence never writes a false
+        // obligation over the typed planner's explicit declaration.
+        if (handlers.TryGetValue(node.Action, out var handler))
+        {
+            if (handler.RequiresExternalOutput != (handler.OutputIdentity is not null))
+                throw new InvalidDataException("Action evidence metadata is incomplete.");
+            if (node.RequiresExternalOutput != handler.RequiresExternalOutput || node.RequiredOutput != handler.OutputIdentity)
+                throw new InvalidDataException("Planned evidence obligation disagrees with the exact action registration.");
+        }
+        if (outputIdentities.TryGetValue(node.Action, out var identity) && node.RequiredOutput != identity)
+            throw new InvalidDataException("Planned evidence obligation disagrees with the exact output registration.");
+        return node;
+    }
     public IDurableActionHandler? Find(DurableActionExecutionKey key) =>
         handlers.TryGetValue(key, out var handler) && (!handler.RequiresExternalOutput || outputProducers.Contains(key)) ? handler : null;
+    internal bool MatchesEvidence(DurableOperationNode node) => Find(node.Action) is { } handler &&
+        node.RequiresExternalOutput == handler.RequiresExternalOutput && node.RequiredOutput == handler.OutputIdentity &&
+        (node.RequiredOutput is null || outputIdentities.TryGetValue(node.Action, out var identity) && identity == node.RequiredOutput);
 
 }
 
@@ -210,7 +233,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
                 ? composer.Plan(spec, resource.Key, inputs, configuration)
                 : handler.Plan(resource.Key, resource.Value, inputs));
         }
-        var graph = new DurableOperationGraph(nodes);
+        var graph = new DurableOperationGraph(nodes.Select(registry.FreezeEvidence));
         graph.ValidateReferences(inputs);
         if (!ValidateGraph(spec, provider, inputs, configuration, graph))
             throw new InvalidDataException("Graph ownership or contracts are inconsistent.");
@@ -247,7 +270,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
             return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
                 : handler.Plan(r.Key, r.Value, inputs);
         });
-        var graph = new DurableOperationGraph(nodes, reused, baseline, retained);
+        var graph = new DurableOperationGraph(nodes.Select(registry.FreezeEvidence), reused, baseline, retained);
         graph.ValidateReferences(inputs);
         if (!spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(reused.Select(r => r.Resource))) ||
             graph.Nodes.Any(n => !spec.Resources.TryGetValue(n.ResourceId, out var declared) ||
@@ -301,5 +324,5 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         return expected.Equals(graph);
     }
 
-    public bool Supports(DurableOperationGraph graph) => graph.Nodes.All(n => registry.Find(n.Action)?.Supports(n) == true);
+    public bool Supports(DurableOperationGraph graph) => graph.Nodes.All(n => registry.MatchesEvidence(n) && registry.Find(n.Action)?.Supports(n) == true);
 }

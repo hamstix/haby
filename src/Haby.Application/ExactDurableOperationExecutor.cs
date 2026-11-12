@@ -69,7 +69,7 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
         // before any effect if even one mandatory exact handler is absent or cannot decode it.
         if (progress.Nodes.Any(n => registry.Find(n.Operation.Node.Action) is null))
             return new(DurableExecutionOutcome.HandlerUnavailable, operation);
-        if (progress.Nodes.Any(n => registry.Find(n.Operation.Node.Action)!.Supports(n.Operation.Node) != true))
+        if (progress.Nodes.Any(n => !registry.MatchesEvidence(n.Operation.Node) || registry.Find(n.Operation.Node.Action)!.Supports(n.Operation.Node) != true))
             return new(DurableExecutionOutcome.InputUnavailable, operation);
         var handler = registry.Find(operation.Node.Action);
         if (handler is null) return new(DurableExecutionOutcome.HandlerUnavailable, operation);

@@ -23,6 +23,7 @@ public sealed partial class ExactActionAdmissionTests
     {
         public const string Contract = "sample.queue-evidence/v1";
         public DurableActionExecutionKey Producer => Key;
+        public ExternalOperationOutputIdentity Identity => new(boundary.OutputIdentityOverride ?? Contract, "receipt");
         public static ExternalOperationOutput Encode(QueueEvidence evidence) => new(Contract, "receipt",
             JsonSerializer.Serialize(evidence, QueueEvidenceJsonContext.Default.QueueEvidence));
         public static QueueEvidence? Decode(ExternalOperationOutput output)
@@ -34,11 +35,12 @@ public sealed partial class ExactActionAdmissionTests
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => node.Action == Producer &&
             node.Input.Format == "sample.queue-create/v1" && Decode(output) is { QueueName: "jobs", BrokerTarget: "queue-broker", Receipt: { Length: > 0 } } &&
             JsonSerializer.Deserialize(node.Input.Json, QueueJsonContext.Default.QueueCreateInput)?.QueueName == "jobs";
-        public ValueTask<bool> ValidateReuseAsync(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
-            IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration, CancellationToken token) =>
-            new(!boundary.RejectAcceptedOutput && Validate(accepted.Node, output) && configuration.ImplementationId == "sample.impl/v1" &&
+        public bool ValidateReuse(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
+            IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration,
+            IReadOnlyCollection<ProviderResourceReservation> reservations) =>
+            !boundary.RejectAcceptedOutput && Validate(accepted.Node, output) && configuration.ImplementationId == "sample.impl/v1" &&
                 Decode(output)?.CredentialSecretId == boundary.DeliveryCredential?.SecretId.ToString() &&
-                Decode(output)?.CredentialVersionId == boundary.DeliveryCredential?.SecretVersionId.ToString());
+                Decode(output)?.CredentialVersionId == boundary.DeliveryCredential?.SecretVersionId.ToString();
         public async ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
             ExternalOperationOutput output, CancellationToken cancellationToken)
         {
@@ -93,6 +95,7 @@ public sealed partial class ExactActionAdmissionTests
             (!boundary.DependentResources || RelatedClosure(target, target, resource, retain: false));
 
         public override bool RequiresExternalOutput => true;
+        public override ExternalOperationOutputIdentity OutputIdentity => new(QueueEvidenceContract.Contract, "receipt");
         public override DurableActionExecutionKey Key => ExactActionAdmissionTests.Key;
         public override string InputFormat => "sample.queue-create/v1";
         public override JsonTypeInfo<QueueCreateInput> InputTypeInfo => QueueJsonContext.Default.QueueCreateInput;
@@ -107,6 +110,8 @@ public sealed partial class ExactActionAdmissionTests
             return [producer, producer with
             {
                 Id = QueueEvidenceConsumerId, Action = QueueSubscribeKey,
+                RequiresExternalOutput = false,
+                RequiredOutput = null,
                 Input = new("sample.queue-subscribe/v1", JsonSerializer.Serialize(new QueueSubscribeInput("jobs"), QueueEvidenceJsonContext.Default.QueueSubscribeInput)),
                 Dependencies = [producer.Id], OutputReferences = [QueueEvidenceSelector]
             }];

@@ -11,6 +11,7 @@ public sealed class PostgreSqlRoleEvidenceContract : IExternalOperationOutputCon
     public const string Contract = "postgresql.role-evidence/v1";
     public const string Key = "role";
     public DurableActionExecutionKey Producer => PostgreSqlApplicationLoginAction.RegistrationKey;
+    public ExternalOperationOutputIdentity Identity => new(Contract, Key);
     public static ExternalOperationOutput Encode(PostgreSqlRoleEvidence value) => new(Contract, Key,
         JsonSerializer.Serialize(value, PostgreSqlRoleJsonContext.Default.PostgreSqlRoleEvidence));
     public static PostgreSqlRoleEvidence? Decode(ExternalOperationOutput output)
