@@ -22,9 +22,12 @@ internal class WslcPostgreSqlProcess(string privateDirectory)
         {
             StartInfo = new ProcessStartInfo(executable)
             {
-                UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             }
         };
         // A Windows PowerShell child must resolve its own modules when invoked

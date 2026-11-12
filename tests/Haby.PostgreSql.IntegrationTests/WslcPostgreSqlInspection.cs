@@ -66,12 +66,12 @@ internal static class WslcPostgreSqlInspection
             count = array.RootElement.EnumerateArray().Count(x => Text(x, field) == exactName);
         }
         else
-        foreach (var line in jsonLines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            using var document = JsonDocument.Parse(line);
-            var root = document.RootElement;
-            if (Text(root, field) == exactName) count++;
-        }
+            foreach (var line in jsonLines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement;
+                if (Text(root, field) == exactName) count++;
+            }
         if (count > 1) throw new InvalidDataException("Owned resource inventory is ambiguous.");
         return count == 1;
     }

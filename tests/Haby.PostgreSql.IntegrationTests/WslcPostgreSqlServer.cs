@@ -108,7 +108,12 @@ internal sealed class WslcPostgreSqlServer
             if (_run.UseLoopbackRelay) clientPort = await StartRelayAsync(startup.Token);
             var connection = new NpgsqlConnectionStringBuilder
             {
-                Host = "127.0.0.1", Port = clientPort, Database = "postgres", Username = "postgres", Password = password, Pooling = false
+                Host = "127.0.0.1",
+                Port = clientPort,
+                Database = "postgres",
+                Username = "postgres",
+                Password = password,
+                Pooling = false
             };
             foreach (var host in new[] { "127.0.0.1", "localhost" }) await VerifyTcpAsync(connection, host, system, startup.Token);
             // Probe-only Timeout/CommandTimeout never enter the test connection.
@@ -270,8 +275,11 @@ internal sealed class WslcPostgreSqlServer
         var script = Path.Combine(AppContext.BaseDirectory, "postgresql-loopback-relay.py");
         var ready = Path.Combine(_directory, "relay-ready.json");
         _relayPipes = new CancellationTokenSource();
-        _relay = new Process { StartInfo = new ProcessStartInfo(_run.PythonPath)
-        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } };
+        _relay = new Process
+        {
+            StartInfo = new ProcessStartInfo(_run.PythonPath)
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true }
+        };
         foreach (var argument in new[] { script, "--run-id", _state.RunId, "--fixture-id", _state.FixtureId,
             "--upstream-host", _state.HostAddress, "--upstream-port", _state.HostPort.ToString(CultureInfo.InvariantCulture), "--ready", ready,
             "--events", Path.Combine(_directory, "relay-events.jsonl") })
