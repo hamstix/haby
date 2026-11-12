@@ -158,6 +158,7 @@ internal sealed class WslcPostgreSqlServer
         try { await CleanupCoreAsync(); }
         catch (Exception failure) when (failure is not OutOfMemoryException)
         {
+            await RecordFailureAsync("cleanup-failure-private.txt", failure);
             MarkIncomplete();
             throw new InvalidOperationException("Owned PostgreSQL fixture cleanup is incomplete; exact ownership records retained.");
         }
@@ -422,31 +423,48 @@ internal sealed class WslcPostgreSqlServer
         catch (UnauthorizedAccessException) { }
     }
 
-    internal static async Task RecoverRunAsync(WslcPostgreSqlRun run)
+    internal static Task RecoverRunAsync(WslcPostgreSqlRun run)
+    {
+        run.Validate();
+        return RecoverRunAsync(run, Directory.EnumerateDirectories(run.LocalDirectory));
+    }
+
+    // Supplies directory observations only; ownership and recovery remain real.
+    internal static async Task RecoverRunAsync(WslcPostgreSqlRun run, IEnumerable<string> directories)
     {
         run.Validate();
         var attempted = new List<string>();
         var unreconciled = new List<string>();
-        foreach (var directory in Directory.EnumerateDirectories(run.LocalDirectory))
+        // Exhaust enumeration before disposal can mutate parent directory entries.
+        // Deduplicate exact paths, not fixture names that could hide a foreign path.
+        var snapshot = directories.Select(Path.GetFullPath).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        var work = new List<(string Directory, WslcPostgreSqlServer? Server)>();
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(run.LocalDirectory));
+        var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var directory in snapshot)
         {
-            attempted.Add(Path.GetFileName(directory));
+            WslcPostgreSqlServer? server = null;
             try
             {
-                if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out _) ||
+                if (!string.Equals(Path.GetDirectoryName(directory), root, pathComparison) ||
+                    !Guid.TryParseExact(Path.GetFileName(directory), "N", out _) ||
                     new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException();
                 var file = Path.Combine(directory, "fixture.json");
-                if (!File.Exists(file))
-                {
-                    if (Directory.EnumerateFiles(directory).Any()) throw new InvalidDataException();
-                    continue;
-                }
                 var state = JsonSerializer.Deserialize(await File.ReadAllTextAsync(file), WslcPostgreSqlJson.Default.WslcPostgreSqlState)
                     ?? throw new InvalidDataException();
                 if (Path.GetFileName(directory) != state.FixtureId) throw new InvalidDataException();
-                var server = new WslcPostgreSqlServer(run, state);
-                await server.DisposeAsync();
+                server = new WslcPostgreSqlServer(run, state);
             }
-            catch (Exception failure) when (failure is not OutOfMemoryException) { unreconciled.Add(Path.GetFileName(directory)); }
+            catch (Exception failure) when (failure is not OutOfMemoryException) { }
+            work.Add((directory, server));
+        }
+        foreach (var item in work)
+        {
+            var fixture = Path.GetFileName(item.Directory);
+            attempted.Add(fixture);
+            if (item.Server is null) { unreconciled.Add(fixture); continue; }
+            try { await item.Server.DisposeAsync(); }
+            catch (Exception failure) when (failure is not OutOfMemoryException) { unreconciled.Add(fixture); }
         }
         await File.WriteAllTextAsync(Path.Combine(run.LocalDirectory, "supervisor-recovery-result.json"),
             JsonSerializer.Serialize(new(1, run.RunId, [.. attempted], [.. unreconciled]), WslcPostgreSqlJson.Default.WslcPostgreSqlRecoveryResult));

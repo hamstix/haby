@@ -23,6 +23,88 @@ public sealed class WslcPostgreSqlLifecycleTests(ITestOutputHelper output)
         Assert.Equal(3, Directory.GetFiles(run.LocalDirectory, "*.lifecycle.txt", SearchOption.AllDirectories).Length);
     }
 
+    [Fact]
+    public async Task Recovery_snapshots_distinct_work_before_disposal_mutates_parent()
+    {
+        using var context = new OwnedControl();
+        var run = context.Run with { WslcPath = Path.Combine(context.Run.LocalDirectory, "missing-owned-cli") };
+        for (var index = 0; index < 3; index++) _ = new WslcPostgreSqlServer(run);
+        var directories = Directory.GetDirectories(run.LocalDirectory).Order(StringComparer.Ordinal).ToArray();
+        IEnumerable<string> Observations()
+        {
+            yield return directories[2];
+            Assert.False(File.Exists(Path.Combine(run.LocalDirectory, ".cleanup-incomplete")));
+            yield return directories[0];
+            yield return directories[2];
+            yield return directories[1];
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => WslcPostgreSqlServer.RecoverRunAsync(run, Observations()));
+        var result = JsonSerializer.Deserialize(await File.ReadAllTextAsync(Path.Combine(run.LocalDirectory, "supervisor-recovery-result.json")),
+            WslcPostgreSqlJson.Default.WslcPostgreSqlRecoveryResult)!;
+        var expected = directories.Select(Path.GetFileName).ToArray();
+        Assert.Equal(expected, result.AttemptedFixtureDirectories);
+        Assert.Equal(expected, result.UnreconciledFixtureDirectories);
+        Assert.Equal(3, Directory.GetFiles(run.LocalDirectory, "*.lifecycle.txt", SearchOption.AllDirectories).Length);
+    }
+
+    [Fact]
+    public async Task Recovery_reports_missing_state_and_foreign_directory_while_visiting_owned_records()
+    {
+        using var context = new OwnedControl();
+        var run = context.Run with { WslcPath = Path.Combine(context.Run.LocalDirectory, "missing-owned-cli") };
+        _ = new WslcPostgreSqlServer(run);
+        var owned = Directory.GetDirectories(run.LocalDirectory).Single();
+        var missing = Path.Combine(run.LocalDirectory, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(missing);
+        var foreign = run.LocalDirectory + "-foreign";
+        Directory.CreateDirectory(foreign);
+        var sentinel = Path.Combine(foreign, "unowned.txt");
+        File.WriteAllText(sentinel, "Unrelated directory must remain untouched.");
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => WslcPostgreSqlServer.RecoverRunAsync(run, [missing, foreign, owned]));
+            var result = JsonSerializer.Deserialize(await File.ReadAllTextAsync(Path.Combine(run.LocalDirectory, "supervisor-recovery-result.json")),
+                WslcPostgreSqlJson.Default.WslcPostgreSqlRecoveryResult)!;
+            var expected = new[] { missing, foreign, owned }.Order(StringComparer.Ordinal).Select(Path.GetFileName).ToArray();
+            Assert.Equal(expected, result.AttemptedFixtureDirectories);
+            Assert.Equal(expected, result.UnreconciledFixtureDirectories);
+            Assert.Single(Directory.GetFiles(owned, "*.lifecycle.txt"));
+            Assert.True(File.Exists(sentinel));
+        }
+        finally { Directory.Delete(foreign, true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Disposal_retains_private_failure_without_exposing_it_or_replacing_primary(bool blockEvidenceWrite)
+    {
+        using var context = new OwnedControl();
+        var cli = new ControlledCli(context, null, wrongLabel: false);
+        var server = new WslcPostgreSqlServer(context.Run, cli);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => server.StartAsync());
+        var evidence = Path.Combine(Directory.GetDirectories(context.Run.LocalDirectory).Single(), "cleanup-failure-private.txt");
+        if (blockEvidenceWrite) Directory.CreateDirectory(evidence);
+        cli.FailureOperation = "owned-name-readback";
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(server.DisposeAsync);
+        Assert.Equal("Owned PostgreSQL fixture cleanup is incomplete; exact ownership records retained.", failure.Message);
+        Assert.Null(failure.InnerException);
+        Assert.DoesNotContain(ControlledCli.PrivateFailureMarker, failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("CleanupIncomplete", context.State.FailureCode);
+        Assert.True(cli.Stops > 0);
+        Assert.True(cli.VolumeRemovals > 0);
+        if (blockEvidenceWrite) Assert.True(Directory.Exists(evidence));
+        else
+        {
+            Assert.True(File.Exists(evidence));
+            var text = await File.ReadAllTextAsync(evidence);
+            Assert.Contains(nameof(IOException), text, StringComparison.Ordinal);
+            Assert.Contains(ControlledCli.PrivateFailureMarker, text, StringComparison.Ordinal);
+            Assert.Contains(nameof(ControlledCli.RunAsync), text, StringComparison.Ordinal);
+        }
+    }
+
     [Theory]
     [InlineData(0, false)]
     [InlineData(7, false)]
@@ -170,11 +252,14 @@ public sealed class WslcPostgreSqlLifecycleTests(ITestOutputHelper output)
         private bool _volume = existingResources;
         internal int Stops { get; private set; }
         internal int VolumeRemovals { get; private set; }
+        internal string? FailureOperation { get; set; }
+        internal const string PrivateFailureMarker = "private-cleanup-control-evidence";
 
         internal override Task<Result> RunAsync(string executable, IReadOnlyList<string> arguments, string operation,
             TimeSpan timeout, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (operation == FailureOperation) throw new IOException(PrivateFailureMarker);
             var state = context.State;
             var text = "";
             switch (operation)
