@@ -106,7 +106,7 @@ public sealed partial class ExactActionAdmissionTests
         public override IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs)
         {
             var producer = PrepareNode(resourceId.Value == "jobs" ? QueueEvidenceProducerId : OperationId.Create(resourceId.Value + "-create"), resourceId, resource, inputs);
-            if (resourceId.Value != "jobs") return [producer];
+            if (resourceId.Value != "jobs" || boundary.ExternalEvidenceOnly) return [producer];
             return [producer, producer with
             {
                 Id = QueueEvidenceConsumerId, Action = QueueSubscribeKey,

@@ -335,7 +335,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
                 .SetProperty(row => row.Outcome, nameof(DurableAttemptOutcome.Succeeded)),
             cancellationToken);
         if (closed != 1) throw new InvalidOperationException("Create operation attempt is inconsistent.");
-        _ = await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken, outputContracts, codecs: codecs);
+        _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, outputContracts, codecs: codecs);
         await transaction.CommitAsync(CancellationToken.None);
         return true;
     }

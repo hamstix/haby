@@ -96,7 +96,7 @@ public sealed partial class ExactActionAdmissionTests
     [InlineData("publication")]
     [InlineData("attempt")]
     [InlineData("aggregate")]
-    public async Task Failed_publication_or_finalization_rolls_back_output_success_and_attempt_then_reuses_slot(string mode)
+    public async Task Publication_and_aggregate_failures_preserve_their_distinct_atomic_boundaries(string mode)
     {
         var boundary = new QueueBoundary { Generated = true };
         var scenario = await GraphCase(boundary);
@@ -120,19 +120,22 @@ public sealed partial class ExactActionAdmissionTests
         if (mode == "attempt") constraint += " NOT VALID";
         await GraphSql(scenario.Connection, constraint);
         await using (var failed = Services(scenario.Connection, boundary))
-            Assert.Equal(DurableExecutionOutcome.RetryableFailure,
+            Assert.Equal(mode == "aggregate" ? DurableExecutionOutcome.Succeeded : DurableExecutionOutcome.RetryableFailure,
                 (await failed.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(producer, default)).Outcome);
         SecretRef reference;
         byte[] bytes;
         await using (var verify = OutputContext(scenario.Connection))
         {
             Assert.Equal(1, await verify.GeneratedCredentialSlots.CountAsync());
-            Assert.Equal(0, await verify.OperationOutputs.CountAsync());
+            Assert.Equal(mode == "aggregate" ? 1 : 0, await verify.OperationOutputs.CountAsync());
+            Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
             var operation = await verify.DurableOperations.AsNoTracking().SingleAsync(r => r.OperationId == producer.OperationId.Value);
-            Assert.Equal("Preparing", operation.State);
-            Assert.Null(operation.FinalizedAt);
+            Assert.Equal(mode == "aggregate" ? "Succeeded" : "Preparing", operation.State);
+            if (mode == "aggregate") Assert.NotNull(operation.FinalizedAt); else Assert.Null(operation.FinalizedAt);
             var attempt = await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.AttemptId == operation.CurrentAttemptId);
-            Assert.Null(attempt.FinishedAt); Assert.Null(attempt.Outcome); Assert.Null(attempt.DispatchedAt);
+            if (mode == "aggregate") { Assert.NotNull(attempt.FinishedAt); Assert.Equal("Succeeded", attempt.Outcome); }
+            else { Assert.Null(attempt.FinishedAt); Assert.Null(attempt.Outcome); }
+            Assert.Null(attempt.DispatchedAt);
             Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
             var slot = await verify.GeneratedCredentialSlots.AsNoTracking().SingleAsync();
             reference = new(SecretId.Parse(slot.SecretId.ToString()), SecretVersionId.Parse(slot.VersionId.ToString()));
@@ -146,13 +149,15 @@ public sealed partial class ExactActionAdmissionTests
             Assert.True(Enumerable.SequenceEqual(bytes, await CredentialBytes(restart, producer, reference)), "Retry must retain exact material.");
             var output = await restart.GetRequiredService<IGeneratedCredentialOperations>().ConsumeAsync(ConsumerKey(scenario.Commit), PasswordSelector, default);
             Assert.Equal(reference, output!.Reference);
+            if (mode == "aggregate")
+                Assert.Null((await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(producer.DeploymentId, producer.Generation, default)).StopOutcome);
         }
         Array.Clear(bytes);
         await using var check = OutputContext(scenario.Connection);
         Assert.Equal(1, await check.GeneratedCredentialCreationAudits.CountAsync());
         Assert.Equal(1, await check.OperationOutputs.CountAsync());
         Assert.Equal(1, await check.DurableOperationAttempts.CountAsync(r => r.OperationId == producer.OperationId.Value && r.Outcome == "Succeeded"));
-        Assert.Equal(1, await check.DurableOperationAttempts.CountAsync(r => r.OperationId == producer.OperationId.Value && r.Outcome == "AbandonedBeforeDispatch"));
+        Assert.Equal(mode == "aggregate" ? 0 : 1, await check.DurableOperationAttempts.CountAsync(r => r.OperationId == producer.OperationId.Value && r.Outcome == "AbandonedBeforeDispatch"));
     }
 
     [Theory]

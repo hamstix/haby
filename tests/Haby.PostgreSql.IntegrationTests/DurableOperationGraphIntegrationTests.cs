@@ -183,7 +183,7 @@ public sealed partial class ExactActionAdmissionTests
     }
 
     [Fact]
-    public async Task Failed_finalization_rolls_back_final_success_and_attempt_close_with_aggregate_advance()
+    public async Task Aggregate_persistence_failure_retains_confirmed_last_node_and_resumes_without_replay()
     {
         var boundary = new QueueBoundary { Graph = true, Mode = "retry", StopId = "30-independent" };
         var scenario = await GraphCase(boundary);
@@ -194,21 +194,21 @@ public sealed partial class ExactActionAdmissionTests
         await using (var failing = Services(scenario.Connection, boundary))
             await Assert.ThrowsAsync<PostgresException>(() => failing.GetRequiredService<DurableGenerationRunner>()
                 .RunAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default).AsTask());
-        await AssertGraphCatalog(scenario.Connection, 2, null, 3);
+        await AssertGraphCatalog(scenario.Connection, 3, null, 3);
         await using (var verify = Services(scenario.Connection, boundary))
         await using (var context = await verify.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
         {
             var operation = await context.DurableOperations.AsNoTracking().SingleAsync(r => r.OperationId == "30-independent");
-            Assert.Equal("Dispatching", operation.State);
+            Assert.Equal("Succeeded", operation.State);
             var attempt = await context.DurableOperationAttempts.AsNoTracking().SingleAsync(r => r.AttemptId == operation.CurrentAttemptId);
-            Assert.Null(attempt.FinishedAt); Assert.Null(attempt.Outcome);
+            Assert.NotNull(attempt.FinishedAt); Assert.Equal("Succeeded", attempt.Outcome);
             Assert.Empty(await context.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
         }
         await GraphSql(scenario.Connection, "ALTER TABLE application_deployments DROP CONSTRAINT test_reject_applied");
         await using var restart = Services(scenario.Connection, boundary);
         var stopped = await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default);
-        Assert.Equal(DurableExecutionOutcome.NeedsAttention, stopped.StopOutcome);
-        Assert.Equal(3, boundary.Calls); // The externally successful uncertain final step never repeats.
+        Assert.Null(stopped.StopOutcome); Assert.Equal(1, stopped.Progress!.AppliedGeneration);
+        Assert.Equal(3, boundary.Calls); // The confirmed final step never repeats.
     }
 
     [Fact]

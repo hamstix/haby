@@ -77,7 +77,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
                     .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
             if (closed != 1) return false;
-            _ = await DurableAggregateCompletion.TryAdvanceAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs);
+            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             return true;

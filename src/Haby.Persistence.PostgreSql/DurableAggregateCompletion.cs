@@ -1,5 +1,6 @@
 using Haby.Application;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Haby.Persistence.PostgreSql;
 
@@ -9,6 +10,40 @@ internal static partial class DurableAggregateCompletion
     // changing operations. No Provider I/O, SecretStore call or second connection here.
     internal static Task LockAsync(ManifestCatalogDbContext context, Guid deployment, CancellationToken token) =>
         context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {deployment} FOR UPDATE", token);
+
+    // Confirmed operation/output/attempt writes precede this savepoint. Only the
+    // checkpoint and Applied transition may roll back independently of that evidence.
+    // Recovery decisions deliberately use TryAdvanceAsync directly instead.
+    internal static async Task<bool> TryAdvanceConfirmedAsync(ManifestCatalogDbContext context, Guid deployment,
+        long generation, CancellationToken token, IEnumerable<IExternalOperationOutputContract>? contracts = null,
+        IEnumerable<IProviderConfigurationCodec>? codecs = null)
+    {
+        var transaction = context.Database.CurrentTransaction ?? throw new InvalidOperationException("Completion requires a transaction.");
+        const string savepoint = "haby_resources_ready";
+        var original = context.ChangeTracker.Entries<GenerationStageCheckpointRow>().Select(x => x.Entity).ToHashSet();
+        await transaction.CreateSavepointAsync(savepoint, token);
+        bool advanced;
+        try
+        {
+            advanced = await TryAdvanceAsync(context, deployment, generation, token, contracts, codecs: codecs);
+        }
+        catch (Exception error) when (error is PostgresException or DbUpdateException { InnerException: PostgresException })
+        {
+            // Only a server-reported database error can be recovered this way. A
+            // connection, cancellation, rollback or commit failure remains explicit.
+            advanced = false;
+        }
+        if (!advanced)
+        {
+            await transaction.RollbackToSavepointAsync(savepoint, token);
+            // SaveChanges may have accepted the inserted receipt before a later
+            // ExecuteUpdate failed; rollback does not restore EF's tracked state.
+            foreach (var entry in context.ChangeTracker.Entries<GenerationStageCheckpointRow>().Where(x => !original.Contains(x.Entity)).ToArray())
+                entry.State = EntityState.Detached;
+        }
+        await transaction.ReleaseSavepointAsync(savepoint, token);
+        return advanced;
+    }
 
     internal static async Task<bool> TryAdvanceAsync(ManifestCatalogDbContext context, Guid deployment,
         long generation, CancellationToken token, IEnumerable<IExternalOperationOutputContract>? contracts = null,

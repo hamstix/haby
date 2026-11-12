@@ -59,8 +59,12 @@ Confirmed operation/output completion is not rolled back merely because the
 aggregate lacks sufficient readiness evidence. Mixed generations preserve new
 confirmed effects while unavailable reused-peer evidence blocks aggregate
 completion. The runner can retry the completion boundary after that evidence is
-available, without redispatching successful nodes. Database/commit failure still
-uses the existing uncertain-write barriers and idempotent confirmation rules.
+available, without redispatching successful nodes. A savepoint starts after the
+confirmed operation/output/attempt writes and encloses all checkpoint and Applied
+changes. Recoverable server-reported database errors roll back that aggregate
+boundary and detach the staged receipt before committing the confirmed result.
+Connection, cancellation, savepoint and commit failures retain the existing
+uncertain-write barriers; no transaction failure is assumed to have committed.
 
 Recovery inserts the real accepted decision before calculating the proof, in the
 same transaction as operation completion, checkpoint and Applied advancement. Its
@@ -71,7 +75,8 @@ restrictions remain unchanged.
 
 Adapter reuse validation receives the transaction's exact reservation snapshot
 through a synchronous metadata-only contract. It cannot rent another connection
-through that seam. Generated material validation precedes the new aggregate lock;
+through that seam. Generated producers check dependencies before material
+resolution and recheck them under the lock. Material validation precedes the lock;
 inside the boundary only exact catalog metadata is checked. There is no Provider
 or network I/O or SecretStore resolution under that lock.
 

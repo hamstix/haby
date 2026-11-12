@@ -162,6 +162,57 @@ public sealed partial class ExactActionAdmissionTests
         Assert.Equal(3, await final.DurableOperationAttempts.CountAsync()); Assert.Equal(2, await final.OperationOutputs.CountAsync());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Aggregate_database_failure_preserves_confirmed_output_and_repeated_resume_never_replays(bool appliedFailure)
+    {
+        var boundary = new QueueBoundary { ExternalEvidence = true, ExternalEvidenceOnly = true };
+        var scenario = await GraphCase(boundary);
+        var key = new DurableOperationKey(scenario.Commit.DeploymentId, scenario.Commit.Generation, QueueEvidenceProducerId);
+        await GraphSql(scenario.Connection, appliedFailure
+            ? "ALTER TABLE application_deployments ADD CONSTRAINT test_aggregate_failure CHECK (applied_generation IS NULL)"
+            : "ALTER TABLE generation_stage_checkpoints ADD CONSTRAINT test_aggregate_failure CHECK (generation < 1)");
+        Guid attemptId;
+        var output = QueueEvidenceContract.Encode(new("jobs", "queue-broker", "accepted-1"));
+        await using (var act = Services(scenario.Connection, boundary))
+        {
+            var journal = act.GetRequiredService<IDurableOperationJournal>();
+            var attempt = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(key, DateTimeOffset.UtcNow, default));
+            attemptId = attempt.AttemptId;
+            Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(key, attemptId, DateTimeOffset.UtcNow, default));
+            boundary.Create(new("jobs"));
+            Assert.True(await act.GetRequiredService<IExternalOperationOutputs>().CompleteAsync(key, attemptId, output, DateTimeOffset.UtcNow, default));
+        }
+        for (var failure = 0; failure < 2; failure++)
+        {
+            await using var restart = Services(scenario.Connection, boundary);
+            var runner = restart.GetRequiredService<DurableGenerationRunner>();
+            var error = await Record.ExceptionAsync(() => runner.RunAsync(key.DeploymentId, key.Generation, default).AsTask());
+            if (appliedFailure) Assert.IsType<PostgresException>(error); else Assert.IsType<DbUpdateException>(error);
+            await using var verify = OutputContext(scenario.Connection);
+            var operation = await verify.DurableOperations.AsNoTracking().SingleAsync(x => x.Generation == 1);
+            Assert.Equal("Succeeded", operation.State); Assert.Equal(attemptId, operation.CurrentAttemptId);
+            var attempt = await verify.DurableOperationAttempts.AsNoTracking().SingleAsync(x => x.Generation == 1);
+            Assert.Equal("Succeeded", attempt.Outcome); Assert.NotNull(attempt.FinishedAt);
+            Assert.Equal(output.Payload, (await verify.OperationOutputs.AsNoTracking().SingleAsync(x => x.Generation == 1)).Payload);
+            Assert.False(await verify.GenerationStageCheckpoints.AnyAsync(x => x.Generation == 1));
+            Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        }
+        await GraphSql(scenario.Connection, "ALTER TABLE " + (appliedFailure ? "application_deployments" : "generation_stage_checkpoints") + " DROP CONSTRAINT test_aggregate_failure");
+        await using (var restart = Services(scenario.Connection, boundary))
+        {
+            var journal = restart.GetRequiredService<IDurableOperationJournal>();
+            var admission = restart.GetRequiredService<DurableActionAdmission>();
+            Assert.All(await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => journal.TryCompleteGenerationAsync(key.DeploymentId, key.Generation, admission, default).AsTask())), Assert.True);
+        }
+        await using var final = OutputContext(scenario.Connection);
+        Assert.Equal(1, await final.GenerationStageCheckpoints.CountAsync());
+        Assert.Equal(1, await final.DurableOperationAttempts.CountAsync()); Assert.Equal(1, await final.OperationOutputs.CountAsync());
+        Assert.Equal(1, (await final.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        Assert.Equal(1, boundary.Calls);
+    }
+
     [Fact]
     public async Task Persisted_checkpoint_keeps_exact_original_attempts_identity_and_time_across_restart_and_concurrent_replay()
     {
