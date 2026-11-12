@@ -10,11 +10,54 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Xunit;
+using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture, ITestOutputHelper output) : IClassFixture<PostgreSqlFixture>
 {
+    [Fact]
+    public async Task Fixture_servers_are_isolated_and_the_no_effects_oracle_remains_global()
+    {
+        var setup = await Prepare();
+        var role = "haby_a_isolation_" + Guid.NewGuid().ToString("N");
+        await using var admin = new NpgsqlConnection(fixture.ConnectionString);
+        await admin.OpenAsync();
+        var originalCount = "SELECT count(*) FROM pg_roles WHERE rolname LIKE 'haby_a_%'";
+        Assert.Equal(0L, (long)(await new NpgsqlCommand(originalCount, admin).ExecuteScalarAsync())!);
+        var identityA = (string)(await new NpgsqlCommand("SELECT system_identifier::text FROM pg_control_system()", admin).ExecuteScalarAsync())!;
+        await new NpgsqlCommand($"CREATE ROLE \"{role}\" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS", admin).ExecuteNonQueryAsync();
+        var oid = (uint)(await new NpgsqlCommand($"SELECT oid FROM pg_roles WHERE rolname = '{role}'", admin).ExecuteScalarAsync())!;
+        var other = new PostgreSqlFixture();
+        try
+        {
+            Assert.Equal(1L, (long)(await new NpgsqlCommand(originalCount, admin).ExecuteScalarAsync())!);
+            Assert.Equal(0L, (long)(await new NpgsqlCommand("SELECT count(*) FROM pg_database WHERE datname = 'sample_app'", admin).ExecuteScalarAsync())!);
+            await Assert.ThrowsAsync<EqualException>(() => AssertNoEffects(setup.Connection, setup.Policy));
+            Assert.Equal(setup.Policy, await ExternalPolicy());
+            await other.InitializeAsync();
+            await using var independent = new NpgsqlConnection(other.ConnectionString);
+            await independent.OpenAsync();
+            var identityB = (string)(await new NpgsqlCommand("SELECT system_identifier::text FROM pg_control_system()", independent).ExecuteScalarAsync())!;
+            var countB = (long)(await new NpgsqlCommand(originalCount, independent).ExecuteScalarAsync())!;
+            output.WriteLine($"FIXTURE_ISOLATION A={identityA} B={identityB} roleCountA=1 roleCountB={countB} strictOracleRejectedA=true");
+            Assert.NotEqual(identityA, identityB);
+            Assert.Equal(0L, countB);
+        }
+        finally
+        {
+            try { await other.DisposeAsync(); }
+            finally
+            {
+                await using var ownership = new NpgsqlCommand($"SELECT count(*) FROM pg_roles WHERE oid = {oid} AND rolname = '{role}' AND NOT rolcanlogin", admin);
+                Assert.Equal(1L, (long)(await ownership.ExecuteScalarAsync())!);
+                await new NpgsqlCommand($"DROP ROLE \"{role}\"", admin).ExecuteNonQueryAsync();
+            }
+        }
+        Assert.Equal(0L, (long)(await new NpgsqlCommand(originalCount, admin).ExecuteScalarAsync())!);
+    }
+
     [Fact]
     public async Task Persisted_pair_refuses_conflicting_same_alias_entries_before_read_check_or_commit()
     {

@@ -1,5 +1,4 @@
 using System.Text;
-using System.Diagnostics;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
@@ -16,41 +15,18 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class PostgreSqlFixture : IAsyncLifetime
 {
     private PostgreSqlContainer? _container;
-    private string? _externalContainer;
+    private WslcPostgreSqlServer? _externalServer;
     public string ConnectionString { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
         using var timing = TestTiming.ClusterReady();
-        var external = Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_EXTERNAL") == "1";
-        var supplied = Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_CONNECTION");
-        if (supplied is not null && !external)
-            throw new InvalidOperationException("An external connection requires explicit ephemeral opt-in.");
-        if (external)
+        var external = WslcPostgreSqlRun.ReadEnvironment();
+        if (external is not null)
         {
-            if (string.IsNullOrWhiteSpace(supplied))
-                throw new InvalidOperationException("The ephemeral external connection is missing.");
-            _externalContainer = Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_CONTAINER");
-            if (string.IsNullOrWhiteSpace(_externalContainer))
-                throw new InvalidOperationException("The ephemeral external container name is missing.");
-            // Every test creates unique catalog databases; pooled idle sessions otherwise
-            // accumulate across the suite and can exhaust the disposable server's client limit.
-            ConnectionString = new NpgsqlConnectionStringBuilder(supplied) { Pooling = false }.ConnectionString;
-            // The WSLc helper starts the container; Npgsql readiness is checked here.
-            for (var attempt = 0; attempt < 30; attempt++)
-            {
-                try
-                {
-                    await using var connection = new NpgsqlConnection(ConnectionString);
-                    await connection.OpenAsync();
-                    return;
-                }
-                catch (NpgsqlException)
-                {
-                    if (attempt == 29) throw new InvalidOperationException("The ephemeral PostgreSQL container did not become ready.");
-                    await Task.Delay(TimeSpan.FromSeconds(1));
-                }
-            }
+            _externalServer = new(external);
+            await _externalServer.StartAsync();
+            ConnectionString = _externalServer.ConnectionString;
             return;
         }
         // A unique confidential sentinel cannot collide with ordinary metadata such as
@@ -67,6 +43,7 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
     {
         using var timing = TestTiming.ClusterCleanup();
         if (_container is not null) await _container.DisposeAsync();
+        if (_externalServer is not null) await _externalServer.DisposeAsync();
     }
 
     public async Task RunClientUtilityAsync(params string[] command)
@@ -79,18 +56,8 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
             return;
         }
 
-        var start = new ProcessStartInfo("wslc") { RedirectStandardError = true, RedirectStandardOutput = true };
-        start.ArgumentList.Add("exec");
-        start.ArgumentList.Add(_externalContainer!);
-        foreach (var argument in command) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("WSLc did not start.");
-        var error = process.StandardError.ReadToEndAsync();
-        var output = process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        await output;
-        await error;
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"PostgreSQL client utility {command[0]} failed (exit {process.ExitCode}). Output withheld because catalog utilities may expose protected data.");
+        if (_externalServer is null) throw new InvalidOperationException("Owned fixture is unavailable.");
+        await _externalServer.UtilityAsync(command);
     }
 
     internal async Task<string> ReadServerLogsAsync()
@@ -100,14 +67,8 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
             var logs = await _container.GetLogsAsync();
             return logs.Stdout + logs.Stderr;
         }
-        var start = new ProcessStartInfo("wslc") { RedirectStandardError = true, RedirectStandardOutput = true };
-        start.ArgumentList.Add("logs"); start.ArgumentList.Add(_externalContainer!);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Log reader unavailable.");
-        var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        var result = await stdout + await stderr;
-        if (process.ExitCode != 0) throw new InvalidOperationException("Server log capture failed; output withheld.");
-        return result;
+        if (_externalServer is null) throw new InvalidOperationException("Owned fixture is unavailable.");
+        return await _externalServer.UtilityAsync([], logs: true);
     }
 }
 

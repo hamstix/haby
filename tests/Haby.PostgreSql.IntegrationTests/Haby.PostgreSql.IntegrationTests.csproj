@@ -26,6 +26,7 @@
     <PackageReference Include="Testcontainers.PostgreSql" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\..\scripts\postgresql-loopback-relay.py" Link="postgresql-loopback-relay.py" CopyToOutputDirectory="PreserveNewest" />
     <Protobuf Include="Checkpoint.proto" GrpcServices="Both" />
   </ItemGroup>
   <ItemGroup>

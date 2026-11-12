@@ -28,7 +28,9 @@ mount is a default input. Check actual Docker compatibility before choosing
 Testcontainers: ordinary WSL2 and WSLc do not imply a Docker daemon. See the
 [PostgreSQL runtime guide](postgresql-integration-tests.md) and the existing
 `scripts/test-postgresql-wslc.ps1` helper. External mode needs explicit opt-in,
-an invocation-owned container and ephemeral connection supplied privately.
+allocation prerequisites in a private invocation-owned run configuration. Each
+fixture owns a new PostgreSQL server, volume and any required loopback relay.
+Existing connections and container targets are refused.
 
 Run heavy pools and full gates sequentially. Ephemeral prerequisites may be
 installed inside a disposable container. Cleanup must verify ownership and remove
@@ -51,8 +53,9 @@ wrong-password rejection and the unchanged pinned-endpoint test first. Preserve
 probe/lifecycle/failure evidence. Check the runtime's real inspect schema rather
 than assuming Docker-style field paths. A relay cannot turn connection failures
 into success or justify a production/test-source workaround. Never assume an old
-task's helpers or output paths exist; any wrapper belongs in fresh ignored task
-outputs and must be reviewed/verified for the current source and venue.
+task's output paths exist. The fixture-owned repository relay and any task-local
+supervisor must be reviewed/verified for the current source and venue; keep raw
+lifecycle and failure output in fresh private task directories.
 
 ## Execute every applicable gate
 

@@ -50,13 +50,13 @@ Resource and execution semantics.
 | Linux CI | `Testcontainers.PostgreSql` over a Docker-compatible API | Container-generated administrative connection |
 | Linux developer machine with Docker-compatible runtime | `Testcontainers.PostgreSql` | Container-generated administrative connection |
 | Windows 11 with Docker-compatible runtime | `Testcontainers.PostgreSql` | Container-generated administrative connection |
-| Windows 11 with built-in `wslc` only | Repository PowerShell helper launches one disposable `wslc` PostgreSQL container | Explicit ephemeral external-connection mode, using the same integration assertions |
+| Windows 11 with built-in `wslc` only | Each fixture launches its own disposable `wslc` PostgreSQL server | Explicit owned-run allocation configuration, using the same integration assertions |
 
 `wslc` is a WSL container CLI, not a Docker CLI or a verified Docker API
 endpoint. Do not set `DOCKER_HOST` to a guessed `wslc` socket or assume that
 Testcontainers can drive it. Testcontainers' documented configuration expects
-a Docker-compatible endpoint or context. The WSLc path starts its container
-separately and supplies only its temporary connection to the tests.
+a Docker-compatible endpoint or context. The WSLc path allocates a separate server for every fixture. Run configuration
+contains allocation prerequisites, never an existing connection or container.
 
 Official references: [WSL containers](https://learn.microsoft.com/en-us/windows/wsl/wsl-container),
 [WSLc getting started](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-containers),
@@ -80,30 +80,52 @@ access-denied result or failed `hello-world` run is an environment blocker,
 not a failed PostgreSQL provider test. The agent should report it; it must not
 install a new runtime or switch to a personal PostgreSQL instance silently.
 
-Run `scripts/test-postgresql-wslc.ps1` from the repository root. It:
+Run `scripts/test-postgresql-wslc.ps1` from the repository root. The helper
+creates a fresh run nonce and Windows-user-only private directory, then runs the
+existing unfiltered measurement command. Every external `PostgreSqlFixture`
+creates its own labelled server and named volume, private credential file,
+CID record and lifecycle manifest before launch. Client utilities, logs and
+cleanup target that fixture's verified CID. The default Testcontainers path
+continues to allocate its own per-fixture container.
 
-1. Verify `wslc` and the .NET SDK in its own process environment.
-2. Choose a unique test-owned container name, an available loopback host port
-   and a fresh temporary administrative password. Never use a fixed container
-   name, host port 5432 or a stored credential.
-3. Start one PostgreSQL image pinned by the test suite, with its port published
-   only on `127.0.0.1`, and wait until Npgsql can connect. The command shape is
-   `wslc run -d --rm --name <test-owned-name> -p 127.0.0.1:<port>:5432 -e POSTGRES_PASSWORD=<temporary-value> <pinned-postgres-image>`;
-   verify exact option support with `wslc run --help` on the host before use.
-4. Enable a distinct opt-in external-ephemeral mode and pass the temporary
-   connection and test-owned container name to the same integration test
-   project used in CI. The test must reject a supplied connection string
-   without the explicit opt-in marker. The container name lets the backup
-   drill run `pg_dump` and `pg_restore` inside that disposable container.
-5. In `finally`, stop **only** the container this invocation created, clear
-   temporary environment variables, and report cleanup failure separately.
-   Do not run broad prune commands or touch other containers.
+Creation and readiness each have a 45-second bound; readiness commands and SQL
+probes have a 5-second bound. Cleanup has a 60-second bound per fixture. These
+harness bounds do not change test connection, command or driver timeouts.
+Passwords are passed through private files, removed after launch, and never
+included in command arguments or public evidence. Raw command output remains
+in the private run directory.
 
-The helper must not print the temporary password or connection string. It may
-collect container logs on failure only after checking that they do not expose
-secrets. A failed test does not authorize leaving the test container running
-indefinitely. An explicitly requested diagnostic mode may preserve it with
-the exact container name reported to the operator.
+Windows publishes only to `127.0.0.1`. Linux under WSL requires a Windows-mounted
+private directory, the WSL path to Windows `pwsh`, and an explicitly selected
+Windows WSL gateway address. The fixture verifies that address belongs to the
+Windows WSL interface, the actual bind and authenticated server identity. Each
+Linux fixture owns one transparent IPv4/IPv6 loopback relay to its own upstream;
+it preserves one frontend connection to one upstream without pooling, retries,
+TLS termination or SQL inspection. Both loopback names and wrong-password
+rejection are checked before the fixture is ready.
+
+For focused validation, prepare a run without launching any server:
+
+```powershell
+$config = ./scripts/test-postgresql-wslc.ps1 -PrepareOnly
+$env:HABY_POSTGRESQL_EPHEMERAL_EXTERNAL = '1'
+$env:HABY_POSTGRESQL_EPHEMERAL_RUN = $config
+# Run the explicitly selected focused command, then recover exact owned resources:
+./scripts/test-postgresql-wslc.ps1 -CleanupOnly -ConfigurationPath $config
+```
+
+Pass `-TestAssemblyPath` when using a non-default build artifact directory.
+On Linux also supply `-PrivateDirectoryBase` on the Windows mount,
+`-WindowsPowerShellPath` and `-HostAddress` for the verified WSL gateway.
+Keep results outside the run root; its subdirectories are exclusively fixture
+nonce directories. Restore the caller's environment after focused validation.
+
+Recovery requires the pre-recorded exact unique name, run/fixture labels, CID
+when available, port binding and named volume proof. Missing CID after a
+partial launch does not authorize a guessed target. Ambiguous or uncertain
+ownership fails visibly and retains the private manifest. Cleanup never prunes
+or touches unrelated containers, volumes, processes or daemon settings. The
+supervisor preserves a failed test exit and reports cleanup failure separately.
 
 The helper exercises the same real-PostgreSQL assertions as CI. Direct `dotnet test` from Windows without
 a Docker-compatible endpoint or the helper is not evidence of a provider bug.
@@ -130,10 +152,13 @@ Run the integration project directly on a Docker-compatible host:
 dotnet test ./tests/Haby.PostgreSql.IntegrationTests/Haby.PostgreSql.IntegrationTests.csproj --artifacts-path ./.artifacts
 ```
 
-The external mode requires `HABY_POSTGRESQL_EPHEMERAL_EXTERNAL=1`,
-`HABY_POSTGRESQL_EPHEMERAL_CONNECTION` and
-`HABY_POSTGRESQL_EPHEMERAL_CONTAINER`. Supplying only a connection string fails.
-Use this mode only with the helper's disposable PostgreSQL container.
+The external mode requires `HABY_POSTGRESQL_EPHEMERAL_EXTERNAL=1` and
+`HABY_POSTGRESQL_EPHEMERAL_RUN` pointing to the helper's current run configuration.
+The former `HABY_POSTGRESQL_EPHEMERAL_CONNECTION` and
+`HABY_POSTGRESQL_EPHEMERAL_CONTAINER` variables are refused, including when an
+owned-run configuration is also supplied. No fallback or existing-target mode
+is available. A run shares allocation prerequisites only; it never shares a
+PostgreSQL cluster between fixtures.
 
 ## Dependency review for Slice 12
 
