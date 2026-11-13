@@ -5,7 +5,7 @@
   "nativePerPlatform": 75,
   "regularFullRetainsQualification": true,
   "currentPostgresql": 900,
-  "currentFast": 1382,
+  "currentFast": 1390,
   "currentKubernetesApiObjects": 24,
   "entries": [
     {"method":"Haby.PostgreSql.IntegrationTests.AdministrativeSecretTests.Cancellation_after_secret_insert_before_receipt_commit_rolls_back_every_row","case":"47c71fd82d68e86c4703545bc858b1a26040263e880667ca757d553f8f2f7581","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
@@ -2463,6 +2463,14 @@
     {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"c02684ea14655ac8d60d9a0eab429c708b0e1a1941ae3f19b50c1ddac1a19aa3","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K22-new-factory-hostname-refusal","addedFor200":true},
     {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"3d73c94709a447882c1610bcdb136c9862969e8aa23ef9c97bfe59ceacd8b5d8","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K23-new-factory-custom-root-refusal","addedFor200":true},
     {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"a699b033d20d261e674dc584e754af74473ad8701cfb076c765bf5fd078b7a49","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K24-real-UID-race-replacement-preserved","addedFor200":true},
-    {"method":"Haby.Kubernetes.Tests.ProjectionMutationTests.K04_patch_applied_in_RFC6902_order_preserves_injected_fields_and_confirms_target","case":"2a30fb90d3ac1d6a20be6f908490e771a18a8980e07e7d8f82a21cf0deec9e69","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true}
+    {"method":"Haby.Kubernetes.Tests.ProjectionMutationTests.K04_patch_applied_in_RFC6902_order_preserves_injected_fields_and_confirms_target","case":"2a30fb90d3ac1d6a20be6f908490e771a18a8980e07e7d8f82a21cf0deec9e69","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"17bb37c0fb4e4243166906204a61b02c4de2438b7cd2b949bb7fb27b3212f103","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"32484e8d323224801e4e108ba526ccc0cc59455411dbc93feb7f9747d2f91182","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"37d2c9b5a2330e28ac19b3b77bee0190c8cff6c0087eb6ab05a34d868b4a7f65","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"4055d7989af244c43fea5e12fd3839b6b9f70f12e16876da974da366198c5f28","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"54aca03288d7531fa42ac58cbc0facb7a27c9ebfb3354dce74c54c314461f30e","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"bbf7c1c7cd991fb4a81d775d0508e116d52c25664e527139837c0ee279ac6cfd","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"d49414a2e544fd5778bb935f4d49c2f9733b48336100ac09c3c1f93000a4d2d5","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.RemovedFieldConfirmationTests.Confirmation_requires_removed_owned_entries_absent_but_preserves_never_owned_entries","case":"f2f72085184e44bb5bd98aaeb1d223d34fea869413a8706a9891376326d956a0","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true}
   ]
 }

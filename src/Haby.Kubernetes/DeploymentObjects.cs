@@ -122,10 +122,23 @@ internal static class DeploymentObjects
         String(obj, "metadata", "annotations", GenerationKey) == i.TargetGeneration.ToString(CultureInfo.InvariantCulture);
     internal static DeploymentReceipt Receipt(JsonObject obj, DeploymentIntent i, ConfirmationSource source)
     {
-        Ownership(obj, i); Matches(obj, i.Target); Need(HasMarkers(obj, i), "operation-marker");
+        Ownership(obj, i); MatchesTarget(obj, i); Need(HasMarkers(obj, i), "operation-marker");
         var result = new DeploymentReceipt(1, i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload,
             i.TargetGeneration, i.Operation, String(obj, "metadata", "uid")!, long.Parse(At(obj, "metadata", "generation")?.ToJsonString() ?? "0", CultureInfo.InvariantCulture), i.Target, source);
         Validate(result); return result;
+    }
+    private static void MatchesTarget(JsonObject obj, DeploymentIntent intent)
+    {
+        Matches(obj, intent.Target);
+        if (intent.LastConfirmed is not { } previous) return;
+        // Target membership alone cannot prove a requested removal. Only previously owned
+        // entries participate; unrelated injected keys/names remain outside Haby ownership.
+        var nodes = At(obj, "spec", "template", "spec", "nodeSelector")?.AsObject();
+        foreach (var key in previous.NodeSelector.Keys.Except(intent.Target.NodeSelector.Keys, StringComparer.Ordinal))
+            Need(nodes is null || !nodes.ContainsKey(key), "removed-node-selector-present");
+        var pulls = Pulls(obj);
+        foreach (var name in previous.ImagePullSecrets.Except(intent.Target.ImagePullSecrets, StringComparer.Ordinal))
+            Need(!pulls.Any(item => String(item!, "name") == name), "removed-pull-secret-present");
     }
     private static JsonArray Pulls(JsonObject obj)
     {

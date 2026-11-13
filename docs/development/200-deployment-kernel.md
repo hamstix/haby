@@ -108,9 +108,9 @@ Preserve the existing 900 PostgreSQL, 1308 fast and 75-per-platform Native AOT
 baseline inventory and report added cases separately. Full hosted validation and
 the new adapter real-API cases are required before acceptance.
 
-The checked-in case ledger retains 2358 pre-slice gate rows and adds 74 fast cases
-and 24 named API-object scenarios (2456 rows total). Normal obligations remain
-900 PostgreSQL, 1382 fast and 75 Native AOT cases per platform. API-object cases
+The checked-in case ledger retains 2358 pre-slice gate rows and adds 82 fast cases
+and 24 named API-object scenarios (2464 rows total). Normal obligations remain
+900 PostgreSQL, 1390 fast and 75 Native AOT cases per platform. API-object cases
 have stable `K01`..`K24` scenario identities; their method plus scenario SHA256
 is compared with the same gate ledger before publishing safe cases/gate metadata.
 This is a custom API-case inventory, not a TRX execution or a readiness gate.
@@ -147,3 +147,20 @@ reads before its single update, then retains bounded outcome/preservation counts
 This separates positive field ownership from the explicit race cases, without
 retrying a rejected write, weakening assertions or implementing Workload pause.
 New-source hosted evidence is required; the failed attempt is not a success.
+
+## F1: confirmation includes owned removals
+
+Independent review of `62dacce68cdfa0227de9f271efbd4ce8525f8053` identified
+a separate confirmation defect: target-entry membership alone accepted a removed
+owned nodeSelector key or imagePullSecret name restored in an otherwise matching
+response/live object. This finding does not explain the original K04 failure.
+
+The shared receipt boundary now requires absence of LastConfirmed-minus-Target
+keys/names, while pre-write baseline matching remains separate. A mismatching
+write response is Uncertain with no receipt; observation is NotConfirmed with
+zero writes and no receipt. Never-owned injected entries remain permitted.
+Eight focused cases cover both field kinds, both paths and retained/absent
+entries with exact UID/owner/new markers and otherwise matching target. Before
+the fix: 4 passed / 4 failed, all four retained cases falsely Confirmed. After:
+8/8 passed with identical test bytes; local paired source/patch hashes retained.
+Corrected-source full hosted checks and renewed exact-SHA review are required.
