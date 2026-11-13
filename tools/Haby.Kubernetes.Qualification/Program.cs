@@ -1,7 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using k8s;
 
-if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] is not ("--probe-stock-tls" or "--deployment-kernel")))
+if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] is not ("--probe-stock-tls" or "--deployment-kernel" or "--durable-actions")))
 {
     Console.Error.WriteLine("Usage: qualification <explicit-https-endpoint> <private-credential-directory>");
     return 2;
@@ -11,6 +11,13 @@ try
     var endpoint = new Uri(args[0]);
     if (endpoint.Scheme != "https") return 2;
     var directory = Path.GetFullPath(args[1]);
+    if (args.Length == 3 && args[2] == "--durable-actions")
+    {
+        using var bootstrap = ClientFactory.Create(endpoint, directory);
+        using var actionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        await DurableActionCases.Run(bootstrap, endpoint, directory, actionDeadline.Token);
+        return 0;
+    }
     if (args.Length == 3 && args[2] == "--deployment-kernel")
     {
         using var bootstrap = ClientFactory.Create(endpoint, directory);

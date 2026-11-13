@@ -34,6 +34,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        ConfigureInternalActions(modelBuilder);
         ConfigureGenerationStageCheckpoints(modelBuilder);
         ConfigureResourceNaming(modelBuilder);
         ConfigureResourceManagement(modelBuilder);
@@ -290,6 +291,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         modelBuilder.Entity<DurablePlanRow>(entity =>
         {
             entity.ToTable("deployment_plans");
+            entity.Property(row => row.InternalEffects).HasColumnName("internal_effects").HasDefaultValue(false);
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.ChangeSetId).HasColumnName("change_set_id");
@@ -334,6 +336,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         modelBuilder.Entity<DeploymentGenerationRow>(entity =>
         {
             entity.ToTable("application_deployment_generations", table => table.HasCheckConstraint("CK_deployment_generations_first", "generation > 0 AND presence = 'Present'"));
+            entity.Property(row => row.InternalEffects).HasColumnName("internal_effects").HasDefaultValue(false);
             entity.HasKey(row => new { row.DeploymentId, row.Generation });
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
             entity.Property(row => row.SnapshotFormatVersion).HasColumnName("snapshot_format_version");
@@ -448,6 +451,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
                     "outcome IS DISTINCT FROM 'Uncertain' OR dispatched_at IS NOT NULL");
             });
             entity.HasKey(row => row.AttemptId);
+            entity.HasAlternateKey(row => new { row.AttemptId, row.DeploymentId, row.Generation, row.OperationId });
             entity.Property(row => row.AttemptId).HasColumnName("attempt_id");
             entity.Property(row => row.DeploymentId).HasColumnName("deployment_id");
             entity.Property(row => row.Generation).HasColumnName("generation");
@@ -536,6 +540,7 @@ internal sealed class DurableChangeSetRow
 
 internal sealed class DurablePlanRow
 {
+    public bool InternalEffects { get; set; }
     public Guid Id { get; set; }
     public Guid ChangeSetId { get; set; }
     public Guid EnvironmentRecordId { get; set; }
@@ -571,6 +576,7 @@ internal sealed class ApplicationDeploymentRow
 
 internal sealed class DeploymentGenerationRow
 {
+    public bool InternalEffects { get; set; }
     public Guid DeploymentId { get; set; }
     public int SnapshotFormatVersion { get; set; }
     public long Generation { get; set; }

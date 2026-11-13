@@ -629,7 +629,7 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
     }
 
     private static ServiceProvider Services(string connection, TimeProvider clock, bool registerCodec = true,
-        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null, ConfigurationRenderingCatalog? rendering = null)
+        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null, ConfigurationRenderingCatalog? rendering = null, bool internalActions = false)
     {
         var services = new ServiceCollection()
             .AddSingleton(rendering ?? Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1", producerAction: Haby.PostgreSql.PostgreSqlDatabaseCreateAction.RegistrationKey))
@@ -638,6 +638,7 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             .AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore()
             .AddPostgreSqlProviderAliasStore();
+        if (internalActions) services.AddSingleton<IProviderConfigurationCodec, Haby.Kubernetes.KubernetesProviderConfigurationCodec>();
         if (saveInterceptor is not null)
             services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(saveInterceptor));
         if (commandInterceptor is not null)

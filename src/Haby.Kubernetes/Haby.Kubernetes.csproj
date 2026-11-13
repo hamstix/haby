@@ -5,6 +5,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Haby.Kubernetes.Tests" />
+    <InternalsVisibleTo Include="Haby.PostgreSql.IntegrationTests" />
     <InternalsVisibleTo Include="Haby.Kubernetes.Qualification" />
   </ItemGroup>
 </Project>

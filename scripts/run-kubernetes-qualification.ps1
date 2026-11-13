@@ -4,6 +4,7 @@ param(
     [string]$EvidenceId=([Guid]::NewGuid().ToString('N')),
     [switch]$ProbeStockTls,
     [switch]$DeploymentKernel,
+    [switch]$DurableActions,
     [ValidateRange(1,120)][int]$CommandTimeoutSeconds=20,
     [ValidateRange(1,300)][int]$ReadinessTimeoutSeconds=120,
     [scriptblock]$CommandRunner
@@ -68,8 +69,8 @@ try {
     $record.Add('Stage: readiness-complete'); $stage='copy'; $record.Add('Stage: copy-start')
     foreach($pair in @(@('server-ca.crt','ca.crt'),@('client-admin.crt','admin.crt'),@('client-admin.key','admin.key'))){RuntimeCall @('cp',"${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])",(Join-Path $private $pair[1])) | Out-Null}
     $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
-    if($ProbeStockTls -and $DeploymentKernel){throw 'Select one harness mode.'}
-    [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}else{@()}
+    if((@($ProbeStockTls,$DeploymentKernel,$DurableActions) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
+    [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}else{@()}
     $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-restore','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
     foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
     if($result.ExitCode -ne 0){$reason='nonzero';throw 'Harness failed.'}

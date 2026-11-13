@@ -20,7 +20,7 @@ public sealed partial class ManifestCatalogDbContext
                 t.HasCheckConstraint("CK_generation_stage_checkpoints_bounds", "length(input_fingerprint) = 67 AND octet_length(evidence_json) <= 2097152");
             });
             e.HasKey(x => new { x.DeploymentId, x.Generation, x.Stage });
-            e.HasIndex(x => x.Id).IsUnique();
+            e.HasAlternateKey(x => x.Id);
             e.Property(x => x.Id).HasColumnName("id");
             e.Property(x => x.DeploymentId).HasColumnName("deployment_id");
             e.Property(x => x.Generation).HasColumnName("generation");
