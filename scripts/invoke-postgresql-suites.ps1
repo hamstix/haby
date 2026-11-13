@@ -1,13 +1,22 @@
 function Invoke-HabyPostgreSqlSuites {
     param([string]$Project, [string]$Artifacts, [string]$Private, [string]$Safe,
         [object[]]$Coverage, [string[]]$Suites, [string]$MapPath, [string]$PlanPath,
-        [int]$ServerLimit, [int]$HostLimit)
+        [int]$ServerLimit, [int]$HostLimit, [switch]$AnonymousReflectionPrecheck, [string]$Source)
     $firstExit = 0; $failedReport = $false
     $reports = [Collections.Generic.List[object]]::new()
     $trx = [Collections.Generic.List[string]]::new()
     $resourceGroups = [Collections.Generic.List[object]]::new()
     $oldTiming = $env:HABY_TEST_TIMING_DIRECTORY
+    $precheck = $null
     try {
+        if ($AnonymousReflectionPrecheck) {
+            . "$PSScriptRoot/anonymous-reflection-precheck.ps1"
+            $precheck = Invoke-HabyAnonymousReflectionPrecheck -Project $Project -Artifacts $Artifacts -Private $Private -Safe $Safe -Coverage $Coverage -Source $Source
+            if ($precheck.exitCode -ne 0) {
+                return [pscustomobject]@{ exitCode = $precheck.exitCode; reportingFailed = $precheck.reportingFailed
+                    precheck = $precheck; groups = @(); trxPaths = @() }
+            }
+        }
         foreach ($suite in $Suites) {
             $raw = Join-Path $Private $suite; $output = Join-Path $Safe $suite
             New-Item -ItemType Directory -Path $raw, $output | Out-Null
@@ -65,5 +74,5 @@ function Invoke-HabyPostgreSqlSuites {
         if ($firstExit -eq 0) { $firstExit = 1 }
         Write-Warning 'Aggregate resource report unavailable; existing primary exit retained.'
     }
-    return [pscustomobject]@{ exitCode = $firstExit; reportingFailed = $failedReport; groups = $reports.ToArray(); trxPaths = $trx.ToArray() }
+    return [pscustomobject]@{ exitCode = $firstExit; reportingFailed = $failedReport; precheck = $precheck; groups = $reports.ToArray(); trxPaths = $trx.ToArray() }
 }

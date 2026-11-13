@@ -50,6 +50,7 @@ jobs:
             .artifacts/fast/safe/gate.json
             .artifacts/fast/safe/cases.json
             .artifacts/fast/safe/counts.json
+            .artifacts/fast/safe/failure-evidence.json
             .artifacts/fast/safe/results.trx
           if-no-files-found: error
           retention-days: 14
@@ -58,6 +59,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-postgresql-timing-export.ps1
 
+      - name: Verify bounded failure evidence and adversarial publication controls
+        shell: pwsh
+        run: ./scripts/test-postgresql-failure-evidence.ps1
+
       - name: Verify hosted entrypoint ownership, coverage and failure propagation
         shell: pwsh
         run: ./scripts/test-postgresql-entrypoint.ps1
@@ -65,6 +70,10 @@ jobs:
       - name: Verify explicit suite selection and aggregate accounting
         shell: pwsh
         run: ./scripts/test-postgresql-suites.ps1
+
+      - name: Verify named reflection precheck stops full execution on failure
+        shell: pwsh
+        run: ./scripts/test-anonymous-reflection-precheck.ps1
 
       - name: Verify Native AOT prerequisite fallback and failure propagation
         run: bash ./scripts/test-native-aot-prerequisites.sh
@@ -145,6 +154,7 @@ jobs:
             .artifacts/native-results/${{ matrix.rid }}/safe/gate.json
             .artifacts/native-results/${{ matrix.rid }}/safe/cases.json
             .artifacts/native-results/${{ matrix.rid }}/safe/counts.json
+            .artifacts/native-results/${{ matrix.rid }}/safe/failure-evidence.json
             .artifacts/native-results/${{ matrix.rid }}/safe/results.trx
           if-no-files-found: error
           retention-days: 14
@@ -183,7 +193,7 @@ jobs:
         env:
           HABY_AOT_CLI_REQUIRED: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
-        run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite full -ResultsDirectory ./.artifacts/postgresql-measurement
+        run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite full -AnonymousReflectionPrecheck -ResultsDirectory ./.artifacts/postgresql-measurement
       - name: Publish allowlisted PostgreSQL timing and case inventory
         if: always()
         uses: actions/upload-artifact@v4
@@ -196,18 +206,27 @@ jobs:
             .artifacts/postgresql-measurement/safe/coverage.json
             .artifacts/postgresql-measurement/safe/cases.json
             .artifacts/postgresql-measurement/safe/counts.json
+            .artifacts/postgresql-measurement/safe/failure-evidence.json
             .artifacts/postgresql-measurement/safe/top-duration.csv
             .artifacts/postgresql-measurement/safe/class-duration.csv
             .artifacts/postgresql-measurement/safe/setup.csv
             .artifacts/postgresql-measurement/safe/results.trx
             .artifacts/postgresql-measurement/safe/host-diagnostics.csv
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/precheck.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/cases.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/counts.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/failure-evidence.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/results.trx
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/host-diagnostics.csv
             .artifacts/postgresql-measurement/safe/functional/cases.json
             .artifacts/postgresql-measurement/safe/functional/counts.json
+            .artifacts/postgresql-measurement/safe/functional/failure-evidence.json
             .artifacts/postgresql-measurement/safe/functional/resources.json
             .artifacts/postgresql-measurement/safe/functional/setup.csv
             .artifacts/postgresql-measurement/safe/functional/host-diagnostics.csv
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/cases.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/counts.json
+            .artifacts/postgresql-measurement/safe/infrastructure-qualification/failure-evidence.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/resources.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/setup.csv
           if-no-files-found: error

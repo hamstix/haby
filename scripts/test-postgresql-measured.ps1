@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$ResultsDirectory, [switch]$Docker, [AllowEmptyString()][string]$Suite = 'full')
+param([Parameter(Mandatory)][string]$ResultsDirectory, [switch]$Docker, [AllowEmptyString()][string]$Suite = 'full', [switch]$AnonymousReflectionPrecheck)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path $PSScriptRoot -Parent
@@ -6,6 +6,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $selectedSuites = @(Get-HabyPostgreSqlSuites $Suite)
 $gateSuites = if ($Suite -ceq 'full') { @('functional','infrastructure-qualification') } else { @($Suite) }
 if (-not $Docker -and $Suite -cne 'full') { throw 'Explicit suite selection requires the Docker entrypoint.' }
+if ($AnonymousReflectionPrecheck -and (-not $Docker -or $Suite -cne 'full')) { throw 'Named reflection precheck requires Docker full mode.' }
 $destination = [IO.Path]::GetFullPath($ResultsDirectory)
 if (Test-Path $destination) { throw 'Use a new results directory for each measurement.' }
 New-Item -ItemType Directory -Force $destination | Out-Null
@@ -85,7 +86,8 @@ try {
                 $primaryPhase = 'test'
                 $assemblyPath = Join-Path $artifacts 'bin/Haby.PostgreSql.IntegrationTests/debug/Haby.PostgreSql.IntegrationTests.dll'
                 if (Test-Path $assemblyPath) { $assemblyHash = (Get-FileHash $assemblyPath -Algorithm SHA256).Hash.ToLowerInvariant() }
-                $suiteExecution = Invoke-HabyPostgreSqlSuites -Project $project -Artifacts $artifacts -Private $private -Safe $safe -Coverage $coverage -Suites $selectedSuites -MapPath (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/coverage-map.json') -PlanPath $planPath -ServerLimit $prerequisites.serverLimit -HostLimit $prerequisites.hostGroupLimit
+                $suiteExecution = Invoke-HabyPostgreSqlSuites -Project $project -Artifacts $artifacts -Private $private -Safe $safe -Coverage $coverage -Suites $selectedSuites -MapPath (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/coverage-map.json') -PlanPath $planPath -ServerLimit $prerequisites.serverLimit -HostLimit $prerequisites.hostGroupLimit -AnonymousReflectionPrecheck:$AnonymousReflectionPrecheck -Source $sha
+                if ($suiteExecution.precheck -and $suiteExecution.precheck.exitCode -ne 0) { $primaryPhase = 'anonymous-reflection-precheck' }
                 $testExit = $suiteExecution.exitCode; $reportFailed = $suiteExecution.reportingFailed
                 $rawTrxPaths = @($suiteExecution.trxPaths); $coverage = if ($Suite -ceq 'full') { $allCoverage } else { $selectedCoverage }
                 $phases.Add([pscustomobject]@{ phase = 'test'; seconds = $timer.Elapsed.TotalSeconds; exitCode = $testExit })
@@ -154,7 +156,7 @@ try {
             wallSeconds = $wall.Elapsed.TotalSeconds; testExitCode = $testExit; phases = $phases
             entrypoint = $(if ($Docker) { 'hosted-linux-docker' } else { 'existing-measured' })
             primaryPhase = $primaryPhase; preflightCleanupExitCode = $cleanupExit; reportingFailed = $reportFailed
-            selection = $Suite; selectedSuites = $selectedSuites; groups = $suiteExecution.groups
+            selection = $Suite; selectedSuites = $selectedSuites; groups = $suiteExecution.groups; precheck = $suiteExecution.precheck
             fixtureCleanup = 'Owned by existing fixtures; failures remain xUnit failures. Preflight cleanup is reported separately.'
         } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $safe 'measurement.json') -Encoding utf8
         Write-Output ('POSTGRESQL_MEASUREMENT ' + (Get-Content (Join-Path $safe 'measurement.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 5 -Compress))

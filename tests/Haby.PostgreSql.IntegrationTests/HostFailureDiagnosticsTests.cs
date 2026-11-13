@@ -6,6 +6,66 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class HostFailureDiagnosticsTests
 {
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Anonymous_reflection_assertion_accepts_exact_denial_from_write_or_read(bool earlyWrite)
+    {
+        var phase = HostFailurePhase.Channel;
+        StatusCode? observed = null;
+        var reads = 0;
+        var denial = new RpcException(new Status(StatusCode.Unauthenticated, string.Empty));
+        await AnonymousReflectionAssertion.RequireUnauthenticatedAsync(
+            () => earlyWrite ? Task.FromException(denial) : Task.CompletedTask,
+            () => { reads++; return Task.FromException(denial); },
+            value => phase = value, value => observed = value);
+        Assert.Equal(earlyWrite ? 0 : 1, reads);
+        Assert.Equal(HostFailurePhase.StatusAssertion, phase);
+        Assert.Equal(StatusCode.Unauthenticated, observed);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task Anonymous_reflection_assertion_refuses_wrong_status_and_non_rpc_errors(bool earlyWrite, bool nonRpc)
+    {
+        var phase = HostFailurePhase.Channel;
+        StatusCode? observed = null;
+        var reads = 0;
+        Exception error = nonRpc ? new InvalidOperationException() : new RpcException(new Status(StatusCode.PermissionDenied, string.Empty));
+        var failure = await Record.ExceptionAsync(() => AnonymousReflectionAssertion.RequireUnauthenticatedAsync(
+            () => earlyWrite ? Task.FromException(error) : Task.CompletedTask,
+            () => { reads++; return Task.FromException(error); },
+            value => phase = value, value => observed = value));
+        Assert.NotNull(failure);
+        Assert.Equal(earlyWrite ? 0 : 1, reads);
+        if (nonRpc)
+        {
+            Assert.Null(observed);
+            Assert.Equal(earlyWrite ? HostFailurePhase.ReflectionWrite : HostFailurePhase.ReflectionRead, phase);
+        }
+        else
+        {
+            Assert.Equal(StatusCode.PermissionDenied, observed);
+            Assert.Equal(HostFailurePhase.StatusAssertion, phase);
+        }
+    }
+
+    [Fact]
+    public async Task Anonymous_reflection_assertion_refuses_missing_denial()
+    {
+        var phase = HostFailurePhase.Channel;
+        StatusCode? observed = null;
+        var failure = await Record.ExceptionAsync(() => AnonymousReflectionAssertion.RequireUnauthenticatedAsync(
+            () => Task.CompletedTask, () => Task.CompletedTask,
+            value => phase = value, value => observed = value));
+        Assert.NotNull(failure);
+        Assert.Null(observed);
+        Assert.Equal(HostFailurePhase.ReflectionRead, phase);
+    }
+
+    [Theory]
     [InlineData((int)HostFailurePhase.ReflectionWrite)]
     [InlineData((int)HostFailurePhase.ReflectionRead)]
     [InlineData((int)HostFailurePhase.StatusAssertion)]

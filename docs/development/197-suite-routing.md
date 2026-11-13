@@ -55,10 +55,14 @@ the same non-waiting collection mechanism.
 
 The first table describes the unchanged baseline. This slice adds nine regular
 source/asset controls, eight regular Host-bound layout/value controls and one
-real heavy-group capacity qualification control. Current inventories are **1308
+real heavy-group capacity qualification control. Inventories at #197 are **1308
 fast**, **888 functional**, **5 infrastructure qualification**, and **75 published
 native rows per platform**. The ledger marks added rows with `addedFor197`; none
 of the 884 PostgreSQL or 1299 fast baseline rows is removed or renamed.
+
+The subsequent #188 anonymous-reflection assertion correction adds seven regular
+deterministic controls (`addedFor188`). Current PostgreSQL inventory is **895
+functional + 5 qualification = 900**; fast/native inventories are unchanged.
 
 For normal source inspection on Windows PowerShell, from the checkout root:
 
@@ -171,6 +175,10 @@ theory rows have identical display hashes: multiplicity is retained and a separa
 hash of the actual opaque test ID distinguishes row executions. Exact repeated
 executions remain invalid, including duplicates across TRX inputs. This avoids
 deduplicating different parameter rows just because their displays are identical.
+
+The shared exporter also publishes [bounded failure evidence](188-safe-failure-evidence.md)
+for each suite and aggregate, preserving exact failed-row joins. Parsed signatures
+are untrusted text categories, never runtime type, phase or root-cause evidence.
 
 No XML output, exception messages/stacks, attachments, SQL or raw theory values
 are copied into public artifacts. Existing 14-day safe retention and ephemeral

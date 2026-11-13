@@ -56,12 +56,10 @@ public sealed class OperatorHostConfigurationTests
             var client = new ServerReflection.ServerReflectionClient(channel);
             var call = client.ServerReflectionInfo();
             defer(() => { call.Dispose(); return ValueTask.CompletedTask; });
-            phase = HostFailurePhase.ReflectionWrite;
-            await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
-            phase = HostFailurePhase.ReflectionRead;
-            observed = (await Assert.ThrowsAsync<Grpc.Core.RpcException>(async () => await call.ResponseStream.MoveNext(CancellationToken.None))).StatusCode;
-            phase = HostFailurePhase.StatusAssertion;
-            Assert.Equal(Grpc.Core.StatusCode.Unauthenticated, observed);
+            await AnonymousReflectionAssertion.RequireUnauthenticatedAsync(
+                () => call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" }),
+                async () => { await call.ResponseStream.MoveNext(CancellationToken.None); },
+                value => phase = value, value => observed = value);
         }, () => phase, () => observed);
     }
 

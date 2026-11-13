@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PostgreSQL safe failure evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "failedCases",
+    "emittedRecords",
+    "omittedRecords",
+    "truncated",
+    "maxRecords",
+    "maxBytes",
+    "maxMethodCharacters",
+    "maxMessageCharacters",
+    "records"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "failedCases": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "emittedRecords": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1024
+    },
+    "omittedRecords": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "maxRecords": {
+      "const": 1024
+    },
+    "maxBytes": {
+      "const": 1048576
+    },
+    "maxMethodCharacters": {
+      "const": 512
+    },
+    "maxMessageCharacters": {
+      "const": 4096
+    },
+    "records": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "method",
+          "case",
+          "row",
+          "classificationMode",
+          "category",
+          "assertionKind",
+          "exceptionCategory",
+          "grpcCode",
+          "socketCode",
+          "phase",
+          "rootCause"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9_.+`]+(?![\\s\\S])"
+          },
+          "case": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+          },
+          "classificationMode": {
+            "type": "string",
+            "enum": [
+              "unavailable",
+              "parsed-signature"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "assertion",
+              "timeout",
+              "cancellation",
+              "transport"
+            ]
+          },
+          "assertionKind": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "equal",
+              "true",
+              "false",
+              "null",
+              "not-null"
+            ]
+          },
+          "exceptionCategory": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "timeout",
+              "cancellation",
+              "socket",
+              "grpc"
+            ]
+          },
+          "grpcCode": {
+            "type": "string",
+            "enum": [
+              "unavailable",
+              "deadline-exceeded"
+            ]
+          },
+          "socketCode": {
+            "type": "string",
+            "enum": [
+              "unavailable",
+              "connection-refused"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          "rootCause": {
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          },
+          "row": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+          }
+        }
+      }
+    }
+  }
+}
