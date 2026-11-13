@@ -3,6 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Manifest;
+using Haby.Kubernetes;
 using Haby.PostgreSql;
 using Haby.Persistence.PostgreSql;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -110,6 +111,10 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlManifestCatalog(connection!);
         // Execution resolves only the committed exact Provider revision and SecretVersion.
         builder.Services.AddPostgreSqlProviderConfigurationCodec();
+        builder.Services.AddSingleton<KubernetesProviderConfigurationCodec>();
+        builder.Services.AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<KubernetesProviderConfigurationCodec>());
+        builder.Services.AddSingleton<IProviderDeclarationAdapter, KubernetesProviderDeclarationAdapter>();
+        builder.Services.AddSingleton<IProviderPreflightHandler, KubernetesPreflightHandler>();
         builder.Services.AddSingleton<IPlanActionDescriber, PostgreSqlPlanActionDescriber>();
         builder.Services.AddSingleton<DescribeDurablePlan>();
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
