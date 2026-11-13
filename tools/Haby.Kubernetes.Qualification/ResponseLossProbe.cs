@@ -15,7 +15,7 @@ internal sealed class ResponseLossProbe : DelegatingHandler
         if (response.StatusCode != HttpStatusCode.Created) return response;
         using (response)
         using (var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken)))
-            AcceptedUid = body.RootElement.GetProperty("metadata").GetProperty("uid").GetString();
+            AcceptedUid = body.RootElement.GetProperty("metadata"u8).GetProperty("uid"u8).GetString();
         throw new HttpRequestException("Qualification response loss after confirmed API acceptance.");
     }
 }

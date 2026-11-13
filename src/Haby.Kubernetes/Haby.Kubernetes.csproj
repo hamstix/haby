@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Haby.Kubernetes.Contracts/Haby.Kubernetes.Contracts.csproj" />
+    <PackageReference Include="KubernetesClient" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Haby.Kubernetes.Tests" />
+    <InternalsVisibleTo Include="Haby.Kubernetes.Qualification" />
+  </ItemGroup>
+</Project>

@@ -15,7 +15,7 @@ and independently reviewable PRs.
 | --- | --- | --- |
 | P1 - Resource provisioning pilot | Delivered within the isolated PostgreSQL pilot | Prepare an Environment, import an Application, Plan/commit/execute, create its database and generated application login, and grant database-owner access. |
 | P2 - Application configuration | Functionally delivered within the bounded PostgreSQL profile | Generate exact configuration documents from applied Resource outputs and shared Profiles; let an explicitly authorized application client retrieve and use them. |
-| P3 - Workload lifecycle | In progress: contracts/pure planning; runtime not implemented | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
+| P3 - Workload lifecycle | In progress: contracts and adapter kernel; durable runtime not implemented | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
 | P4 - Standard Providers | Planned | Add RabbitMQ, Redis and HTTP/auth integrations and extend PostgreSQL through complete tested application scenarios. |
 
 P1 is a working checkpoint, not a claim that configuration delivery, all
@@ -175,8 +175,8 @@ the separate naming and shared-system evidence without claiming P3 rollout.
 
 ## P3 - Workload lifecycle
 
-Status: in progress: contracts/pure planning, API-only qualification and immutable Placement revision administration.
-Kubernetes execution remains unimplemented. Goal: deploy and operate an Application
+Status: in progress: contracts/pure planning, API-only qualification, immutable Placement administration and a bounded Deployment adapter kernel.
+Host-registered durable Kubernetes execution remains unimplemented. Goal: deploy and operate an Application
 using Haby-managed configuration and the same durable state/operation model.
 
 - [x] Accept the first Workload foundation packet under [ADR-046](docs/adr/0046-kubernetes-workload-foundation-and-rollout-stages.md): unified deployment planning/execution, Kubernetes-specific contracts with neutral core/storage, exact inputs, staged readiness and mandatory retirement cleanup. This is design acceptance, not implementation.
@@ -190,6 +190,8 @@ using Haby-managed configuration and the same durable state/operation model.
 - [x] Implement exact named/scoped Placement selections with conditional updates and operator exact reads: [issue #183 runbook](docs/development/183-placement-selections.md). Selection metadata changes no accepted Plan or generation.
 - [x] Persist authoritative declaration-keyed exact Provider input sets in Plans/generations ([issue #185 contract](docs/development/185-durable-provider-input-sets.md)), preserving the explicit Resource-pilot restrictions. This does not enable Workload admission or effects.
 - [x] Persist evidence-bearing ResourcesReady checkpoints for admitted Resource-only generations through one completion boundary ([issue #187 contract](docs/development/187-resources-ready-checkpoints.md)). Preserve original provenance, audited recovery and confirmed effects; Workload admission and later stages remain closed.
+- [x] Complete the evidence maintenance sequence: [PR #194](https://github.com/hamstix/haby/pull/194) hosted entrypoint, [PR #196](https://github.com/hamstix/haby/pull/196) fixture isolation, [PR #198](https://github.com/hamstix/haby/pull/198) explicit suites and [PR #199](https://github.com/hamstix/haby/pull/199) bounded failure evidence. The earlier #191 proposal/PR #192 was superseded and is not implemented on main. These changes do not implement Workload runtime stages.
+- [x] Implement the [issue #200 bounded Deployment kernel](docs/development/200-deployment-kernel.md): strict explicit transport, closed intent/receipts, one-shot create, conditional keyed update and separate read-only uncertain observation. It is not Host-registered, has no persisted dispatch linkage and cannot admit Workloads or advance AppliedGeneration. Durable intent/dispatch linkage is the next slice.
 - [ ] Implement durable exact Placement capture and stage checkpoints. Placement revision/selection administration alone does not enable these paths.
 - [ ] Implement Deployment and explicitly selected Service and headless Service (allowed together), plus individual Ingress controlled by placement. No compulsory bundle, arbitrary PodSpec/YAML or ownership of referenced objects; shared product routing remains separate.
 - [x] Accept [ADR-049](docs/adr/0049-kubernetes-object-ownership-and-uncertain-writes.md): stable applicationId-componentId-workloadId names with optional nameOverride, exact UID/ownership, bounded managed fields, conditional JSON Patch, conflicts and evidence-based observation after uncertain writes. This is architecture acceptance, not implementation.
