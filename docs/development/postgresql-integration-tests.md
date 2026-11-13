@@ -110,6 +110,14 @@ a Docker-compatible endpoint or the helper is not evidence of a provider bug.
 
 ## Linux and Docker-compatible runtimes
 
+The primary complete gate is the [hosted Linux entrypoint](193-hosted-postgresql-entrypoint.md):
+publish the native CLI, set the required-native variables, then run
+`pwsh -File scripts/test-postgresql-measured.ps1 -Docker -ResultsDirectory .artifacts/postgresql-measurement`.
+It adds bounded prerequisites, one exact-owned server create/remove check,
+case/theory coverage mapping and safe actionable diagnostics. The existing
+WSLc/default measured mode is unchanged. Direct project execution below remains
+useful for focused diagnostics, but does not replace the complete hosted gate.
+
 Verify the runtime from the shell that will run tests:
 
 ```sh

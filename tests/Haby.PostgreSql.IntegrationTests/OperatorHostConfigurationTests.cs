@@ -35,18 +35,34 @@ public sealed class OperatorHostConfigurationTests
     [Fact]
     public async Task Disabled_tls_serves_grpc_on_loopback_without_certificate_settings()
     {
-        await using var app = OperatorHostApplication.Build(
-            ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);
-        await app.StartAsync();
-        var address = new Uri(Assert.Single(app.Urls));
-        Assert.Equal("http", address.Scheme);
-        Assert.True(IPAddress.IsLoopback(IPAddress.Parse(address.Host)));
+        var phase = HostFailurePhase.Build;
+        Grpc.Core.StatusCode? observed = null;
+        await HostFailureDiagnostics.RunAsync(async defer =>
+        {
+            var app = OperatorHostApplication.Build(
+                ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);
+            defer(app.DisposeAsync);
+            phase = HostFailurePhase.Start;
+            await app.StartAsync();
+            var address = new Uri(Assert.Single(app.Urls));
+            phase = HostFailurePhase.AddressScheme;
+            Assert.Equal("http", address.Scheme);
+            phase = HostFailurePhase.AddressLoopback;
+            Assert.True(IPAddress.IsLoopback(IPAddress.Parse(address.Host)));
 
-        using var channel = GrpcChannel.ForAddress(address);
-        var client = new ServerReflection.ServerReflectionClient(channel);
-        using var call = client.ServerReflectionInfo();
-        await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
-        Assert.Equal(Grpc.Core.StatusCode.Unauthenticated, (await Assert.ThrowsAsync<Grpc.Core.RpcException>(async () => await call.ResponseStream.MoveNext(CancellationToken.None))).StatusCode);
+            phase = HostFailurePhase.Channel;
+            var channel = GrpcChannel.ForAddress(address);
+            defer(() => { channel.Dispose(); return ValueTask.CompletedTask; });
+            var client = new ServerReflection.ServerReflectionClient(channel);
+            var call = client.ServerReflectionInfo();
+            defer(() => { call.Dispose(); return ValueTask.CompletedTask; });
+            phase = HostFailurePhase.ReflectionWrite;
+            await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
+            phase = HostFailurePhase.ReflectionRead;
+            observed = (await Assert.ThrowsAsync<Grpc.Core.RpcException>(async () => await call.ResponseStream.MoveNext(CancellationToken.None))).StatusCode;
+            phase = HostFailurePhase.StatusAssertion;
+            Assert.Equal(Grpc.Core.StatusCode.Unauthenticated, observed);
+        }, () => phase, () => observed);
     }
 
     [Theory]

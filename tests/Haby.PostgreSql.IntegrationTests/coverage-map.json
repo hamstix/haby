@@ -1,0 +1,232 @@
+{
+  "baselineSource": "275c8aaf7eb47bf91aa1b57fab4fb891a20d18c2",
+  "baselineCases": 862,
+  "classes": {
+    "AdministrativeSecretTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 15,
+      "gate": "postgresql-integration"
+    },
+    "ConfigurationProfilePersistenceTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 29,
+      "gate": "postgresql-integration"
+    },
+    "DurableDeploymentPlanningTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 52,
+      "gate": "postgresql-integration"
+    },
+    "DurableExecutionTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 23,
+      "gate": "postgresql-integration"
+    },
+    "ExactActionAdmissionTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 61,
+      "gate": "postgresql-integration"
+    },
+    "ExactActionRegistrationTests": {
+      "responsibilities": [
+        "Fast"
+      ],
+      "isolation": "none",
+      "baselineCases": 8,
+      "gate": "postgresql-integration"
+    },
+    "FiveStepCompositionTests": {
+      "responsibilities": [
+        "Fast"
+      ],
+      "isolation": "none",
+      "baselineCases": 4,
+      "gate": "postgresql-integration"
+    },
+    "GeneratedCredentialSlotTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 22,
+      "gate": "postgresql-integration"
+    },
+    "IndependentPairPlanningTests": {
+      "responsibilities": [
+        "Fast"
+      ],
+      "isolation": "none",
+      "baselineCases": 11,
+      "gate": "postgresql-integration"
+    },
+    "ManifestCatalogPersistenceTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 13,
+      "gate": "postgresql-integration"
+    },
+    "OperatorHostConfigurationTests": {
+      "responsibilities": [
+        "Operator/E2E"
+      ],
+      "isolation": "none",
+      "baselineCases": 5,
+      "gate": "postgresql-integration"
+    },
+    "OperatorHostIntegrationTests": {
+      "responsibilities": [
+        "Operator/E2E"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 98,
+      "gate": "postgresql-integration"
+    },
+    "OperatorProviderAccessTests": {
+      "responsibilities": [
+        "Operator/E2E",
+        "Provider integration"
+      ],
+      "isolation": "class-owned-server-exclusive-provider-alias",
+      "baselineCases": 6,
+      "gate": "postgresql-integration"
+    },
+    "PlacementRevisionPersistenceTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 22,
+      "gate": "postgresql-integration"
+    },
+    "PlaintextSecretStoreTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 7,
+      "gate": "postgresql-integration"
+    },
+    "PostgreSqlApplicationLoginTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration",
+        "Operator/E2E"
+      ],
+      "isolation": "class-owned-server-exclusive-login",
+      "baselineCases": 347,
+      "gate": "postgresql-integration"
+    },
+    "PostgreSqlIntegrationTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration",
+        "Operator/E2E"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 9,
+      "gate": "postgresql-integration"
+    },
+    "PostgreSqlPairPersistenceTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 12,
+      "gate": "postgresql-integration"
+    },
+    "PostgreSqlPairPlanningTests": {
+      "responsibilities": [
+        "Fast"
+      ],
+      "isolation": "none",
+      "baselineCases": 41,
+      "gate": "postgresql-integration"
+    },
+    "PostgreSqlRestrictTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 37,
+      "gate": "postgresql-integration"
+    },
+    "ProviderAliasTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration"
+      ],
+      "isolation": "class-owned-server-exclusive-provider-alias",
+      "baselineCases": 6,
+      "gate": "postgresql-integration"
+    },
+    "ProviderConfigurationStoreTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 5,
+      "gate": "postgresql-integration"
+    },
+    "ProviderDeclarationTests": {
+      "responsibilities": [
+        "Persistence"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 9,
+      "gate": "postgresql-integration"
+    },
+    "ProviderPreflightCompatibilityTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration"
+      ],
+      "isolation": "class-owned-server-exclusive-provider-alias",
+      "baselineCases": 7,
+      "gate": "postgresql-integration"
+    },
+    "RetainedPairPlanningTests": {
+      "responsibilities": [
+        "Fast"
+      ],
+      "isolation": "none",
+      "baselineCases": 10,
+      "gate": "postgresql-integration"
+    },
+    "TestCatalogPoolTests": {
+      "responsibilities": [
+        "Test infrastructure"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 3,
+      "gate": "postgresql-integration"
+    },
+    "HostFailureDiagnosticsTests": {
+      "responsibilities": [
+        "Test infrastructure"
+      ],
+      "isolation": "none",
+      "baselineCases": 0,
+      "gate": "postgresql-integration"
+    }
+  }
+}
