@@ -226,6 +226,22 @@ capabilities, not prerequisites for this milestone.
 
 ### Accepted P3 execution order
 
+**Test architecture prerequisite:** complete [#191](https://github.com/hamstix/haby/issues/191),
+then [#188](https://github.com/hamstix/haby/issues/188), under their existing scope.
+Before resuming new functional P3 slices, complete the accepted maintenance stage
+in [ADR-056](docs/adr/0056-test-responsibilities-isolation-and-execution.md):
+
+- [ ] Map every case/theory parameter and provide one documented runner with a short preflight and useful safe diagnostics.
+- [ ] Separate catalog persistence from Provider effects with explicit database/server isolation and measured configurable concurrency.
+- [ ] Separate Host/E2E and infrastructure qualification; migrate CI with complete coverage mapping and remove only replaced execution paths.
+
+GitHub-hosted Linux is the primary full integration gate; a separate Linux runner
+can support diagnostics and periodic heavy qualification. Preserve Windows-specific
+and published Native AOT checks, real external semantics and ADR-055 mass-start
+qualification. This is accepted work, not completed migration or a waiver of
+current checks. Ordinary validation uses source/build/results attribution rather
+than immutable Git-index or repeated forensic preparation requirements.
+
 Under [ADR-055](docs/adr/0055-p3-implementation-closure-and-coordination.md):
 
 1. Issue #177: contracts and pure resolution.
