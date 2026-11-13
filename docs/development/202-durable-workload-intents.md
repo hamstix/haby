@@ -24,7 +24,10 @@ Internal Plans share aggregate/precondition locks, normal freshness checks,
 configuration capture and generation row writers with public Plans. Placement
 selection follows the existing Environment/alias-scoped precedence. Commit
 rechecks exact selections; execution uses the saved inputs without consulting
-current aliases. Accepted input rows restrict deletion of referenced Provider
+current aliases. Adapter preparation resolves all frozen Workload Placements
+together and retains whole-generation object-name collision checks before
+selecting one subject. Later selection changes cannot rebind an accepted intent.
+Accepted input rows restrict deletion of referenced Provider
 and Placement revisions, including before an action is accepted.
 
 Resource proof preparation, coverage, original attempt/output provenance and
@@ -44,6 +47,9 @@ The additive migration adds `internal_effects` with a false default, generic
 the singleton serialization gate are reused. No new scheduler, server workflow
 function or Provider-specific catalog column is introduced. Existing supported
 catalogs can apply this additive migration; no reset or backfill is performed.
+Commit timestamps are normalized to PostgreSQL microsecond precision before
+persistence and the first receipt return, so first receipt and exact stored
+replay have the same identity without comparison tolerance.
 The current durable input version remains 4. Normal older-format refusal rules
 continue to apply.
 
@@ -91,6 +97,14 @@ Resource baseline, then imports and accepts the mixed target. Synthetic action
 coverage uses the same intent/state/barrier/observation/output path with its own
 test action contract; it claims no additional production Provider.
 
+Internal fixture preflight composes exact typed handlers. PostgreSQL retains its
+real credential/connection/privilege preflight and normal alias CAS/audit path.
+Catalog-only cases explicitly use a narrow typed Kubernetes test double that
+checks its scoped sentinel credentials; it is not real API evidence or a
+production preflight registration. Real API cases instead validate the actual
+fixture TLS/credentials, authenticated identity, namespace and Deployment
+permissions through the qualified client, without deploying a probe object.
+
 The existing qualification project reuses these test fixtures and the qualified
 API launcher. On a Linux Docker host:
 
@@ -114,3 +128,21 @@ Ordinary full PostgreSQL, solution, dependency and both published Native AOT
 gates remain required. A clean build or synthetic test is not real API evidence.
 Recorded gate results must identify their actual source and failures; failed
 hosted runs are retained and are not automatically repeated.
+
+Placement selection writers hold shared transaction locks on the environment/alias
+scope before reading. Internal capture and commit validation hold the same scope
+exclusively until their outer transaction ends, including absent higher-precedence
+selection insertions. Existing token/primary-key CAS and audit semantics remain.
+Functional tests retain the eight-party writer races and add actual PostgreSQL
+blocking checks for updates and absent application/component selections. Migration
+history assertions compare exact assembly-derived ID sets and verify every
+intentionally removed ID, retaining the fresh-catalog refusal and preservation checks.
+
+Multi-alias capture first locks all distinct Provider alias rows in ordinal alias
+order, then all distinct Placement scopes in that order, before subject selection
+reads. Commit validation uses the same capture path after its ordered Provider
+checks. The regression uses two genuine imported applications with reversed
+component-to-alias mappings, pauses one capture after its first scope lock and
+observes the other backend waiting on that same scope. Both complete with their
+exact per-subject Provider and Placement inputs. Local compilation/discovery is
+not execution evidence for this PostgreSQL regression.

@@ -45,10 +45,41 @@ internal static class DurableActionCases
                 return new(endpoint, await File.ReadAllTextAsync(Path.Combine(directory, "ca.crt"), token), null,
                     await Save("admin.crt"), await Save("admin.key"));
             }
+            async ValueTask<ProviderPreflightResult> Preflight(ISecretStore store, EnvironmentRecordId environment,
+                ProviderAliasBinding target, KubernetesProviderConfiguration configuration, CancellationToken cancellationToken)
+            {
+                var binding = new KubernetesBinding(environment.ToString(), target.InstanceId.ToString(), target.RevisionNumber.Value,
+                    KubernetesProviderConfigurationCodec.Implementation);
+                var connection = new KubernetesConnection(binding, configuration.Endpoint, configuration.ServerCaPem,
+                    configuration.BearerToken, configuration.ClientCertificate, configuration.ClientPrivateKey);
+                try
+                {
+                    // Actual fixture credentials, chain/hostname checks and authenticated API
+                    // permissions. No Deployment or other persistent workload is created.
+                    using var client = await KubernetesClientFactory.CreateFixture(connection, store, [], cancellationToken);
+                    await client.Client.Version.GetCodeAsync(cancellationToken);
+                    var identity = await client.Client.AuthenticationV1.CreateSelfSubjectReviewAsync(new V1SelfSubjectReview(), cancellationToken: cancellationToken);
+                    if (string.IsNullOrEmpty(identity.Status?.UserInfo?.Username) || identity.Status.UserInfo.Username == "system:anonymous")
+                        return new(ProviderPreflightOutcome.AuthenticationFailed);
+                    await client.Client.CoreV1.ReadNamespaceAsync(name, cancellationToken: cancellationToken);
+                    foreach (var verb in new[] { "get", "create", "patch" })
+                    {
+                        var review = await client.Client.AuthorizationV1.CreateSelfSubjectAccessReviewAsync(new V1SelfSubjectAccessReview
+                        { Spec = new() { ResourceAttributes = new() { NamespaceProperty = name, Group = "apps", Resource = "deployments", Verb = verb } } }, cancellationToken: cancellationToken);
+                        if (review.Status?.Allowed != true) return new(ProviderPreflightOutcome.InsufficientPrivilege);
+                    }
+                    return new(ProviderPreflightOutcome.Ready);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.Unauthorized) { return new(ProviderPreflightOutcome.AuthenticationFailed); }
+                catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.Forbidden) { return new(ProviderPreflightOutcome.InsufficientPrivilege); }
+                catch (Exception error) when (error is ArgumentException or CryptographicException) { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
+                catch (Exception error) when (error is HttpRequestException or HttpOperationException) { return new(ProviderPreflightOutcome.ServerUnavailable); }
+            }
             async Task<(DurableDeploymentPlanningTests.InternalScenario Scenario, DurableOperationKey Key, Counter Counter)> Accepted(Action<InternalActionFault>? fault = null)
             {
                 Console.WriteLine("Durable phase: arrange-real-Resource-and-accepted-mixed-generation");
-                var scenario = await setup.InternalScenarioAsync(Configuration, name);
+                var scenario = await setup.InternalScenarioAsync(Configuration, name, actualKubernetesProbe: Preflight);
                 await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
                 var counter = new Counter(scenario.Connection);
                 var actions = Compose(services, counter, fault);

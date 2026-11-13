@@ -23,7 +23,7 @@ public sealed class PostgreSqlPlacementSelectionStore(IDbContextFactory<Manifest
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var transaction = await db.Database.BeginTransactionAsync(token);
             var scopeLock = $"haby-placement:{Guid.Parse(reference.Environment.ToString()):N}:{reference.Alias.Value}";
-            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({scopeLock}, 0))", token);
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock_shared(hashtextextended({scopeLock}, 0))", token);
             var row = await Query(db, reference.Environment, reference.Alias, target).SingleOrDefaultAsync(token);
             if (row is not null) row.Revision = await db.PlacementRevisions.SingleOrDefaultAsync(x => x.Id == row.RevisionId, token)
                 ?? throw new InvalidDataException("Stored Placement selection is unavailable.");

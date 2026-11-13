@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Haby.Kubernetes.Qualification" />
+    <Compile Include="..\InternalKubernetesFixturePreflight.cs" Link="InternalKubernetesFixturePreflight.cs" />
     <Compile Include="..\DurableInputSamples.cs" Link="DurableInputSamples.cs" />
     <Compile Include="..\PlacementSamples.cs" Link="PlacementSamples.cs" />
     <Compile Include="..\ProfileDeclarationBoundarySamples.cs" Link="ProfileDeclarationBoundarySamples.cs" />

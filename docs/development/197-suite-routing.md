@@ -202,9 +202,9 @@ execution path is removed without replacement evidence. No #191 harness is used.
 After this slice the architect must explicitly reassess #188/#191; no old run chain
 or functional P3 work resumes automatically.
 
-Issue #202 adds eight fast and fourteen functional PostgreSQL rows, plus thirteen
+Issue #202 adds fourteen fast and twenty-three functional PostgreSQL rows, plus thirteen
 scoped real API/catalog rows in `kubernetes-durable-actions` (`api-catalog`). The
-current ordinary inventories are 1398 fast and 914 PostgreSQL (909 functional,
+current ordinary inventories are 1404 fast and 923 PostgreSQL (918 functional,
 5 qualification); native and existing 24 kernel rows are unchanged. The new
 [internal action guide](202-durable-workload-intents.md) describes the bounded
 launcher mode. Existing case identities and platform obligations are retained.

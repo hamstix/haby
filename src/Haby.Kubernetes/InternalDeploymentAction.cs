@@ -17,14 +17,33 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
     public string Prepare(InternalActionContext context)
     {
         if (context.Subject is not ProviderInput.Workload subject || context.Placement is null) throw new InvalidDataException("Deployment subject unavailable.");
-        var placement = KubernetesPlacementCodec.ToTyped(context.Placement);
-        var revision = new PlacementRevisionInput(context.Provider.Environment, context.Provider.Alias, context.Provider.Instance,
-            context.Provider.Configuration, context.Provider.Implementation, placement);
-        var declaration = context.Inputs.Configuration!.Manifest.Spec.Components[subject.Component].Workloads[subject.Id];
-        var scope = declaration.PlacementRef is { } selector ? new PlacementScope(context.Inputs.Environment, context.Provider.Alias, Selector: selector) :
-            new PlacementScope(context.Inputs.Environment, context.Provider.Alias, context.Inputs.Providers.Declaration.ApplicationId, subject.Component);
-        var effective = KubernetesWorkloadPlanner.Resolve(context.Inputs.Providers.Declaration, ApplicationVersion.Create(context.ApplicationVersion),
-            context.Inputs.Providers, new PlacementInputs([revision], [new(scope, placement.Reference)]));
+        var manifest = context.Inputs.Providers.Declaration;
+        var revisions = new List<PlacementRevisionInput>(); var assignments = new List<PlacementAssignment>();
+        var pins = new Dictionary<(EnvironmentRecordId, ProviderAlias, PlacementReference), (Guid, PlacementDeclaration)>();
+        foreach (var frozen in context.Inputs.Providers.Entries.Values.Where(x => x.Input is ProviderInput.Workload))
+        {
+            var input = (ProviderInput.Workload)frozen.Input;
+            var savedPin = frozen.Placement is { } saved ? InternalPlacementInput.Decode(saved) : throw new InvalidDataException("Frozen Placement unavailable.");
+            var pin = savedPin.Declaration;
+            var placement = KubernetesPlacementCodec.ToTyped(pin);
+            var revision = new PlacementRevisionInput(frozen.Environment, frozen.Alias, frozen.Instance, frozen.Configuration, frozen.Implementation, placement);
+            var existing = revisions.SingleOrDefault(x => x.Environment == frozen.Environment && x.Alias == frozen.Alias && x.Declaration.Reference == placement.Reference);
+            var key = (frozen.Environment, frozen.Alias, placement.Reference);
+            if (existing is null) { revisions.Add(revision); pins.Add(key, (savedPin.Id, pin)); }
+            else if (existing.Provider != revision.Provider || existing.Configuration != revision.Configuration || existing.Implementation != revision.Implementation || pins[key] != (savedPin.Id, pin))
+                throw new InvalidDataException("Conflicting frozen Placement revision.");
+            var declaration = manifest.Spec.Components[input.Component].Workloads[input.Id];
+            var scope = declaration.PlacementRef is { } selector ? new PlacementScope(frozen.Environment, frozen.Alias, Selector: selector) :
+                new PlacementScope(frozen.Environment, frozen.Alias, manifest.ApplicationId, input.Component);
+            var assignment = new PlacementAssignment(scope, placement.Reference);
+            var selected = assignments.SingleOrDefault(x => x.Scope == scope);
+            if (selected is null) assignments.Add(assignment);
+            else if (selected.Revision != assignment.Revision) throw new InvalidDataException("Conflicting frozen Placement selection.");
+        }
+        // Resolve the complete frozen generation once, including cross-Workload name
+        // collisions, before selecting this action's exact declared subject.
+        var effective = KubernetesWorkloadPlanner.Resolve(manifest, ApplicationVersion.Create(context.ApplicationVersion),
+            context.Inputs.Providers, new PlacementInputs(revisions, assignments));
         var workload = effective.Single(x => x.Input == subject);
         return DeploymentIntents.Encode(DeploymentIntents.Prepare(workload, Guid.Parse(context.Key.DeploymentId.ToString()),
             context.ManagedIdentity, context.Key.Generation.Value, context.Marker));

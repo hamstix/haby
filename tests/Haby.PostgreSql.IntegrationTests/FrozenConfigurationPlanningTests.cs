@@ -342,13 +342,18 @@ public sealed partial class DurableDeploymentPlanningTests
     {
         var setup = await PrepareConfigurationAsync();
         await using (var services = Services(setup.Connection, setup.Time)) await ConfigurationPlan(setup, services);
+        string[] expectedHistory;
         await using (var arrange = new ConfigFactory(setup.Connection).CreateDbContext())
+        {
+            expectedHistory = await MigrationHistoryAssertions.CurrentAsync(arrange, "ReuseManagedResources", "AddResourceNaming",
+                "FreezeConfigurationPlanning", "PinConfigurationRendering", "MaterializeConfigurationDocuments", "AddConfigurationAccess", "AddOperatorAccess");
             await arrange.Database.ExecuteSqlRawAsync("""
                 ALTER TABLE deployment_plans DROP COLUMN configuration_json;
                 ALTER TABLE application_deployment_generations DROP COLUMN configuration_json;
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%FreezeConfigurationPlanning' OR "MigrationId" LIKE '%PinConfigurationRendering' OR "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
+        }
         await using (var act = Services(setup.Connection, setup.Time))
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => act.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
@@ -356,9 +361,8 @@ public sealed partial class DurableDeploymentPlanningTests
         }
         await using var check = new NpgsqlConnection(setup.Connection); await check.OpenAsync();
         Assert.Equal(1L, await new NpgsqlCommand("SELECT count(*) FROM deployment_plans", check).ExecuteScalarAsync());
-        // The seven explicitly removed migrations leave 23 of the current 30 rows;
-        // the Provider-input-set migration remains, so this is still a non-prefix history.
-        Assert.Equal(23L, await new NpgsqlCommand("SELECT count(*) FROM \"__EFMigrationsHistory\"", check).ExecuteScalarAsync());
+        await using var history = new ConfigFactory(setup.Connection).CreateDbContext();
+        await MigrationHistoryAssertions.EqualAsync(history, expectedHistory);
     }
 
     private static async Task ObserveConfigurationLockWait(string connection, int owner, int contender,

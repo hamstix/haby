@@ -183,6 +183,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         var deploymentId = actual is null ? ApplicationDeploymentId.New() : ApplicationDeploymentId.Parse(actual.Id.ToString());
         var deploymentGuid = Guid.Parse(deploymentId.ToString());
         var committedAt = clock.GetUtcNow();
+        committedAt = committedAt.AddTicks(-(committedAt.Ticks % TimeSpan.TicksPerMicrosecond));
         var generation = actual is null ? 1 : checked(actual.DesiredGeneration + 1);
         var unchanged = false;
         if (actual is not null)

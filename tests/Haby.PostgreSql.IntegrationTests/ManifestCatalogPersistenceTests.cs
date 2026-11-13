@@ -79,7 +79,8 @@ public sealed class ManifestCatalogPersistenceTests(CatalogServerFixture server)
         await check.OpenAsync();
         Assert.Equal(1, await ScalarAsync(check, "SELECT count(*) FROM applications"));
         Assert.Equal(2, await ScalarAsync(check, "SELECT count(*) FROM manifest_revisions"));
-        Assert.Equal(30, await ScalarAsync(check, "SELECT count(*) FROM \"__EFMigrationsHistory\""));
+        await using var history = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
+        await MigrationHistoryAssertions.CurrentAsync(history);
         Assert.Equal(2, await ScalarAsync(check, "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'IX_%' AND indexdef LIKE '%UNIQUE INDEX%' AND tablename IN ('applications','manifest_revisions')"));
         Assert.Equal(1, await ScalarAsync(check, "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'AK_%' AND indexdef LIKE '%UNIQUE INDEX%' AND tablename='manifest_revisions'"));
     }

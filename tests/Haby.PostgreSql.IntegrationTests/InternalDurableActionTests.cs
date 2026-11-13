@@ -7,6 +7,7 @@ using Haby.Kubernetes.Contracts;
 using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
+using Haby.Tests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -17,10 +18,15 @@ public sealed partial class DurableDeploymentPlanningTests
 {
     internal sealed record InternalScenario(string Connection, TimeProvider Time, EnvironmentRecordId Environment,
         DurableChangeSetCommit Commit, ManifestRevisionRef Revision);
-    internal async Task<InternalScenario> InternalScenarioAsync(Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? suppliedConfiguration = null, string namespaceName = "test")
+    internal async Task<InternalScenario> InternalScenarioAsync(Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? suppliedConfiguration = null, string namespaceName = "test", bool subMicrosecondCommit = false,
+        Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualKubernetesProbe = null, bool twoComponents = false, bool distinctPlacements = false)
     {
         var setup = await PrepareCommitAsync();
-        await using var services = Services(setup.Connection, setup.Time, internalActions: true);
+        ProviderAliasBinding? fixtureBinding = null;
+        InternalKubernetesFixtureProbe? probe = actualKubernetesProbe is null ? null : (secrets, environment, configuration, token) =>
+            actualKubernetesProbe(secrets, environment, fixtureBinding ?? throw new InvalidDataException("Fixture binding unavailable."), configuration, token);
+        await using var services = Services(setup.Connection, setup.Time, internalActions: true, kubernetesProbe: probe);
+        Assert.Equal(ProviderPreflightOutcome.Ready, (await services.GetRequiredService<IProviderRevisionPreflight>().CheckAsync(setup.Environment, setup.First, default)).Outcome);
         var catalog = new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition], [KubernetesContract.Definition], [], []);
         var envelope = JsonNode.Parse(Envelope)!;
         envelope["applicationVersion"] = "internal-base";
@@ -41,9 +47,10 @@ public sealed partial class DurableDeploymentPlanningTests
         var providerStore = services.GetRequiredService<IProviderConfigurationStore>();
         var instance = await providerStore.CreateInstanceAsync(setup.Environment, configuration, default);
         await providerStore.AddRevisionAsync(setup.Environment, instance, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
+        fixtureBinding = new(instance, ProviderConfigurationRevisionNumber.Create(1));
         var alias = ProviderAlias.Create("kubernetes.primary");
         Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(setup.Environment, alias, null,
-            new(instance, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
+            fixtureBinding, "tester", default)).Outcome);
         var placementCodec = new KubernetesPlacementCodec();
         var placement = placementCodec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"test"}}"""u8.ToArray());
         placement = placementCodec.Decode(Encoding.UTF8.GetBytes(placement.Payload.Replace("\"test\"", "\"" + namespaceName + "\"", StringComparison.Ordinal)));
@@ -52,9 +59,25 @@ public sealed partial class DurableDeploymentPlanningTests
         await new PostgreSqlPlacementRevisionStore(factory, placementCodec).CompareAndCreateAsync(reference, placement, new("tester", setup.Time.GetUtcNow()), default);
         await new PostgreSqlPlacementSelectionStore(factory, placementCodec).ApplyAsync(PlacementSelectionTarget.Create("environment", "", "", ""), reference,
             new PlacementSelectionPrecondition.ExpectedAbsence(), new("tester", setup.Time.GetUtcNow(), null), default);
+        if (distinctPlacements)
+        {
+            var workerPlacement = placementCodec.Decode(Encoding.UTF8.GetBytes(placement.Payload.Replace("standard", "worker-placement", StringComparison.Ordinal)
+                .Replace("\"" + namespaceName + "\"", "\"" + namespaceName + "-worker\"", StringComparison.Ordinal)));
+            var workerReference = new PlacementRevisionKey(setup.Environment, alias, workerPlacement.Name, workerPlacement.Revision);
+            await new PostgreSqlPlacementRevisionStore(factory, placementCodec).CompareAndCreateAsync(workerReference, workerPlacement, new("tester", setup.Time.GetUtcNow()), default);
+            await new PostgreSqlPlacementSelectionStore(factory, placementCodec).ApplyAsync(PlacementSelectionTarget.Create("named", "worker-selected", "", ""), workerReference,
+                new PlacementSelectionPrecondition.ExpectedAbsence(), new("tester", setup.Time.GetUtcNow(), null), default);
+        }
         envelope["applicationVersion"] = "internal-target";
         envelope["manifest"]!["spec"]!["components"] = JsonNode.Parse("""{"api":{"workloads":{"main":{"type":"kubernetes.workload/v1alpha1","providerRef":"kubernetes.primary","properties":{"image":{"reference":"registry.example/app:v1"}}}}}}"""u8);
+        if (twoComponents)
+        {
+            var worker = envelope["manifest"]!["spec"]!["components"]!["api"]!.DeepClone();
+            if (distinctPlacements) worker["workloads"]!["main"]!["placementRef"] = "worker-selected";
+            envelope["manifest"]!["spec"]!["components"]!["worker"] = worker;
+        }
         var target = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await importer.ExecuteAsync(Encoding.UTF8.GetBytes(envelope.ToJsonString()), "tester"));
+        if (subMicrosecondCommit) setup.Time.Advance(TimeSpan.FromTicks(1));
         var accepted = await new InternalAcceptedGenerationBuilder(services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(),
             (PostgreSqlDurableDesiredStateCommitter)committer).AcceptForEffectAsync(setup.Environment, target.ManifestRevisionRef.ApplicationRecordId,
                 target.ManifestRevisionRef, original.Generation, "tester", default);
@@ -253,5 +276,89 @@ public sealed partial class DurableDeploymentPlanningTests
             await fixture.RunClientUtilityAsync("rm", "-f", dump);
             await fixture.RunClientUtilityAsync("rmdir", directory);
         }
+    }
+
+    [Fact]
+    public async Task First_internal_submicrosecond_commit_receipt_accepts_action_and_matches_persisted_replay()
+    {
+        var scenario = await InternalScenarioAsync(subMicrosecondCommit: true);
+        await using var services = Services(scenario.Connection, scenario.Time, internalActions: true);
+        var handler = new SyntheticAction();
+        var key = await Actions(services, handler).AcceptAsync(scenario.Commit, SyntheticSubject, handler.Contract.Action, "precision", default);
+        var committer = (PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>();
+        var replay = Assert.IsType<DurableCommitResult.Committed>(await committer.CommitInternalAsync(scenario.Commit.ChangeSetId, scenario.Commit.PlanId, "replay", default)).Commit;
+        Assert.Equal(scenario.Commit, replay); Assert.Equal(0, scenario.Commit.CommittedAt.Ticks % TimeSpan.TicksPerMicrosecond);
+        Assert.NotNull(await Actions(services, handler).HistoryAsync(key, default));
+    }
+
+    [Fact]
+    public async Task First_public_submicrosecond_commit_receipt_matches_exact_persisted_replay()
+    {
+        var setup = await PrepareCommitAsync(); setup.Time.Advance(TimeSpan.FromTicks(1));
+        await using var services = Services(setup.Connection, setup.Time);
+        var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
+        var change = (await planner.CreateChangeSetAsync(setup.Environment, setup.Revision.ApplicationRecordId, setup.Revision,
+            new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).ChangeSet!;
+        var plan = (await planner.CreatePlanAsync(change.Id, "tester", default)).Plan!;
+        var committer = services.GetRequiredService<IDurableDesiredStateCommitter>();
+        var first = Assert.IsType<DurableCommitResult.Committed>(await committer.CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
+        Assert.Equal(first, await committer.FindCommitAsync(change.Id, default));
+        Assert.Equal(first, Assert.IsType<DurableCommitResult.Committed>(await committer.CommitAsync(change.Id, plan.Id, "replay", default)).Commit);
+        Assert.Equal(0, first.CommittedAt.Ticks % TimeSpan.TicksPerMicrosecond);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Two_components_accept_their_frozen_placements_after_current_selections_change(bool distinct)
+    {
+        var scenario = await InternalScenarioAsync(twoComponents: true, distinctPlacements: distinct);
+        await using var services = Services(scenario.Connection, scenario.Time, internalActions: true);
+        var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(); var codec = new KubernetesPlacementCodec();
+        var alias = ProviderAlias.Create("kubernetes.primary");
+        var later = codec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"later","revision":1},"spec":{"namespace":"later-target"}}"""u8.ToArray());
+        var reference = new PlacementRevisionKey(scenario.Environment, alias, later.Name, later.Revision);
+        await new PostgreSqlPlacementRevisionStore(factory, codec).CompareAndCreateAsync(reference, later, new("later", scenario.Time.GetUtcNow()), default);
+        var selections = new PostgreSqlPlacementSelectionStore(factory, codec);
+        foreach (var target in distinct ? new[] { PlacementSelectionTarget.Create("environment", "", "", ""), PlacementSelectionTarget.Create("named", "worker-selected", "", "") } :
+            new[] { PlacementSelectionTarget.Create("environment", "", "", "") })
+        {
+            var previous = (await selections.FindAsync(scenario.Environment, alias, target, default))!;
+            Assert.Equal(PlacementSelectionOutcome.Updated, (await selections.ApplyAsync(target, reference,
+                new PlacementSelectionPrecondition.ExpectedToken(previous.Token), new("later", scenario.Time.GetUtcNow(), null), default)).Outcome);
+        }
+        var handler = new InternalDeploymentAction(services.GetRequiredService<ISecretStore>()); var actions = Actions(services, handler);
+        foreach (var component in new[] { "api", "worker" })
+        {
+            var key = await actions.AcceptAsync(scenario.Commit, new ProviderInput.Workload(ManifestLocalId.Create(component), ManifestLocalId.Create("main")),
+                InternalDeploymentAction.Create, component + "-create", default);
+            var history = (await actions.HistoryAsync(key, default))!; var intent = DeploymentIntents.Decode(history.Intent.Payload);
+            Assert.Equal(component == "worker" && distinct ? "test-worker" : "test", intent.Namespace);
+            Assert.Equal(component == "worker" && distinct ? "worker-placement" : "standard", intent.Placement);
+            Assert.Equal(component, intent.Component); Assert.Empty(history.Attempts);
+        }
+        await using var verify = await factory.CreateDbContextAsync();
+        Assert.Equal(2, await verify.ActionIntents.CountAsync()); Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+    }
+
+    [Fact]
+    public async Task Typed_internal_fixture_preflight_keeps_real_PostgreSql_checks_and_refuses_bad_Kubernetes_credentials_before_alias_write()
+    {
+        var setup = await PrepareCommitAsync(); await using var services = Services(setup.Connection, setup.Time, internalActions: true);
+        var preflight = services.GetRequiredService<IProviderRevisionPreflight>();
+        Assert.Equal(ProviderPreflightOutcome.Ready, (await preflight.CheckAsync(setup.Environment, setup.First, default)).Outcome);
+        var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
+        await services.GetRequiredService<ISecretStore>().CreateAsync(new(new SecretOwner.Environment(setup.Environment), SecretPurpose.ProviderAdministrator), secret, "wrong-fixture-token"u8.ToArray(), default);
+        var configuration = new KubernetesProviderConfiguration(new Uri("https://127.0.0.1:6443"), null, secret, null, null);
+        var providers = services.GetRequiredService<IProviderConfigurationStore>();
+        var instance = await providers.CreateInstanceAsync(setup.Environment, configuration, default);
+        await providers.AddRevisionAsync(setup.Environment, instance, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
+        var binding = new ProviderAliasBinding(instance, ProviderConfigurationRevisionNumber.Create(1));
+        Assert.Equal(ProviderPreflightOutcome.AuthenticationFailed, (await preflight.CheckAsync(setup.Environment, binding, default)).Outcome);
+        var alias = ProviderAlias.Create("kubernetes.primary"); var store = services.GetRequiredService<IProviderAliasStore>();
+        var refused = await store.ChangeAsync(setup.Environment, alias, null, binding, "tester", default);
+        Assert.Equal(ProviderAliasChangeOutcome.PreflightFailed, refused.Outcome);
+        Assert.Equal(ProviderPreflightOutcome.AuthenticationFailed, refused.Preflight!.Value.Outcome);
+        Assert.Null(await store.ResolveAsync(setup.Environment, alias, default));
     }
 }

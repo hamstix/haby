@@ -6,16 +6,27 @@ namespace Haby.Persistence.PostgreSql;
 
 public sealed partial class PostgreSqlDurableDeploymentPlanner
 {
-    private async Task<ExactProviderResolutionSet> CaptureInternalProvidersAsync(ManifestCatalogDbContext db,
+    internal async Task<ExactProviderResolutionSet> CaptureInternalProvidersAsync(ManifestCatalogDbContext db,
         NormalizedApplicationManifest manifest, EnvironmentRecordId environment, IEnumerable<ExactProviderResolution> resources, CancellationToken token)
     {
         var entries = resources.ToList();
         var env = Guid.Parse(environment.ToString());
+        if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("Exact action capture requires a transaction.");
+        var aliases = manifest.Spec.Components.Values.SelectMany(x => x.Workloads.Values)
+            .Select(x => x.ProviderRef.Value).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        // Match Commit's combined order: Provider alias rows first, then Placement scopes.
+        // All scopes must be held before subject reads; component order can reverse aliases.
+        foreach (var alias in aliases)
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT environment_record_id FROM provider_aliases WHERE environment_record_id = {env} AND alias = {alias} FOR SHARE", token);
+        foreach (var alias in aliases)
+        {
+            var lockKey = $"haby-placement:{env:N}:{alias}";
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", token);
+        }
         foreach (var (component, declaration) in manifest.Spec.Components.OrderBy(x => x.Key.Value, StringComparer.Ordinal))
             foreach (var (id, workload) in declaration.Workloads.OrderBy(x => x.Key.Value, StringComparer.Ordinal))
             {
                 var alias = workload.ProviderRef.Value;
-                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT environment_record_id FROM provider_aliases WHERE environment_record_id = {env} AND alias = {alias} FOR SHARE", token);
                 var binding = await db.ProviderAliases.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env && x.Alias == alias, token)
                     ?? throw new InvalidDataException("Exact action Provider unavailable.");
                 var revision = await db.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env &&
@@ -33,11 +44,12 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         return new(manifest, environment, entries);
     }
 
-    private static async Task<Guid> SelectPlacementAsync(ManifestCatalogDbContext db, Guid environment, string alias,
+    internal static async Task<Guid> SelectPlacementAsync(ManifestCatalogDbContext db, Guid environment, string alias,
         string application, string component, string? selector, CancellationToken token)
     {
-        // One transaction snapshot and the shared administrative selection lock prevent
-        // capture/commit from observing a partially changed selector.
+        // Capture and commit validation exclude every writer in this alias scope, including
+        // insertion of an absent higher-precedence row, until the outer transaction ends.
+        if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("Placement capture requires a transaction.");
         var lockKey = $"haby-placement:{environment:N}:{alias}";
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", token);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT environment_record_id FROM placement_selections WHERE environment_record_id = {environment} AND provider_alias = {alias} FOR SHARE", token);
