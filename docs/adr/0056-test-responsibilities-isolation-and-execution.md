@@ -146,13 +146,30 @@ evidence that the corresponding behavior remains covered.
 
 ## Delivery order and acceptance
 
-Complete #191 and then #188 under their existing scope. Complete this maintenance
-stage before resuming new functional P3 slices:
+The maintainer accepted a stop-loss on 2026-11-13. This supersedes the earlier
+ordering that required completion of #191 and then #188 before maintenance.
+Stop new qualification attempts for those issues, reconcile active task-owned
+processes and safely release positively identified resources. Preserve existing
+results and unresolved cleanup; do not restart unavailable infrastructure merely
+to continue the previous qualification chain. Keep both issues and their PRs open
+and unmerged, with a concise completed/failed/unperformed checkpoint.
+
+Start maintenance from current main, without requiring the unmerged #191 harness:
 
 1. Inventory coverage and provide the minimal runner, preflight and documentation.
 2. Separate persistence and Provider-effect isolation; measure and bound resources.
 3. Separate Host/E2E and infrastructure qualification, migrate CI and remove only
    demonstrated obsolete execution paths.
+
+Then finish or explicitly reassess #188/#191 using the new execution path before
+resuming functional P3. Preserve useful diagnostic and isolation fixes, but do not
+retain infrastructure solely because it was already implemented. Any scope
+supersession must be recorded explicitly; stopping work is not issue completion.
+Known hosted failures remain unresolved until explained and corrected or otherwise
+explicitly dispositioned; a runtime change alone is not a waiver. The first slice
+must establish a reproducible GitHub-hosted Linux/Docker/Testcontainers run and
+actionable diagnostics without depending on local WSLc sessions or a private
+supervisor. Do not require the entire reorganization in that first slice.
 
 Acceptance requires a clean-checkout documented Linux run, explicit Windows/AOT
 coverage, a complete case/parameter map, useful failure diagnostics, and verified

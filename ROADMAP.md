@@ -226,14 +226,21 @@ capabilities, not prerequisites for this milestone.
 
 ### Accepted P3 execution order
 
-**Test architecture prerequisite:** complete [#191](https://github.com/hamstix/haby/issues/191),
-then [#188](https://github.com/hamstix/haby/issues/188), under their existing scope.
-Before resuming new functional P3 slices, complete the accepted maintenance stage
-in [ADR-056](docs/adr/0056-test-responsibilities-isolation-and-execution.md):
+**Test architecture prerequisite (stop-loss accepted 2026-11-13):** stop new
+qualification attempts for [#191](https://github.com/hamstix/haby/issues/191) and
+[#188](https://github.com/hamstix/haby/issues/188), safely reconcile owned resources
+and preserve completed, failed and unperformed evidence. Keep the issues and PRs
+open and unmerged. Start the maintenance stage from current main under
+[ADR-056](docs/adr/0056-test-responsibilities-isolation-and-execution.md), without
+requiring the unmerged local harness:
 
 - [ ] Map every case/theory parameter and provide one documented runner with a short preflight and useful safe diagnostics.
 - [ ] Separate catalog persistence from Provider effects with explicit database/server isolation and measured configurable concurrency.
 - [ ] Separate Host/E2E and infrastructure qualification; migrate CI with complete coverage mapping and remove only replaced execution paths.
+
+After maintenance, finish or explicitly reassess #188/#191 through the new path
+before resuming functional P3. Retain useful fixes rather than all accumulated
+infrastructure; stopping an investigation does not close its unresolved failures.
 
 GitHub-hosted Linux is the primary full integration gate; a separate Linux runner
 can support diagnostics and periodic heavy qualification. Preserve Windows-specific
