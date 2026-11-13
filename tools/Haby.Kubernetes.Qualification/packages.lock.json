@@ -12,15 +12,66 @@
           "YamlDotNet": "16.3.0"
         }
       },
+      "Corvus.Text.Json": {
+        "type": "Transitive",
+        "resolved": "5.7.7",
+        "contentHash": "Awo6YNEZQZQbO7DsCGBGm5E/Jw+8sI+354wytYeAbRkuL08zWeqg4tSqf+FCXQk5pezlZMy6lnINHcQ7P8lXlw==",
+        "dependencies": {
+          "NodaTime": "3.3.1"
+        }
+      },
+      "Corvus.Text.Json.Validator": {
+        "type": "Transitive",
+        "resolved": "5.7.7",
+        "contentHash": "suHMPbief1Q11rPA6RT59yF7KpyJKzyGxCC7lUS1G67CNb+WxNKzP6TqV8mhnb7Fa27llBe139qLOJNWrECkUw==",
+        "dependencies": {
+          "Corvus.Text.Json": "5.7.7"
+        }
+      },
       "Fractions": {
         "type": "Transitive",
         "resolved": "7.3.0",
         "contentHash": "2bETFWLBc8b7Ut2SVi+bxhGVwiSpknHYGBh2PADyGWONLkTxT7bKyDRhF8ao+XUv90tq8Fl7GTPxSI5bacIRJw=="
       },
+      "NodaTime": {
+        "type": "Transitive",
+        "resolved": "3.3.1",
+        "contentHash": "7zkTEqmakybTTuDuifpnzl5s8MkmpAdyvoqIPIO2+M2ThF8ixavPcPt1afPfFyCI+A6t3ySujgpGq/5iWc4/RQ=="
+      },
       "YamlDotNet": {
         "type": "Transitive",
         "resolved": "16.3.0",
         "contentHash": "SgMOdxbz8X65z8hraIs6hOEdnkH6hESTAIUa7viEngHOYaH+6q5XJmwr1+yb9vJpNQ19hCQY69xbFsLtXpobQA=="
+      },
+      "haby.application": {
+        "type": "Project",
+        "dependencies": {
+          "Haby.Domain": "[1.0.0, )",
+          "Haby.Manifest": "[1.0.0, )"
+        }
+      },
+      "haby.domain": {
+        "type": "Project"
+      },
+      "haby.kubernetes": {
+        "type": "Project",
+        "dependencies": {
+          "Haby.Kubernetes.Contracts": "[1.0.0, )",
+          "KubernetesClient": "[19.0.2, 19.0.2]"
+        }
+      },
+      "haby.kubernetes.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Haby.Application": "[1.0.0, )"
+        }
+      },
+      "haby.manifest": {
+        "type": "Project",
+        "dependencies": {
+          "Corvus.Text.Json.Validator": "[5.7.7, )",
+          "Haby.Domain": "[1.0.0, )"
+        }
       }
     }
   }

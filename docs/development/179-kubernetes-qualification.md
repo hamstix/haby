@@ -1,12 +1,12 @@
 # Kubernetes client qualification (#179)
 
-Status: isolated qualification implemented; launcher corrections await final SHA-bound gates and independent review. The qualification tool is outside the production solution and has
+Status: API-only qualification completed and merged in [PR #180](https://github.com/hamstix/haby/pull/180), merge `252646670cdea275789485b5192a0d78efb2ea00`. The historical correction/evidence sequence below is retained. The qualification tool is outside the production solution and has
 no references from Domain, Application, Manifest, Host or habyctl. No production
 capability, secret persistence, preflight or runtime identity binding is admitted.
 
 ## Evaluated candidate and binary terms
 
-The provisional candidate is KubernetesClient **19.0.2**, net10.0, source commit
+The qualified candidate is KubernetesClient **19.0.2**, net10.0, source commit
 `f93cab47eb098242347d6f33752b304fd3bb9302`. The inspected downloaded nupkg's nuspec
 specifies Apache-2.0. Its complete resolved dependency closure is Fractions 7.3.0
 (the actual packaged license.txt is BSD-2-Clause) and YamlDotNet 16.3.0 (nuspec MIT,
@@ -41,7 +41,7 @@ hook with explicit custom-root chain validation, server-auth EKU and rejection o
 missing certificates or hostname mismatch. Redirects are disabled. A repeated real
 mismatch probe now refuses. This is qualification-only code, not a production fix.
 Revocation checking is disabled for the disposable private CA; production revocation
-policy remains an adapter decision. Real untrusted-CA and mismatched client-key probes now refuse through this same factory.
+policy is now implemented separately by the [#200 adapter kernel](200-deployment-kernel.md): Online revocation fails closed for system and custom-root trust. The qualification factory remains a disposable-CA fixture. Real untrusted-CA and mismatched client-key probes refuse through this same fixture factory.
 
 ## Runtime and API evidence
 
@@ -59,15 +59,15 @@ and TokenRequest binding, but no kubelet runs containers. This profile proves AP
 semantics only, not projected-file rotation, scheduling, rollout or readiness.
 No arbitrary Kubernetes-version compatibility claim follows.
 
-| Case | Actual local observation | Remaining qualification |
+| Case | Actual local observation | Final qualification disposition |
 | --- | --- | --- |
-| A | Named Deployment create returns UID/RV; occupied name 409; original UID retained | Passed on reviewed f31a112; correction revision rerun required |
-| B | UID+RV tests; keyed app at index 1; unrelated injected container/annotation preserved; stale RV/wrong UID 422 | Passed on reviewed f31a112; correction revision rerun required |
-| C | UID DELETE, separate GET 404, replacement protected with 409 | Passed on reviewed f31a112; correction revision rerun required |
+| A | Named Deployment create returns UID/RV; occupied name 409; original UID retained | Final clean e94de432 Windows/Linux passed; PR #180 merged |
+| B | UID+RV tests; keyed app at index 1; unrelated injected container/annotation preserved; stale RV/wrong UID 422 | Final clean e94de432 Windows/Linux passed; PR #180 merged |
+| C | UID DELETE, separate GET 404, replacement protected with 409 | Final clean e94de432 Windows/Linux passed; PR #180 merged |
 | D | Real bound token validates SA UID/namespace/Pod name+UID/audience; invalid/wrong audience/unbound deny | No owner-chain inference; no production policy implementation |
 | E | Watch cancellation about 2 seconds; accepted marked POST response loss injected, one SDK attempt, exact UID/marker/state GET | Broader transport edge-case analysis |
 | F | mTLS API access; bearer SelfSubjectReview exact SA identity; invalid bearer 401 | All three strict TLS controls passed on reviewed f31a112 |
-| G | Actual Windows WSLc run, initially dirty working-tree evidence | Clean f31a112 passed Windows/Linux; launcher correction reruns required |
+| G | Actual Windows WSLc run, initially dirty working-tree evidence | Final clean e94de432 Windows/Linux and corrected launcher scenarios passed; PR #180 merged |
 
 The SDK constructor does not install RetryDelegatingHandler. The accepted-response
 loss probe injects failure after a real successful response; it is not a network
@@ -117,8 +117,11 @@ one was RPC Internal. Five cases across the four methods passed a fresh targeted
 rerun. This does not replace the complete CI run or prove an environmental cause.
 No production or integration-test code was changed to obtain a green run.
 
-ROADMAP remains incomplete pending final correction gates and renewed independent
-review. #178 architectural approval does not cover this qualification.
+That intermediate review did not complete qualification. Final correction evidence
+and renewed independent review were subsequently accepted for PR #180 at
+`e94de4322e85ac7e29abedfa84f3b225fb8d09fe`; the PR is now merged. Historical failed
+and partial runs above remain failed/partial. #178 architectural approval alone
+did not cover qualification.
 ## Alternative comparison and exact transport boundary
 
 The alternative source inspected is dotnet-kube-client commit
@@ -227,7 +230,8 @@ and readiness failure. It verifies private cleanup and owned storage absence aft
 each, while a separately labeled control volume remains intact. The rehearsal
 removes that exact control volume at the end. Only four explicitly named sanitized
 reports are uploaded. Precommit Windows execution passed all four scenarios;
-final clean-source Windows/Linux evidence must be bound to the published revision.
+final clean-source Windows/Linux evidence was subsequently bound to PR #180's
+`e94de4322e85ac7e29abedfa84f3b225fb8d09fe` (qualification run 43072650986).
 Earlier runs used plain container removal and may have left anonymous volumes;
 unknown historical volumes must not be guessed or globally pruned.
 
@@ -265,4 +269,6 @@ run directory and each report carries a fresh evidence ID and container run ID.
 The four explicit report filenames under .artifacts/qualification-evidence/
 haby179-control-*/ remain the only uploaded artifacts. No credentials are placed
 in that evidence directory. Clean-source Windows/Linux reruns and refreshed
-exact-SHA independent review are required for these changes.
+exact-SHA independent review were completed before PR #180 merged. This history
+does not qualify the production adapter added in #200; that kernel has separate
+tests and reuses the owned Docker launcher in `-DeploymentKernel` mode.
