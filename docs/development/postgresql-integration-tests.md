@@ -110,6 +110,9 @@ a Docker-compatible endpoint or the helper is not evidence of a provider bug.
 
 ## Linux and Docker-compatible runtimes
 
+See [fixture isolation and resource groups](195-postgresql-isolation.md) for the
+current class/case migration map, server bound and owned cleanup requirements.
+
 The primary complete gate is the [hosted Linux entrypoint](193-hosted-postgresql-entrypoint.md):
 publish the native CLI, set the required-native variables, then run
 `pwsh -File scripts/test-postgresql-measured.ps1 -Docker -ResultsDirectory .artifacts/postgresql-measurement`.

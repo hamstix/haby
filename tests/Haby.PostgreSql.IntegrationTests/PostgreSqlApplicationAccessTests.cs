@@ -8,19 +8,17 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static ServiceProvider OwnerServices(Scenario scenario, IPostgreSqlAccessFaultHooks? fault = null) =>
-        Services(scenario.Connection, full: true, access: true, accessFault: fault);
-
-    private static async Task<DurableExecutionResult> AccessExecute(Scenario scenario, string id = "app-login-access",
-        IPostgreSqlAccessFaultHooks? fault = null, CancellationToken token = default)
+    private protected static ServiceProvider OwnerServices(Scenario scenario, IPostgreSqlAccessFaultHooks? fault = null) =>
+            Services(scenario.Connection, full: true, access: true, accessFault: fault);
+    private protected static async Task<DurableExecutionResult> AccessExecute(Scenario scenario, string id = "app-login-access",
+            IPostgreSqlAccessFaultHooks? fault = null, CancellationToken token = default)
     {
         await using var services = OwnerServices(scenario, fault);
         return await services.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(scenario.Key(id), token);
     }
-
-    private static async Task AccessReady(Scenario scenario)
+    private protected static async Task AccessReady(Scenario scenario)
     {
         foreach (var id in new[] { "db-create", "db-restrict", "app-login-material", "app-login-create" })
             Assert.Equal(DurableExecutionOutcome.Succeeded, (await AccessExecute(scenario, id)).Outcome);
@@ -29,16 +27,58 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(4, await verify.DurableOperationAttempts.CountAsync());
         Assert.Equal(3, await verify.OperationOutputs.CountAsync());
     }
-
-    private string AdministrativeTarget(Scenario scenario) => new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
+    private protected string AdministrativeTarget(Scenario scenario) => new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
     { Database = scenario.Database, Pooling = false }.ConnectionString;
-
-    private static async Task<PostgreSqlApplicationConnection> ConnectionOutput(Scenario scenario)
+    private protected static async Task<PostgreSqlApplicationConnection> ConnectionOutput(Scenario scenario)
     {
         await using var context = Context(scenario.Connection);
         var row = await context.OperationOutputs.AsNoTracking().SingleAsync(r => r.OperationId == "app-login-access");
         return PostgreSqlApplicationConnectionContract.Decode(new(row.Contract, row.Key, row.Payload))!;
     }
+    private protected static async Task AssertComplete(Scenario scenario)
+    {
+        await using var verify = Context(scenario.Connection);
+        Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        Assert.Equal(5, await verify.DurableOperations.CountAsync(r => r.State == "Succeeded"));
+        Assert.Equal(5, await verify.DurableOperationAttempts.CountAsync(r => r.Outcome == "Succeeded" && r.FinishedAt != null));
+        Assert.Equal(4, await verify.DurableOperationAttempts.CountAsync(r => r.DispatchedAt != null));
+        Assert.Equal(4, await verify.OperationOutputs.CountAsync());
+    }
+    private protected sealed class AccessFault(string mode, CancellationTokenSource? cancel = null) : IPostgreSqlAccessFaultHooks
+    {
+        public int Markers;
+        public ValueTask AfterMarkerAsync(CancellationToken token)
+        {
+            Markers++;
+            if (mode == "cancel") { cancel!.Cancel(); token.ThrowIfCancellationRequested(); }
+            if (mode == "trap") throw new InvalidOperationException("Unexpected redispatch.");
+            return ValueTask.CompletedTask;
+        }
+        public ValueTask AfterOwnershipAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token) =>
+            mode == "owner-rollback" ? Reject(connection, transaction, token) : ValueTask.CompletedTask;
+        public async ValueTask AfterSchemaAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token)
+        {
+            if (mode is "schema-rollback" or "rollback-unknown")
+            {
+                try { await Reject(connection, transaction, token); }
+                catch (PostgresException) { if (mode == "rollback-unknown") await connection.CloseAsync(); throw; }
+            }
+        }
+        public ValueTask BeforeCommitAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token) =>
+            mode == "defaults-rollback" ? Reject(connection, transaction, token) : ValueTask.CompletedTask;
+        private static async ValueTask Reject(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token) =>
+            await new NpgsqlCommand("SELECT 1/0", connection, transaction).ExecuteScalarAsync(token);
+        public ValueTask AfterCommitAsync(CancellationToken token) => Fail("commit");
+        public ValueTask BeforeVerificationAsync(CancellationToken token) => Fail("verification");
+        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => Fail("authentication");
+        public ValueTask BeforeFinalizationAsync(CancellationToken token) => Fail("finalization");
+        private ValueTask Fail(string boundary) => mode == boundary ? ValueTask.FromException(new IOException("Injected interruption.")) : ValueTask.CompletedTask;
+    }
+
+}
+
+public sealed partial class PostgreSqlApplicationLoginTests
+{
 
     [Fact]
     public async Task Five_real_actions_publish_exact_connection_and_run_two_real_EF_migrations_as_generated_login()
@@ -141,47 +181,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         finally { Array.Clear(bytes); }
     }
 
-    private static async Task AssertComplete(Scenario scenario)
-    {
-        await using var verify = Context(scenario.Connection);
-        Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
-        Assert.Equal(5, await verify.DurableOperations.CountAsync(r => r.State == "Succeeded"));
-        Assert.Equal(5, await verify.DurableOperationAttempts.CountAsync(r => r.Outcome == "Succeeded" && r.FinishedAt != null));
-        Assert.Equal(4, await verify.DurableOperationAttempts.CountAsync(r => r.DispatchedAt != null));
-        Assert.Equal(4, await verify.OperationOutputs.CountAsync());
-    }
-
-    private sealed class AccessFault(string mode, CancellationTokenSource? cancel = null) : IPostgreSqlAccessFaultHooks
-    {
-        public int Markers;
-        public ValueTask AfterMarkerAsync(CancellationToken token)
-        {
-            Markers++;
-            if (mode == "cancel") { cancel!.Cancel(); token.ThrowIfCancellationRequested(); }
-            if (mode == "trap") throw new InvalidOperationException("Unexpected redispatch.");
-            return ValueTask.CompletedTask;
-        }
-        public ValueTask AfterOwnershipAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token) =>
-            mode == "owner-rollback" ? Reject(connection, transaction, token) : ValueTask.CompletedTask;
-        public async ValueTask AfterSchemaAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token)
-        {
-            if (mode is "schema-rollback" or "rollback-unknown")
-            {
-                try { await Reject(connection, transaction, token); }
-                catch (PostgresException) { if (mode == "rollback-unknown") await connection.CloseAsync(); throw; }
-            }
-        }
-        public ValueTask BeforeCommitAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token) =>
-            mode == "defaults-rollback" ? Reject(connection, transaction, token) : ValueTask.CompletedTask;
-        private static async ValueTask Reject(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token) =>
-            await new NpgsqlCommand("SELECT 1/0", connection, transaction).ExecuteScalarAsync(token);
-        public ValueTask AfterCommitAsync(CancellationToken token) => Fail("commit");
-        public ValueTask BeforeVerificationAsync(CancellationToken token) => Fail("verification");
-        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => Fail("authentication");
-        public ValueTask BeforeFinalizationAsync(CancellationToken token) => Fail("finalization");
-        private ValueTask Fail(string boundary) => mode == boundary ? ValueTask.FromException(new IOException("Injected interruption.")) : ValueTask.CompletedTask;
-    }
-
     [Theory]
     [InlineData("owner-rollback")]
     [InlineData("schema-rollback")]
@@ -269,4 +268,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(DurableExecutionOutcome.NeedsAttention, (await AccessExecute(scenario, fault: fault)).Outcome);
         Assert.Equal(1, fault.Markers);
     }
+
 }

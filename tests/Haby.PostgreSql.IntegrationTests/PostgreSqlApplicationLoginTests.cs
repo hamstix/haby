@@ -18,20 +18,20 @@ namespace Haby.PostgreSql.IntegrationTests;
 [CollectionDefinition("Login logging isolated", DisableParallelization = true)]
 public sealed class LoginLoggingCollection;
 
-[Collection("Login logging isolated")]
-public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>, IDisposable
+public abstract partial class ApplicationLoginScenario : IDisposable
 {
-    private readonly TestCatalogPools _catalogPools = new();
+    private protected readonly PostgreSqlFixture fixture;
+    protected ApplicationLoginScenario(PostgreSqlFixture fixture) => this.fixture = fixture;
+    private protected readonly TestCatalogPools _catalogPools = new();
     public void Dispose() => _catalogPools.Dispose();
-
-    private sealed record Scenario(string Connection, string Database, DurableChangeSetCommit Commit, DurablePlan Plan)
+    private protected sealed record Scenario(string Connection, string Database, DurableChangeSetCommit Commit, DurablePlan Plan)
     {
         public DurableOperationKey Key(string id) => new(Commit.DeploymentId, Commit.Generation, OperationId.Create(id));
         public ManagedResourceKey Owner => new(Plan.Inputs.Environment, Plan.Inputs.Revision.ApplicationRecordId, ManifestLocalId.Create("app-login"));
         public string DeclaredDatabase { get; init; } = Database;
         public string Role => PostgreSqlResourceNaming.Role(Owner, Plan.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy)!;
     }
-    private sealed class Prefix(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer
+    private protected sealed class Prefix(ResourceTypeId contract) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer
     {
         private readonly PostgreSqlPairResourceAdmission pair = new(contract);
         public DurableActionExecutionKey Key => pair.Key;
@@ -43,7 +43,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
             new DurableOperationGraph(spec.Resources.SelectMany(r => new Prefix(r.Value.Type).Plan(spec, r.Key, inputs, configuration))).Equals(graph);
     }
-    private static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null, ISecretStore? secretStore = null)
+    private protected static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null, ISecretStore? secretStore = null)
     {
         var services = new ServiceCollection().AddSingleton(TimeProvider.System)
             .AddSingleton(PostgreSqlConnectionRendering.CreateCatalog())
@@ -68,16 +68,16 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         if (secretStore is not null) services.AddSingleton(secretStore);
         return services.BuildServiceProvider();
     }
-    private static ManifestCatalogDbContext Context(string connection) => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
-    private async Task<string> Database(string prefix)
+    private protected static ManifestCatalogDbContext Context(string connection) => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
+    private protected async Task<string> Database(string prefix)
     {
         var name = prefix + Guid.NewGuid().ToString("N");
         await using var connection = new NpgsqlConnection(fixture.ConnectionString); await connection.OpenAsync();
         await new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection).ExecuteNonQueryAsync();
         return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name, Pooling = false }.ConnectionString;
     }
-    private async Task<Scenario> Prepare(bool full = false, bool render = false, string? renderingProfile = null,
-        Action<System.Text.Json.Nodes.JsonNode>? configureManifest = null, string? namingPrefix = null)
+    private protected async Task<Scenario> Prepare(bool full = false, bool render = false, string? renderingProfile = null,
+            Action<System.Text.Json.Nodes.JsonNode>? configureManifest = null, string? namingPrefix = null)
     {
         var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("login_catalog_")));
         var name = "login_target_" + Guid.NewGuid().ToString("N");
@@ -135,17 +135,17 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
         return new(connection, PostgreSqlResourceNaming.Database(name, plan.Inputs.Providers.RequireUniformResourceProvider().ResourceNaming().Policy)!, (await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(change.Id, default))!, plan) { DeclaredDatabase = name };
     }
-    private static async Task<DurableExecutionResult> Execute(Scenario scenario, string id, IPostgreSqlLoginFaultHooks? fault = null, CancellationToken token = default)
+    private protected static async Task<DurableExecutionResult> Execute(Scenario scenario, string id, IPostgreSqlLoginFaultHooks? fault = null, CancellationToken token = default)
     {
         await using var services = Services(scenario.Connection, fault);
         return await services.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(scenario.Key(id), token);
     }
-    private static async Task Ready(Scenario scenario)
+    private protected static async Task Ready(Scenario scenario)
     {
         foreach (var id in new[] { "db-create", "db-restrict", "app-login-material" })
             Assert.Equal(DurableExecutionOutcome.Succeeded, (await Execute(scenario, id)).Outcome);
     }
-    private async Task<string> Policy(string database)
+    private protected async Task<string> Policy(string database)
     {
         var builder = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = database, Pooling = false };
         await using var connection = new NpgsqlConnection(builder.ConnectionString); await connection.OpenAsync();
@@ -156,34 +156,32 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
             WHERE d.datname = current_database() AND n.nspname = 'public'
             """, connection).ExecuteScalarAsync())!;
     }
-    private async Task<string> UnrelatedPolicy()
+    private protected async Task<string> UnrelatedPolicy()
     {
         await using var connection = new NpgsqlConnection(fixture.ConnectionString); await connection.OpenAsync();
         var databases = (string)(await new NpgsqlCommand("SELECT json_agg(json_build_array(oid, datname, datdba, datacl) ORDER BY datname)::text FROM pg_catalog.pg_database WHERE datistemplate OR datname = 'postgres'", connection).ExecuteScalarAsync())!;
         return databases + await Policy("postgres") + await Policy("template1");
     }
-
-
-    private async Task<bool> Exists(string role)
+    private protected async Task<bool> Exists(string role)
     {
         await using var admin = new NpgsqlConnection(fixture.ConnectionString); await admin.OpenAsync();
         await using var command = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", admin);
         command.Parameters.AddWithValue(role); return (bool)(await command.ExecuteScalarAsync())!;
     }
-    private static async Task<SecretRef> Password(Scenario scenario)
+    private protected static async Task<SecretRef> Password(Scenario scenario)
     {
         await using var context = Context(scenario.Connection);
         var row = await context.OperationOutputs.AsNoTracking().SingleAsync(r => r.OperationId == "app-login-material");
         return GeneratedCredentialOutputCodec.Decode(row.Contract, row.Payload)!.Reference;
     }
-    private static async Task<byte[]> Material(Scenario scenario, SecretRef reference)
+    private protected static async Task<byte[]> Material(Scenario scenario, SecretRef reference)
     {
         await using var services = Services(scenario.Connection);
         using var material = await services.GetRequiredService<ISecretStore>().ResolveAsync(
             new(new SecretOwner.Resource(scenario.Owner), SecretPurpose.ApplicationLogin), reference, default);
         return material!.CopyBytes();
     }
-    private async Task AssertLogin(Scenario scenario, byte[] bytes)
+    private protected async Task AssertLogin(Scenario scenario, byte[] bytes)
     {
         var builder = new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
         { Database = scenario.Database, Username = scenario.Role, Password = Encoding.ASCII.GetString(bytes), Pooling = false };
@@ -200,7 +198,7 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         Assert.True(error.SqlState == PostgresErrorCodes.InvalidPassword);
         builder.Password = null;
     }
-    private async Task AssertRole(Scenario scenario, PostgreSqlRoleEvidence evidence)
+    private protected async Task AssertRole(Scenario scenario, PostgreSqlRoleEvidence evidence)
     {
         await using var admin = new NpgsqlConnection(fixture.ConnectionString); await admin.OpenAsync();
         await using var command = new NpgsqlCommand("""
@@ -216,6 +214,52 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         command.Parameters.AddWithValue(scenario.Role); command.Parameters.AddWithValue(scenario.Database);
         Assert.True(await command.ExecuteScalarAsync() is true);
     }
+    private protected async Task<string> OwnershipAndObjects(string database)
+    {
+        await using var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
+        { Database = database, Pooling = false }.ConnectionString);
+        await connection.OpenAsync();
+        // Read every schema owner/ACL and creator-default row, not just the absence of
+        // one expected application schema. The database CONNECT ACL is intentionally separate.
+        await using var command = new NpgsqlCommand("""
+            SELECT json_build_array(d.datdba,
+              (SELECT json_agg(json_build_array(nspname, nspowner, nspacl) ORDER BY nspname) FROM pg_catalog.pg_namespace),
+              (SELECT json_agg(json_build_array(defaclrole, defaclnamespace, defaclobjtype, defaclacl)
+                ORDER BY defaclrole, defaclnamespace, defaclobjtype) FROM pg_catalog.pg_default_acl),
+              (SELECT json_agg(json_build_array(setrole, setdatabase, setconfig) ORDER BY setrole)
+                FROM pg_catalog.pg_db_role_setting WHERE setdatabase = d.oid))::text
+            FROM pg_catalog.pg_database d WHERE datname = pg_catalog.current_database()
+            """, connection);
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+    private protected sealed class Fault(string mode, CancellationTokenSource? cancellation = null) : IPostgreSqlLoginFaultHooks
+    {
+        public int Markers;
+        public ValueTask AfterMarkerAsync(CancellationToken token)
+        {
+            Markers++;
+            if (mode == "cancel") { cancellation!.Cancel(); token.ThrowIfCancellationRequested(); }
+            if (mode == "trap") throw new InvalidOperationException("Unexpected redispatch.");
+            return ValueTask.CompletedTask;
+        }
+        public async ValueTask AfterRoleAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token)
+        {
+            if (mode is "rollback" or "rollback-unknown")
+            {
+                try { await new NpgsqlCommand("SELECT 1/0", connection, transaction).ExecuteScalarAsync(token); }
+                catch (PostgresException) { if (mode == "rollback-unknown") await connection.CloseAsync(); throw; }
+            }
+        }
+        public ValueTask AfterCommitAsync(CancellationToken token) => mode == "commit" ? ValueTask.FromException(new IOException("Lost response.")) : ValueTask.CompletedTask;
+        public ValueTask BeforeVerificationAsync(CancellationToken token) => mode == "verification" ? ValueTask.FromException(new IOException("Unavailable.")) : ValueTask.CompletedTask;
+        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => mode == "authentication" ? ValueTask.FromException(new IOException("Unavailable.")) : ValueTask.CompletedTask;
+        public ValueTask BeforeFinalizationAsync(CancellationToken token) => mode == "finalization" ? ValueTask.FromException(new IOException("Unavailable.")) : ValueTask.CompletedTask;
+    }
+
+}
+
+public sealed partial class PostgreSqlApplicationLoginTests
+{
 
     [Fact]
     public async Task Four_step_test_prefix_authenticates_saved_password_without_completing_database_owner_policy()
@@ -257,49 +301,6 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
             await using var final = Context(scenario.Connection); Assert.Equal(4, await final.DurableOperationAttempts.CountAsync());
         }
         finally { Array.Clear(bytes); }
-    }
-
-    private async Task<string> OwnershipAndObjects(string database)
-    {
-        await using var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
-        { Database = database, Pooling = false }.ConnectionString);
-        await connection.OpenAsync();
-        // Read every schema owner/ACL and creator-default row, not just the absence of
-        // one expected application schema. The database CONNECT ACL is intentionally separate.
-        await using var command = new NpgsqlCommand("""
-            SELECT json_build_array(d.datdba,
-              (SELECT json_agg(json_build_array(nspname, nspowner, nspacl) ORDER BY nspname) FROM pg_catalog.pg_namespace),
-              (SELECT json_agg(json_build_array(defaclrole, defaclnamespace, defaclobjtype, defaclacl)
-                ORDER BY defaclrole, defaclnamespace, defaclobjtype) FROM pg_catalog.pg_default_acl),
-              (SELECT json_agg(json_build_array(setrole, setdatabase, setconfig) ORDER BY setrole)
-                FROM pg_catalog.pg_db_role_setting WHERE setdatabase = d.oid))::text
-            FROM pg_catalog.pg_database d WHERE datname = pg_catalog.current_database()
-            """, connection);
-        return (string)(await command.ExecuteScalarAsync())!;
-    }
-
-    private sealed class Fault(string mode, CancellationTokenSource? cancellation = null) : IPostgreSqlLoginFaultHooks
-    {
-        public int Markers;
-        public ValueTask AfterMarkerAsync(CancellationToken token)
-        {
-            Markers++;
-            if (mode == "cancel") { cancellation!.Cancel(); token.ThrowIfCancellationRequested(); }
-            if (mode == "trap") throw new InvalidOperationException("Unexpected redispatch.");
-            return ValueTask.CompletedTask;
-        }
-        public async ValueTask AfterRoleAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken token)
-        {
-            if (mode is "rollback" or "rollback-unknown")
-            {
-                try { await new NpgsqlCommand("SELECT 1/0", connection, transaction).ExecuteScalarAsync(token); }
-                catch (PostgresException) { if (mode == "rollback-unknown") await connection.CloseAsync(); throw; }
-            }
-        }
-        public ValueTask AfterCommitAsync(CancellationToken token) => mode == "commit" ? ValueTask.FromException(new IOException("Lost response.")) : ValueTask.CompletedTask;
-        public ValueTask BeforeVerificationAsync(CancellationToken token) => mode == "verification" ? ValueTask.FromException(new IOException("Unavailable.")) : ValueTask.CompletedTask;
-        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => mode == "authentication" ? ValueTask.FromException(new IOException("Unavailable.")) : ValueTask.CompletedTask;
-        public ValueTask BeforeFinalizationAsync(CancellationToken token) => mode == "finalization" ? ValueTask.FromException(new IOException("Unavailable.")) : ValueTask.CompletedTask;
     }
     [Theory]
     [InlineData("rollback")]
@@ -352,4 +353,5 @@ public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fi
         absence.Parameters.AddWithValue(scenario.Database);
         Assert.True(await absence.ExecuteScalarAsync() is true);
     }
+
 }

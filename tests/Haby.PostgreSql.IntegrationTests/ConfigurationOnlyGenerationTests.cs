@@ -15,16 +15,15 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static RevisionReference SameRevision(Scenario scenario) => new()
+    private protected static RevisionReference SameRevision(Scenario scenario) => new()
     {
         ApplicationRecordId = scenario.Plan.Inputs.Revision.ApplicationRecordId.ToString(),
         RevisionNumber = scenario.Plan.Inputs.Revision.RevisionNumber.Value
     };
-
-    private static async Task<RevisionReference> SelectConfigurationRevision(ManifestOperator.ManifestOperatorClient client,
-        Scenario scenario, int revision, Action<JsonNode>? configure = null)
+    private protected static async Task<RevisionReference> SelectConfigurationRevision(ManifestOperator.ManifestOperatorClient client,
+            Scenario scenario, int revision, Action<JsonNode>? configure = null)
     {
         var profile = JsonNode.Parse(RenderingProfile)!;
         profile["metadata"]!["revision"] = revision;
@@ -48,6 +47,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         })).Status);
         return SameRevision(scenario);
     }
+
+}
+
+public sealed partial class ApplicationConfigurationTests
+{
 
     [Theory]
     [InlineData("environment")]
@@ -256,4 +260,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using (var verify = Context(scenario.Connection)) Assert.Equal(3, await verify.DeploymentGenerations.CountAsync());
         await host.StopAsync();
     }
+
 }

@@ -146,6 +146,7 @@ jobs:
           path: |
             .artifacts/postgresql-measurement/safe/measurement.json
             .artifacts/postgresql-measurement/safe/preflight.json
+            .artifacts/postgresql-measurement/safe/resources.json
             .artifacts/postgresql-measurement/safe/coverage.json
             .artifacts/postgresql-measurement/safe/cases.json
             .artifacts/postgresql-measurement/safe/counts.json

@@ -23,7 +23,136 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
+{
+    private protected sealed class DeliveryClock : TimeProvider
+    {
+        public DateTimeOffset Now = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+    private protected sealed class DeliveryReadTrap : DbCommandInterceptor
+    {
+        public bool Enabled;
+        public bool ForbidCurrentInputs;
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (ForbidCurrentInputs && new[] { "configuration_profile_revisions", "configuration_profile_assignments", "provider_aliases", "provider_configuration_revisions", "manifest_revisions" }
+                .Any(table => command.CommandText.Contains(table, StringComparison.Ordinal))) throw new InvalidOperationException("Current input discovery during delivery.");
+            if (Enabled && (command.CommandText.Contains("configuration_document_revisions", StringComparison.Ordinal) ||
+                command.CommandText.Contains("secret_payloads", StringComparison.Ordinal))) throw new InvalidOperationException("Protected read before authorization.");
+            return ValueTask.FromResult(result);
+        }
+    }
+    private protected sealed class DeliveryLogs : ILoggerProvider
+    {
+        public readonly ConcurrentQueue<string> Lines = new();
+        public ILogger CreateLogger(string categoryName) => new Capture(Lines);
+        public void Dispose() { }
+        private sealed class Capture(ConcurrentQueue<string> lines) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => lines.Enqueue(formatter(state, exception));
+        }
+    }
+    private protected static Metadata Bearer(string credential) => new() { { "authorization", "Bearer " + credential } };
+    private protected static async Task Denied(ConfigurationDelivery.ConfigurationDeliveryClient client, string revision, string? credential)
+    {
+        var failure = await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverAsync(new() { RevisionId = revision }, credential is null ? null : Bearer(credential)));
+        Assert.Equal(StatusCode.PermissionDenied, failure.StatusCode);
+        Assert.Equal("Configuration access denied.", failure.Status.Detail);
+        Assert.All(failure.Trailers, x => Assert.Contains(x.Key, new[] { "date", "server" }));
+    }
+    private protected sealed class PayloadReads : DbCommandInterceptor
+    {
+        public int Count;
+        public bool Unavailable;
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("secret_payloads", StringComparison.Ordinal) && !command.CommandText.Contains("length(", StringComparison.OrdinalIgnoreCase))
+            {
+                Count++;
+                if (Unavailable) throw new Npgsql.NpgsqlException("private-storage-material-sentinel");
+            }
+            return ValueTask.FromResult(result);
+        }
+    }
+    private protected sealed class DeliveryFormatterFault : IConfigurationFormatter
+    {
+        public bool Enabled;
+        public int Count;
+        public ConfigurationFormatterId Contract => PostgreSqlConnectionRendering.Formatter;
+        public ManifestLocalId Identity => PostgreSqlConnectionRendering.Implementation;
+        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
+        {
+            Count++;
+            if (Enabled) throw new InvalidOperationException("private-formatter-material-sentinel");
+            return new PostgreSqlConnectionFormatter().Format(arguments, material);
+        }
+    }
+    private protected static async Task RunRuntime(string endpoint, string revision, string path, Scenario scenario, string[]? expectations = null, int expectedExit = 0)
+    {
+        var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        start.ArgumentList.Add(typeof(RuntimeConfigurationClient).Assembly.Location);
+        start.Environment["HABY_RUNTIME_ENDPOINT"] = endpoint; start.Environment["HABY_RUNTIME_REVISION"] = revision; start.Environment["HABY_RUNTIME_TOKEN_FILE"] = path;
+        foreach (var key in new[] { "HABY_RUNTIME_EXPECT_TIMEOUT", "HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT", "HABY_RUNTIME_EXPECT_SSL_MODE" }) start.Environment.Remove(key);
+        if (expectations is not null)
+        {
+            start.Environment["HABY_RUNTIME_EXPECT_TIMEOUT"] = expectations[0];
+            start.Environment["HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT"] = expectations[1];
+            start.Environment["HABY_RUNTIME_EXPECT_SSL_MODE"] = expectations[2];
+        }
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+        Assert.Equal(expectedExit, process.ExitCode);
+        if (expectedExit != 0)
+        {
+            Assert.Equal("", await stdout);
+            Assert.Equal("Runtime setting expectations are invalid or received settings did not match. Details withheld." + Environment.NewLine, await stderr);
+            return;
+        }
+        Assert.Equal("", await stderr);
+        var text = await stdout;
+        Assert.Contains("user=" + scenario.Role, text); Assert.Contains("database=" + scenario.Database, text);
+        Assert.False(text.Contains("Password", StringComparison.OrdinalIgnoreCase));
+    }
+    private protected static async Task NativeAccess(string endpoint, ConfigurationDocumentRequest selector, string folder)
+    {
+        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
+        if (binary is null) return;
+        var config = Path.Combine(folder, "native.yaml"); var credentialFile = Path.Combine(folder, "native.token");
+        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  selected:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: selected\n    environmentId: pilot\n");
+        var text = await Run(["create", selector.ApplicationId, "--component", "api", "--document", "settings", "--token-output-file", credentialFile]);
+        using var parsed = JsonDocument.Parse(text); var id = parsed.RootElement.GetProperty("data"u8).GetProperty("grantId"u8).GetString()!;
+        var retained = await RuntimeConfigurationClient.ReadCredentialAsync(credentialFile, default);
+        using var channel = GrpcChannel.ForAddress(endpoint);
+        var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+        var revision = parsed.RootElement.GetProperty("data"u8).GetProperty("revisionId"u8).GetString()!;
+        await runtime.DeliverAsync(new() { RevisionId = revision }, Bearer(retained));
+        foreach (var verb in new[] { "get", "revoke", "revoke" })
+        {
+            var ordinary = await Run([verb, id]); Assert.False(ordinary.Contains(retained, StringComparison.Ordinal));
+        }
+        await Denied(runtime, revision, retained);
+        async Task<string> Run(string[] args)
+        {
+            var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var arg in new[] { "configuration", "access" }.Concat(args).Concat(["--config", config, "--output", "json"])) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+            Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr); return await stdout;
+        }
+    }
+
+}
+
+public sealed partial class ApplicationConfigurationTests
 {
     [Theory]
     [InlineData(0, true)]
@@ -99,45 +228,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await using var connection = new Npgsql.NpgsqlConnection(scenario.Connection); await connection.OpenAsync();
         Assert.Equal(true, await new Npgsql.NpgsqlCommand("SELECT to_regclass('public.configuration_access_grants') IS NULL AND to_regclass('public.resource_management') IS NULL", connection).ExecuteScalarAsync());
         // Refusal never recreates authority tables, backfills ownership or rewrites the old artifact.
-    }
-    private sealed class DeliveryClock : TimeProvider
-    {
-        public DateTimeOffset Now = DateTimeOffset.UtcNow;
-        public override DateTimeOffset GetUtcNow() => Now;
-    }
-    private sealed class DeliveryReadTrap : DbCommandInterceptor
-    {
-        public bool Enabled;
-        public bool ForbidCurrentInputs;
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
-            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
-        {
-            if (ForbidCurrentInputs && new[] { "configuration_profile_revisions", "configuration_profile_assignments", "provider_aliases", "provider_configuration_revisions", "manifest_revisions" }
-                .Any(table => command.CommandText.Contains(table, StringComparison.Ordinal))) throw new InvalidOperationException("Current input discovery during delivery.");
-            if (Enabled && (command.CommandText.Contains("configuration_document_revisions", StringComparison.Ordinal) ||
-                command.CommandText.Contains("secret_payloads", StringComparison.Ordinal))) throw new InvalidOperationException("Protected read before authorization.");
-            return ValueTask.FromResult(result);
-        }
-    }
-    private sealed class DeliveryLogs : ILoggerProvider
-    {
-        public readonly ConcurrentQueue<string> Lines = new();
-        public ILogger CreateLogger(string categoryName) => new Capture(Lines);
-        public void Dispose() { }
-        private sealed class Capture(ConcurrentQueue<string> lines) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-            public bool IsEnabled(LogLevel logLevel) => true;
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => lines.Enqueue(formatter(state, exception));
-        }
-    }
-    private static Metadata Bearer(string credential) => new() { { "authorization", "Bearer " + credential } };
-    private static async Task Denied(ConfigurationDelivery.ConfigurationDeliveryClient client, string revision, string? credential)
-    {
-        var failure = await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverAsync(new() { RevisionId = revision }, credential is null ? null : Bearer(credential)));
-        Assert.Equal(StatusCode.PermissionDenied, failure.StatusCode);
-        Assert.Equal("Configuration access denied.", failure.Status.Detail);
-        Assert.All(failure.Trailers, x => Assert.Contains(x.Key, new[] { "date", "server" }));
     }
 
     [Fact]
@@ -316,35 +406,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         finally { foreach (var path in Directory.EnumerateFiles(folder)) File.Delete(path); Directory.Delete(folder); }
     }
 
-    private sealed class PayloadReads : DbCommandInterceptor
-    {
-        public int Count;
-        public bool Unavailable;
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
-            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
-        {
-            if (command.CommandText.Contains("secret_payloads", StringComparison.Ordinal) && !command.CommandText.Contains("length(", StringComparison.OrdinalIgnoreCase))
-            {
-                Count++;
-                if (Unavailable) throw new Npgsql.NpgsqlException("private-storage-material-sentinel");
-            }
-            return ValueTask.FromResult(result);
-        }
-    }
-    private sealed class DeliveryFormatterFault : IConfigurationFormatter
-    {
-        public bool Enabled;
-        public int Count;
-        public ConfigurationFormatterId Contract => PostgreSqlConnectionRendering.Formatter;
-        public ManifestLocalId Identity => PostgreSqlConnectionRendering.Implementation;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
-        {
-            Count++;
-            if (Enabled) throw new InvalidOperationException("private-formatter-material-sentinel");
-            return new PostgreSqlConnectionFormatter().Format(arguments, material);
-        }
-    }
-
     [Fact]
     public async Task Authorized_delivery_production_owner_purpose_material_and_formatter_failures_publish_no_document_or_new_state()
     {
@@ -425,62 +486,4 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await host.StopAsync();
     }
 
-    private static async Task RunRuntime(string endpoint, string revision, string path, Scenario scenario, string[]? expectations = null, int expectedExit = 0)
-    {
-        var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        start.ArgumentList.Add(typeof(RuntimeConfigurationClient).Assembly.Location);
-        start.Environment["HABY_RUNTIME_ENDPOINT"] = endpoint; start.Environment["HABY_RUNTIME_REVISION"] = revision; start.Environment["HABY_RUNTIME_TOKEN_FILE"] = path;
-        foreach (var key in new[] { "HABY_RUNTIME_EXPECT_TIMEOUT", "HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT", "HABY_RUNTIME_EXPECT_SSL_MODE" }) start.Environment.Remove(key);
-        if (expectations is not null)
-        {
-            start.Environment["HABY_RUNTIME_EXPECT_TIMEOUT"] = expectations[0];
-            start.Environment["HABY_RUNTIME_EXPECT_COMMAND_TIMEOUT"] = expectations[1];
-            start.Environment["HABY_RUNTIME_EXPECT_SSL_MODE"] = expectations[2];
-        }
-        using var process = Process.Start(start)!;
-        var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
-        Assert.Equal(expectedExit, process.ExitCode);
-        if (expectedExit != 0)
-        {
-            Assert.Equal("", await stdout);
-            Assert.Equal("Runtime setting expectations are invalid or received settings did not match. Details withheld." + Environment.NewLine, await stderr);
-            return;
-        }
-        Assert.Equal("", await stderr);
-        var text = await stdout;
-        Assert.Contains("user=" + scenario.Role, text); Assert.Contains("database=" + scenario.Database, text);
-        Assert.False(text.Contains("Password", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static async Task NativeAccess(string endpoint, ConfigurationDocumentRequest selector, string folder)
-    {
-        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
-        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
-        if (binary is null) return;
-        var config = Path.Combine(folder, "native.yaml"); var credentialFile = Path.Combine(folder, "native.token");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  selected:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: selected\n    environmentId: pilot\n");
-        var text = await Run(["create", selector.ApplicationId, "--component", "api", "--document", "settings", "--token-output-file", credentialFile]);
-        using var parsed = JsonDocument.Parse(text); var id = parsed.RootElement.GetProperty("data"u8).GetProperty("grantId"u8).GetString()!;
-        var retained = await RuntimeConfigurationClient.ReadCredentialAsync(credentialFile, default);
-        using var channel = GrpcChannel.ForAddress(endpoint);
-        var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
-        var revision = parsed.RootElement.GetProperty("data"u8).GetProperty("revisionId"u8).GetString()!;
-        await runtime.DeliverAsync(new() { RevisionId = revision }, Bearer(retained));
-        foreach (var verb in new[] { "get", "revoke", "revoke" })
-        {
-            var ordinary = await Run([verb, id]); Assert.False(ordinary.Contains(retained, StringComparison.Ordinal));
-        }
-        await Denied(runtime, revision, retained);
-        async Task<string> Run(string[] args)
-        {
-            var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var arg in new[] { "configuration", "access" }.Concat(args).Concat(["--config", config, "--output", "json"])) start.ArgumentList.Add(arg);
-            using var process = Process.Start(start)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
-            Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr); return await stdout;
-        }
-    }
 }

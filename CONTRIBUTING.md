@@ -93,6 +93,7 @@ The separate PostgreSQL integration suite and its runtime requirements are
 described in [the PostgreSQL integration-test guide](docs/development/postgresql-integration-tests.md).
 The primary full gate is the [hosted Linux Docker entrypoint](docs/development/193-hosted-postgresql-entrypoint.md).
 Windows contributors can inspect its Actions job/artifacts without running a duplicate full PostgreSQL suite locally; Windows-specific and published Native AOT checks remain required.
+Follow the [fixture isolation and resource-group guide](docs/development/195-postgresql-isolation.md): only audited catalog-only classes share a server, every catalog case owns its database, and Docker fixture concurrency defaults to four bounded collection lanes/groups.
 
 For tests that exercise persisted EF Core behavior, use separate `DbContext` instances for arranging data, invoking the system under test and verifying the result. Dispose each context before opening the next one, and prefer `AsNoTracking()` for verification queries when tracking behavior is not under test. This prevents the change tracker, identity map and navigation fix-up from hiding query or persistence defects. A test may intentionally share a context only when the unit-of-work or tracking behavior itself is the subject of the test; make that intent explicit in the test name or setup.
 

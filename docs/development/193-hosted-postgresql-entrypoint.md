@@ -1,5 +1,8 @@
 # Hosted PostgreSQL entrypoint
 
+Current fixture grouping, resource limits and the 869-case migration baseline are
+documented in [PostgreSQL isolation and resource groups](195-postgresql-isolation.md).
+
 Run from a clean checkout of the PR source on Linux with a local Unix-socket
 Docker-compatible engine, PowerShell 7 and the .NET SDK selected by `global.json`:
 
@@ -64,6 +67,7 @@ failures. Preflight cleanup success is not a claim about every suite fixture.
 | Preflight code | Action |
 | --- | --- |
 | `linux-required` | Use the hosted Linux job or a Linux Docker workstation. |
+| `resource-bound` | Set `HABY_TEST_POSTGRESQL_SERVERS` to one integer from 2 through 8, or unset it for 4. |
 | `external-mode` | Remove the four external-ephemeral variables; do not supply a personal database. |
 | `sdk` | Install/select the supported `global.json` SDK; prereleases/other feature bands are refused. |
 | `runtime` | Install the .NET/ASP.NET Core 10 shared runtimes supplied by the supported SDK. |

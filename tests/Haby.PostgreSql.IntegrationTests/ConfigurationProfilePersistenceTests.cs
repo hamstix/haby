@@ -17,7 +17,8 @@ using static Haby.Tests.ProfilePersistenceSamples;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class ConfigurationProfilePersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+[Collection("Catalog database group")]
+public sealed partial class ConfigurationProfilePersistenceTests(CatalogServerFixture server) : CatalogTestCase(server)
 {
     [Fact]
     public async Task Fresh_composition_retains_full_secret_declaration_audit_and_exact_retry_behavior()
@@ -364,14 +365,7 @@ public sealed partial class ConfigurationProfilePersistenceTests(PostgreSqlFixtu
 
     private async Task<string> Database(bool migrate = true)
     {
-        var name = "haby_profiles_" + Guid.NewGuid().ToString("N");
-        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
-        {
-            await connection.OpenAsync();
-            await using var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection);
-            await command.ExecuteNonQueryAsync();
-        }
-        var result = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name }.ConnectionString;
+        var result = await CreateDatabaseAsync("haby_profiles_");
         if (migrate)
         {
             await using var services = Services(result);

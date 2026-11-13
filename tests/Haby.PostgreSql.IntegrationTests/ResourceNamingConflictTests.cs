@@ -9,9 +9,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private sealed class NamingCreateBarrier : IDurableCreateDispatchFaultHooks
+    private protected sealed class NamingCreateBarrier : IDurableCreateDispatchFaultHooks
     {
         private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _sessions;
@@ -26,8 +26,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         public ValueTask BeforeSuccessPersistedAsync(CancellationToken token) => ValueTask.CompletedTask;
     }
-
-    private async Task<Scenario> NamingPlan(string logical, string prefix)
+    private protected async Task<Scenario> NamingPlan(string logical, string prefix)
     {
         var catalog = await NamingCatalog();
         await using var services = Services(catalog.Connection, full: true);
@@ -47,6 +46,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
         return new(catalog.Connection, prefix + logical, commit, plan) { DeclaredDatabase = logical };
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Theory]
     [InlineData(false)]
@@ -108,4 +112,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         finally { builder.Password = null; }
     }
+
 }

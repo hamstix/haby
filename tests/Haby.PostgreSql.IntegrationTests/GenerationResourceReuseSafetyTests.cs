@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public sealed partial class ApplicationGenerationTests
 {
     [Theory]
     [InlineData(false, false)]
@@ -224,4 +224,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(pair ? 4 : mixed ? 3 : 2, await verify.ResourceManagement.CountAsync());
         await host.StopAsync();
     }
+
 }

@@ -11,10 +11,10 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private sealed class PairStageFault(string stage, CancellationTokenSource? cancel) :
-        IDurableCreateDispatchFaultHooks, IPostgreSqlRestrictFaultHooks, IPostgreSqlLoginFaultHooks, IPostgreSqlAccessFaultHooks
+    private protected sealed class PairStageFault(string stage, CancellationTokenSource? cancel) :
+            IDurableCreateDispatchFaultHooks, IPostgreSqlRestrictFaultHooks, IPostgreSqlLoginFaultHooks, IPostgreSqlAccessFaultHooks
     {
         public int Calls;
         private ValueTask Stop(string current)
@@ -32,7 +32,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         ValueTask IPostgreSqlLoginFaultHooks.BeforeFinalizationAsync(CancellationToken token) => Stop("login-b-create");
         ValueTask IPostgreSqlAccessFaultHooks.BeforeFinalizationAsync(CancellationToken token) => Stop("login-b-access");
     }
-    private sealed class PairMaterialFault(IDbContextFactory<ManifestCatalogDbContext> contexts, CancellationTokenSource? cancel) : IGeneratedCredentialSlots
+    private protected sealed class PairMaterialFault(IDbContextFactory<ManifestCatalogDbContext> contexts, CancellationTokenSource? cancel) : IGeneratedCredentialSlots
     {
         public bool Enabled = true;
         public ValueTask<GeneratedCredentialResult> GetOrCreateAsync(GeneratedCredentialSlot slot, string profile, CancellationToken token)
@@ -45,6 +45,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
             return new PostgreSqlGeneratedCredentialSlots(contexts).GetOrCreateAsync(slot, profile, token);
         }
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Theory]
     [InlineData("db-b-create", false)]

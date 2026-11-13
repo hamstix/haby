@@ -1,22 +1,40 @@
 {
-  "baselineSource": "275c8aaf7eb47bf91aa1b57fab4fb891a20d18c2",
-  "baselineCases": 862,
+  "baselineSource": "1720256bd200bf75c67f74829cb3b45afa46651f",
+  "baselineCases": 869,
   "classes": {
     "AdministrativeSecretTests": {
       "responsibilities": [
         "Persistence"
       ],
-      "isolation": "class-owned-server",
+      "isolation": "case-database-group-server",
       "baselineCases": 15,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ConfigurationProfilePersistenceTests": {
       "responsibilities": [
         "Persistence"
       ],
-      "isolation": "class-owned-server",
+      "isolation": "case-database-group-server",
       "baselineCases": 29,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "DurableDeploymentPlanningTests": {
       "responsibilities": [
@@ -24,7 +42,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 52,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "DurableExecutionTests": {
       "responsibilities": [
@@ -33,7 +60,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 23,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ExactActionAdmissionTests": {
       "responsibilities": [
@@ -42,7 +78,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 61,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ExactActionRegistrationTests": {
       "responsibilities": [
@@ -50,7 +95,16 @@
       ],
       "isolation": "none",
       "baselineCases": 8,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "FiveStepCompositionTests": {
       "responsibilities": [
@@ -58,7 +112,16 @@
       ],
       "isolation": "none",
       "baselineCases": 4,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "GeneratedCredentialSlotTests": {
       "responsibilities": [
@@ -66,7 +129,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 22,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "IndependentPairPlanningTests": {
       "responsibilities": [
@@ -74,15 +146,33 @@
       ],
       "isolation": "none",
       "baselineCases": 11,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ManifestCatalogPersistenceTests": {
       "responsibilities": [
         "Persistence"
       ],
-      "isolation": "class-owned-server",
+      "isolation": "case-database-group-server",
       "baselineCases": 13,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "OperatorHostConfigurationTests": {
       "responsibilities": [
@@ -90,7 +180,16 @@
       ],
       "isolation": "none",
       "baselineCases": 5,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      }
     },
     "OperatorHostIntegrationTests": {
       "responsibilities": [
@@ -98,7 +197,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 98,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      }
     },
     "OperatorProviderAccessTests": {
       "responsibilities": [
@@ -107,23 +215,50 @@
       ],
       "isolation": "class-owned-server-exclusive-provider-alias",
       "baselineCases": 6,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      }
     },
     "PlacementRevisionPersistenceTests": {
       "responsibilities": [
         "Persistence"
       ],
-      "isolation": "class-owned-server",
+      "isolation": "case-database-group-server",
       "baselineCases": 22,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "PlaintextSecretStoreTests": {
       "responsibilities": [
         "Persistence"
       ],
-      "isolation": "class-owned-server",
+      "isolation": "case-database-group-server",
       "baselineCases": 7,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "PostgreSqlApplicationLoginTests": {
       "responsibilities": [
@@ -131,9 +266,18 @@
         "Provider integration",
         "Operator/E2E"
       ],
-      "isolation": "class-owned-server-exclusive-login",
-      "baselineCases": 347,
-      "gate": "postgresql-integration"
+      "isolation": "class-owned-server",
+      "baselineCases": 80,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "PostgreSqlIntegrationTests": {
       "responsibilities": [
@@ -143,7 +287,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 9,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      }
     },
     "PostgreSqlPairPersistenceTests": {
       "responsibilities": [
@@ -151,7 +304,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 12,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "PostgreSqlPairPlanningTests": {
       "responsibilities": [
@@ -159,7 +321,16 @@
       ],
       "isolation": "none",
       "baselineCases": 41,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "PostgreSqlRestrictTests": {
       "responsibilities": [
@@ -168,7 +339,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 37,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ProviderAliasTests": {
       "responsibilities": [
@@ -177,7 +357,16 @@
       ],
       "isolation": "class-owned-server-exclusive-provider-alias",
       "baselineCases": 6,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ProviderConfigurationStoreTests": {
       "responsibilities": [
@@ -185,7 +374,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 5,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ProviderDeclarationTests": {
       "responsibilities": [
@@ -193,7 +391,16 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 9,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "ProviderPreflightCompatibilityTests": {
       "responsibilities": [
@@ -202,7 +409,16 @@
       ],
       "isolation": "class-owned-server-exclusive-provider-alias",
       "baselineCases": 7,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      }
     },
     "RetainedPairPlanningTests": {
       "responsibilities": [
@@ -210,7 +426,16 @@
       ],
       "isolation": "none",
       "baselineCases": 10,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "TestCatalogPoolTests": {
       "responsibilities": [
@@ -218,15 +443,124 @@
       ],
       "isolation": "class-owned-server",
       "baselineCases": 3,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     },
     "HostFailureDiagnosticsTests": {
       "responsibilities": [
         "Test infrastructure"
       ],
       "isolation": "none",
+      "baselineCases": 7,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
+    },
+    "ApplicationConfigurationTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration",
+        "Operator/E2E"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 60,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      }
+    },
+    "ApplicationGenerationTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration",
+        "Operator/E2E"
+      ],
+      "isolation": "class-owned-server",
+      "baselineCases": 204,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": true,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      }
+    },
+    "ApplicationLoginLoggingTests": {
+      "responsibilities": [
+        "Persistence",
+        "Provider integration",
+        "Operator/E2E"
+      ],
+      "isolation": "class-owned-server-exclusive-login",
+      "baselineCases": 3,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": true,
+        "globalClientLogging": true,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
+    },
+    "FixtureLayoutTests": {
+      "responsibilities": [
+        "Test infrastructure"
+      ],
+      "isolation": "none",
       "baselineCases": 0,
-      "gate": "postgresql-integration"
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
+    },
+    "OwnedInfrastructureTests": {
+      "responsibilities": [
+        "Test infrastructure"
+      ],
+      "isolation": "exclusive-owned-infrastructure",
+      "baselineCases": 0,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": true,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      }
     }
   }
 }

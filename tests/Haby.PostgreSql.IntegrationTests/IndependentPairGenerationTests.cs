@@ -14,9 +14,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static JsonObject IndependentEnvelope(Scenario scenario, int version, string database)
+    private protected static JsonObject IndependentEnvelope(Scenario scenario, int version, string database)
     {
         var envelope = UpdateEnvelope(scenario, version);
         var spec = envelope["manifest"]!["spec"]!;
@@ -29,9 +29,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         spec["components"]!["consumer-b"]!["bindings"]!["storage"]!["options"] = new JsonObject { ["timeout"] = 73 };
         return envelope;
     }
-
-    private static async Task<DurablePlanSummary> IndependentPlan(ManifestOperator.ManifestOperatorClient client,
-        RevisionReference revision, int expected, string endpoint, int created, bool retainedPair = false)
+    private protected static async Task<DurablePlanSummary> IndependentPlan(ManifestOperator.ManifestOperatorClient client,
+            RevisionReference revision, int expected, string endpoint, int created, bool retainedPair = false)
     {
         var native = await NativeReuseCommand(endpoint, "changeset", "create", revision.ApplicationRecordId,
             revision.RevisionNumber.ToString(), "--expected-generation", expected.ToString());
@@ -54,6 +53,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         return planned.Plan;
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Theory]
     [InlineData(false, null)]

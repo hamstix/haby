@@ -15,17 +15,66 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static ProviderResourceReservation Reservation(ProviderInstanceId provider, ManagedResourceKey owner) =>
-        new(provider, owner.EnvironmentRecordId, owner.ApplicationRecordId, owner.ResourceLocalId,
-            PostgreSqlApplicationLoginAction.RoleReservationNamespace, PostgreSqlPairResourceAdmission.RoleName(owner));
-
-    private static async Task Sql(string connection, string sql)
+    private protected static ProviderResourceReservation Reservation(ProviderInstanceId provider, ManagedResourceKey owner) =>
+            new(provider, owner.EnvironmentRecordId, owner.ApplicationRecordId, owner.ResourceLocalId,
+                PostgreSqlApplicationLoginAction.RoleReservationNamespace, PostgreSqlPairResourceAdmission.RoleName(owner));
+    private protected static async Task Sql(string connection, string sql)
     {
         await using var session = new NpgsqlConnection(connection); await session.OpenAsync();
         await new NpgsqlCommand(sql, session).ExecuteNonQueryAsync();
     }
+    private protected sealed class CapturedLogs : ILoggerProvider
+    {
+        internal ConcurrentQueue<string> Messages { get; } = new();
+        public ILogger CreateLogger(string categoryName) => new Sink(Messages);
+        public void Dispose() { }
+        private sealed class Sink(ConcurrentQueue<string> messages) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => messages.Enqueue(formatter(state, exception));
+        }
+    }
+    private protected sealed class SqlEvents : EventListener
+    {
+        internal ConcurrentQueue<string> Messages { get; } = new();
+        protected override void OnEventSourceCreated(EventSource eventSource)
+        {
+            if (eventSource.Name == "Npgsql.Sql") EnableEvents(eventSource, EventLevel.Verbose);
+        }
+        protected override void OnEventWritten(EventWrittenEventArgs eventData)
+        {
+            if (eventData.Payload is not null)
+                Messages.Enqueue(string.Join(" ", eventData.Payload));
+        }
+    }
+    private protected sealed class NameRace(string connection, string role) : IPostgreSqlLoginFaultHooks
+    {
+        public async ValueTask BeforeRoleAsync(NpgsqlConnection _, NpgsqlTransaction transaction, CancellationToken token)
+        {
+            // A different acknowledged administrator creates the competing role after the
+            // absence check. PostgreSQL's unique role name must arbitrate without overwrite.
+            using var quote = new NpgsqlCommandBuilder();
+            await Sql(connection, "CREATE ROLE " + quote.QuoteIdentifier(role) + " NOLOGIN");
+        }
+    }
+    private protected sealed class ExternalDrift(string connection, string role, bool authentication) : IPostgreSqlLoginFaultHooks
+    {
+        private async ValueTask Change()
+        {
+            using var quote = new NpgsqlCommandBuilder();
+            await Sql(connection, "ALTER ROLE " + quote.QuoteIdentifier(role) + (authentication ? " NOLOGIN" : " CREATEDB"));
+        }
+        public ValueTask BeforeVerificationAsync(CancellationToken token) => authentication ? ValueTask.CompletedTask : Change();
+        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => authentication ? Change() : ValueTask.CompletedTask;
+    }
+
+}
+
+public sealed partial class PostgreSqlApplicationLoginTests
+{
 
     [Theory]
     [InlineData("output")]
@@ -292,55 +341,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         finally { Array.Clear(bytes); }
     }
 
-    private sealed class CapturedLogs : ILoggerProvider
-    {
-        internal ConcurrentQueue<string> Messages { get; } = new();
-        public ILogger CreateLogger(string categoryName) => new Sink(Messages);
-        public void Dispose() { }
-        private sealed class Sink(ConcurrentQueue<string> messages) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-            public bool IsEnabled(LogLevel logLevel) => true;
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => messages.Enqueue(formatter(state, exception));
-        }
-    }
-
-    private sealed class SqlEvents : EventListener
-    {
-        internal ConcurrentQueue<string> Messages { get; } = new();
-        protected override void OnEventSourceCreated(EventSource eventSource)
-        {
-            if (eventSource.Name == "Npgsql.Sql") EnableEvents(eventSource, EventLevel.Verbose);
-        }
-        protected override void OnEventWritten(EventWrittenEventArgs eventData)
-        {
-            if (eventData.Payload is not null)
-                Messages.Enqueue(string.Join(" ", eventData.Payload));
-        }
-    }
-
-    private sealed class NameRace(string connection, string role) : IPostgreSqlLoginFaultHooks
-    {
-        public async ValueTask BeforeRoleAsync(NpgsqlConnection _, NpgsqlTransaction transaction, CancellationToken token)
-        {
-            // A different acknowledged administrator creates the competing role after the
-            // absence check. PostgreSQL's unique role name must arbitrate without overwrite.
-            using var quote = new NpgsqlCommandBuilder();
-            await Sql(connection, "CREATE ROLE " + quote.QuoteIdentifier(role) + " NOLOGIN");
-        }
-    }
-
-    private sealed class ExternalDrift(string connection, string role, bool authentication) : IPostgreSqlLoginFaultHooks
-    {
-        private async ValueTask Change()
-        {
-            using var quote = new NpgsqlCommandBuilder();
-            await Sql(connection, "ALTER ROLE " + quote.QuoteIdentifier(role) + (authentication ? " NOLOGIN" : " CREATEDB"));
-        }
-        public ValueTask BeforeVerificationAsync(CancellationToken token) => authentication ? ValueTask.CompletedTask : Change();
-        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => authentication ? Change() : ValueTask.CompletedTask;
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -450,6 +450,12 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Single(await verify.OperationOutputs.AsNoTracking().Where(a => a.OperationId == "app-login-create").ToArrayAsync());
     }
 
+}
+
+[Collection("Login logging isolated")]
+public sealed partial class ApplicationLoginLoggingTests(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture), IClassFixture<PostgreSqlFixture>
+{
+
     [Theory]
     [InlineData("success")]
     [InlineData("rollback")]
@@ -501,4 +507,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
             await fixture.RunClientUtilityAsync("psql", "-U", "postgres", "-c", "SELECT pg_reload_conf()");
         }
     }
+
 }

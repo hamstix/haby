@@ -18,9 +18,9 @@ using StoreStatus = Haby.Application.ConfigurationDocumentStatus;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static ConfigurationDocumentRequest DocumentRequest(Scenario scenario, string component = "api", bool exact = false)
+    private protected static ConfigurationDocumentRequest DocumentRequest(Scenario scenario, string component = "api", bool exact = false)
     {
         var request = new ConfigurationDocumentRequest
         {
@@ -32,6 +32,87 @@ public sealed partial class PostgreSqlApplicationLoginTests
         if (exact) request.Generation = scenario.Commit.Generation.Value;
         return request;
     }
+    private protected static void CheckPreview(ConfigurationDocumentReply reply, ConfigurationDocumentReply original)
+    {
+        Assert.Equal(Status.Found, reply.Status); Assert.Equal(original.Artifact, reply.Artifact);
+        using var doc = JsonDocument.Parse(reply.PreviewJson.Memory);
+        var root = doc.RootElement;
+        Assert.Equal(new[] { "/PostgreSQL/DefaultConnection/ConnectionString" }, root.GetProperty("redactedPaths"u8).EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal("***REDACTED***", root.GetProperty("document"u8).GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8).GetString());
+        Assert.Equal("Information", root.GetProperty("document"u8).GetProperty("Logging"u8).GetProperty("Level"u8).GetString());
+        foreach (var hidden in new[] { "secretId", "versionId", "password", "formatter", "timeout", "sslMode" }) Assert.DoesNotContain(hidden, reply.PreviewJson.ToStringUtf8());
+    }
+    private protected static async Task<string> ConfigurationState(Scenario scenario)
+    {
+        await using var db = Context(scenario.Connection);
+        // Protected in-memory comparison only; no raw state enters measurement artifacts.
+        var rows = await db.Database.SqlQueryRaw<string>("""
+            SELECT (jsonb_build_array(
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM application_deployments t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id) FROM durable_create_operations t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY attempt_id) FROM durable_create_operation_attempts t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id, output_contract, output_key) FROM operation_outputs t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY secret_version_id) FROM secret_payloads t)))::text AS "Value"
+            """).SingleAsync();
+        return rows;
+    }
+    private protected sealed class OutputBarrier(int participants)
+    {
+        private readonly int _participants = participants;
+        private int _count;
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int Count => Math.Min(Volatile.Read(ref _count), _participants);
+        internal IConfigurationOutputEvidence Wrap(IConfigurationOutputEvidence inner) => new BarrierEvidence(this, inner);
+        private sealed class BarrierEvidence(OutputBarrier owner, IConfigurationOutputEvidence inner) : IConfigurationOutputEvidence
+        {
+            public async ValueTask<ExternalOperationOutput?> ReadAsync(DurableOperationKey producer, ManagedResourceKey resource, DurableActionExecutionKey action, string contract, string key, CancellationToken token)
+            {
+                var output = await inner.ReadAsync(producer, resource, action, contract, key, token);
+                if (Interlocked.Increment(ref owner._count) <= owner._participants)
+                {
+                    if (owner._count == owner._participants) owner._ready.TrySetResult();
+                    await owner._ready.Task.WaitAsync(TimeSpan.FromSeconds(30), token);
+                }
+                return output;
+            }
+        }
+    }
+    private protected static async Task NativeDocument(string endpoint, ConfigurationDocumentRequest request, string verb, string outcome, int exit)
+    {
+        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
+        if (binary is null) return;
+        var config = Path.Combine(Path.GetTempPath(), "haby-document-" + Guid.NewGuid().ToString("N") + ".yaml");
+        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: wrong\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  wrong:\n    instance: local\n    environmentId: absent\n  right:\n    instance: local\n    environmentId: pilot\n");
+        try
+        {
+            foreach (var format in new[] { "text", "json" })
+            {
+                var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                foreach (var arg in new[] { "configuration", verb, request.ApplicationId, "--config", config, "--component", request.ComponentId, "--document", request.DocumentId,
+                    "--generation", "1", "--output", format }) start.ArgumentList.Add(arg);
+                foreach (var arg in format == "text" ? new[] { "--environment", request.Environment } : new[] { "--context", "right" }) start.ArgumentList.Add(arg);
+                using var process = Process.Start(start)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+                var expectedOutcome = verb == "materialize" && outcome == "created" && format == "json" ? "existing" : outcome;
+                Assert.Equal(exit, process.ExitCode); Assert.Equal("", await stderr); var text = await stdout; Assert.Contains(expectedOutcome, text);
+                if (format == "json")
+                {
+                    using var doc = JsonDocument.Parse(text); Assert.Equal(expectedOutcome, doc.RootElement.GetProperty("outcome"u8).GetString());
+                    Assert.Equal(1, doc.RootElement.GetProperty("data"u8).GetProperty("target"u8).GetProperty("generation"u8).GetInt64());
+                    if (verb == "preview") Assert.Equal(JsonValueKind.Object, doc.RootElement.GetProperty("data"u8).GetProperty("preview"u8).ValueKind);
+                }
+                foreach (var hidden in new[] { "secretId", "password", "formatter", "sslMode" }) Assert.DoesNotContain(hidden, text);
+            }
+        }
+        finally { File.Delete(config); }
+    }
+
+}
+
+public sealed partial class ApplicationConfigurationTests
+{
 
     [Fact]
     public async Task Configuration_document_actual_Host_five_steps_two_documents_concurrent_repeat_native_restart_and_dump_restore_preserve_complete_artifacts()
@@ -129,83 +210,4 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
     }
 
-    private static void CheckPreview(ConfigurationDocumentReply reply, ConfigurationDocumentReply original)
-    {
-        Assert.Equal(Status.Found, reply.Status); Assert.Equal(original.Artifact, reply.Artifact);
-        using var doc = JsonDocument.Parse(reply.PreviewJson.Memory);
-        var root = doc.RootElement;
-        Assert.Equal(new[] { "/PostgreSQL/DefaultConnection/ConnectionString" }, root.GetProperty("redactedPaths"u8).EnumerateArray().Select(x => x.GetString()));
-        Assert.Equal("***REDACTED***", root.GetProperty("document"u8).GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8).GetString());
-        Assert.Equal("Information", root.GetProperty("document"u8).GetProperty("Logging"u8).GetProperty("Level"u8).GetString());
-        foreach (var hidden in new[] { "secretId", "versionId", "password", "formatter", "timeout", "sslMode" }) Assert.DoesNotContain(hidden, reply.PreviewJson.ToStringUtf8());
-    }
-
-    private static async Task<string> ConfigurationState(Scenario scenario)
-    {
-        await using var db = Context(scenario.Connection);
-        // Protected in-memory comparison only; no raw state enters measurement artifacts.
-        var rows = await db.Database.SqlQueryRaw<string>("""
-            SELECT (jsonb_build_array(
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM application_deployments t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id) FROM durable_create_operations t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY attempt_id) FROM durable_create_operation_attempts t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id, output_contract, output_key) FROM operation_outputs t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY secret_version_id) FROM secret_payloads t)))::text AS "Value"
-            """).SingleAsync();
-        return rows;
-    }
-
-    private sealed class OutputBarrier(int participants)
-    {
-        private readonly int _participants = participants;
-        private int _count;
-        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal int Count => Math.Min(Volatile.Read(ref _count), _participants);
-        internal IConfigurationOutputEvidence Wrap(IConfigurationOutputEvidence inner) => new BarrierEvidence(this, inner);
-        private sealed class BarrierEvidence(OutputBarrier owner, IConfigurationOutputEvidence inner) : IConfigurationOutputEvidence
-        {
-            public async ValueTask<ExternalOperationOutput?> ReadAsync(DurableOperationKey producer, ManagedResourceKey resource, DurableActionExecutionKey action, string contract, string key, CancellationToken token)
-            {
-                var output = await inner.ReadAsync(producer, resource, action, contract, key, token);
-                if (Interlocked.Increment(ref owner._count) <= owner._participants)
-                {
-                    if (owner._count == owner._participants) owner._ready.TrySetResult();
-                    await owner._ready.Task.WaitAsync(TimeSpan.FromSeconds(30), token);
-                }
-                return output;
-            }
-        }
-    }
-
-    private static async Task NativeDocument(string endpoint, ConfigurationDocumentRequest request, string verb, string outcome, int exit)
-    {
-        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
-        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
-        if (binary is null) return;
-        var config = Path.Combine(Path.GetTempPath(), "haby-document-" + Guid.NewGuid().ToString("N") + ".yaml");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: wrong\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  wrong:\n    instance: local\n    environmentId: absent\n  right:\n    instance: local\n    environmentId: pilot\n");
-        try
-        {
-            foreach (var format in new[] { "text", "json" })
-            {
-                var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-                foreach (var arg in new[] { "configuration", verb, request.ApplicationId, "--config", config, "--component", request.ComponentId, "--document", request.DocumentId,
-                    "--generation", "1", "--output", format }) start.ArgumentList.Add(arg);
-                foreach (var arg in format == "text" ? new[] { "--environment", request.Environment } : new[] { "--context", "right" }) start.ArgumentList.Add(arg);
-                using var process = Process.Start(start)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
-                var expectedOutcome = verb == "materialize" && outcome == "created" && format == "json" ? "existing" : outcome;
-                Assert.Equal(exit, process.ExitCode); Assert.Equal("", await stderr); var text = await stdout; Assert.Contains(expectedOutcome, text);
-                if (format == "json")
-                {
-                    using var doc = JsonDocument.Parse(text); Assert.Equal(expectedOutcome, doc.RootElement.GetProperty("outcome"u8).GetString());
-                    Assert.Equal(1, doc.RootElement.GetProperty("data"u8).GetProperty("target"u8).GetProperty("generation"u8).GetInt64());
-                    if (verb == "preview") Assert.Equal(JsonValueKind.Object, doc.RootElement.GetProperty("data"u8).GetProperty("preview"u8).ValueKind);
-                }
-                foreach (var hidden in new[] { "secretId", "password", "formatter", "sslMode" }) Assert.DoesNotContain(hidden, text);
-            }
-        }
-        finally { File.Delete(config); }
-    }
 }
