@@ -59,6 +59,12 @@ Assert-Check (-not (Test-PostgreSqlRuntimeInventory ($runtimeInventory.Replace('
 $malformedRuntime = 'MicrosoftXNETCoreXApp 10.0.15 /runtime' + [Environment]::NewLine + 'MicrosoftXAspNetCoreXApp 10.0.15 /runtime'
 Assert-Check (-not (Test-PostgreSqlRuntimeInventory $malformedRuntime)) 'Malformed runtime family names accepted.'
 Assert-Check ((Get-PostgreSqlServerLimit $null) -eq 4 -and (Get-PostgreSqlServerLimit '2') -eq 2 -and (Get-PostgreSqlServerLimit '8') -eq 8) 'Supported resource bound rejected.'
+Assert-Check ((Get-HabyHostGroupLimit $null 4) -eq 2 -and (Get-HabyHostGroupLimit $null 2) -eq 1 -and (Get-HabyHostGroupLimit '3' 4) -eq 3) 'Supported Host group bound rejected.'
+foreach ($invalid in @('', '0', '4', '04', 'PROTECTED-invalid')) {
+    $refused = $false
+    try { Get-HabyHostGroupLimit $invalid 4 | Out-Null } catch { $refused = $true }
+    Assert-Check $refused 'Invalid Host group bound accepted.'
+}
 foreach ($invalid in @('', '1', '9', '04', 'PROTECTED-invalid')) {
     $refused = $false
     try { Get-PostgreSqlServerLimit $invalid | Out-Null } catch { $refused = $true }
@@ -89,6 +95,10 @@ try {
     $refused = $false
     try { Get-PostgreSqlCoverageCases $discovery $map | Out-Null } catch { $refused = $true }
     Assert-Check $refused 'Unmapped class was accepted.'
+    'Unmapped.Namespace.Hidden_case' | Set-Content -LiteralPath $discovery
+    $refused = $false
+    try { Get-PostgreSqlCoverageCases $discovery $map | Out-Null } catch { $refused = $true }
+    Assert-Check $refused 'A test outside the mapped namespace was silently omitted.'
     $baseline = Join-Path $directory 'baseline.json'
     [pscustomobject]@{ cases = @($cases | ForEach-Object { $_.baselineMethod + '#' + $_.baselineCase }) } | ConvertTo-Json | Set-Content -LiteralPath $baseline
     Assert-PostgreSqlBaselineCoverage $cases $baseline

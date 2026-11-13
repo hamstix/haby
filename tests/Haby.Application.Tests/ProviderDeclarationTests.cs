@@ -109,9 +109,7 @@ public sealed class ProviderDeclarationTests
     }
     private static JsonSchema Schema()
     {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "HamstixHaby.slnx"))) root = root.Parent;
-        return JsonSchema.FromText(File.ReadAllText(Path.Combine(root!.FullName, "schemas", "provider.v1alpha1.json")),
+        return JsonSchema.FromText(File.ReadAllText(Haby.Tests.TestPaths.AssetPath("schemas", "provider.v1alpha1.json")),
             "https://haby.dev/schemas/provider-v1alpha1.schema.json", new JsonSchema.Options(allowFileSystemAndHttpResolution: false));
     }
 }

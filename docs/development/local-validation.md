@@ -1,5 +1,11 @@
 # Local validation when hosted runners are unavailable
 
+This is a historical quota fallback, not the current maintenance default. Use the
+[hosted suite/gate workflow](197-suite-routing.md) under ADR-056. Do not resume
+#188/#191 or this old run chain without the architect's explicit reassessment.
+Any separately authorized fast source inspection now requires the explicit
+`HABY_TEST_SOURCE_ROOT` described in that guide; no build-output ancestry is used.
+
 This temporary execution-venue protocol records the
 [approved local equivalent](https://github.com/hamstix/haby/issues/183#issuecomment-6807444676)
 for sequential P3 slices while hosted Actions quota is exhausted. It changes no

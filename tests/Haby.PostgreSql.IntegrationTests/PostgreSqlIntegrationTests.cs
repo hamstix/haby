@@ -17,10 +17,11 @@ public class PostgreSqlFixture : IAsyncLifetime
 {
     private readonly Func<Task>? _afterStart;
     private readonly bool _control;
+    private readonly bool _heavyHost;
     private bool _reserved;
     private bool _ready;
     public PostgreSqlFixture() { }
-    internal PostgreSqlFixture(bool control, Func<Task>? afterStart = null) { _control = control; _afterStart = afterStart; }
+    internal PostgreSqlFixture(bool control, Func<Task>? afterStart = null, bool heavyHost = false) { _control = control; _afterStart = afterStart; _heavyHost = heavyHost; }
     private PostgreSqlContainer? _container;
     private string? _externalContainer;
     public string ConnectionString { get; private set; } = null!;
@@ -61,7 +62,7 @@ public class PostgreSqlFixture : IAsyncLifetime
         }
         // A unique confidential sentinel cannot collide with ordinary metadata such as
         // "postgresql" in captured CLI output, unlike the fixture's default password.
-        PostgreSqlResources.Reserve(_control);
+        PostgreSqlResources.Reserve(_control, _heavyHost);
         _reserved = true;
         try
         {
@@ -92,7 +93,7 @@ public class PostgreSqlFixture : IAsyncLifetime
         {
             if (_container is not null) await _container.DisposeAsync();
             _reserved = false;
-            PostgreSqlResources.Cleaned(_control, _ready);
+            PostgreSqlResources.Cleaned(_control, _ready, _heavyHost);
         }
         catch { PostgreSqlResources.CleanupFailed(); throw; }
     }
@@ -139,7 +140,7 @@ public class PostgreSqlFixture : IAsyncLifetime
     }
 }
 
-public sealed class PostgreSqlIntegrationTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+public sealed class PostgreSqlIntegrationTests(HostPostgreSqlFixture fixture) : IClassFixture<HostPostgreSqlFixture>
 {
     private static readonly ManifestContractCatalog Catalog = new([PostgreSqlDatabaseContract.Definition], [], [], []);
 

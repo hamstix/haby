@@ -1,5 +1,9 @@
 # PostgreSQL isolation and resource groups
 
+The [suite/gate guide](197-suite-routing.md) extends this server-isolation baseline
+with explicit functional/qualification routing and a separate heavy Host group
+bound. Historical timings and counts below describe the #195 checkpoint.
+
 This is ADR-056 maintenance slice 2, based on main
 `1720256bd200bf75c67f74829cb3b45afa46651f`. Use the unchanged
 [hosted entrypoint](193-hosted-postgresql-entrypoint.md). No production contract,

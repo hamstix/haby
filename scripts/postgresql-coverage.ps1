@@ -5,7 +5,10 @@ function Get-PostgreSqlCoverageCases([string]$DiscoveryPath, [string]$MapPath) {
     $cases = [Collections.Generic.List[object]]::new()
     foreach ($line in [IO.File]::ReadAllLines($DiscoveryPath)) {
         $display = $line.Trim()
-        if (-not $display.StartsWith('Haby.PostgreSql.IntegrationTests.', [StringComparison]::Ordinal)) { continue }
+        if (-not $display.StartsWith('Haby.PostgreSql.IntegrationTests.', [StringComparison]::Ordinal)) {
+            if ($display -match '^[A-Za-z_][A-Za-z0-9_.+`]*\.[A-Za-z_][A-Za-z0-9_`]*(\(|$)') { throw 'Discovered test outside mapped namespace; report withheld.' }
+            continue
+        }
         $method = $display.Split('(', 2)[0]
         if ($method -notmatch '^[A-Za-z0-9_.+]+$') { throw 'Unsafe discovery method; report withheld.' }
         $split = $method.LastIndexOf('.')
@@ -23,7 +26,8 @@ function Get-PostgreSqlCoverageCases([string]$DiscoveryPath, [string]$MapPath) {
         $baselineDisplay = $baselineMethod + $display.Substring($method.Length)
         $baselineCase = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($baselineMethod + [char]10 + $baselineDisplay))).ToLowerInvariant()
         # Keep every row, including repeated identities; never deduplicate theory rows.
-        $cases.Add([pscustomobject]@{ method = $method; case = $hash; baselineMethod = $baselineMethod; baselineCase = $baselineCase
+        if ($entry.suite -cnotin @('functional', 'infrastructure-qualification')) { throw 'Missing/invalid suite assignment.' }
+        $cases.Add([pscustomobject]@{ method = $method; case = $hash; baselineMethod = $baselineMethod; baselineCase = $baselineCase; suite = $entry.suite
             responsibilities = $entry.responsibilities; isolation = $entry.isolation; requirements = $entry.requirements; gate = $entry.gate })
     }
     if ($cases.Count -eq 0) { throw 'No discovered integration cases.' }

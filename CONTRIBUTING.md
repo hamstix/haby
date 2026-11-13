@@ -65,12 +65,21 @@ Domain, Manifest, Application and PostgreSQL projects and their fast tests. It
 does not contain an installable server or UI. Run the solution-level workflow:
 
 ```powershell
+$env:HABY_TEST_SOURCE_ROOT = (Get-Location).Path
 dotnet restore .\HamstixHaby.slnx
 dotnet build .\HamstixHaby.slnx --no-restore
 dotnet test .\HamstixHaby.slnx --no-build
 dotnet format .\HamstixHaby.slnx --verify-no-changes --severity warn
 git diff --check
 ```
+
+Architecture/source tests require that explicit absolute checkout root. In bash,
+use `export HABY_TEST_SOURCE_ROOT="$PWD"`. Data-only schema/corpus tests read copied
+test assets instead of searching output ancestors. See the
+[suite/gate and qualification guide](docs/development/197-suite-routing.md) for
+`full`/`functional`/`infrastructure-qualification`, Host group limits, complete
+accounting and the Windows-to-hosted workflow. Regular Build keeps both PostgreSQL
+suites and both published Native AOT targets mandatory.
 
 Run narrower project or filtered tests first when that gives faster feedback, but do not substitute them for applicable solution validation in the final report.
 

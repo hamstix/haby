@@ -17,7 +17,7 @@ using Xunit.Abstractions;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixture, ITestOutputHelper output) : IClassFixture<PostgreSqlFixture>
+public sealed partial class OperatorHostIntegrationTests(HostPostgreSqlFixture fixture, ITestOutputHelper output) : IClassFixture<HostPostgreSqlFixture>
 {
     [Fact]
     public async Task Pg_dump_restore_preserves_revision_warnings_and_preview_in_fresh_host()
@@ -44,7 +44,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
                 var payload = Encoding.UTF8.GetString(Envelope("restore-example"))
                     .Replace("sample_db", targetName, StringComparison.Ordinal);
                 var imported = await client.ImportAsync(new EnvelopeRequest
-                    { OriginalEnvelope = ByteString.CopyFromUtf8(payload) });
+                { OriginalEnvelope = ByteString.CopyFromUtf8(payload) });
                 Assert.Equal(ImportReply.OutcomeOneofCase.Created, imported.OutcomeCase);
                 Assert.Equal("manifest.resource.unused", Assert.Single(imported.Created.Revision.HistoricalWarnings.Diagnostics).Code);
                 reference = imported.Created.Revision.Reference;
@@ -108,7 +108,9 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
         var request = new PreviewDatabaseRequest { Reference = reference, EnvironmentId = "test" };
         request.Providers.Add(new PreviewProviderSelection
         {
-            Alias = "postgresql.primary", InstanceId = "local-postgresql", ConfigurationRevision = 7,
+            Alias = "postgresql.primary",
+            InstanceId = "local-postgresql",
+            ConfigurationRevision = 7,
             ImplementationId = "haby.postgresql.database/v1alpha1"
         });
         return request;
@@ -146,7 +148,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
                 var payload = Encoding.UTF8.GetString(Envelope("preview-example"))
                     .Replace("sample_db", targetName, StringComparison.Ordinal);
                 var imported = await client.ImportAsync(new EnvelopeRequest
-                    { OriginalEnvelope = ByteString.CopyFromUtf8(payload) });
+                { OriginalEnvelope = ByteString.CopyFromUtf8(payload) });
                 reference = imported.Created.Revision.Reference;
             }
             await using (var restarted = await StartAsync(catalogConnection, path))
@@ -156,7 +158,9 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
                 var request = new PreviewDatabaseRequest { Reference = reference, EnvironmentId = "test" };
                 request.Providers.Add(new PreviewProviderSelection
                 {
-                    Alias = "postgresql.primary", InstanceId = "local-postgresql", ConfigurationRevision = 7,
+                    Alias = "postgresql.primary",
+                    InstanceId = "local-postgresql",
+                    ConfigurationRevision = 7,
                     ImplementationId = "haby.postgresql.database/v1alpha1"
                 });
                 for (var attempt = 0; attempt < 2; attempt++)
@@ -191,7 +195,7 @@ public sealed partial class OperatorHostIntegrationTests(PostgreSqlFixture fixtu
                     """{"type":"postgresql.database/v1alpha1","providerRef":"postgresql.primary","properties":{"name":"other_db"}}"""u8);
                 var unsupportedPayload = unsupportedDocument.ToJsonString();
                 var unsupported = await client.ImportAsync(new EnvelopeRequest
-                    { OriginalEnvelope = ByteString.CopyFromUtf8(unsupportedPayload) });
+                { OriginalEnvelope = ByteString.CopyFromUtf8(unsupportedPayload) });
                 Assert.Equal(ImportReply.OutcomeOneofCase.Created, unsupported.OutcomeCase);
                 request.Reference = unsupported.Created.Revision.Reference;
                 Assert.Equal(PreviewDatabaseReply.OutcomeOneofCase.UnsupportedShape,

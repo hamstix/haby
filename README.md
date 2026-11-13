@@ -38,6 +38,7 @@ Install the .NET 10 SDK selected by [global.json](global.json). From the
 repository root, run:
 
 ```powershell
+$env:HABY_TEST_SOURCE_ROOT = (Get-Location).Path
 dotnet restore .\HamstixHaby.slnx --artifacts-path .\.artifacts
 dotnet build .\HamstixHaby.slnx --no-restore --artifacts-path .\.artifacts
 dotnet test .\HamstixHaby.slnx --no-build --artifacts-path .\.artifacts
@@ -47,17 +48,20 @@ git diff --check
 
 The solution contains the current Domain, Manifest, Application and PostgreSQL
 projects and their fast tests. The PostgreSQL integration project is separate
-because it requires an ephemeral container runtime. Run it where that runtime
-is available:
+because it requires an ephemeral container runtime. The primary complete gate is
+the [hosted Linux suite entrypoint](docs/development/197-suite-routing.md), including
+required native CLI publication and functional/qualification accounting. Direct
+project execution remains available for focused diagnostics, not full-gate evidence:
 
 ```powershell
 dotnet test .\tests\Haby.PostgreSql.IntegrationTests\Haby.PostgreSql.IntegrationTests.csproj --artifacts-path .\.artifacts
 ```
 
-Windows hosts with WSLc can use the repository's `scripts/test-postgresql-wslc.ps1`
-helper. See the [PostgreSQL integration-test guide](docs/development/postgresql-integration-tests.md)
-for runtime checks and the supported commands. CI runs this suite in a dedicated
-job. See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflow.
+Windows contributors can invoke/inspect Actions without a duplicate local full
+PostgreSQL run. The `scripts/test-postgresql-wslc.ps1` helper remains explicitly
+legacy; its shared-server mode cannot establish fresh-server qualification. See
+the [PostgreSQL integration-test guide](docs/development/postgresql-integration-tests.md)
+for supported diagnostics and [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflow.
 
 ## License
 

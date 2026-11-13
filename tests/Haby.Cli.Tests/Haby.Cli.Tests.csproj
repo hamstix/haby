@@ -22,4 +22,7 @@
     <ProjectReference Include="..\..\src\Haby.Configuration.Contracts\Haby.Configuration.Contracts.csproj" />
     <ProjectReference Include="..\..\src\habyctl\habyctl.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\TestPaths.cs" Link="TestPaths.cs" />
+  </ItemGroup>
 </Project>

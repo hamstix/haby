@@ -41,7 +41,7 @@ public abstract partial class ApplicationLoginScenario
 }
 
 [Collection("Login logging isolated")]
-public sealed partial class ApplicationGenerationTests(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture), IClassFixture<PostgreSqlFixture>
+public sealed partial class ApplicationGenerationTests(HostPostgreSqlFixture server) : ApplicationLoginScenario(server), IClassFixture<HostPostgreSqlFixture>
 {
 
     [Fact]

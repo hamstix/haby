@@ -29,15 +29,9 @@ public sealed class ProfileWireTests
     private static bool SchemaValid(JsonNode node, bool assignment = false)
     {
         var name = assignment ? "configuration-profile-assignment" : "configuration-profile";
-        var schema = JsonSchema.FromText(File.ReadAllText(Path.Combine(Root(), "schemas", name + ".v1alpha1.json")),
+        var schema = JsonSchema.FromText(File.ReadAllText(Haby.Tests.TestPaths.AssetPath("schemas", name + ".v1alpha1.json")),
             "https://haby.dev/schemas/" + name + ".v1alpha1.json", new JsonSchema.Options(allowFileSystemAndHttpResolution: false));
         return schema.Validate(Encoding.UTF8.GetBytes(node.ToJsonString()));
-    }
-    private static string Root()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "HamstixHaby.slnx"))) directory = directory.Parent;
-        return directory!.FullName;
     }
 
     [Fact]
@@ -331,7 +325,7 @@ public sealed class ProfileWireTests
     [Fact]
     public void Checked_in_examples_agree_with_schema_DTO_and_semantic_acceptance()
     {
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(Root(), "docs", "examples", "configuration-profiles"), "*.json"))
+        foreach (var file in Directory.EnumerateFiles(Haby.Tests.TestPaths.AssetDirectory("docs", "examples", "configuration-profiles"), "*.json"))
         {
             var node = JsonNode.Parse(File.ReadAllText(file))!;
             var assignment = node["kind"]!.GetValue<string>() == "ConfigurationProfileAssignment";

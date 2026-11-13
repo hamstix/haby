@@ -52,18 +52,16 @@ public sealed class ConfigurationDeliveryContractTests
     [Fact]
     public void Delivery_projects_exclude_even_unused_operator_and_server_project_references()
     {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "HamstixHaby.slnx"))) root = root.Parent;
-        Assert.NotNull(root);
-        var contracts = XDocument.Load(Path.Combine(root.FullName, "src", "Haby.Configuration.Contracts", "Haby.Configuration.Contracts.csproj"));
+        var root = Haby.Tests.TestPaths.SourceRoot;
+        var contracts = XDocument.Load(Path.Combine(root, "src", "Haby.Configuration.Contracts", "Haby.Configuration.Contracts.csproj"));
         Assert.Empty(contracts.Descendants("ProjectReference"));
         Assert.Empty(contracts.Descendants("FrameworkReference"));
-        var client = XDocument.Load(Path.Combine(root.FullName, "src", "Haby.Configuration.Client", "Haby.Configuration.Client.csproj"));
+        var client = XDocument.Load(Path.Combine(root, "src", "Haby.Configuration.Client", "Haby.Configuration.Client.csproj"));
         var reference = Assert.Single(client.Descendants("ProjectReference"));
         Assert.Equal("Haby.Configuration.Contracts.csproj", Path.GetFileName((string?)reference.Attribute("Include")));
         Assert.Empty(client.Descendants("FrameworkReference"));
         Assert.Equal("Grpc.Net.Client", (string?)Assert.Single(client.Descendants("PackageReference")).Attribute("Include"));
-        var example = XDocument.Load(Path.Combine(root.FullName, "examples", "Haby.Configuration.Client", "Haby.Configuration.Example.csproj"));
+        var example = XDocument.Load(Path.Combine(root, "examples", "Haby.Configuration.Client", "Haby.Configuration.Example.csproj"));
         Assert.Equal("Haby.Configuration.Client.csproj", Path.GetFileName((string?)Assert.Single(example.Descendants("ProjectReference")).Attribute("Include")));
     }
 }

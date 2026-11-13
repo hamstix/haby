@@ -1,7 +1,11 @@
-param([Parameter(Mandatory)][string]$ResultsDirectory, [switch]$Docker)
+param([Parameter(Mandatory)][string]$ResultsDirectory, [switch]$Docker, [AllowEmptyString()][string]$Suite = 'full')
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path $PSScriptRoot -Parent
+. "$PSScriptRoot/test-suite-plan.ps1"
+$selectedSuites = @(Get-HabyPostgreSqlSuites $Suite)
+$gateSuites = if ($Suite -ceq 'full') { @('functional','infrastructure-qualification') } else { @($Suite) }
+if (-not $Docker -and $Suite -cne 'full') { throw 'Explicit suite selection requires the Docker entrypoint.' }
 $destination = [IO.Path]::GetFullPath($ResultsDirectory)
 if (Test-Path $destination) { throw 'Use a new results directory for each measurement.' }
 New-Item -ItemType Directory -Force $destination | Out-Null
@@ -19,6 +23,9 @@ $preflight = $null
 $coverage = @()
 $cleanupExit = $null
 $oldDockerHost = $env:DOCKER_HOST
+$oldSourceRoot = $env:HABY_TEST_SOURCE_ROOT
+$suiteExecution = $null
+$rawTrxPaths = @((Join-Path $private 'full.trx'))
 $sha = (& git -C $root rev-parse HEAD | Out-String).Trim()
 $diff = (& git -C $root diff --binary HEAD | Out-String)
 $diffHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($diff))).ToLowerInvariant()
@@ -30,11 +37,13 @@ $runnerPackages = @($packages.Project.ItemGroup.PackageVersion | Where-Object In
 $oldTimingDirectory = $env:HABY_TEST_TIMING_DIRECTORY
 $env:HABY_TEST_TIMING_DIRECTORY = $safe
 try {
+    $env:HABY_TEST_SOURCE_ROOT = $root
     $blocked = $false
     if ($Docker) {
         Push-Location $root
         . (Join-Path $PSScriptRoot 'postgresql-docker-preflight.ps1')
         . (Join-Path $PSScriptRoot 'postgresql-coverage.ps1')
+        . (Join-Path $PSScriptRoot 'invoke-postgresql-suites.ps1')
         $primaryPhase = 'preflight'; $timer = [Diagnostics.Stopwatch]::StartNew()
         if ($IsLinux) { [IO.File]::SetUnixFileMode($private, [IO.UnixFileMode]448) }
         $prerequisites = Invoke-PostgreSqlDockerPrerequisites $root $private
@@ -67,9 +76,20 @@ try {
                 $primaryPhase = 'discovery-coverage'
                 $coverage = @(Get-PostgreSqlCoverageCases (Join-Path $private 'discovery.log') (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/coverage-map.json'))
                 Assert-PostgreSqlBaselineCoverage $coverage (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/baseline-cases.json')
+                $planPath = Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json'
+                Assert-HabyGatePlan $coverage $planPath 'postgresql-integration' @('functional','infrastructure-qualification')
+                $selectedCoverage = @($coverage | Where-Object { $_.suite -cin $selectedSuites })
+                $allCoverage = $coverage
                 [pscustomobject]@{ status = 'discovered-not-executed'; cases = $coverage } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $safe 'coverage.json') -Encoding utf8
                 $timer.Restart()
                 $primaryPhase = 'test'
+                $assemblyPath = Join-Path $artifacts 'bin/Haby.PostgreSql.IntegrationTests/debug/Haby.PostgreSql.IntegrationTests.dll'
+                if (Test-Path $assemblyPath) { $assemblyHash = (Get-FileHash $assemblyPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+                $suiteExecution = Invoke-HabyPostgreSqlSuites -Project $project -Artifacts $artifacts -Private $private -Safe $safe -Coverage $coverage -Suites $selectedSuites -MapPath (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/coverage-map.json') -PlanPath $planPath -ServerLimit $prerequisites.serverLimit -HostLimit $prerequisites.hostGroupLimit
+                $testExit = $suiteExecution.exitCode; $reportFailed = $suiteExecution.reportingFailed
+                $rawTrxPaths = @($suiteExecution.trxPaths); $coverage = if ($Suite -ceq 'full') { $allCoverage } else { $selectedCoverage }
+                $phases.Add([pscustomobject]@{ phase = 'test'; seconds = $timer.Elapsed.TotalSeconds; exitCode = $testExit })
+                break
             }
             $assemblyPath = Join-Path $artifacts 'bin/Haby.PostgreSql.IntegrationTests/debug/Haby.PostgreSql.IntegrationTests.dll'
             if (Test-Path $assemblyPath) { $assemblyHash = (Get-FileHash $assemblyPath -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -86,21 +106,20 @@ try {
     Write-Warning 'PostgreSQL runner phase failed; protected exception output withheld. Consult the phase/preflight metadata.'
 } finally {
     $env:HABY_TEST_TIMING_DIRECTORY = $oldTimingDirectory
+    $env:HABY_TEST_SOURCE_ROOT = $oldSourceRoot
     try {
         $timer = [Diagnostics.Stopwatch]::StartNew()
         try {
-            & (Join-Path $PSScriptRoot 'export-postgresql-timing.ps1') -TrxPath (Join-Path $private 'full.trx') -OutputDirectory $safe
+            & (Join-Path $PSScriptRoot 'export-postgresql-timing.ps1') -TrxPath $rawTrxPaths -OutputDirectory $safe
             if ($Docker) {
                 $executed = @(Get-Content (Join-Path $safe 'cases.json') -Raw | ConvertFrom-Json)
                 Assert-PostgreSqlCoverage $coverage $executed
                 $resources = Get-Content -LiteralPath (Join-Path $safe 'resources.json') -Raw | ConvertFrom-Json
-                if ($resources.limit -ne $preflight.prerequisites.serverLimit -or $resources.active -ne 0 -or
-                    $resources.cleanupFailed -ne 0 -or $resources.peakReservedServers -gt $resources.limit -or
-                    $resources.readyActive -ne 0 -or $resources.peakReadyServers -gt $resources.limit -or
-                    $resources.startupAttempts -ne $resources.cleaned -or
-                    $resources.catalogDatabasesCreated -ne $resources.catalogDatabasesDropped) { throw 'Owned resource accounting incomplete.' }
-                [pscustomobject]@{ status = 'complete'; discovered = $coverage.Count; executed = $executed.Count; cases = $coverage } |
-                    ConvertTo-Json -Depth 6 | Set-Content (Join-Path $safe 'coverage.json') -Encoding utf8
+                Assert-HabyResourceCounts $resources $preflight.prerequisites.serverLimit $preflight.prerequisites.hostGroupLimit
+                Assert-HabyGatePlan $executed $planPath 'postgresql-integration' $gateSuites
+                [pscustomobject]@{ status = $(if ($Suite -ceq 'full') { 'complete' } else { 'selected-complete' }); selection = $Suite; selectedSuites = $selectedSuites
+                    discovered = $coverage.Count; executed = $executed.Count; cases = $coverage } |
+                    ConvertTo-Json -Depth 7 | Set-Content (Join-Path $safe 'coverage.json') -Encoding utf8
             }
         } catch {
             $reportFailed = $true
@@ -135,6 +154,7 @@ try {
             wallSeconds = $wall.Elapsed.TotalSeconds; testExitCode = $testExit; phases = $phases
             entrypoint = $(if ($Docker) { 'hosted-linux-docker' } else { 'existing-measured' })
             primaryPhase = $primaryPhase; preflightCleanupExitCode = $cleanupExit; reportingFailed = $reportFailed
+            selection = $Suite; selectedSuites = $selectedSuites; groups = $suiteExecution.groups
             fixtureCleanup = 'Owned by existing fixtures; failures remain xUnit failures. Preflight cleanup is reported separately.'
         } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $safe 'measurement.json') -Encoding utf8
         Write-Output ('POSTGRESQL_MEASUREMENT ' + (Get-Content (Join-Path $safe 'measurement.json') -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 5 -Compress))

@@ -5,6 +5,33 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class FixtureLayoutTests
 {
     [Theory]
+    [InlineData(null, 4, 2)]
+    [InlineData(null, 2, 1)]
+    [InlineData("3", 4, 3)]
+    public void Heavy_Host_limit_respects_server_lanes(string? value, int servers, int expected) =>
+        Assert.Equal(expected, PostgreSqlResources.ParseHost(value, servers));
+
+    [Theory]
+    [InlineData("0", 4)]
+    [InlineData("4", 4)]
+    [InlineData("", 4)]
+    [InlineData("04", 8)]
+    public void Invalid_heavy_Host_limit_is_refused(string value, int servers) =>
+        Assert.Throws<InvalidOperationException>(() => PostgreSqlResources.ParseHost(value, servers));
+
+    [Fact]
+    public void Heavy_Host_fixture_classes_are_assigned_only_to_configured_lanes()
+    {
+        foreach (var type in typeof(PostgreSqlFixture).Assembly.GetTypes()
+            .Where(t => t.GetInterfaces().Contains(typeof(IClassFixture<HostPostgreSqlFixture>))))
+        {
+            Assert.Contains(type.Name, PostgreSqlCollections.HeavyHostClasses);
+            Assert.InRange(PostgreSqlCollections.Lane(type.Name, 4, 1), 0, 0);
+            Assert.InRange(PostgreSqlCollections.Lane(type.Name, 4, 2), 0, 1);
+        }
+    }
+
+    [Theory]
     [InlineData(null, 4)]
     [InlineData("2", 2)]
     [InlineData("8", 8)]
@@ -41,7 +68,8 @@ public sealed class FixtureLayoutTests
         var exclusive = new[] { typeof(ApplicationLoginLoggingTests), typeof(ProviderAliasTests),
             typeof(ProviderPreflightCompatibilityTests), typeof(OperatorProviderAccessTests) };
         foreach (var type in typeof(PostgreSqlFixture).Assembly.GetTypes()
-            .Where(t => t.GetInterfaces().Contains(typeof(IClassFixture<PostgreSqlFixture>)) && !exclusive.Contains(t)))
+            .Where(t => (t.GetInterfaces().Contains(typeof(IClassFixture<PostgreSqlFixture>)) ||
+                t.GetInterfaces().Contains(typeof(IClassFixture<HostPostgreSqlFixture>))) && !exclusive.Contains(t)))
             Assert.Contains(type.Name, PostgreSqlCollections.OwnedClasses);
     }
 

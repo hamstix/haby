@@ -21,4 +21,10 @@
     <ProjectReference Include="..\..\src\Haby.Kubernetes.Contracts\Haby.Kubernetes.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Haby.PostgreSql\Haby.PostgreSql.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\TestPaths.cs" Link="TestPaths.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\schemas\provider.v1alpha1.json" Link="TestAssets\schemas\provider.v1alpha1.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

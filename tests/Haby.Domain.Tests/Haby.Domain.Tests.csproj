@@ -14,4 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Haby.Domain\Haby.Domain.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\TestPaths.cs" Link="TestPaths.cs" />
+  </ItemGroup>
 </Project>

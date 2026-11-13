@@ -110,6 +110,9 @@ a Docker-compatible endpoint or the helper is not evidence of a provider bug.
 
 ## Linux and Docker-compatible runtimes
 
+Use the [suite/gate guide](197-suite-routing.md) for current full/partial selection,
+explicit source root and copied assets, heavy Host limits and qualification triggers.
+
 See [fixture isolation and resource groups](195-postgresql-isolation.md) for the
 current class/case migration map, server bound and owned cleanup requirements.
 

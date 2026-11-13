@@ -15,4 +15,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Haby.Manifest\Haby.Manifest.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\TestPaths.cs" Link="TestPaths.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\schemas\*.json" Link="TestAssets\schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Corpus\*.json" Link="TestAssets\tests\Haby.Manifest.Tests\Corpus\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\docs\examples\configuration-profiles\*.json" Link="TestAssets\docs\examples\configuration-profiles\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
