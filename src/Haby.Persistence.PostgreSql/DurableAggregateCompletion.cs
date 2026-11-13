@@ -47,35 +47,35 @@ internal static partial class DurableAggregateCompletion
 
     internal static async Task<bool> TryAdvanceAsync(ManifestCatalogDbContext context, Guid deployment,
         long generation, CancellationToken token, IEnumerable<IExternalOperationOutputContract>? contracts = null,
-        DurableActionAdmission? admission = null, IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null)
+        DurableActionAdmission? admission = null, IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null, bool internalResourceStage = false)
     {
         await LockAsync(context, deployment, token);
         var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(r => r.Id == deployment, token);
         var source = await context.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(r => r.DeploymentId == deployment && r.Generation == generation, token);
-        if (owner is null || source is null || owner.DesiredGeneration < generation) return false;
+        if (owner is null || source is null || owner.DesiredGeneration < generation || source.InternalEffects != internalResourceStage) return false;
         try
         {
             var inputs = source.Inputs();
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
             if (source.Presence != nameof(DesiredPresence.Present) || inputs.Configuration is not { } configuration ||
-                configuration.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
+                !internalResourceStage && configuration.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
                 !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                     graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
                 graph.Nodes.Count + graph.ReusedResources.Count == 0) return false;
-            var stored = await ReadAsync(context, source, token);
-            if (stored is not null) return owner.AppliedGeneration >= generation;
+            var stored = await ReadAsync(context, source, token, internalResourceStage);
+            if (stored is not null) return internalResourceStage || owner.AppliedGeneration >= generation;
             // Applied is never an authority for backfilling evidence.
             if (owner.DesiredGeneration != generation || owner.AppliedGeneration >= generation ||
                 graph.Baseline?.Generation != owner.AppliedGeneration) return false;
             if (prepared is null && graph.Baseline is not null) return false;
-            if (prepared is not null && await InspectMetadataAsync(context, deployment, generation, contracts ?? [], codecs ?? [], token, admission) is null) return false;
+            if (prepared is not null && await InspectMetadataAsync(context, deployment, generation, contracts ?? [], codecs ?? [], token, admission, internalResourceStage: internalResourceStage) is null) return false;
             if (graph.Baseline is not null)
             {
                 if (admission is null) return false;
                 await ResourceContinuity.LockAsync(context, deployment, token);
                 if (!await ResourceContinuity.ValidateAsync(context, deployment, graph, token) ||
                     !await ResourceContinuity.ValidateOutputsAsync(context, deployment, graph, contracts ?? [], codecs ?? [],
-                        admission, inputs, token, creationGeneration: graph.Nodes.Count > 0 ? generation : null)) return false;
+                        admission, internalResourceStage ? InternalResourceStage.Project(inputs) : inputs, token, creationGeneration: graph.Nodes.Count > 0 ? generation : null)) return false;
             }
             var results = await BuildResultsAsync(context, source, graph, contracts?.ToArray() ?? [], codecs?.ToArray() ?? [], token, checkCredential: prepared is not null);
             if (results is null || (prepared is null
@@ -98,6 +98,7 @@ internal static partial class DurableAggregateCompletion
                 ConfirmedAt = at
             });
             await context.SaveChangesAsync(token);
+            if (internalResourceStage) return true;
             return await context.ApplicationDeployments.Where(r => r.Id == deployment && r.DesiredGeneration == generation && r.AppliedGeneration == owner.AppliedGeneration)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.AppliedGeneration, generation)
                     .SetProperty(r => r.ConcurrencyToken, r => r.ConcurrencyToken + 1), token) == 1;
@@ -105,8 +106,9 @@ internal static partial class DurableAggregateCompletion
         catch (InvalidDataException) { return false; }
     }
 
-    internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token)
+    internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token, bool internalResourceStage = false)
     {
+        if (source.InternalEffects && !internalResourceStage) throw new InvalidDataException("Internal generation is not publicly admitted.");
         var rows = await context.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation).ToArrayAsync(token);
         if (rows.Length == 0) return null;
         if (rows is not [var row] || row.Stage != ResourcesReadyCheckpoint.Stage || row.FormatVersion != ResourcesReadyCheckpoint.FormatVersion ||
@@ -118,8 +120,8 @@ internal static partial class DurableAggregateCompletion
             throw new InvalidDataException("Resource checkpoint identity mismatch.");
         var inputs = source.Inputs();
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
-        if (inputs.Configuration!.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
-            !ResourceReadinessCoverage.IsComplete(inputs.Configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
+        if (!internalResourceStage && inputs.Configuration!.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
+            !ResourceReadinessCoverage.IsComplete(inputs.Configuration!.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                 graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)))
             throw new InvalidDataException("Resource checkpoint declaration mismatch.");
         // Historical reads do not resolve credentials or require continued secret availability.

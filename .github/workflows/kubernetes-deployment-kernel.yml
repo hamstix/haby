@@ -5,6 +5,9 @@ on:
     paths:
       - 'src/Haby.Kubernetes/**'
       - 'src/Haby.Kubernetes.Contracts/**'
+      - 'src/Haby.Application/**'
+      - 'src/Haby.Persistence.PostgreSql/**'
+      - 'tests/Haby.PostgreSql.IntegrationTests/**'
       - 'tests/Haby.Kubernetes.Tests/**'
       - 'tools/Haby.Kubernetes.Qualification/**'
       - 'scripts/*kubernetes-qualification*.ps1'
@@ -13,6 +16,56 @@ on:
 permissions:
   contents: read
 jobs:
+  durable-actions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HABY_TEST_SOURCE_ROOT: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore pinned existing test contour
+        run: dotnet restore tools/Haby.Kubernetes.Qualification --locked-mode
+      - name: Run scoped real catalog and API restart cases
+        shell: pwsh
+        run: ./scripts/run-kubernetes-qualification.ps1 -Runtime docker -DurableActions -EvidencePath .artifacts/durable-actions/evidence.txt
+      - name: Verify exact durable case inventory and owned cleanup
+        shell: pwsh
+        run: |
+          $lines = @(Get-Content .artifacts/durable-actions/evidence.txt)
+          $ids = @($lines | Where-Object { $_ -cmatch '^PASS durable-D[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(13,3) })
+          $expected = @(1..13 | ForEach-Object { 'D{0:d2}' -f $_ })
+          if (($ids -join ',') -cne ($expected -join ',') -or 'Harness: PASS' -notin $lines -or
+              'Run-owned private directory removed.' -notin $lines -or
+              'PASS durable-owned-catalog-cleanup' -notin $lines -or
+              @($lines | Where-Object { $_ -match '^Run-owned container and [0-9]+ anonymous volumes absent\.$' }).Count -ne 1 -or
+              @($lines | Where-Object { $_ -match '^FAIL |^Failure:|cleanup: FAIL|stop: FAIL|Evidence write: FAIL' }).Count) { throw 'Durable evidence incomplete.' }
+          $method = 'Haby.Kubernetes.Qualification.DurableActionCases.Run'
+          $cases = @(foreach ($line in $lines) {
+            if ($line -cmatch '^PASS durable-(D[0-9]{2}-[a-zA-Z0-9-]+)$') {
+              $identity = $method + "`n" + $Matches[1]
+              [pscustomobject]@{ method = $method; case = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant(); outcome = 'Passed' }
+            }
+          })
+          . ./scripts/test-suite-plan.ps1
+          Assert-HabyGatePlan $cases ./tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json 'kubernetes-durable-actions' @('api-catalog')
+          $cases | ConvertTo-Json -Depth 4 | Set-Content .artifacts/durable-actions/cases.json -Encoding utf8
+          [pscustomobject]@{ source = (& git rev-parse HEAD); dirty = [bool](& git status --porcelain); sdk = (& dotnet --version); gate = 'kubernetes-durable-actions'; suite = 'api-catalog'; cases = $cases.Count; status = 'complete' } |
+            ConvertTo-Json | Set-Content .artifacts/durable-actions/gate.json -Encoding utf8
+      - name: Upload bounded durable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubernetes-durable-actions-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/durable-actions/evidence.txt
+            .artifacts/durable-actions/cases.json
+            .artifacts/durable-actions/gate.json
+          retention-days: 7
   deployment-kernel:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

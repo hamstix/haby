@@ -8,7 +8,8 @@ internal static partial class DurableAggregateCompletion
     private static async Task<ResourceReadyResult[]?> BuildResultsAsync(ManifestCatalogDbContext db, DeploymentGenerationRow target,
         DurableOperationGraph graph, IExternalOperationOutputContract[]? contracts, IProviderConfigurationCodec[] codecs, CancellationToken token, bool checkCredential)
     {
-        var current = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == target.DeploymentId && x.Generation == target.Generation).ToArrayAsync(token);
+        var ids = graph.Nodes.Select(x => x.Id.Value).ToArray();
+        var current = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == target.DeploymentId && x.Generation == target.Generation && (!target.InternalEffects || ids.Contains(x.OperationId))).ToArrayAsync(token);
         if (current.Length != graph.Nodes.Count || graph.Nodes.Any(n => !current.Any(x => x.OperationId == n.Id.Value && x.State == nameof(DurableOperationState.Succeeded)))) return null;
         var resources = graph.Nodes.Select(n => n.ResourceId.Value).Concat(graph.ReusedResources.Select(r => r.Resource.Value))
             .Concat(graph.RetainedResources.Select(r => r.Resource.Value)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);

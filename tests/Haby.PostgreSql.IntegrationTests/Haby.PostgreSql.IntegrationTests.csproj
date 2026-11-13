@@ -4,6 +4,8 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Haby.Kubernetes.Qualification" />
+    <Compile Include="..\InternalKubernetesFixturePreflight.cs" Link="InternalKubernetesFixturePreflight.cs" />
     <Compile Include="..\DurableInputSamples.cs" Link="DurableInputSamples.cs" />
     <Compile Include="..\PlacementSamples.cs" Link="PlacementSamples.cs" />
     <Compile Include="..\ProfileDeclarationBoundarySamples.cs" Link="ProfileDeclarationBoundarySamples.cs" />
@@ -29,6 +31,7 @@
     <Protobuf Include="Checkpoint.proto" GrpcServices="Both" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Haby.Kubernetes\Haby.Kubernetes.csproj" />
     <ProjectReference Include="..\..\src\Haby.PostgreSql\Haby.PostgreSql.csproj" />
     <ProjectReference Include="..\..\examples\Haby.Configuration.Client\Haby.Configuration.Example.csproj" />
     <ProjectReference Include="..\..\src\Haby.Persistence.PostgreSql\Haby.Persistence.PostgreSql.csproj" />

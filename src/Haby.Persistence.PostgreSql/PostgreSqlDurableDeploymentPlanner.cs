@@ -11,7 +11,7 @@ using Npgsql;
 namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Durable, side-effect-free planning of initial work or bounded Resource reuse.</summary>
-public sealed class PostgreSqlDurableDeploymentPlanner(
+public sealed partial class PostgreSqlDurableDeploymentPlanner(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IManifestRevisionQuery revisions,
     IProviderAliasResolver aliases, IEnumerable<IProviderConfigurationCodec> codecs,
     DurableActionAdmission admission, TimeProvider clock, ConfigurationRenderingCatalog? rendering = null,
@@ -62,8 +62,14 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             new DeploymentChangeSetMember(application, revision, precondition), createdAt, actorId));
     }
 
-    public async ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId,
-        string actorId, CancellationToken cancellationToken)
+    public ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId,
+        string actorId, CancellationToken cancellationToken) => CreatePlanCoreAsync(changeSetId, actorId, false, cancellationToken);
+
+    internal ValueTask<DurablePlanResult> CreateInternalPlanAsync(DeploymentChangeSetId id, string actor, CancellationToken token) =>
+        CreatePlanCoreAsync(id, actor, true, token);
+
+    private async ValueTask<DurablePlanResult> CreatePlanCoreAsync(DeploymentChangeSetId changeSetId, string actorId,
+        bool internalEffects, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(changeSetId);
         ValidateActor(actorId);
@@ -96,7 +102,9 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
-        if (!DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
+        if (!internalEffects && !DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
+        if (internalEffects && (baseline is null || !spec.Components.Values.Any(x => x.Workloads.Count > 0)))
+            return new(DurablePlanStatus.UnsupportedShape);
         var alias = DurableActionAdmission.SingleAlias(spec);
         if (alias is null) return new(DurablePlanStatus.UnsupportedShape);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
@@ -113,13 +121,27 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
         ResourceNamingSnapshot naming;
         try { naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot; }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
-        var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), reference,
-            CaptureProviders(revision.Declaration, environmentId, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber, resolved.ImplementationId, naming));
-        var admitted = await AdmitAsync(context, spec, revisionRow, inputs, cancellationToken);
+        var resourceProviders = revision.Declaration.Spec.Resources.Select(r => new ExactProviderResolution(new ProviderInput.Resource(r.Key), environmentId, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber, ProviderImplementationId.Create(resolved.ImplementationId), ResourceNamingCodec.Exact(naming))).ToArray();
+        var providers = internalEffects ? await CaptureInternalProvidersAsync(context, revision.Declaration, environmentId, resourceProviders, cancellationToken)
+            : new ExactProviderResolutionSet(revision.Declaration, environmentId, resourceProviders);
+        var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), reference, providers);
+        // Capture the complete configuration before projecting the Resource-stage view.
+        DurablePlanStatus admitted = DurablePlanStatus.Planned;
+        var resourceInputs = inputs;
         try
         {
+            if (internalEffects && spec.Components.Values.Any(c => c.Bindings.Count != 0 || c.Documents.Count != 0))
+                return new(DurablePlanStatus.UnsupportedShape);
+            if (internalEffects)
+            {
+                var initial = await ConfigurationPlanningCapture.CaptureAsync(context, new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering);
+                if (initial.Snapshot is null) return new(DurablePlanStatus.ConfigurationRefused, ConfigurationReport: initial.Expansion);
+                inputs = inputs with { Configuration = initial.Snapshot };
+                resourceInputs = InternalResourceStage.Project(inputs);
+            }
+            admitted = await AdmitAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow, resourceInputs, cancellationToken);
             var producers = admitted == DurablePlanStatus.Planned
-                ? await DescribeProducersAsync(context, spec, revisionRow, inputs, cancellationToken) : [];
+                ? await DescribeProducersAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow, resourceInputs, cancellationToken) : [];
             var configuration = await ConfigurationPlanningCapture.CaptureAsync(context,
                 new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering, producers: producers);
             if (configuration.Snapshot is null)
@@ -139,19 +161,24 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             inputs = inputs with { Configuration = configuration.Snapshot };
         }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
+        resourceInputs = internalEffects ? InternalResourceStage.Project(inputs) : inputs;
+        var resourceSpec = internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec;
         DurableOperationGraph graph;
         try
         {
-            graph = baseline is null ? await PlanGraphAsync(context, spec, revisionRow, inputs, cancellationToken) :
-                await ReuseGraphAsync(context, baseline, spec, revisionRow, inputs, cancellationToken)
+            graph = baseline is null ? await PlanGraphAsync(context, resourceSpec, revisionRow, resourceInputs, cancellationToken) :
+                await ReuseGraphAsync(context, baseline, resourceSpec, revisionRow, resourceInputs, cancellationToken)
                     ?? throw new NotSupportedException();
         }
         catch (NotSupportedException) { return new(DurablePlanStatus.UnsupportedShape); }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
+        if (internalEffects && (graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
+            graph.ReusedResources.Count != spec.Resources.Count)) return new(DurablePlanStatus.UnsupportedShape);
         var id = DeploymentPlanId.New();
         var createdAt = clock.GetUtcNow();
         var planRow = new DurablePlanRow
         {
+            InternalEffects = internalEffects,
             Id = Guid.Parse(id.ToString()),
             ChangeSetId = row.Id,
             EnvironmentRecordId = row.EnvironmentRecordId,
@@ -168,6 +195,11 @@ public sealed class PostgreSqlDurableDeploymentPlanner(
             ActorId = actorId
         };
         context.DurablePlans.Add(planRow);
+        if (internalEffects) foreach (var exact in inputs.Providers.Entries.Values)
+        {
+            var subject = exact.Input switch { ProviderInput.Workload w => "Workload/" + w.Component.Value + "/" + w.Id.Value, ProviderInput.Resource r => "Resource/" + r.Id.Value, _ => throw new InvalidDataException() };
+            context.InternalPlanInputs.Add(new() { PlanId = planRow.Id, Subject = subject, ProviderId = Guid.Parse(exact.Instance.ToString()), ConfigurationRevision = exact.Configuration.Value, PlacementId = exact.Placement is { } placement ? InternalPlacementInput.Decode(placement).Id : null });
+        }
         await context.SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);

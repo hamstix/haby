@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><IsPackable>false</IsPackable></PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Compile Include="../InternalKubernetesFixturePreflight.cs" Link="InternalKubernetesFixturePreflight.cs" />
+    <Compile Include="../DeploymentReplacementObservation.cs" Link="DeploymentReplacementObservation.cs" />
+    <ProjectReference Include="../../src/Haby.PostgreSql/Haby.PostgreSql.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio"><PrivateAssets>all</PrivateAssets></PackageReference>

@@ -67,13 +67,11 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             if (await context.DurableOperations.CountAsync(r => r.DeploymentId == deployment && r.Generation == generation &&
                 dependencies.Contains(r.OperationId) && r.State == nameof(DurableOperationState.Succeeded), cancellationToken) != dependencies.Length)
                 return false;
-            var held = await context.DurableOperations.Where(r => r.DeploymentId == deployment && r.Generation == generation &&
+            if (!await context.DurableOperations.AsNoTracking().AnyAsync(r => r.DeploymentId == deployment && r.Generation == generation &&
                 r.OperationId == id && r.State == nameof(DurableOperationState.Dispatching) && r.CurrentAttemptId == attempt &&
-                r.AttemptNumber == candidate.AttemptNumber && r.DispatchedAt == candidate.DispatchedAt)
-                .ExecuteUpdateAsync(s => s.SetProperty(r => r.State, nameof(DurableOperationState.Succeeded))
-                    .SetProperty(r => r.FinalizedAt, at).SetProperty(r => r.UpdatedAt, at)
-                    .SetProperty(r => r.ReasonCode, (string?)null), cancellationToken);
-            if (held != 1) return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
+                r.AttemptNumber == candidate.AttemptNumber && r.DispatchedAt == candidate.DispatchedAt, cancellationToken) ||
+                !await DurableOperationTransitions.ConfirmAsync(context, producer, attempt, at, false, cancellationToken))
+                return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
             var existing = await OutputAsync(context, producer, output.Contract, output.Key, cancellationToken);
             if (existing is not null && existing.Payload != output.Payload) return false;
             if (existing is null) context.OperationOutputs.Add(new()
@@ -86,12 +84,6 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 Payload = output.Payload
             });
             await context.SaveChangesAsync(cancellationToken);
-            var closed = await context.DurableOperationAttempts.Where(r => r.AttemptId == attempt &&
-                r.DeploymentId == deployment && r.Generation == generation && r.OperationId == id && r.AttemptNumber == candidate.AttemptNumber &&
-                r.DispatchedAt == candidate.DispatchedAt && r.DispatchedAt != null && r.FinishedAt == null && r.Outcome == null)
-                .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
-                    .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
-            if (closed != 1) return false;
             _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs, prepared: prepared);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);

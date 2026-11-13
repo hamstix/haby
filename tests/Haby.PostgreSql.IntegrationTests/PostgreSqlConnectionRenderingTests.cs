@@ -41,11 +41,16 @@ public sealed partial class ApplicationConfigurationTests
     public async Task Prior_configuration_format_requires_fresh_catalog_in_startup_and_direct_migration_without_reset()
     {
         var scenario = await Prepare(full: true, render: true);
+        string[] expectedHistory;
         await using (var arrange = Context(scenario.Connection))
+        {
+            expectedHistory = await MigrationHistoryAssertions.CurrentAsync(arrange, "ReuseManagedResources", "AddResourceNaming",
+                "PinConfigurationRendering", "MaterializeConfigurationDocuments", "AddConfigurationAccess", "AddOperatorAccess");
             await arrange.Database.ExecuteSqlRawAsync("""
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%PinConfigurationRendering' OR "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 """);
+        }
         await using (var services = OwnerServices(scenario))
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
@@ -60,9 +65,7 @@ public sealed partial class ApplicationConfigurationTests
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
         Assert.Equal(1, await verify.DeploymentGenerations.AsNoTracking().CountAsync());
         Assert.Empty(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
-        // Six explicitly deleted rows leave 24 of 30; keep the non-prefix history
-        // and every startup/direct-migration refusal assertion intact.
-        Assert.Equal(24, (await verify.Database.GetAppliedMigrationsAsync()).Count());
+        await MigrationHistoryAssertions.EqualAsync(verify, expectedHistory);
     }
 
     [Fact]

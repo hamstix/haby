@@ -58,7 +58,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         await using var transaction = await context.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
         var id = Guid.Parse(deployment.ToString());
         var gen = await context.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(r => r.DeploymentId == id && r.Generation == generation.Value, cancellationToken);
-        if (gen is null) return null;
+        if (gen is null || gen.InternalEffects) return null;
         _ = gen.Inputs();
         var graph = DurableOperationGraphCodec.Decode(gen.GraphJson);
         var owner = await context.ApplicationDeployments.AsNoTracking().SingleAsync(r => r.Id == id, cancellationToken);
@@ -109,53 +109,20 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         DateTimeOffset at, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
+        if (await FindAsync(key, cancellationToken) is null) return new DurableBeginAttemptResult.NotFound();
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var attemptId = Guid.CreateVersion7();
-        var affected = await context.DurableOperations
-            .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
-                          row.OperationId == resourceId &&
-                          (row.State == nameof(DurableOperationState.Pending) ||
-                           row.State == nameof(DurableOperationState.Preparing)))
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.State, nameof(DurableOperationState.Preparing))
-                .SetProperty(row => row.CurrentAttemptId, (Guid?)attemptId)
-                .SetProperty(row => row.AttemptNumber, row => row.AttemptNumber + 1)
-                .SetProperty(row => row.ReasonCode, (string?)null)
-                .SetProperty(row => row.UpdatedAt, at), cancellationToken);
-        if (affected == 0)
+        var row = await DurableOperationTransitions.BeginAsync(context, key, at, cancellationToken);
+        if (row is null)
         {
             await transaction.RollbackAsync(cancellationToken);
             var observed = await ReadAsync(context, key, cancellationToken);
-            return observed is null
-                ? new DurableBeginAttemptResult.NotFound()
-                : new DurableBeginAttemptResult.Terminal(observed);
+            return observed is null ? new DurableBeginAttemptResult.NotFound() : new DurableBeginAttemptResult.Terminal(observed);
         }
-
-        var operation = await ReadAsync(context, key, cancellationToken)
-            ?? throw new InvalidOperationException("Create operation vanished during attempt start.");
-        var priorOpen = await context.DurableOperationAttempts
-            .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
-                          row.OperationId == resourceId && row.FinishedAt == null &&
-                          row.AttemptId != attemptId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.FinishedAt, at)
-                .SetProperty(row => row.Outcome, nameof(DurableAttemptOutcome.AbandonedBeforeDispatch)),
-            cancellationToken);
-        if (priorOpen > 1) throw new InvalidOperationException("Create operation has more than one open attempt.");
-        context.DurableOperationAttempts.Add(new DurableOperationAttemptRow
-        {
-            AttemptId = attemptId,
-            DeploymentId = deployment,
-            Generation = generation,
-            OperationId = resourceId,
-            AttemptNumber = operation.AttemptNumber,
-            StartedAt = at
-        });
-        await context.SaveChangesAsync(cancellationToken);
+        var operation = await ReadAsync(context, key, cancellationToken) ?? throw new InvalidDataException("Operation disappeared.");
         await transaction.CommitAsync(CancellationToken.None);
-        return new DurableBeginAttemptResult.Started(operation, attemptId, operation.AttemptNumber);
+        return new DurableBeginAttemptResult.Started(operation, row.CurrentAttemptId!.Value, row.AttemptNumber);
     }
 
     public async ValueTask<DurableMarkerResult> TryCommitDispatchMarkerAsync(DurableOperationKey key,
@@ -163,33 +130,17 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
     {
         ArgumentNullException.ThrowIfNull(key);
         var local = await FindAsync(key, cancellationToken);
-        if (local is not null && GeneratedCredentialContracts.IsProducer(local.Node))
+        if (local is null) throw new InvalidDataException("Operation is not publicly admitted.");
+        if (GeneratedCredentialContracts.IsProducer(local.Node))
             return new DurableMarkerResult.Rejected(local);
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var affected = await context.DurableOperations
-            .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
-                          row.OperationId == resourceId &&
-                          row.State == nameof(DurableOperationState.Preparing) &&
-                          row.CurrentAttemptId == attemptId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.State, nameof(DurableOperationState.Dispatching))
-                .SetProperty(row => row.DispatchedAt, at)
-                .SetProperty(row => row.UpdatedAt, at), cancellationToken);
-        if (affected == 0)
+        if (!await DurableOperationTransitions.MarkerAsync(context, key, attemptId, at, cancellationToken))
         {
             await transaction.RollbackAsync(cancellationToken);
-            var observed = await ReadAsync(context, key, cancellationToken)
-                ?? throw new InvalidOperationException("Create operation vanished during marker rejection.");
-            return new DurableMarkerResult.Rejected(observed);
+            return new DurableMarkerResult.Rejected(await ReadAsync(context, key, cancellationToken) ?? throw new InvalidDataException("Operation disappeared."));
         }
-
-        var attemptUpdated = await context.DurableOperationAttempts
-            .Where(row => row.AttemptId == attemptId && row.FinishedAt == null)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.DispatchedAt, at), cancellationToken);
-        if (attemptUpdated != 1)
-            throw new InvalidOperationException("Create operation attempt is inconsistent.");
         await transaction.CommitAsync(CancellationToken.None);
         return new DurableMarkerResult.Committed();
     }
@@ -199,6 +150,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
+        if (await FindAsync(key, cancellationToken) is null) return false;
         if ((outcome == DurableAttemptOutcome.CanceledBeforeDispatch && reason is not null) ||
             (outcome == DurableAttemptOutcome.FailedBeforeDispatch &&
              reason is not (DurableOperationReason.InputUnavailable or
@@ -238,6 +190,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
+        if (await FindAsync(key, cancellationToken) is null) return false;
         if (terminal is not (DurableOperationState.Failed or DurableOperationState.NeedsAttention))
             throw new ArgumentOutOfRangeException(nameof(terminal));
         var (deployment, generation, resourceId) = Identity(key);
@@ -275,31 +228,11 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
+        if (await FindAsync(key, cancellationToken) is null) return false;
         var (deployment, generation, resourceId) = Identity(key);
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var affected = await context.DurableOperations
-            .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
-                          row.OperationId == resourceId &&
-                          row.State == nameof(DurableOperationState.Dispatching))
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.State, nameof(DurableOperationState.NeedsAttention))
-                .SetProperty(row => row.ReasonCode, nameof(DurableOperationReason.UncertainAfterDispatch))
-                .SetProperty(row => row.FinalizedAt, at)
-                .SetProperty(row => row.UpdatedAt, at), cancellationToken);
-        if (affected == 0)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return false;
-        }
-
-        await context.DurableOperationAttempts
-            .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
-                          row.OperationId == resourceId && row.FinishedAt == null)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.FinishedAt, at)
-                .SetProperty(row => row.Outcome, nameof(DurableAttemptOutcome.Uncertain)),
-            cancellationToken);
+        if (!await DurableOperationTransitions.RecoverAsync(context, key, at, cancellationToken)) return false;
         await transaction.CommitAsync(CancellationToken.None);
         return true;
     }
@@ -319,28 +252,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             pending: new(key, attemptId, null));
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         await DurableAggregateCompletion.LockAsync(context, deployment, cancellationToken);
-        var affected = await context.DurableOperations
-            .Where(row => row.DeploymentId == deployment && row.Generation == generation &&
-                          row.OperationId == resourceId &&
-                          row.State == nameof(DurableOperationState.Dispatching) &&
-                          row.CurrentAttemptId == attemptId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.State, nameof(DurableOperationState.Succeeded))
-                .SetProperty(row => row.FinalizedAt, at)
-                .SetProperty(row => row.UpdatedAt, at), cancellationToken);
-        if (affected == 0)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            return false;
-        }
-
-        var closed = await context.DurableOperationAttempts
-            .Where(row => row.AttemptId == attemptId && row.FinishedAt == null)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(row => row.FinishedAt, at)
-                .SetProperty(row => row.Outcome, nameof(DurableAttemptOutcome.Succeeded)),
-            cancellationToken);
-        if (closed != 1) throw new InvalidOperationException("Create operation attempt is inconsistent.");
+        if (!await DurableOperationTransitions.ConfirmAsync(context, key, attemptId, at, false, cancellationToken)) return false;
         _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, outputContracts, codecs: codecs, prepared: prepared);
         await transaction.CommitAsync(CancellationToken.None);
         return true;
@@ -357,7 +269,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
                             where operation.DeploymentId == deployment && operation.Generation == generation &&
                                   operation.OperationId == resourceId
                             select new { operation, gen }).SingleOrDefaultAsync(cancellationToken);
-        if (joined is null) return null;
+        if (joined is null || joined.gen.InternalEffects) return null;
         var row = joined.operation;
         if (joined.gen.Presence != nameof(DesiredPresence.Present))
             throw new InvalidDataException("Stored create operation is inconsistent.");

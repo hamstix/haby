@@ -6,7 +6,7 @@ namespace Haby.Persistence.PostgreSql;
 
 internal static partial class DurableAggregateCompletion
 {
-    internal enum EvidencePurpose { Aggregate, Publication }
+    internal enum EvidencePurpose { Aggregate, Publication, InternalResourceStage }
     internal sealed record PendingResult(DurableOperationKey Key, Guid AttemptId, ExternalOperationOutput? Output);
     internal sealed record ValidatedCandidate(PendingResult Request, long AttemptNumber, DateTimeOffset? DispatchedAt);
     internal sealed record PreparedCandidate(long Generation, string Operation, Guid AttemptId, long AttemptNumber,
@@ -24,8 +24,8 @@ internal static partial class DurableAggregateCompletion
     internal static Task<ReadinessMetadata?> InspectMetadataAsync(ManifestCatalogDbContext db, Guid deployment,
         long generation, IEnumerable<IExternalOperationOutputContract> registrations,
         IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token,
-        DurableActionAdmission? admission = null, PendingResult? pending = null) =>
-        InspectMetadataCoreAsync(db, deployment, generation, registrations, codecs, token, admission, pending, EvidencePurpose.Aggregate);
+        DurableActionAdmission? admission = null, PendingResult? pending = null, bool internalResourceStage = false) =>
+        InspectMetadataCoreAsync(db, deployment, generation, registrations, codecs, token, admission, pending, internalResourceStage ? EvidencePurpose.InternalResourceStage : EvidencePurpose.Aggregate);
 
     internal static Task<ReadinessMetadata?> InspectPublicationAsync(ManifestCatalogDbContext db, PendingResult pending,
         IEnumerable<IExternalOperationOutputContract> registrations, IEnumerable<IProviderConfigurationCodec> codecs,
@@ -41,7 +41,7 @@ internal static partial class DurableAggregateCompletion
         {
             var root = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deployment, token);
-            if (root is null || owner is null) return null;
+            if (root is null || owner is null || root.InternalEffects != (purpose == EvidencePurpose.InternalResourceStage)) return null;
             var target = DurableOperationGraphCodec.Decode(root.GraphJson);
             if (pending is not null && (pending.Key.DeploymentId.ToString() != deployment.ToString() || pending.Key.Generation.Value != generation ||
                 target.Nodes.All(x => x.Id != pending.Key.OperationId))) return null;
@@ -85,7 +85,7 @@ internal static partial class DurableAggregateCompletion
                 var inputs = row.Inputs();
                 var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
                 graph.ValidateReferences(inputs);
-                if (inputs.Configuration is not { } configuration || configuration.Manifest.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||
+                if (inputs.Configuration is not { } configuration || row.InternalEffects && purpose != EvidencePurpose.InternalResourceStage || !row.InternalEffects && configuration.Manifest.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||
                     !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                         graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
                     graph.Nodes.Count + graph.ReusedResources.Count == 0) return null;
@@ -119,12 +119,12 @@ internal static partial class DurableAggregateCompletion
             {
                 var ids = source.Nodes.Select(x => x.Id.Value).ToArray();
                 var operationsQuery = db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation);
-                if (closure is not null) operationsQuery = operationsQuery.Where(x => ids.Contains(x.OperationId));
+                if (closure is not null || source.Row.InternalEffects) operationsQuery = operationsQuery.Where(x => ids.Contains(x.OperationId));
                 var operations = await operationsQuery.OrderBy(x => x.OperationId).Take(source.Nodes.Count + 1).ToArrayAsync(token);
                 var attemptIds = operations.Where(x => x.CurrentAttemptId is not null).Select(x => x.CurrentAttemptId!.Value).ToArray();
                 var attempts = await db.DurableOperationAttempts.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation && attemptIds.Contains(x.AttemptId)).ToArrayAsync(token);
                 var outputsQuery = db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == source.Row.Generation);
-                if (closure is not null) outputsQuery = outputsQuery.Where(x => ids.Contains(x.OperationId));
+                if (closure is not null || source.Row.InternalEffects) outputsQuery = outputsQuery.Where(x => ids.Contains(x.OperationId));
                 var outputs = await outputsQuery.OrderBy(x => x.OperationId).ThenBy(x => x.Contract).ThenBy(x => x.Key).Take(source.Nodes.Count + 1).ToArrayAsync(token);
                 if (operations.Length != source.Nodes.Count || outputs.Any(x => source.Nodes.All(node => node.Id.Value != x.OperationId))) return null;
                 foreach (var node in source.Nodes)
@@ -199,6 +199,7 @@ internal static partial class DurableAggregateCompletion
         DurablePlanningInputs inputs, DurableOperationGraph graph, IProviderConfigurationCodec[] codecs,
         DurableActionAdmission admission, CancellationToken token)
     {
+        if (source.InternalEffects) inputs = InternalResourceStage.Project(inputs);
         var pin = inputs.Providers.RequireUniformResourceProvider();
         var id = Guid.Parse(pin.Instance.ToString());
         var instance = await db.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.EnvironmentRecordId == source.EnvironmentRecordId, token);
@@ -227,7 +228,7 @@ internal static partial class DurableAggregateCompletion
     internal static async Task<ReadinessPreparation?> PrepareAsync(ManifestCatalogDbContext db, ReadinessMetadata? metadata, CancellationToken token)
     {
         if (metadata is null || !metadata.Complete) return null;
-        if (metadata.Purpose != EvidencePurpose.Aggregate) throw new InvalidOperationException("Own publication metadata is not aggregate readiness authority.");
+        if (metadata.Purpose is not (EvidencePurpose.Aggregate or EvidencePurpose.InternalResourceStage)) throw new InvalidOperationException("Own publication metadata is not aggregate readiness authority.");
         if (!await CheckCredentialMetadataAsync(db, metadata, token)) return null;
         if (db.Database.CurrentTransaction is not null) throw new InvalidOperationException("Material preflight must precede the completion transaction.");
         foreach (var credential in metadata.Credentials)

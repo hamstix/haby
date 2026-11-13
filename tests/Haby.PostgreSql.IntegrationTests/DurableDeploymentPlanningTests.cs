@@ -4,6 +4,7 @@ using Haby.Domain;
 using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
+using Haby.Tests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -629,7 +630,7 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
     }
 
     private static ServiceProvider Services(string connection, TimeProvider clock, bool registerCodec = true,
-        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null, ConfigurationRenderingCatalog? rendering = null)
+        bool supportsCapability = true, SaveChangesInterceptor? saveInterceptor = null, IInterceptor? commandInterceptor = null, ConfigurationRenderingCatalog? rendering = null, bool internalActions = false, InternalKubernetesFixtureProbe? kubernetesProbe = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(rendering ?? Haby.Tests.ConfigurationRenderingSamples.Catalog("postgresql.database/v1alpha1", producerAction: Haby.PostgreSql.PostgreSqlDatabaseCreateAction.RegistrationKey))
@@ -638,6 +639,8 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             .AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore()
             .AddPostgreSqlProviderAliasStore();
+        if (internalActions) services.AddSingleton<Haby.Kubernetes.KubernetesProviderConfigurationCodec>()
+            .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<Haby.Kubernetes.KubernetesProviderConfigurationCodec>());
         if (saveInterceptor is not null)
             services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(saveInterceptor));
         if (commandInterceptor is not null)
@@ -649,6 +652,13 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             .AddPostgreSqlDurableOperationJournal()
             .AddPostgreSqlDurableOperationExecution()
             .AddPostgreSqlDurableDesiredStateCommitter();
+        if (internalActions)
+        {
+            services.AddSingleton<IProviderPreflightHandler, PostgreSqlPreflightHandler>();
+            services.AddInternalKubernetesFixturePreflight(p => new InternalKubernetesFixturePreflight(
+                p.GetRequiredService<Haby.Kubernetes.KubernetesProviderConfigurationCodec>(), p.GetRequiredService<ISecretStore>(),
+                kubernetesProbe ?? InternalKubernetesFixturePreflight.DeterministicProbe));
+        }
         if (!supportsCapability) services.RemoveAll<IDurableActionAdmissionHandler>().RemoveAll<IDurableActionHandler>();
         return services.BuildServiceProvider();
     }

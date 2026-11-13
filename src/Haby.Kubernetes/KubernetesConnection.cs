@@ -17,6 +17,10 @@ public sealed record KubernetesConnection(KubernetesBinding Binding, Uri Endpoin
     internal void Validate()
     {
         DeploymentIntents.Binding(Binding);
+        ValidateAccess(Endpoint, ServerCaPem, BearerToken, ClientCertificate, ClientPrivateKey);
+    }
+    internal static void ValidateAccess(Uri Endpoint, string? ServerCaPem, SecretRef? BearerToken, SecretRef? ClientCertificate, SecretRef? ClientPrivateKey)
+    {
         Need(Endpoint is { IsAbsoluteUri: true, Scheme: "https" } && string.IsNullOrEmpty(Endpoint.UserInfo) &&
             string.IsNullOrEmpty(Endpoint.Query) && string.IsNullOrEmpty(Endpoint.Fragment) && Endpoint.AbsolutePath == "/", "endpoint");
         Need(BearerToken is not null && ClientCertificate is null && ClientPrivateKey is null ||
