@@ -35,6 +35,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-postgresql-timing-export.ps1
 
+      - name: Verify hosted entrypoint ownership, coverage and failure propagation
+        shell: pwsh
+        run: ./scripts/test-postgresql-entrypoint.ps1
+
       - name: Verify Native AOT prerequisite fallback and failure propagation
         run: bash ./scripts/test-native-aot-prerequisites.sh
 
@@ -122,8 +126,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - name: Verify Docker runtime
-        run: docker info
       - name: Install Native AOT prerequisites
         run: bash ./scripts/ensure-native-aot-prerequisites.sh
       - name: Publish native CLI for persisted planning, commit, execution and recovery rehearsals
@@ -135,12 +137,22 @@ jobs:
         env:
           HABY_AOT_CLI_REQUIRED: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
-        run: ./scripts/test-postgresql-measured.ps1 -ResultsDirectory ./.artifacts/postgresql-measurement
+        run: ./scripts/test-postgresql-measured.ps1 -Docker -ResultsDirectory ./.artifacts/postgresql-measurement
       - name: Publish allowlisted PostgreSQL timing and case inventory
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: postgresql-timing-${{ github.sha }}-${{ github.run_attempt }}
-          path: .artifacts/postgresql-measurement/safe/
+          path: |
+            .artifacts/postgresql-measurement/safe/measurement.json
+            .artifacts/postgresql-measurement/safe/preflight.json
+            .artifacts/postgresql-measurement/safe/coverage.json
+            .artifacts/postgresql-measurement/safe/cases.json
+            .artifacts/postgresql-measurement/safe/counts.json
+            .artifacts/postgresql-measurement/safe/top-duration.csv
+            .artifacts/postgresql-measurement/safe/class-duration.csv
+            .artifacts/postgresql-measurement/safe/setup.csv
+            .artifacts/postgresql-measurement/safe/results.trx
+            .artifacts/postgresql-measurement/safe/host-diagnostics.csv
           if-no-files-found: error
           retention-days: 14
