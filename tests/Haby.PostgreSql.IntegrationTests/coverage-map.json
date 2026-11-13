@@ -17,7 +17,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ConfigurationProfilePersistenceTests": {
       "responsibilities": [
@@ -34,7 +38,11 @@
         "restoreUtilities": true,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "DurableDeploymentPlanningTests": {
       "responsibilities": [
@@ -51,7 +59,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "DurableExecutionTests": {
       "responsibilities": [
@@ -69,7 +81,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ExactActionAdmissionTests": {
       "responsibilities": [
@@ -87,7 +103,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ExactActionRegistrationTests": {
       "responsibilities": [
@@ -104,7 +124,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "FiveStepCompositionTests": {
       "responsibilities": [
@@ -121,7 +145,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "GeneratedCredentialSlotTests": {
       "responsibilities": [
@@ -138,7 +166,11 @@
         "restoreUtilities": true,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "IndependentPairPlanningTests": {
       "responsibilities": [
@@ -155,7 +187,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ManifestCatalogPersistenceTests": {
       "responsibilities": [
@@ -172,7 +208,11 @@
         "restoreUtilities": true,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "OperatorHostConfigurationTests": {
       "responsibilities": [
@@ -189,7 +229,11 @@
         "restoreUtilities": false,
         "hostOrNative": true,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "OperatorHostIntegrationTests": {
       "responsibilities": [
@@ -206,7 +250,11 @@
         "restoreUtilities": true,
         "hostOrNative": true,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "OperatorProviderAccessTests": {
       "responsibilities": [
@@ -224,7 +272,11 @@
         "restoreUtilities": false,
         "hostOrNative": true,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "PlacementRevisionPersistenceTests": {
       "responsibilities": [
@@ -241,7 +293,11 @@
         "restoreUtilities": true,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "PlaintextSecretStoreTests": {
       "responsibilities": [
@@ -258,7 +314,11 @@
         "restoreUtilities": true,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "PostgreSqlApplicationLoginTests": {
       "responsibilities": [
@@ -277,7 +337,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "PostgreSqlIntegrationTests": {
       "responsibilities": [
@@ -296,7 +360,11 @@
         "restoreUtilities": false,
         "hostOrNative": true,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "PostgreSqlPairPersistenceTests": {
       "responsibilities": [
@@ -313,7 +381,11 @@
         "restoreUtilities": true,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "PostgreSqlPairPlanningTests": {
       "responsibilities": [
@@ -330,7 +402,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "PostgreSqlRestrictTests": {
       "responsibilities": [
@@ -348,7 +424,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ProviderAliasTests": {
       "responsibilities": [
@@ -366,7 +446,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ProviderConfigurationStoreTests": {
       "responsibilities": [
@@ -383,7 +467,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ProviderDeclarationTests": {
       "responsibilities": [
@@ -400,7 +488,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ProviderPreflightCompatibilityTests": {
       "responsibilities": [
@@ -418,7 +510,11 @@
         "restoreUtilities": false,
         "hostOrNative": true,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "RetainedPairPlanningTests": {
       "responsibilities": [
@@ -435,7 +531,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "TestCatalogPoolTests": {
       "responsibilities": [
@@ -452,7 +552,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "HostFailureDiagnosticsTests": {
       "responsibilities": [
@@ -469,7 +573,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ApplicationConfigurationTests": {
       "responsibilities": [
@@ -488,7 +596,11 @@
         "restoreUtilities": true,
         "hostOrNative": true,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ApplicationGenerationTests": {
       "responsibilities": [
@@ -507,7 +619,11 @@
         "restoreUtilities": true,
         "hostOrNative": true,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "ApplicationLoginLoggingTests": {
       "responsibilities": [
@@ -526,7 +642,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "FixtureLayoutTests": {
       "responsibilities": [
@@ -543,7 +663,11 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
     },
     "OwnedInfrastructureTests": {
       "responsibilities": [
@@ -560,7 +684,14 @@
         "restoreUtilities": false,
         "hostOrNative": false,
         "conservativeClassUnion": true
-      }
+      },
+      "suite": "infrastructure-qualification",
+      "triggers": [
+        "regular-full",
+        "infrastructure-path",
+        "weekly",
+        "manual"
+      ]
     }
   }
 }

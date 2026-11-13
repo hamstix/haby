@@ -1,0 +1,51 @@
+name: Infrastructure qualification
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owned-infrastructure:
+    runs-on: ubuntu-latest
+    env:
+      HABY_TEST_SOURCE_ROOT: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Validate native prerequisites
+        run: bash ./scripts/ensure-native-aot-prerequisites.sh
+      - name: Publish required native executable
+        shell: pwsh
+        run: |
+          if (-not $env:HABY_AOT_C_COMPILER) { throw 'Validated Native AOT compiler is missing.' }
+          dotnet publish ./src/habyctl/habyctl.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true "-p:CppCompilerAndLinker=$env:HABY_AOT_C_COMPILER" -p:LinkerFlavor=bfd -o ./.artifacts/aot/linux-x64
+          if ($LASTEXITCODE -ne 0) { throw "Native publish failed: $LASTEXITCODE" }
+      - name: Qualify owned infrastructure
+        shell: pwsh
+        env:
+          HABY_AOT_CLI_REQUIRED: '1'
+          HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
+        run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite infrastructure-qualification -ResultsDirectory ./.artifacts/qualification
+      - name: Publish allowlisted qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infrastructure-qualification-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/qualification/safe/measurement.json
+            .artifacts/qualification/safe/preflight.json
+            .artifacts/qualification/safe/resources.json
+            .artifacts/qualification/safe/coverage.json
+            .artifacts/qualification/safe/cases.json
+            .artifacts/qualification/safe/counts.json
+            .artifacts/qualification/safe/results.trx
+            .artifacts/qualification/safe/infrastructure-qualification/setup.csv
+            .artifacts/qualification/safe/infrastructure-qualification/resources.json
+          if-no-files-found: error
+          retention-days: 14

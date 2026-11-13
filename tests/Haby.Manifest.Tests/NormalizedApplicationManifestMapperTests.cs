@@ -223,11 +223,6 @@ public sealed class NormalizedApplicationManifestMapperTests
         Map("{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"sample\"},\"spec\":{\"parameters\":{\"ratio\":{\"type\":\"number\",\"minimum\":" + rawNumber + "}}}}");
     private static ApplicationManifest ReadComplete() => JsonSerializer.Deserialize(File.ReadAllText(RepositoryPath("tests", "Haby.Manifest.Tests", "Corpus", "complete.json")), Context.ApplicationManifest)!;
     private static JsonObject CompleteNode() => JsonNode.Parse(File.ReadAllText(RepositoryPath("tests", "Haby.Manifest.Tests", "Corpus", "complete.json")))!.AsObject();
-    private static string RepositoryPath(params string[] parts) => Path.Combine([FindRoot(), .. parts]);
-    private static string FindRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "HamstixHaby.slnx"))) directory = directory.Parent;
-        return directory?.FullName ?? throw new InvalidOperationException("Repository root not found.");
-    }
+    private static string RepositoryPath(params string[] parts) => Haby.Tests.TestPaths.AssetPath(parts);
+
 }

@@ -6,6 +6,22 @@ namespace Haby.PostgreSql.IntegrationTests;
 [Collection("Owned infrastructure controls")]
 public sealed class OwnedInfrastructureTests
 {
+    [Fact]
+    public async Task Real_heavy_group_bound_refuses_an_extra_owner_without_waiting()
+    {
+        var servers = Enumerable.Range(0, PostgreSqlResources.HostLimit).Select(_ => new HostPostgreSqlFixture(control: true)).ToArray();
+        var overflow = new HostPostgreSqlFixture(control: true);
+        await RunOwned(async () =>
+        {
+            await Task.WhenAll(servers.Select(s => s.InitializeAsync()));
+            Assert.Equal(PostgreSqlResources.HostLimit, PostgreSqlResources.HostActive);
+            foreach (var server in servers) Assert.Equal(1, await Scalar(server.ConnectionString, "SELECT 1"));
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => overflow.InitializeAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("Heavy Host group capacity exceeded; check collection ownership.", error.Message);
+        }, () => DisposeEvery([.. servers, overflow]));
+        Assert.Equal(0, PostgreSqlResources.HostActive);
+    }
+
     public OwnedInfrastructureTests()
     {
         if (Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_EXTERNAL") == "1")

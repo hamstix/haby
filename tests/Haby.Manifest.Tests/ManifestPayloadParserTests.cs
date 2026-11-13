@@ -413,10 +413,5 @@ public class ManifestPayloadParserTests
     private static ManifestParseResult Parse(string text) => ManifestPayloadParser.Parse(Encoding.UTF8.GetBytes(text), TestManifestCatalog.Instance);
     private static ManifestValidationReport Report(string text) => Assert.IsType<ManifestParseResult.InvalidManifest>(Parse(text)).Report;
 
-    private static string RepositoryPath(params string[] parts)
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-            if (File.Exists(Path.Combine(directory.FullName, "HamstixHaby.slnx"))) return Path.Combine([directory.FullName, .. parts]);
-        throw new DirectoryNotFoundException();
-    }
+    private static string RepositoryPath(params string[] parts) => Haby.Tests.TestPaths.AssetPath(parts);
 }

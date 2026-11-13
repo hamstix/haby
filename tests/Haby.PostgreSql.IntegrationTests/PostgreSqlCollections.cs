@@ -27,6 +27,14 @@ public sealed class PostgreSqlCollections(ITestAssembly assembly, IMessageSink s
         "PostgreSqlPairPersistenceTests", "GeneratedCredentialSlotTests", "ProviderConfigurationStoreTests",
         "PostgreSqlIntegrationTests", "DurableExecutionTests", "PostgreSqlRestrictTests", "TestCatalogPoolTests", "ProviderDeclarationTests"
     ];
+    internal static readonly string[] HeavyHostClasses =
+        ["ApplicationConfigurationTests", "ApplicationGenerationTests", "OperatorHostIntegrationTests", "PostgreSqlIntegrationTests"];
+
+    internal static int Lane(string name, int servers, int hosts)
+    {
+        var heavy = Array.IndexOf(HeavyHostClasses, name);
+        return heavy >= 0 ? heavy % hosts : Array.IndexOf(OwnedClasses, name) % (servers - 1);
+    }
 
     public string DisplayName => "bounded PostgreSQL collection lanes";
 
@@ -35,7 +43,7 @@ public sealed class PostgreSqlCollections(ITestAssembly assembly, IMessageSink s
         if (Environment.GetEnvironmentVariable("HABY_POSTGRESQL_EPHEMERAL_EXTERNAL") == "1") return _ordinary.Get(testClass);
         var index = Array.IndexOf(OwnedClasses, testClass.Name.Split('.')[^1]);
         if (index < 0) return _ordinary.Get(testClass);
-        var lane = index % (PostgreSqlResources.Limit - 1);
+        var lane = Lane(testClass.Name.Split('.')[^1], PostgreSqlResources.Limit, PostgreSqlResources.HostLimit);
         return _lanes.GetOrAdd(lane, value => new TestCollection(assembly, null, "PostgreSQL owned lane " + value));
     }
 }

@@ -369,13 +369,5 @@ public sealed class ManifestContractTests
         return V1Alpha1NumericSetGuard.FindDuplicatePaths(document.RootElement).Count == 0;
     }
 
-    private static string RepositoryPath(params string[] parts)
-    {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "HamstixHaby.slnx")))
-                return Path.Combine([directory.FullName, .. parts]);
-        }
-        throw new DirectoryNotFoundException("Could not find HamstixHaby.slnx above the test output directory.");
-    }
+    private static string RepositoryPath(params string[] parts) => Haby.Tests.TestPaths.AssetPath(parts);
 }

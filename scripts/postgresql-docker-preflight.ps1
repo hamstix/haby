@@ -17,6 +17,12 @@ function Get-PostgreSqlServerLimit($Value) {
     return [int]$Value
 }
 
+function Get-HabyHostGroupLimit($Value, [int]$Servers) {
+    if ($null -eq $Value) { return [Math]::Min(2, $Servers - 1) }
+    if ([string]$Value -cnotmatch '^[1-7]$' -or [int]$Value -ge $Servers) { throw 'HABY_TEST_HOST_GROUPS must be from 1 through server-limit minus 1.' }
+    return [int]$Value
+}
+
 function Invoke-PostgreSqlCommand {
     param([string]$File, [string[]]$Arguments, [int]$TimeoutSeconds = 20,
         [hashtable]$ChildEnvironment = @{}, [string]$LogDirectory)
@@ -50,6 +56,7 @@ function Invoke-PostgreSqlDockerPrerequisites([string]$Root, [string]$LogDirecto
         if (-not $IsLinux) { throw 'Linux required.' }
         $phase = 'resource-bound'
         $serverLimit = Get-PostgreSqlServerLimit ([Environment]::GetEnvironmentVariable('HABY_TEST_POSTGRESQL_SERVERS'))
+        $hostGroupLimit = Get-HabyHostGroupLimit ([Environment]::GetEnvironmentVariable('HABY_TEST_HOST_GROUPS')) $serverLimit
         $phase = 'external-mode'
         foreach ($name in @('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL', 'HABY_POSTGRESQL_EPHEMERAL_CONNECTION', 'HABY_POSTGRESQL_EPHEMERAL_CONTAINER', 'HABY_POSTGRESQL_EPHEMERAL_RUN')) {
             if ([Environment]::GetEnvironmentVariable($name)) { throw 'External mode is not Docker mode.' }
@@ -110,7 +117,7 @@ function Invoke-PostgreSqlDockerPrerequisites([string]$Root, [string]$LogDirecto
             $pull = Invoke-PostgreSqlCommand docker @('pull', 'postgres:17.6-alpine') 120 @{} $LogDirectory
             if ($pull.exitCode -ne 0) { throw 'Pinned PostgreSQL image unavailable.' }
         }
-        $result = [pscustomobject]@{ primary = 'ok'; cleanup = 'ok'; exitCode = 0; serverLimit = $serverLimit; sdk = $sdk.output.Trim(); dockerApi = $docker.output.Trim(); nativeSha256 = (Get-FileHash -LiteralPath $env:HABY_AOT_CLI_PATH).Hash.ToLowerInvariant() }
+        $result = [pscustomobject]@{ primary = 'ok'; cleanup = 'ok'; exitCode = 0; serverLimit = $serverLimit; hostGroupLimit = $hostGroupLimit; sdk = $sdk.output.Trim(); dockerApi = $docker.output.Trim(); nativeSha256 = (Get-FileHash -LiteralPath $env:HABY_AOT_CLI_PATH).Hash.ToLowerInvariant() }
     } catch {
         $result = [pscustomobject]@{ primary = $phase; cleanup = 'ok'; exitCode = 20 }
     } finally {

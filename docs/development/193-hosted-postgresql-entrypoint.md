@@ -1,5 +1,8 @@
 # Hosted PostgreSQL entrypoint
 
+For current explicit suite selection, source/assets requirements, Host group
+limits and weekly/manual qualification, see the [suite/gate guide](197-suite-routing.md).
+
 Current fixture grouping, resource limits and the 869-case migration baseline are
 documented in [PostgreSQL isolation and resource groups](195-postgresql-isolation.md).
 
