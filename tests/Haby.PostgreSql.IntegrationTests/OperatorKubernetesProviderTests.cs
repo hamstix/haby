@@ -132,7 +132,7 @@ public sealed partial class OperatorHostIntegrationTests
         return $$$$"""
             {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"cluster","environment":"pilot"},
             "spec":{"revision":{{{{revision}}}},"providerKind":"kubernetes/v1","configurationContract":"haby.kubernetes.connection/v1",
-            "implementationId":"haby.kubernetes/v1","properties":{"endpoint":"{{{{endpoint}}}}"},"secretRefs":{ {{{{refs}}}}}}
+            "implementationId":"haby.kubernetes/v1","properties":{"endpoint":"{{{{endpoint}}}}"},"secretRefs":{ {{{{refs}}}}}}}
             """;
     }
 
