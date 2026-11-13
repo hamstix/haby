@@ -19,6 +19,7 @@ internal sealed class WslcPostgreSqlServer
     private readonly CancellationTokenSource _stopping = new();
     private WslcPostgreSqlState _state;
     private Process? _relay;
+    private readonly LinuxRelayIdentityReader _relayIdentity = new();
     private CancellationTokenSource? _relayPipes;
     private Task<string>? _relayOutput;
     private Task<string>? _relayError;
@@ -35,14 +36,14 @@ internal sealed class WslcPostgreSqlServer
         File.WriteAllText(Path.Combine(_directory, ".fixture-id"), fixture);
         _process = process ?? new(_directory);
         var name = "haby-pg-" + run.RunId[..8] + "-" + fixture;
-        _state = new(1, run.RunId, fixture, name, name + "-data", run.HostAddress, 0);
+        _state = new(2, run.RunId, fixture, name, name + "-data", run.HostAddress, 0);
         Persist(); // Both nonces exist before any allocation or process launch.
     }
 
     internal WslcPostgreSqlServer(WslcPostgreSqlRun run, WslcPostgreSqlState state, WslcPostgreSqlProcess? process = null)
     {
         run.Validate();
-        if (state.FormatVersion != 1 || state.RunId != run.RunId || !Guid.TryParseExact(state.FixtureId, "N", out _) ||
+        if (state.FormatVersion != 2 || state.RunId != run.RunId || !Guid.TryParseExact(state.FixtureId, "N", out _) ||
             state.Name != "haby-pg-" + run.RunId[..8] + "-" + state.FixtureId ||
             state.VolumeName != state.Name + "-data" || state.HostAddress != run.HostAddress)
             throw new InvalidOperationException("Owned fixture recovery identity is invalid.");
@@ -309,6 +310,10 @@ internal sealed class WslcPostgreSqlServer
     {
         _relay = relay;
         _state = _state with { RelayPid = relay.Id, RelayStartTicks = relay.StartTime.ToUniversalTime().Ticks }; Persist();
+        if (OperatingSystem.IsLinux())
+        {
+            _state = _state with { LinuxRelay = _relayIdentity.Read(relay.Id) }; Persist();
+        }
     }
 
     private async Task StopRelayAsync(CancellationToken token)
@@ -332,9 +337,13 @@ internal sealed class WslcPostgreSqlServer
                 ClearRelay();
                 return;
             }
-            if (!OperatingSystem.IsLinux() || process.StartTime.ToUniversalTime().Ticks != _state.RelayStartTicks ||
-                !File.ReadAllText($"/proc/{process.Id}/cmdline").Contains(_state.RunId, StringComparison.Ordinal) ||
-                !File.ReadAllText($"/proc/{process.Id}/cmdline").Contains(_state.FixtureId, StringComparison.Ordinal)) throw new InvalidDataException();
+            if (!OperatingSystem.IsLinux() || _state.LinuxRelay is null) throw new InvalidDataException();
+            token.ThrowIfCancellationRequested();
+            var executable = File.ResolveLinkTarget(_run.PythonPath, true)?.FullName ?? Path.GetFullPath(_run.PythonPath);
+            _relayIdentity.RequireMatch(_state.LinuxRelay, process.Id, _run.PythonPath,
+                Path.Combine(AppContext.BaseDirectory, "postgresql-loopback-relay.py"), _state.RunId, _state.FixtureId, executable);
+            // Exact native revalidation immediately precedes the signal request. The
+            // lookup and /bin/kill are not atomic; no pidfd ownership claim is made.
             var stopped = await _process.RunAsync("/bin/kill", ["-TERM", process.Id.ToString(CultureInfo.InvariantCulture)], "relay-stop", TimeSpan.FromSeconds(5), token);
             if (stopped.ExitCode != 0 || stopped.TimedOut || !stopped.Complete) throw new InvalidDataException();
             await process.WaitForExitAsync(token).WaitAsync(TimeSpan.FromSeconds(5), token);
@@ -377,7 +386,7 @@ internal sealed class WslcPostgreSqlServer
 
     private void ClearRelay()
     {
-        _state = _state with { RelayPid = null, RelayStartTicks = null }; Persist();
+        _state = _state with { RelayPid = null, RelayStartTicks = null, LinuxRelay = null }; Persist();
     }
 
     private async Task<string> RequiredAsync(string[] arguments, string operation, TimeSpan timeout, CancellationToken token)

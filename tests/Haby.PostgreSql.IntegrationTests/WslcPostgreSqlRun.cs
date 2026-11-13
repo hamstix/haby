@@ -68,7 +68,7 @@ internal sealed record WslcPostgreSqlState(int FormatVersion, string RunId, stri
     bool VolumeAttempted = false, bool VolumeConclusive = false, bool StartAttempted = false, bool StartConclusive = false,
     int? RelayPid = null, long? RelayStartTicks = null, bool Ready = false, bool Cleaned = false,
     string? FailureCode = null, string? SystemIdentifier = null,
-    int? RelayExitCode = null, string? RelayExitStatus = null);
+    int? RelayExitCode = null, string? RelayExitStatus = null, LinuxRelayIdentity? LinuxRelay = null);
 
 internal sealed record WslcPostgreSqlRecoveryResult(int FormatVersion, string RunId,
     string[] AttemptedFixtureDirectories, string[] UnreconciledFixtureDirectories);

@@ -8,6 +8,15 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class WslcPostgreSqlLifecycleTests(ITestOutputHelper output)
 {
     [Fact]
+    public void Recovery_refuses_superseded_wall_clock_only_fixture_state()
+    {
+        using var context = new OwnedControl();
+        _ = new WslcPostgreSqlServer(context.Run);
+        var old = context.State with { FormatVersion = 1 };
+        Assert.Throws<InvalidOperationException>(() => new WslcPostgreSqlServer(context.Run, old));
+    }
+
+    [Fact]
     public async Task Recovery_reports_every_fixture_after_multiple_command_failures()
     {
         using var context = new OwnedControl();

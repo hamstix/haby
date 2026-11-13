@@ -139,6 +139,22 @@ An owned child's nonzero exit remains a cleanup failure; an absent recovered
 non-child does not establish a successful exit. Backend and volume cleanup are
 still attempted after a relay error.
 
+Linux relay ownership uses an exact PID in the current PID namespace, kernel
+boot ID and integer `/proc/PID/stat` field 22 (clock ticks since boot). The
+executable, relay script and exact `--run-id`/`--fixture-id` argument tokens must
+also match. Wall-clock `.NET Process.StartTime` ticks are diagnostic metadata,
+never a Linux cross-observer ownership fence. The native tuple is revalidated
+immediately before a signal request; lookup plus signalling is not atomic and
+does not provide pidfd guarantees. Missing, malformed, unreadable or changed
+identity fails closed. A recovered non-child's disappearance leaves its exit
+result unknown. Windows identity checks retain their separate clock contract.
+
+Private fixture state format 2 carries a typed, versioned Linux identity.
+Superseded format 1 cannot be recovered: start a fresh owned run, retain old
+unreconciled evidence and resolve it explicitly. Old timestamps are never
+reinterpreted as kernel birth values; no process adoption or persistent reset
+is performed.
+
 Relay readiness is published by writing and closing a sibling temporary file,
 then atomically replacing the final readiness path. Failed publication removes
 only its own temporary file. The fixture also removes that exact temporary path
