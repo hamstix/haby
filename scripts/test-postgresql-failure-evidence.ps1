@@ -1,4 +1,4 @@
-param([string]$ExporterPath = '')
+param([string]$ExporterPath = '', [ValidateSet('all','schema','trx')][string]$IdentityCheck = 'all')
 $ErrorActionPreference = 'Stop'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('haby-failure-fixtures-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $directory | Out-Null
@@ -40,14 +40,14 @@ function Export-Fixture {
     Assert-That ((Get-Item (Join-Path $directory 'safe/failure-evidence.json')).Length -le 1048576) 'Sidecar exceeds byte cap.'
     return $e
 }
-function Assert-Refused {
+function Assert-Refused([string]$Label = 'Invalid fixture accepted.') {
     $caught = $null
     $console = [Text.StringBuilder]::new()
     try {
         & $exporter -TrxPath $inputs -OutputDirectory (Join-Path $directory 'safe') *>&1 |
             ForEach-Object { [void]$console.AppendLine(($_ | Out-String)) }
     } catch { $caught = $_; [void]$console.AppendLine(($_ | Out-String)) }
-    Assert-That ($null -ne $caught) 'Invalid fixture accepted.'
+    Assert-That ($null -ne $caught) $Label
     Assert-That ($caught.Exception.Message -ceq 'Safe timing export failed; report withheld.') 'Raw parser error escaped.'
     Assert-That (-not $console.ToString().Contains($sentinel)) 'Protected parser/console content escaped.'
     foreach ($file in Get-ChildItem (Join-Path $directory 'safe') -File) {
@@ -57,6 +57,31 @@ function Assert-Refused {
     }
 }
 try {
+    # Independently selectable regressions: schema rejection must not prevent
+    # execution of the actual malformed-TRX admission control (or vice versa).
+    Write-Fixture @('Assert.Equal() Failure')
+    $identityEvidence = Export-Fixture
+    if ($IdentityCheck -in @('all','schema')) {
+        $acceptedFields = @(
+            foreach ($field in @('method','case','row')) {
+                $invalid = Get-Content (Join-Path $directory 'safe/failure-evidence.json') -Raw | ConvertFrom-Json -AsHashtable
+                $invalid.records[0][$field] += "`n"
+                if ($invalid | ConvertTo-Json -Depth 5 | Test-Json -SchemaFile (Join-Path $PSScriptRoot '../docs/development/schemas/postgresql-failure-evidence-v1.schema.json') -ErrorAction SilentlyContinue) { $field }
+            }
+        )
+        Assert-That ($acceptedFields.Count -eq 0) ('Schema accepted trailing LF in identity fields: ' + ($acceptedFields -join ','))
+        'Schema identity admission: method/case/row trailing LF refused.'
+    }
+    if ($IdentityCheck -in @('all','trx')) {
+        $raw = Join-Path $directory 'raw.trx'
+        $valid = [IO.File]::ReadAllText($raw)
+        $invalid = $valid.Replace('name="Case"', 'name="Case&#10;"')
+        Assert-That ($invalid -cne $valid) 'Malformed TRX fixture was not created.'
+        [IO.File]::WriteAllText($raw, $invalid)
+        Assert-Refused 'Malformed TRX trailing-LF method identity was accepted.'
+        'Actual TRX identity admission: XML character-reference trailing LF refused.'
+    }
+    if ($IdentityCheck -cne 'all') { return }
     # Independently specified public codes, rather than exporter-derived expectations.
     $known = @(
         @('Assert.Equal() Failure', 'assertion', 'equal', 'unknown', 'unavailable', 'unavailable'),

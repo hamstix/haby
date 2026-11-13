@@ -100,7 +100,7 @@ $cases = @(foreach ($inputTrx in $TrxPath) {
         $className = $methods[0].GetAttribute('className'); $methodName = $methods[0].GetAttribute('name')
         $id = $definition.GetAttribute('id'); $qualified = $className + '.' + $methodName
         if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrEmpty($className) -or
-            [string]::IsNullOrEmpty($methodName) -or $qualified -cnotmatch '^[A-Za-z0-9_.+`]+$') { throw 'Unsafe method identity.' }
+            [string]::IsNullOrEmpty($methodName) -or $qualified -cnotmatch '^[A-Za-z0-9_.+`]+\z') { throw 'Unsafe method identity.' }
         if ($definitions.ContainsKey($id)) { throw 'Duplicate test definition.' }
         $definitions.Add($id, $qualified)
     }
