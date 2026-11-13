@@ -79,8 +79,8 @@ failures. Preflight cleanup success is not a claim about every suite fixture.
 ## Coverage and diagnostics
 
 The baseline at main `275c8aaf7eb47bf91aa1b57fab4fb891a20d18c2` has **862**
-discovered rows across 26 classes. Three new infrastructure diagnostic rows
-make this slice's inventory 865. The unmerged #191 inventory of 914 is unrelated.
+discovered rows across 26 classes. Seven new infrastructure diagnostic rows
+make this slice's inventory 869. The unmerged #191 inventory of 914 is unrelated.
 The checked-in [class map](../../tests/Haby.PostgreSql.IntegrationTests/coverage-map.json)
 assigns every class responsibility, actual isolation and the unchanged full gate.
 Some existing classes mix responsibilities; the map records their combined
@@ -99,9 +99,14 @@ collections remain unchanged. Later maintenance owns finer isolation/separation.
 The existing hosted TLS failure is **not declared fixed**. The unchanged
 unauthenticated-status assertion now emits only a structured phase/code on
 failure to `safe/host-diagnostics.csv`: host build/start, address scheme/loopback,
-channel, reflection write/read, status assertion, or successful-body cleanup.
-The phase marks the last explicit operation reached; secondary disposal errors
-while unwinding still require private diagnosis. No exception detail, stack,
+channel, reflection write/read, status assertion, or cleanup.
+Body failures are captured and recorded before resource cleanup; call, channel and
+host cleanup are each attempted in reverse acquisition order. Every cleanup
+failure receives its own cleanup diagnostic without a stale body status. The
+original body exception retains precedence and its stack; a cleanup-only failure
+remains a test failure. Deterministic controls cover synchronous and asynchronous
+disposal failure, multiple failing resources and primary evidence before cleanup.
+No exception detail, stack,
 headers, SQL, credentials or payload is copied. A write-phase `unauthenticated`
 result identifies a different failure boundary from an incorrect response status;
 it does not prove an environment/root cause or waive the assertion. Investigate

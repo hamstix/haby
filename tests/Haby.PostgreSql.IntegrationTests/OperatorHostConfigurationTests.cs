@@ -37,10 +37,11 @@ public sealed class OperatorHostConfigurationTests
     {
         var phase = HostFailurePhase.Build;
         Grpc.Core.StatusCode? observed = null;
-        try
+        await HostFailureDiagnostics.RunAsync(async defer =>
         {
-            await using var app = OperatorHostApplication.Build(
+            var app = OperatorHostApplication.Build(
                 ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);
+            defer(app.DisposeAsync);
             phase = HostFailurePhase.Start;
             await app.StartAsync();
             var address = new Uri(Assert.Single(app.Urls));
@@ -50,22 +51,18 @@ public sealed class OperatorHostConfigurationTests
             Assert.True(IPAddress.IsLoopback(IPAddress.Parse(address.Host)));
 
             phase = HostFailurePhase.Channel;
-            using var channel = GrpcChannel.ForAddress(address);
+            var channel = GrpcChannel.ForAddress(address);
+            defer(() => { channel.Dispose(); return ValueTask.CompletedTask; });
             var client = new ServerReflection.ServerReflectionClient(channel);
-            using var call = client.ServerReflectionInfo();
+            var call = client.ServerReflectionInfo();
+            defer(() => { call.Dispose(); return ValueTask.CompletedTask; });
             phase = HostFailurePhase.ReflectionWrite;
             await call.RequestStream.WriteAsync(new ServerReflectionRequest { ListServices = "" });
             phase = HostFailurePhase.ReflectionRead;
             observed = (await Assert.ThrowsAsync<Grpc.Core.RpcException>(async () => await call.ResponseStream.MoveNext(CancellationToken.None))).StatusCode;
             phase = HostFailurePhase.StatusAssertion;
             Assert.Equal(Grpc.Core.StatusCode.Unauthenticated, observed);
-            phase = HostFailurePhase.Cleanup;
-        }
-        catch (Exception error)
-        {
-            HostFailureDiagnostics.Record(phase, error, observed);
-            throw;
-        }
+        }, () => phase, () => observed);
     }
 
     [Theory]
