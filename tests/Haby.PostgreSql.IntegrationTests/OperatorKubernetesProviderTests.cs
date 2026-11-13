@@ -37,8 +37,12 @@ public sealed partial class OperatorHostIntegrationTests
             await client.CreateEnvironmentAsync(new() { Name = "other" });
             foreach (var name in new[] { "token", "certificate", "private-key" })
                 await client.CreateSecretAsync(new() { Environment = "pilot", Name = name, RequestId = Guid.NewGuid().ToString(), Material = ByteString.CopyFromUtf8("fixture-" + name) });
-            async Task<ProviderReply> Apply(string? json = null, bool confirm = false, long baseline = 0) => await client.ApplyProviderAsync(new()
-            { Declaration = ByteString.CopyFromUtf8(json ?? KubernetesDeclaration(certificate)), ConfirmLogicalIdentity = confirm, ExpectedPreviousRevision = baseline });
+            async Task<ProviderReply> Apply(string? json = null, bool confirm = false, long baseline = 0)
+            {
+                var request = new ApplyProviderRequest { Declaration = ByteString.CopyFromUtf8(json ?? KubernetesDeclaration(certificate)), ConfirmLogicalIdentity = confirm };
+                if (confirm) request.ExpectedPreviousRevision = baseline;
+                return await client.ApplyProviderAsync(request);
+            }
             foreach (var malformed in new[] {
                 KubernetesDeclaration(certificate).Replace("\"endpoint\"", "\"namespace\"", StringComparison.Ordinal),
                 KubernetesDeclaration(certificate).Replace("\"endpoint\":\"https://127.0.0.1:1\"", "\"endpoint\":null", StringComparison.Ordinal),
