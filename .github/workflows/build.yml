@@ -71,6 +71,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-postgresql-suites.ps1
 
+      - name: Verify named reflection precheck stops full execution on failure
+        shell: pwsh
+        run: ./scripts/test-anonymous-reflection-precheck.ps1
+
       - name: Verify Native AOT prerequisite fallback and failure propagation
         run: bash ./scripts/test-native-aot-prerequisites.sh
 
@@ -189,7 +193,7 @@ jobs:
         env:
           HABY_AOT_CLI_REQUIRED: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
-        run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite full -ResultsDirectory ./.artifacts/postgresql-measurement
+        run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite full -AnonymousReflectionPrecheck -ResultsDirectory ./.artifacts/postgresql-measurement
       - name: Publish allowlisted PostgreSQL timing and case inventory
         if: always()
         uses: actions/upload-artifact@v4
@@ -208,6 +212,12 @@ jobs:
             .artifacts/postgresql-measurement/safe/setup.csv
             .artifacts/postgresql-measurement/safe/results.trx
             .artifacts/postgresql-measurement/safe/host-diagnostics.csv
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/precheck.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/cases.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/counts.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/failure-evidence.json
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/results.trx
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/host-diagnostics.csv
             .artifacts/postgresql-measurement/safe/functional/cases.json
             .artifacts/postgresql-measurement/safe/functional/counts.json
             .artifacts/postgresql-measurement/safe/functional/failure-evidence.json

@@ -73,6 +73,31 @@ also remain bounded. Existing timing, entrypoint and suite controls remain requi
 These controls use synthetic failures; no product failure is induced. Ordinary
 solution/format checks and the current hosted full functional/qualification,
 Windows/Linux Native AOT and dependency gates remain acceptance requirements.
+
+The anonymous reflection Host test shares a small test-only assertion boundary
+with seven deterministic controls. Exact `Unauthenticated` may surface during
+request write or response read; wrong statuses, non-RPC errors and missing errors
+remain failures. HTTP/loopback checks, the anonymous request, structured phases
+and primary-before-cleanup handling remain. This adds seven regular functional
+rows (900 PostgreSQL total), not a product authentication or transport change.
+
+Build's existing Linux PostgreSQL job enables `-AnonymousReflectionPrecheck` on
+the Docker/full entrypoint. After shared native/preflight/restore/build/discovery,
+it executes only the named anonymous-reflection Host case with `--no-build
+--no-restore`, before either full suite. Its private logs/TRX and safe
+`anonymous-reflection-precheck/` artifacts are isolated. `precheck.json` always
+labels this scope `partial`; its row is not included in full-suite aggregation.
+Passing requires exactly one matching passed row, zero skips, successful export
+and no Host failure/cleanup CSV. Cleanup confirmation means the named case
+completed the existing awaited call/channel/Host disposal lifecycle; this
+database-free case owns no PostgreSQL fixture. Any test, inventory, cleanup or
+reporting failure stops before full execution and preserves the primary exit.
+The full gate still executes every mapped row once after a successful precheck;
+the extra focused validation never substitutes for that case's full-gate row.
+There is no arbitrary filter option or automatic retry. The regular
+`test-anonymous-reflection-precheck.ps1` controls prove this stop-before-full flow
+with synthetic tools, including missing/malformed output and metadata failure.
+
 This slice selectively adapts the closed signatures/schema and adversarial ideas
 from closed, unmerged PR #190 to current main. It does not import its single-TRX,
 case-keyed identity logic or the old qualification/index/runtime machinery.

@@ -4,7 +4,7 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 75,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 893,
+  "currentPostgresql": 900,
   "currentFast": 1308,
   "entries": [
     {"method":"Haby.PostgreSql.IntegrationTests.AdministrativeSecretTests.Cancellation_after_secret_insert_before_receipt_commit_rolls_back_every_row","case":"47c71fd82d68e86c4703545bc858b1a26040263e880667ca757d553f8f2f7581","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
@@ -2357,6 +2357,13 @@
     {"method":"Haby.Domain.Tests.TestPathsTests.Copied_assets_cannot_follow_parent_paths","case":"e11887ebac044949741346d865a7066826aaf46305053a02c067b079391d53b9","suite":"fast","gate":"validate","trigger":"every-change","addedFor197":true},
     {"method":"Haby.Domain.Tests.TestPathsTests.Copied_assets_cannot_follow_parent_paths","case":"0b9313f4aff892dcc90ccfecfc01f8d1db47e5d513f3d0da24d0c41ca687cda6","suite":"fast","gate":"validate","trigger":"every-change","addedFor197":true},
     {"method":"Haby.Domain.Tests.TestPathsTests.Missing_copied_asset_is_not_replaced_by_repository_search","case":"29400b0a0b8683786765088191c4551c880707ce2aa3de6b37c75f433930f991","suite":"fast","gate":"validate","trigger":"every-change","addedFor197":true},
-    {"method":"Haby.Domain.Tests.TestPathsTests.Empty_copied_example_directory_cannot_silently_skip_validation","case":"637d1c3ad3c156a5595fc516d6627872066481dc9908182b06aa77d386c6a40e","suite":"fast","gate":"validate","trigger":"every-change","addedFor197":true}
+    {"method":"Haby.Domain.Tests.TestPathsTests.Empty_copied_example_directory_cannot_silently_skip_validation","case":"637d1c3ad3c156a5595fc516d6627872066481dc9908182b06aa77d386c6a40e","suite":"fast","gate":"validate","trigger":"every-change","addedFor197":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Anonymous_reflection_assertion_accepts_exact_denial_from_write_or_read","case":"76e890939fabe647d5617026cb88bafd616a4e6e202cb7cd2ead7d4c6caf8193","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor188":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Anonymous_reflection_assertion_accepts_exact_denial_from_write_or_read","case":"a56f885874d6c41b5d341b0e903bc32a2d954413cd71cd52fdc3674ec5f9f7fb","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor188":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Anonymous_reflection_assertion_refuses_missing_denial","case":"6c6699e9a482fbba26fe01bddda0000195779fa5eff0294338434940e619d798","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor188":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Anonymous_reflection_assertion_refuses_wrong_status_and_non_rpc_errors","case":"03a25ac847c36bb4c220cad29ba1001e1ca7e18c8b43bcd98831c53b2ed60ec7","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor188":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Anonymous_reflection_assertion_refuses_wrong_status_and_non_rpc_errors","case":"2964f5078ea64daf5535c4c1252d4a13de248c9b17e33b4d5ca232431dea71cc","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor188":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Anonymous_reflection_assertion_refuses_wrong_status_and_non_rpc_errors","case":"9eb4df48ef8f5459cd2c4b9ce4fbff9f465c0a9ec2666f2c8d6083087ca95b32","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor188":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Anonymous_reflection_assertion_refuses_wrong_status_and_non_rpc_errors","case":"eac7537b8b5f055c8e307927ba943d849f48eea6ff322cda322d73b2a3a0d49d","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor188":true}
   ]
 }

@@ -55,10 +55,14 @@ the same non-waiting collection mechanism.
 
 The first table describes the unchanged baseline. This slice adds nine regular
 source/asset controls, eight regular Host-bound layout/value controls and one
-real heavy-group capacity qualification control. Current inventories are **1308
+real heavy-group capacity qualification control. Inventories at #197 are **1308
 fast**, **888 functional**, **5 infrastructure qualification**, and **75 published
 native rows per platform**. The ledger marks added rows with `addedFor197`; none
 of the 884 PostgreSQL or 1299 fast baseline rows is removed or renamed.
+
+The subsequent #188 anonymous-reflection assertion correction adds seven regular
+deterministic controls (`addedFor188`). Current PostgreSQL inventory is **895
+functional + 5 qualification = 900**; fast/native inventories are unchanged.
 
 For normal source inspection on Windows PowerShell, from the checkout root:
 
