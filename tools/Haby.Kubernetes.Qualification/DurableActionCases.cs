@@ -6,6 +6,7 @@ using Haby.Domain;
 using Haby.Kubernetes;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql.IntegrationTests;
+using Haby.Tests;
 using k8s;
 using k8s.Autorest;
 using k8s.Models;
@@ -15,6 +16,7 @@ using Npgsql;
 
 internal static class DurableActionCases
 {
+    private enum ReplacementPhase { ReadOriginal, DeleteOriginal, ObserveDeletion, CreateReplacement, ObserveForeign }
     private static readonly ProviderInput Subject = new ProviderInput.Workload(ManifestLocalId.Create("api"), ManifestLocalId.Create("main"));
     internal static async Task Run(Kubernetes admin, Uri endpoint, string directory, CancellationToken token)
     {
@@ -157,25 +159,61 @@ internal static class DurableActionCases
                 Check((await actions.ExecuteAsync(replaced.Key, token)).Outcome == InternalActionOutcome.Uncertain, "replacement-fixture-original-uncertain");
                 var saved = (await actions.HistoryAsync(replaced.Key, token))!;
                 var intent = DeploymentIntents.Decode(saved.Intent.Payload);
-                var live = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, name, cancellationToken: token);
-                await admin.AppsV1.DeleteNamespacedDeploymentAsync(intent.Name, name, new V1DeleteOptions { Preconditions = new() { Uid = live.Metadata.Uid }, PropagationPolicy = "Orphan" }, cancellationToken: token);
-                var foreign = await admin.AppsV1.CreateNamespacedDeploymentAsync(new V1Deployment
+                var phase = ReplacementPhase.ReadOriginal;
+                void Stage(ReplacementPhase value) { phase = value; Console.WriteLine($"Durable replacement phase: {phase}"); }
+                try
                 {
-                    ApiVersion = "apps/v1",
-                    Kind = "Deployment",
-                    Spec = live.Spec,
-                    Metadata = new()
+                    Stage(ReplacementPhase.ReadOriginal);
+                    var live = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, name, cancellationToken: token);
+                    if (string.IsNullOrEmpty(live.Metadata.Uid)) throw new InvalidOperationException("Original Deployment identity is unavailable.");
+                    Stage(ReplacementPhase.DeleteOriginal);
+                    await admin.AppsV1.DeleteNamespacedDeploymentAsync(intent.Name, name, new V1DeleteOptions { Preconditions = new() { Uid = live.Metadata.Uid }, PropagationPolicy = "Orphan" }, cancellationToken: token);
+                    Stage(ReplacementPhase.ObserveDeletion);
+                    await DeploymentReplacementObservation.WaitAsync(live.Metadata.Uid, async ct =>
                     {
-                        Name = intent.Name,
-                        NamespaceProperty = name,
-                        Labels = new Dictionary<string, string> { [DeploymentIntents.OwnerKey] = Guid.NewGuid().ToString("N"), [DeploymentIntents.ManagedKey] = intent.ManagedWorkload.ToString("N") },
-                        Annotations = new Dictionary<string, string> { [DeploymentIntents.OperationKey] = Guid.NewGuid().ToString("N"), [DeploymentIntents.GenerationKey] = intent.TargetGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture) }
-                    }
-                }, name, cancellationToken: token);
-                replaced.Counter.DropResponse = false;
-                var result = await actions.RecoverByObservationAsync(replaced.Key, token);
-                Check(foreign.Metadata.Uid != live.Metadata.Uid && result.Outcome == InternalActionOutcome.NotConfirmed && replaced.Counter.Writes == 1 &&
-                    (await actions.HistoryAsync(replaced.Key, token))!.Output is null, "D11-foreign-replacement-uid-never-adopted");
+                        try
+                        {
+                            return (await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, name, cancellationToken: ct)).Metadata.Uid
+                            ?? throw new InvalidOperationException("Observed Deployment identity is unavailable.");
+                        }
+                        catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.NotFound) { return null; }
+                    }, ct => Task.Delay(100, ct), token);
+                    Console.WriteLine("Durable replacement status: original-absent");
+                    Stage(ReplacementPhase.CreateReplacement);
+                    var foreign = await admin.AppsV1.CreateNamespacedDeploymentAsync(new V1Deployment
+                    {
+                        ApiVersion = "apps/v1",
+                        Kind = "Deployment",
+                        Spec = live.Spec,
+                        Metadata = new()
+                        {
+                            Name = intent.Name,
+                            NamespaceProperty = name,
+                            Labels = new Dictionary<string, string> { [DeploymentIntents.OwnerKey] = Guid.NewGuid().ToString("N"), [DeploymentIntents.ManagedKey] = intent.ManagedWorkload.ToString("N") },
+                            Annotations = new Dictionary<string, string> { [DeploymentIntents.OperationKey] = Guid.NewGuid().ToString("N"), [DeploymentIntents.GenerationKey] = intent.TargetGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture) }
+                        }
+                    }, name, cancellationToken: token);
+                    replaced.Counter.DropResponse = false;
+                    Stage(ReplacementPhase.ObserveForeign);
+                    var result = await actions.RecoverByObservationAsync(replaced.Key, token);
+                    Check(foreign.Metadata.Uid != live.Metadata.Uid && result.Outcome == InternalActionOutcome.NotConfirmed && replaced.Counter.Writes == 1 &&
+                        (await actions.HistoryAsync(replaced.Key, token))!.Output is null, "D11-foreign-replacement-uid-never-adopted");
+                }
+                catch (HttpOperationException error)
+                {
+                    var status = error.Response.StatusCode switch
+                    {
+                        HttpStatusCode.Unauthorized => "401",
+                        HttpStatusCode.Forbidden => "403",
+                        HttpStatusCode.NotFound => "404",
+                        HttpStatusCode.Conflict => "409",
+                        HttpStatusCode.TooManyRequests => "429",
+                        HttpStatusCode.InternalServerError => "500",
+                        _ => "other"
+                    };
+                    Console.WriteLine($"Durable replacement failure: phase={phase}; status={status}");
+                    throw;
+                }
             }
             Check(lost.Counter.Barriers == 1 && interrupted.Counter.Barriers == 1 && absent.Counter.Barriers == 0 &&
                 lost.Counter.TransactionChecks > 0 && interrupted.Counter.TransactionChecks > 0 && absent.Counter.TransactionChecks > 0, "D12-committed-marker-no-network-under-catalog-transaction");

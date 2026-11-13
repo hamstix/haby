@@ -146,3 +146,11 @@ component-to-alias mappings, pauses one capture after its first scope lock and
 observes the other backend waiting on that same scope. Both complete with their
 exact per-subject Provider and Placement inputs. Local compilation/discovery is
 not execution evidence for this PostgreSQL regression.
+
+The test-only replacement fixture observes the exact original Deployment after
+UID-preconditioned deletion until GET returns NotFound, requiring the original UID
+on every present observation. It uses a finite 50-read budget under the existing
+deadline and cancellation, then attempts replacement CREATE once. Conflicts remain
+failures. Fixed phase labels and allowlisted HTTP status labels support attribution
+without logging response bodies, URLs, identities or stacks. This fixture does not
+change production execution, trust or uncertain-action recovery.
