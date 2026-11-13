@@ -40,7 +40,17 @@ internal static class DeploymentKernelCases
             Check(occupied is { Outcome: KernelOutcome.Conflict, WriteDispatches: 0 }, "K02-occupied-no-adoption");
             var foreign = i with { Owner = Guid.NewGuid() };
             Check((await Kernel().ObserveAsync(foreign, token)) is { Outcome: KernelOutcome.NotConfirmed, WriteDispatches: 0 }, "K03-foreign-owner");
-            await Mutate(i, """[{"op":"add","path":"/metadata/annotations/unrelated","value":"preserve"},{"op":"add","path":"/spec/template/spec/containers/0","value":{"name":"injected","image":"registry.k8s.io/pause:3.10"}},{"op":"add","path":"/spec/template/spec/nodeSelector/injected","value":"preserve"},{"op":"add","path":"/spec/template/spec/imagePullSecrets/0","value":{"name":"injected"}}]""");
+            await Mutate(i, """[{"op":"add","path":"/spec/paused","value":true},{"op":"add","path":"/metadata/annotations/unrelated","value":"preserve"},{"op":"add","path":"/spec/template/spec/containers/0","value":{"name":"injected","image":"registry.k8s.io/pause:3.10"}},{"op":"add","path":"/spec/template/spec/nodeSelector/injected","value":"preserve"},{"op":"add","path":"/spec/template/spec/imagePullSecrets/0","value":{"name":"injected"}}]""");
+            // Arrange a quiet API object before the positive field-ownership case. This is
+            // fixture administration, not Workload pause support, Pod readiness or write retry.
+            string? previousVersion = null; var stableReads = 0;
+            for (var n = 0; n < 50 && stableReads < 3; n++)
+            {
+                var version = (await Read(i)).Metadata.ResourceVersion;
+                stableReads = version == previousVersion ? stableReads + 1 : 0;
+                previousVersion = version; await Task.Delay(100, token);
+            }
+            if (stableReads < 3) throw new InvalidOperationException("Fixture object did not become quiet.");
             var update = i with
             {
                 ExpectedUid = created.Receipt!.Uid,
@@ -50,11 +60,12 @@ internal static class DeploymentKernelCases
                 Target = i.Target with { Image = "registry.k8s.io/pause:3.9", Replicas = 2, NodeSelector = ImmutableSortedDictionary<string, string>.Empty, ImagePullSecrets = [] }
             };
             var updated = await Kernel().ExecuteAsync(update, token); var live = await Read(i);
+            Console.WriteLine($"Kernel K04 result: outcome={updated.Outcome}; code={updated.Code}; dispatches={updated.WriteDispatches}; uid-preserved={live.Metadata.Uid == created.Receipt.Uid}; paused-preserved={live.Spec.Paused == true}; containers={live.Spec.Template.Spec.Containers.Count}; nodes={live.Spec.Template.Spec.NodeSelector?.Count ?? 0}; pulls={live.Spec.Template.Spec.ImagePullSecrets?.Count ?? 0}");
             Check(updated is { Outcome: KernelOutcome.Confirmed, WriteDispatches: 1 } && updated.Receipt!.Uid == created.Receipt.Uid &&
                 live.Spec.Template.Spec.Containers.Single(c => c.Name == "app").Image == update.Target.Image &&
                 live.Spec.Template.Spec.Containers.Single(c => c.Name == "injected").Image == "registry.k8s.io/pause:3.10" &&
-                live.Metadata.Annotations["unrelated"] == "preserve" && live.Spec.Template.Spec.NodeSelector.Count == 1 &&
-                live.Spec.Template.Spec.NodeSelector["injected"] == "preserve" && live.Spec.Template.Spec.ImagePullSecrets.Single().Name == "injected", "K04-keyed-update-preservation-removal");
+                live.Metadata.Annotations["unrelated"] == "preserve" && live.Spec.Paused == true && live.Spec.Template.Spec.NodeSelector?.Count == 1 &&
+                live.Spec.Template.Spec.NodeSelector["injected"] == "preserve" && live.Spec.Template.Spec.ImagePullSecrets is { Count: 1 } && live.Spec.Template.Spec.ImagePullSecrets.Single().Name == "injected", "K04-keyed-update-preservation-removal");
             Check(!live.Spec.Template.Metadata.Annotations?.ContainsKey(OperationKey) == true || live.Spec.Template.Metadata.Annotations is null, "K05-no-attempt-template-annotation");
             var next = update with { LastConfirmed = update.Target, Operation = Guid.NewGuid(), TargetGeneration = 3, Target = update.Target with { Replicas = 3 } };
             await Mutate(i, """[{"op":"add","path":"/spec/replicas","value":9}]""");

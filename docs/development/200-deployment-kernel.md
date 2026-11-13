@@ -108,9 +108,9 @@ Preserve the existing 900 PostgreSQL, 1308 fast and 75-per-platform Native AOT
 baseline inventory and report added cases separately. Full hosted validation and
 the new adapter real-API cases are required before acceptance.
 
-The checked-in case ledger retains 2358 pre-slice gate rows and adds 73 fast cases
-and 24 named API-object scenarios (2455 rows total). Normal obligations remain
-900 PostgreSQL, 1381 fast and 75 Native AOT cases per platform. API-object cases
+The checked-in case ledger retains 2358 pre-slice gate rows and adds 74 fast cases
+and 24 named API-object scenarios (2456 rows total). Normal obligations remain
+900 PostgreSQL, 1382 fast and 75 Native AOT cases per platform. API-object cases
 have stable `K01`..`K24` scenario identities; their method plus scenario SHA256
 is compared with the same gate ledger before publishing safe cases/gate metadata.
 This is a custom API-case inventory, not a TRX execution or a readiness gate.
@@ -132,3 +132,18 @@ revocation refusal and system-trust refusal for that private CA. System-root
 Online policy, certificate expiry and wrong EKU also have deterministic controls.
 This does not prove successful production access to an offline/private CA or a
 publicly trusted cluster. No revocation fallback is configured or promised.
+
+## First hosted attempt
+
+HEAD `7bec1b3fd84d7c8aed747323770e5dbe74ffdb11`, API run 43474909127,
+remains FAILED at K04 after K01..K03 passed. Namespace UID cleanup and owned
+container/four anonymous volumes/private-directory cleanup passed. Original
+artifact 14062003988 has SHA256
+`a72e4cae47fa305dd0d736f0fb0b48ebe8aded7d7e93d5d88f1008fc1ed208d9`.
+The original report does not identify which K04 assertion failed; no cause is
+claimed. A separate RFC6902-order projection test passes locally. The revised
+positive fixture administratively pauses the object and requires three stable RV
+reads before its single update, then retains bounded outcome/preservation counts.
+This separates positive field ownership from the explicit race cases, without
+retrying a rejected write, weakening assertions or implementing Workload pause.
+New-source hosted evidence is required; the failed attempt is not a success.

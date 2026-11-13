@@ -5,7 +5,7 @@
   "nativePerPlatform": 75,
   "regularFullRetainsQualification": true,
   "currentPostgresql": 900,
-  "currentFast": 1381,
+  "currentFast": 1382,
   "currentKubernetesApiObjects": 24,
   "entries": [
     {"method":"Haby.PostgreSql.IntegrationTests.AdministrativeSecretTests.Cancellation_after_secret_insert_before_receipt_commit_rolls_back_every_row","case":"47c71fd82d68e86c4703545bc858b1a26040263e880667ca757d553f8f2f7581","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
@@ -2462,6 +2462,7 @@
     {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"61e22a19ff47b5cee01f605d9dbc0679a96dc5e448f139714d561425b750c580","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K21-scoped-secret-exclusion","addedFor200":true},
     {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"c02684ea14655ac8d60d9a0eab429c708b0e1a1941ae3f19b50c1ddac1a19aa3","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K22-new-factory-hostname-refusal","addedFor200":true},
     {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"3d73c94709a447882c1610bcdb136c9862969e8aa23ef9c97bfe59ceacd8b5d8","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K23-new-factory-custom-root-refusal","addedFor200":true},
-    {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"a699b033d20d261e674dc584e754af74473ad8701cfb076c765bf5fd078b7a49","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K24-real-UID-race-replacement-preserved","addedFor200":true}
+    {"method":"Haby.Kubernetes.Qualification.DeploymentKernelCases.Run","case":"a699b033d20d261e674dc584e754af74473ad8701cfb076c765bf5fd078b7a49","suite":"api-object","gate":"kubernetes-deployment-kernel","trigger":"adapter-change","scenario":"K24-real-UID-race-replacement-preserved","addedFor200":true},
+    {"method":"Haby.Kubernetes.Tests.ProjectionMutationTests.K04_patch_applied_in_RFC6902_order_preserves_injected_fields_and_confirms_target","case":"2a30fb90d3ac1d6a20be6f908490e771a18a8980e07e7d8f82a21cf0deec9e69","suite":"fast","gate":"validate","trigger":"every-change","addedFor200":true}
   ]
 }
