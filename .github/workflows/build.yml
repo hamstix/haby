@@ -50,6 +50,7 @@ jobs:
             .artifacts/fast/safe/gate.json
             .artifacts/fast/safe/cases.json
             .artifacts/fast/safe/counts.json
+            .artifacts/fast/safe/failure-evidence.json
             .artifacts/fast/safe/results.trx
           if-no-files-found: error
           retention-days: 14
@@ -57,6 +58,10 @@ jobs:
       - name: Verify PostgreSQL timing artifact safety and failure propagation
         shell: pwsh
         run: ./scripts/test-postgresql-timing-export.ps1
+
+      - name: Verify bounded failure evidence and adversarial publication controls
+        shell: pwsh
+        run: ./scripts/test-postgresql-failure-evidence.ps1
 
       - name: Verify hosted entrypoint ownership, coverage and failure propagation
         shell: pwsh
@@ -145,6 +150,7 @@ jobs:
             .artifacts/native-results/${{ matrix.rid }}/safe/gate.json
             .artifacts/native-results/${{ matrix.rid }}/safe/cases.json
             .artifacts/native-results/${{ matrix.rid }}/safe/counts.json
+            .artifacts/native-results/${{ matrix.rid }}/safe/failure-evidence.json
             .artifacts/native-results/${{ matrix.rid }}/safe/results.trx
           if-no-files-found: error
           retention-days: 14
@@ -196,6 +202,7 @@ jobs:
             .artifacts/postgresql-measurement/safe/coverage.json
             .artifacts/postgresql-measurement/safe/cases.json
             .artifacts/postgresql-measurement/safe/counts.json
+            .artifacts/postgresql-measurement/safe/failure-evidence.json
             .artifacts/postgresql-measurement/safe/top-duration.csv
             .artifacts/postgresql-measurement/safe/class-duration.csv
             .artifacts/postgresql-measurement/safe/setup.csv
@@ -203,11 +210,13 @@ jobs:
             .artifacts/postgresql-measurement/safe/host-diagnostics.csv
             .artifacts/postgresql-measurement/safe/functional/cases.json
             .artifacts/postgresql-measurement/safe/functional/counts.json
+            .artifacts/postgresql-measurement/safe/functional/failure-evidence.json
             .artifacts/postgresql-measurement/safe/functional/resources.json
             .artifacts/postgresql-measurement/safe/functional/setup.csv
             .artifacts/postgresql-measurement/safe/functional/host-diagnostics.csv
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/cases.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/counts.json
+            .artifacts/postgresql-measurement/safe/infrastructure-qualification/failure-evidence.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/resources.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/setup.csv
           if-no-files-found: error

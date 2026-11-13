@@ -172,6 +172,10 @@ hash of the actual opaque test ID distinguishes row executions. Exact repeated
 executions remain invalid, including duplicates across TRX inputs. This avoids
 deduplicating different parameter rows just because their displays are identical.
 
+The shared exporter also publishes [bounded failure evidence](188-safe-failure-evidence.md)
+for each suite and aggregate, preserving exact failed-row joins. Parsed signatures
+are untrusted text categories, never runtime type, phase or root-cause evidence.
+
 No XML output, exception messages/stacks, attachments, SQL or raw theory values
 are copied into public artifacts. Existing 14-day safe retention and ephemeral
 private hosted logs apply. Local raw evidence stays private and is cleaned only

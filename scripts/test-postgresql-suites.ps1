@@ -67,6 +67,7 @@ try {
         if (-not $script:missingRaw) {
             $class = $method.Substring(0,$method.LastIndexOf('.')); $name = $method.Substring($method.LastIndexOf('.')+1)
             $data = '<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010"><TestDefinitions><UnitTest id="one"><TestMethod className="'+$class+'" name="'+$name+'" /></UnitTest></TestDefinitions><Results><UnitTestResult testId="one" testName="'+$method+'" outcome="Passed" duration="00:00:00.1" startTime="2026-11-13T12:00:00Z" endTime="2026-11-13T12:00:00.1Z" /></Results><ResultSummary><Counters total="1" passed="1" failed="0" notExecuted="0" /></ResultSummary></TestRun>'
+            if (-not $isQualification) { $data = $data.Replace('outcome="Passed"','outcome="Failed"').Replace('passed="1" failed="0"','passed="0" failed="1"') }
             $data | Set-Content -LiteralPath (Join-Path $args[$index+1] 'full.trx')
         }
         $counts = @{limit=4;hostGroupLimit=2}
@@ -81,6 +82,13 @@ try {
         Require ($result.exitCode -eq 17) 'Suite/report failure masked the primary exit.'
         Require ($result.reportingFailed -eq $missing) 'Secondary report outcome changed.'
         Require ($script:qualificationCalls -eq $(if ($missing) { 0 } else { 1 })) 'Full omitted/repeated qualification or continued after unconfirmed cleanup.'
+        if (-not $missing) {
+            $evidence = Get-Content (Join-Path $output 'functional/failure-evidence.json') -Raw | ConvertFrom-Json
+            $executed = @(Get-Content (Join-Path $output 'functional/cases.json') -Raw | ConvertFrom-Json)
+            Require ($evidence.failedCases -eq 1 -and $evidence.records.Count -eq 1 -and $evidence.records[0].row -ceq $executed[0].row) 'Suite primary failure lost exact row evidence.'
+            $qualified = Get-Content (Join-Path $output 'infrastructure-qualification/failure-evidence.json') -Raw | ConvertFrom-Json
+            Require ($qualified.failedCases -eq 0 -and $qualified.records.Count -eq 0) 'Passing qualification fabricated failure rows.'
+        }
     }
 } finally {
     $owned = [IO.Path]::GetFullPath($directory)

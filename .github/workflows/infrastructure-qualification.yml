@@ -44,8 +44,10 @@ jobs:
             .artifacts/qualification/safe/coverage.json
             .artifacts/qualification/safe/cases.json
             .artifacts/qualification/safe/counts.json
+            .artifacts/qualification/safe/failure-evidence.json
             .artifacts/qualification/safe/results.trx
             .artifacts/qualification/safe/infrastructure-qualification/setup.csv
             .artifacts/qualification/safe/infrastructure-qualification/resources.json
+            .artifacts/qualification/safe/infrastructure-qualification/failure-evidence.json
           if-no-files-found: error
           retention-days: 14
