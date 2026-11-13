@@ -8,6 +8,34 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
+public abstract partial class ApplicationLoginScenario
+{
+    private protected sealed class CommittedAccessDrift(string connection, string role, bool authentication) : IPostgreSqlAccessFaultHooks
+    {
+        public ValueTask BeforeVerificationAsync(CancellationToken token) => authentication ? ValueTask.CompletedTask :
+            new(Sql(connection, "ALTER SCHEMA app OWNER TO postgres"));
+        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => authentication ?
+            new(Sql(connection, $"ALTER ROLE \"{role}\" NOLOGIN")) : ValueTask.CompletedTask;
+    }
+    private protected static async Task<string> AccessCatalogEvidence(string connection)
+    {
+        await using var session = new NpgsqlConnection(connection); await session.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT jsonb_build_array(
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY generation) FROM application_deployment_generations t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id, output_contract, output_key) FROM operation_outputs t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id) FROM durable_create_operations t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id, attempt_number) FROM durable_create_operation_attempts t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY secret_id) FROM generated_credential_slots t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY secret_id) FROM generated_credential_creation_audits t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY namespace, value) FROM provider_resource_reservations t),
+              (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM application_deployments t))::text
+            """, session);
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+}
+
 public sealed partial class PostgreSqlApplicationLoginTests
 {
     [Fact]
@@ -44,14 +72,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var before = await Evidence();
         Assert.Equal(DurableExecutionOutcome.Succeeded, (await AccessExecute(scenario)).Outcome);
         Assert.Equal(before, await Evidence());
-    }
-
-    private sealed class CommittedAccessDrift(string connection, string role, bool authentication) : IPostgreSqlAccessFaultHooks
-    {
-        public ValueTask BeforeVerificationAsync(CancellationToken token) => authentication ? ValueTask.CompletedTask :
-            new(Sql(connection, "ALTER SCHEMA app OWNER TO postgres"));
-        public ValueTask BeforeAuthenticationAsync(CancellationToken token) => authentication ?
-            new(Sql(connection, $"ALTER ROLE \"{role}\" NOLOGIN")) : ValueTask.CompletedTask;
     }
 
     [Theory]
@@ -250,20 +270,4 @@ public sealed partial class PostgreSqlApplicationLoginTests
         finally { Array.Clear(bytes); }
     }
 
-    private static async Task<string> AccessCatalogEvidence(string connection)
-    {
-        await using var session = new NpgsqlConnection(connection); await session.OpenAsync();
-        await using var command = new NpgsqlCommand("""
-            SELECT jsonb_build_array(
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY generation) FROM application_deployment_generations t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id, output_contract, output_key) FROM operation_outputs t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id) FROM durable_create_operations t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY operation_id, attempt_number) FROM durable_create_operation_attempts t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY secret_id) FROM generated_credential_slots t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY secret_id) FROM generated_credential_creation_audits t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY namespace, value) FROM provider_resource_reservations t),
-              (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM application_deployments t))::text
-            """, session);
-        return (string)(await command.ExecuteScalarAsync())!;
-    }
 }

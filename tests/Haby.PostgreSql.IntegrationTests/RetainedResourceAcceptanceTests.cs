@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public sealed partial class ApplicationGenerationTests
 {
     [Theory]
     [InlineData(false, false)]
@@ -138,4 +138,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         finally { await fixture.RunClientUtilityAsync("rm", "-f", dump); }
     }
+
 }

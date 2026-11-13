@@ -13,7 +13,27 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
+{
+    private protected sealed class ReuseCancelBeforeCommit(CancellationTokenSource source) : SaveChangesInterceptor
+    {
+        public bool Enabled;
+        public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData data, int result, CancellationToken token = default)
+        {
+            if (Enabled && data.Context!.ChangeTracker.Entries().Any(x => x.Metadata.GetTableName() == "change_set_commits")) source.Cancel();
+            return new(result);
+        }
+    }
+    private protected sealed class ReuseCancelAfterCommit(CancellationTokenSource source) : DbTransactionInterceptor
+    {
+        public bool Enabled;
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData data, CancellationToken token = default)
+        { if (Enabled) source.Cancel(); return Task.CompletedTask; }
+    }
+
+}
+
+public sealed partial class ApplicationGenerationTests
 {
     [Theory]
     [InlineData("incomplete", false)]
@@ -73,22 +93,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await host.StopAsync();
     }
 
-    private sealed class ReuseCancelBeforeCommit(CancellationTokenSource source) : SaveChangesInterceptor
-    {
-        public bool Enabled;
-        public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData data, int result, CancellationToken token = default)
-        {
-            if (Enabled && data.Context!.ChangeTracker.Entries().Any(x => x.Metadata.GetTableName() == "change_set_commits")) source.Cancel();
-            return new(result);
-        }
-    }
-    private sealed class ReuseCancelAfterCommit(CancellationTokenSource source) : DbTransactionInterceptor
-    {
-        public bool Enabled;
-        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData data, CancellationToken token = default)
-        { if (Enabled) source.Cancel(); return Task.CompletedTask; }
-    }
-
     [Theory]
     [InlineData(false, false, false)]
     [InlineData(true, false, false)]
@@ -118,4 +122,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         { Assert.Equal(2, await verify.DeploymentGenerations.CountAsync()); Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration); }
         await host.StopAsync();
     }
+
 }

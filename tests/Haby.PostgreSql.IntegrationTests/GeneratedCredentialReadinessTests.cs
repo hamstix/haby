@@ -7,9 +7,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private sealed class BlockedProducerSecretStore : ISecretStore
+    private protected sealed class BlockedProducerSecretStore : ISecretStore
     {
         public int Resolutions;
         public ValueTask<SecretMaterial?> ResolveAsync(SecretDefinition definition, SecretRef reference, CancellationToken token)
@@ -22,6 +22,12 @@ public sealed partial class PostgreSqlApplicationLoginTests
         public ValueTask CreateAsync(SecretDefinition definition, SecretRef reference, byte[] material, CancellationToken token) => throw new NotSupportedException();
         public ValueTask AddVersionAsync(EnvironmentRecordId environment, SecretRef reference, byte[] material, CancellationToken token) => throw new NotSupportedException();
     }
+
+}
+
+[Collection("Login logging isolated")]
+public sealed partial class PostgreSqlApplicationLoginTests(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture), IClassFixture<PostgreSqlFixture>
+{
 
     [Fact]
     public async Task Blocked_generated_producer_refuses_before_resolving_material()
@@ -41,4 +47,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Empty(await verify.OperationOutputs.ToArrayAsync());
         Assert.Empty(await verify.GenerationStageCheckpoints.ToArrayAsync());
     }
+
 }

@@ -17,7 +17,38 @@ using StoreStatus = Haby.Application.ConfigurationDocumentStatus;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
+{
+    private protected sealed class SelectionPause
+    {
+        public TaskCompletionSource Selected { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public IConfigurationDocumentStore Wrap(IConfigurationDocumentStore inner) => new Paused(this, inner);
+        private sealed class Paused(SelectionPause pause, IConfigurationDocumentStore inner) : IConfigurationDocumentStore
+        {
+            public async ValueTask<ConfigurationDocumentResult> SelectAsync(ConfigurationDocumentSelection selection, CancellationToken token)
+            {
+                var result = await inner.SelectAsync(selection, token);
+                pause.Selected.TrySetResult(); await pause.Resume.Task.WaitAsync(TimeSpan.FromSeconds(30), token); return result;
+            }
+            public ValueTask<ConfigurationDocumentResult> ReadAsync(ConfigurationDocumentTarget target, CancellationToken token) => inner.ReadAsync(target, token);
+            public ValueTask<ConfigurationDocumentResult> MaterializeAsync(ConfigurationDocumentTarget target, string actor, CancellationToken token) => inner.MaterializeAsync(target, actor, token);
+        }
+    }
+    private protected sealed class DocumentCommitCancellation(CancellationTokenSource cancellation, bool afterCommit) : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction, TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (!afterCommit) { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
+            return ValueTask.FromResult(result);
+        }
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+        { if (afterCommit) cancellation.Cancel(); return Task.CompletedTask; }
+    }
+
+}
+
+public sealed partial class ApplicationConfigurationTests
 {
     [Theory]
     [InlineData(63, true)]
@@ -180,23 +211,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await host.StopAsync();
     }
 
-    private sealed class SelectionPause
-    {
-        public TaskCompletionSource Selected { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public IConfigurationDocumentStore Wrap(IConfigurationDocumentStore inner) => new Paused(this, inner);
-        private sealed class Paused(SelectionPause pause, IConfigurationDocumentStore inner) : IConfigurationDocumentStore
-        {
-            public async ValueTask<ConfigurationDocumentResult> SelectAsync(ConfigurationDocumentSelection selection, CancellationToken token)
-            {
-                var result = await inner.SelectAsync(selection, token);
-                pause.Selected.TrySetResult(); await pause.Resume.Task.WaitAsync(TimeSpan.FromSeconds(30), token); return result;
-            }
-            public ValueTask<ConfigurationDocumentResult> ReadAsync(ConfigurationDocumentTarget target, CancellationToken token) => inner.ReadAsync(target, token);
-            public ValueTask<ConfigurationDocumentResult> MaterializeAsync(ConfigurationDocumentTarget target, string actor, CancellationToken token) => inner.MaterializeAsync(target, actor, token);
-        }
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -220,17 +234,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(afterCommit ? 1 : 0, await verify.ConfigurationDocuments.AsNoTracking().CountAsync());
     }
 
-    private sealed class DocumentCommitCancellation(CancellationTokenSource cancellation, bool afterCommit) : DbTransactionInterceptor
-    {
-        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction, TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
-        {
-            if (!afterCommit) { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
-            return ValueTask.FromResult(result);
-        }
-        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
-        { if (afterCommit) cancellation.Cancel(); return Task.CompletedTask; }
-    }
-
     [Theory]
     [InlineData("frozen-input")]
     [InlineData("corrupt-payload")]
@@ -250,4 +253,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(mode == "frozen-input" ? saved : "{}", (await verify.ConfigurationDocuments.AsNoTracking().SingleAsync()).Payload);
         await host.StopAsync();
     }
+
 }

@@ -17,9 +17,9 @@ using ItemStatus = Haby.Operator.Contracts.ConfigurationDocumentStatus;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static string BatchProfile(int extra = 1)
+    private protected static string BatchProfile(int extra = 1)
     {
         var profile = JsonNode.Parse(RenderingProfile)!;
         for (var i = extra - 1; i >= 0; i--)
@@ -27,12 +27,71 @@ public sealed partial class PostgreSqlApplicationLoginTests
             { ["fileName"] = "static-" + i + ".json", ["format"] = "json", ["template"] = new JsonObject { ["ordinary"] = true } };
         return profile.ToJsonString();
     }
-    private static ConfigurationApplicationRequest BatchRequest(Scenario scenario, bool exact = false)
+    private protected static ConfigurationApplicationRequest BatchRequest(Scenario scenario, bool exact = false)
     {
         var request = new ConfigurationApplicationRequest { Environment = "pilot", ApplicationId = DocumentRequest(scenario).ApplicationId };
         if (exact) request.Generation = 1;
         return request;
     }
+    private protected static async Task NativeBatch(string endpoint, ConfigurationApplicationRequest request, string expected)
+    {
+        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
+        if (binary is null) return;
+        var config = Path.Combine(Path.GetTempPath(), "haby-batch-" + Guid.NewGuid().ToString("N") + ".yaml");
+        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
+        try
+        {
+            var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var arg in new[] { "configuration", "materialize", request.ApplicationId, "--all", "--config", config, "--output", "json" }) start.ArgumentList.Add(arg);
+            if (request.HasGeneration) { start.ArgumentList.Add("--generation"); start.ArgumentList.Add(request.Generation.ToString()); }
+            using var process = Process.Start(start)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+            Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
+            using var doc = JsonDocument.Parse(await stdout); Assert.Equal("succeeded", doc.RootElement.GetProperty("outcome"u8).GetString());
+            var data = doc.RootElement.GetProperty("data"u8); Assert.Equal(1, data.GetProperty("target"u8).GetProperty("generation"u8).GetInt64());
+            var items = data.GetProperty("items"u8).EnumerateArray().ToArray(); Assert.Equal(4, items.Length);
+            Assert.All(items, x => Assert.Equal(expected, x.GetProperty("outcome"u8).GetString()));
+        }
+        finally { File.Delete(config); }
+    }
+    private protected sealed class BatchSelectionPause(IConfigurationApplicationInventory inner) : IConfigurationApplicationInventory
+    {
+        internal readonly TaskCompletionSource Selected = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource Resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int Calls;
+        public async ValueTask<ConfigurationApplicationInventory> SelectApplicationAsync(ConfigurationApplicationSelection selection, CancellationToken token)
+        {
+            Calls++; var selected = await inner.SelectApplicationAsync(selection, token);
+            Selected.TrySetResult(); await Resume.Task.WaitAsync(TimeSpan.FromSeconds(30), token); return selected;
+        }
+    }
+    private protected sealed class BatchCommitPause(IConfigurationDocumentStore inner) : IConfigurationDocumentStore
+    {
+        internal readonly TaskCompletionSource Committed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource Canceled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int Calls;
+        public ValueTask<ConfigurationDocumentResult> SelectAsync(ConfigurationDocumentSelection selection, CancellationToken token) => inner.SelectAsync(selection, token);
+        public ValueTask<ConfigurationDocumentResult> ReadAsync(ConfigurationDocumentTarget target, CancellationToken token) => inner.ReadAsync(target, token);
+        public async ValueTask<ConfigurationDocumentResult> MaterializeAsync(ConfigurationDocumentTarget target, string actor, CancellationToken token)
+        {
+            Calls++; var result = await inner.MaterializeAsync(target, actor, token);
+            if (Calls == 1)
+            {
+                Committed.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                finally { Canceled.TrySetResult(); }
+            }
+            return result;
+        }
+    }
+
+}
+
+[Collection("Login logging isolated")]
+public sealed partial class ApplicationConfigurationTests(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture), IClassFixture<PostgreSqlFixture>
+{
 
     [Fact]
     public async Task Application_batch_second_failure_preserves_prefix_then_same_generation_retry_repairs_and_keeps_original_audit()
@@ -136,7 +195,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
             for (var i = 0; i < 511; i++) docs["d" + i.ToString("D3")] = new JsonObject
             { ["fileName"] = "d" + i + ".json", ["format"] = "json", ["template"] = new JsonObject() };
             manifest["manifest"]!["spec"]!["components"]!["api"]!["documents"] = docs;
-        } : null);
+        }
+        : null);
         await AccessReady(scenario); await AccessExecute(scenario);
         if (mode == "corrupt") await Sql(scenario.Connection, "SET session_replication_role = replica; UPDATE application_deployment_generations SET configuration_json = '{}' ");
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
@@ -147,42 +207,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Empty(result.Items);
         await using var verify = Context(scenario.Connection); Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
         await host.StopAsync();
-    }
-
-    private static async Task NativeBatch(string endpoint, ConfigurationApplicationRequest request, string expected)
-    {
-        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
-        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
-        if (binary is null) return;
-        var config = Path.Combine(Path.GetTempPath(), "haby-batch-" + Guid.NewGuid().ToString("N") + ".yaml");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
-        try
-        {
-            var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var arg in new[] { "configuration", "materialize", request.ApplicationId, "--all", "--config", config, "--output", "json" }) start.ArgumentList.Add(arg);
-            if (request.HasGeneration) { start.ArgumentList.Add("--generation"); start.ArgumentList.Add(request.Generation.ToString()); }
-            using var process = Process.Start(start)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
-            Assert.Equal(0, process.ExitCode); Assert.Equal("", await stderr);
-            using var doc = JsonDocument.Parse(await stdout); Assert.Equal("succeeded", doc.RootElement.GetProperty("outcome"u8).GetString());
-            var data = doc.RootElement.GetProperty("data"u8); Assert.Equal(1, data.GetProperty("target"u8).GetProperty("generation"u8).GetInt64());
-            var items = data.GetProperty("items"u8).EnumerateArray().ToArray(); Assert.Equal(4, items.Length);
-            Assert.All(items, x => Assert.Equal(expected, x.GetProperty("outcome"u8).GetString()));
-        }
-        finally { File.Delete(config); }
-    }
-
-    private sealed class BatchSelectionPause(IConfigurationApplicationInventory inner) : IConfigurationApplicationInventory
-    {
-        internal readonly TaskCompletionSource Selected = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal readonly TaskCompletionSource Resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal int Calls;
-        public async ValueTask<ConfigurationApplicationInventory> SelectApplicationAsync(ConfigurationApplicationSelection selection, CancellationToken token)
-        {
-            Calls++; var selected = await inner.SelectApplicationAsync(selection, token);
-            Selected.TrySetResult(); await Resume.Task.WaitAsync(TimeSpan.FromSeconds(30), token); return selected;
-        }
     }
 
     [Theory]
@@ -248,26 +272,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await host.StopAsync();
     }
 
-    private sealed class BatchCommitPause(IConfigurationDocumentStore inner) : IConfigurationDocumentStore
-    {
-        internal readonly TaskCompletionSource Committed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal readonly TaskCompletionSource Canceled = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal int Calls;
-        public ValueTask<ConfigurationDocumentResult> SelectAsync(ConfigurationDocumentSelection selection, CancellationToken token) => inner.SelectAsync(selection, token);
-        public ValueTask<ConfigurationDocumentResult> ReadAsync(ConfigurationDocumentTarget target, CancellationToken token) => inner.ReadAsync(target, token);
-        public async ValueTask<ConfigurationDocumentResult> MaterializeAsync(ConfigurationDocumentTarget target, string actor, CancellationToken token)
-        {
-            Calls++; var result = await inner.MaterializeAsync(target, actor, token);
-            if (Calls == 1)
-            {
-                Committed.TrySetResult();
-                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
-                finally { Canceled.TrySetResult(); }
-            }
-            return result;
-        }
-    }
-
     [Fact]
     public async Task Application_batch_canceled_lost_response_retains_committed_prefix_and_restart_exact_retry_converges()
     {
@@ -302,4 +306,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         await restart.StopAsync();
     }
+
 }

@@ -14,9 +14,9 @@ using AssignmentTarget = Haby.Operator.Contracts.ProfileAssignmentTarget;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static JsonObject ComponentEnvelope(Scenario scenario, int version)
+    private protected static JsonObject ComponentEnvelope(Scenario scenario, int version)
     {
         var envelope = UpdateEnvelope(scenario, version, version == 2 ? 210 : 220);
         var components = envelope["manifest"]!["spec"]!["components"]!;
@@ -30,9 +30,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
         return envelope;
     }
-
-    private static async Task AssignComponent(ManifestOperator.ManifestOperatorClient client, Scenario scenario,
-        string component, string version, bool disable)
+    private protected static async Task AssignComponent(ManifestOperator.ManifestOperatorClient client, Scenario scenario,
+            string component, string version, bool disable)
     {
         var target = new AssignmentTarget { Kind = "component", ApplicationId = DocumentRequest(scenario).ApplicationId, ComponentRef = component };
         var prior = await client.GetProfileAssignmentAsync(new() { Environment = "pilot", Target = target });
@@ -56,6 +55,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Contains((await client.ApplyProfileAssignmentAsync(request)).Status,
             new[] { ProfileAssignmentStatus.Created, ProfileAssignmentStatus.Updated });
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Fact]
     public async Task Component_update_target_scopes_include_absence_exclude_removals_and_resume_logical_same_id_assignment()

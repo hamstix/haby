@@ -12,7 +12,36 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
+{
+    private protected static async Task<DurablePlanSummary> RetentionPlan(Scenario scenario, ManifestOperator.ManifestOperatorClient client,
+            string name, int version, int expected, bool pair, bool declared, string? endpoint = null)
+    {
+        var envelope = declared ? pair ? IndependentEnvelope(scenario, version, name) : MixedEnvelope(scenario, version, name) : UpdateEnvelope(scenario, version);
+        var revision = await ImportUpdate(client, envelope);
+        if (!pair) return await UpdatePlan(client, revision, expected, endpoint, created: expected == 1 ? 1 : 0, added: declared && expected > 1);
+        var change = await client.CreateChangeSetAsync(new()
+        {
+            EnvironmentId = "pilot",
+            Reference = revision,
+            Precondition = PlanningPrecondition.ExpectedGeneration,
+            ExpectedGeneration = expected
+        });
+        var result = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
+        Assert.Equal(PlanningStatus.Planned, result.Status);
+        var plan = result.Plan;
+        Assert.Equal(expected == 1 ? 5 : 0, plan.Operations.Count);
+        Assert.Equal(expected == 1 || !declared ? 2 : 4, plan.ReusedResources.Count);
+        Assert.Equal(declared ? 0 : 2, plan.RetainedResources.Count);
+        Assert.All(plan.ReusedResources.Concat(plan.RetainedResources), r => Assert.Equal(r.ResourceId is "db-b" or "login-b" ? 2 : 1, r.SourceGeneration));
+        Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new() { PlanId = plan.PlanId })).Status);
+        if (endpoint is not null) _ = await NativeReuseCommand(endpoint, "plan", "get", plan.PlanId);
+        return plan;
+    }
+
+}
+
+public sealed partial class ApplicationGenerationTests
 {
     [Theory]
     [InlineData("database-retention")]
@@ -55,31 +84,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
             Assert.Equal(new[] { "db-b", "login-b" }, graph.RetainedResources.Select(r => r.Resource.Value));
         }
         await restarted.StopAsync();
-    }
-
-    private static async Task<DurablePlanSummary> RetentionPlan(Scenario scenario, ManifestOperator.ManifestOperatorClient client,
-        string name, int version, int expected, bool pair, bool declared, string? endpoint = null)
-    {
-        var envelope = declared ? pair ? IndependentEnvelope(scenario, version, name) : MixedEnvelope(scenario, version, name) : UpdateEnvelope(scenario, version);
-        var revision = await ImportUpdate(client, envelope);
-        if (!pair) return await UpdatePlan(client, revision, expected, endpoint, created: expected == 1 ? 1 : 0, added: declared && expected > 1);
-        var change = await client.CreateChangeSetAsync(new()
-        {
-            EnvironmentId = "pilot",
-            Reference = revision,
-            Precondition = PlanningPrecondition.ExpectedGeneration,
-            ExpectedGeneration = expected
-        });
-        var result = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
-        Assert.Equal(PlanningStatus.Planned, result.Status);
-        var plan = result.Plan;
-        Assert.Equal(expected == 1 ? 5 : 0, plan.Operations.Count);
-        Assert.Equal(expected == 1 || !declared ? 2 : 4, plan.ReusedResources.Count);
-        Assert.Equal(declared ? 0 : 2, plan.RetainedResources.Count);
-        Assert.All(plan.ReusedResources.Concat(plan.RetainedResources), r => Assert.Equal(r.ResourceId is "db-b" or "login-b" ? 2 : 1, r.SourceGeneration));
-        Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new() { PlanId = plan.PlanId })).Status);
-        if (endpoint is not null) _ = await NativeReuseCommand(endpoint, "plan", "get", plan.PlanId);
-        return plan;
     }
 
     [Theory]
@@ -241,4 +245,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(history, await ReuseHistory(scenario.Connection)); Assert.Equal(oid, await DatabaseOid(name));
         await host.StopAsync();
     }
+
 }

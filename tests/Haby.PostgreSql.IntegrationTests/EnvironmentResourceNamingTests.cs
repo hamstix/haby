@@ -15,9 +15,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private async Task<(string Connection, EnvironmentRecordId Environment, ProviderInstanceId Provider)> NamingCatalog()
+    private protected async Task<(string Connection, EnvironmentRecordId Environment, ProviderInstanceId Provider)> NamingCatalog()
     {
         var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("naming_catalog_")));
         await using var services = Services(connection, full: true);
@@ -37,6 +37,12 @@ public sealed partial class PostgreSqlApplicationLoginTests
             ProviderAlias.Create("postgresql.primary"), null, new(provider, ProviderConfigurationRevisionNumber.Create(1)), "fixture", default)).Outcome);
         return (connection, environment, provider);
     }
+
+}
+
+[Collection("Login logging isolated")]
+public sealed partial class ApplicationGenerationTests(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture), IClassFixture<PostgreSqlFixture>
+{
 
     [Fact]
     public async Task Naming_same_manifest_two_authenticated_native_hosts_one_server_freezes_names_and_delivers_real_isolated_access()
@@ -225,4 +231,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
             return result;
         }
     }
+
 }

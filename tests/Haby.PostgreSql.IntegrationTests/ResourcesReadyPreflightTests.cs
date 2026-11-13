@@ -11,9 +11,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private sealed class ReadinessMaterialTrap : DbCommandInterceptor
+    private protected sealed class ReadinessMaterialTrap : DbCommandInterceptor
     {
         public int MaterialSelects;
         public int LockedMaterialSelects;
@@ -29,12 +29,12 @@ public sealed partial class PostgreSqlApplicationLoginTests
             return ValueTask.FromResult(reader);
         }
     }
-    private sealed class ReadinessFactory(string connection, ReadinessMaterialTrap trap) : IDbContextFactory<ManifestCatalogDbContext>
+    private protected sealed class ReadinessFactory(string connection, ReadinessMaterialTrap trap) : IDbContextFactory<ManifestCatalogDbContext>
     {
         public ManifestCatalogDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>()
             .UseNpgsql(connection).AddInterceptors(trap).Options);
     }
-    private sealed class ReadinessSecrets(ISecretStore inner) : ISecretStore
+    private protected sealed class ReadinessSecrets(ISecretStore inner) : ISecretStore
     {
         public int Resolves;
         public ValueTask<SecretMaterial?> ResolveAsync(SecretDefinition d, SecretRef r, CancellationToken t) { Resolves++; return inner.ResolveAsync(d, r, t); }
@@ -43,14 +43,13 @@ public sealed partial class PostgreSqlApplicationLoginTests
         public ValueTask CreateAsync(SecretDefinition d, SecretRef r, byte[] b, CancellationToken t) => inner.CreateAsync(d, r, b, t);
         public ValueTask AddVersionAsync(EnvironmentRecordId e, SecretRef r, byte[] b, CancellationToken t) => inner.AddVersionAsync(e, r, b, t);
     }
-    private sealed class MismatchedDatabaseResult : IExternalOperationOutputContract
+    private protected sealed class MismatchedDatabaseResult : IExternalOperationOutputContract
     {
         public DurableActionExecutionKey Producer => PostgreSqlDatabaseCreateAction.RegistrationKey;
         public ExternalOperationOutputIdentity Identity => new("unsupported.database-result/v99", PostgreSqlDatabaseOutputContract.Key);
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => false;
     }
-
-    private static async Task<string> ReadinessHistory(string connection)
+    private protected static async Task<string> ReadinessHistory(string connection)
     {
         await using var db = new NpgsqlConnection(connection); await db.OpenAsync();
         await using var command = new NpgsqlCommand("""
@@ -63,6 +62,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
             """, db);
         return (string)(await command.ExecuteScalarAsync())!;
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
     [Theory]
     [InlineData("missing-validator")]
     [InlineData("mismatched-validator")]
@@ -184,4 +188,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Empty(await final.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
         Assert.Null((await final.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
     }
+
 }

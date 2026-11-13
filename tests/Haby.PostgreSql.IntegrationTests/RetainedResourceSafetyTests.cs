@@ -11,9 +11,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private sealed class WithoutRetentionPolicy(IDurableActionAdmissionHandler? handler = null) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy
+    private protected sealed class WithoutRetentionPolicy(IDurableActionAdmissionHandler? handler = null) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IDurableResourceReusePolicy
     {
         private readonly IDurableActionAdmissionHandler inner = handler ?? new PostgreSqlDatabaseCreateAdmission();
         public DurableActionExecutionKey Key => inner.Key;
@@ -24,6 +24,20 @@ public sealed partial class PostgreSqlApplicationLoginTests
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) => ((IDurableResourcePlanComposer)inner).ValidateGraph(spec, resource, inputs, configuration, graph);
         public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => ((IDurableResourceReusePolicy)inner).CanReuse(accepted, target, resource, inputs, configuration);
     }
+    private protected async Task EstablishRetained(Scenario scenario, ManifestOperator.ManifestOperatorClient client, string name, int through = 3, bool pair = false)
+    {
+        for (var generation = 2; generation <= through; generation++)
+        {
+            var plan = await RetentionPlan(scenario, client, name, generation, generation - 1, pair, generation == 2);
+            Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Status);
+            Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = generation })).Status);
+        }
+    }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Theory]
     [InlineData(false)]
@@ -53,16 +67,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(GenerationExecutionStatus.InputUnavailable, result.Status); Assert.Equal(2, result.Progress.AppliedGeneration);
         Assert.Equal(history, await ReuseHistory(scenario.Connection)); Assert.NotNull(await DatabaseOid(name));
         await restarted.StopAsync();
-    }
-
-    private async Task EstablishRetained(Scenario scenario, ManifestOperator.ManifestOperatorClient client, string name, int through = 3, bool pair = false)
-    {
-        for (var generation = 2; generation <= through; generation++)
-        {
-            var plan = await RetentionPlan(scenario, client, name, generation, generation - 1, pair, generation == 2);
-            Assert.Equal(CommitStatus.Committed, (await client.CommitDesiredStateAsync(new() { ChangeSetId = plan.ChangeSetId, PlanId = plan.PlanId })).Status);
-            Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = generation })).Status);
-        }
     }
 
     [Theory]
@@ -177,4 +181,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(history, await ReuseHistory(scenario.Connection)); Assert.Equal(oid, await DatabaseOid(name));
         await host.StopAsync();
     }
+
 }

@@ -11,7 +11,8 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+[Collection("Catalog database group")]
+public sealed class ManifestCatalogPersistenceTests(CatalogServerFixture server) : CatalogTestCase(server)
 {
     private const string AnyObject = """{"type":"object"}""";
     private static readonly ManifestContractCatalog Catalog = new(
@@ -376,14 +377,7 @@ public sealed class ManifestCatalogPersistenceTests(PostgreSqlFixture fixture) :
     }
 
     private async Task<string> NewDatabaseAsync()
-    {
-        var name = "haby_catalog_" + Guid.NewGuid().ToString("N");
-        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection);
-        await command.ExecuteNonQueryAsync();
-        return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name }.ConnectionString;
-    }
+    { return await CreateDatabaseAsync("haby_catalog_"); }
 
     private static ServiceProvider Services(string connection) => new ServiceCollection()
         .AddPostgreSqlManifestCatalog(connection).BuildServiceProvider();

@@ -8,7 +8,8 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+[Collection("Catalog database group")]
+public sealed class PlaintextSecretStoreTests(CatalogServerFixture server) : CatalogTestCase(server)
 {
     [Fact]
     public async Task Exact_versions_survive_restart_and_reject_other_scopes()
@@ -266,14 +267,7 @@ public sealed class PlaintextSecretStoreTests(PostgreSqlFixture fixture) : IClas
     }
 
     private async Task<string> NewDatabaseAsync()
-    {
-        var name = "haby_secret_" + Guid.NewGuid().ToString("N");
-        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", connection);
-        await command.ExecuteNonQueryAsync();
-        return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name }.ConnectionString;
-    }
+    { return await CreateDatabaseAsync("haby_secret_"); }
 
     private static ServiceProvider Services(string connection) => new ServiceCollection()
         .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore().BuildServiceProvider();

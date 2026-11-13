@@ -12,12 +12,17 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private sealed class NamingPrecisionClock : TimeProvider
+    private protected sealed class NamingPrecisionClock : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new DateTimeOffset(2026, 11, 10, 12, 0, 0, TimeSpan.Zero).AddTicks(1234567);
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Fact]
     public async Task Naming_creation_and_selection_audit_roundtrip_database_precision_and_equivalent_repeats()
@@ -194,4 +199,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(plan.Id, default));
         Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default));
     }
+
 }

@@ -8,7 +8,21 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
+{
+    private protected sealed class MixedHooks : IDurableCreateDispatchFaultHooks
+    {
+        public Func<CancellationToken, ValueTask>? AfterMarker;
+        public Func<CancellationToken, ValueTask>? BeforeSuccess;
+        public ValueTask BeforeDispatchMarkerAsync(CancellationToken token) => ValueTask.CompletedTask;
+        public ValueTask AfterDispatchMarkerCommittedAsync(CancellationToken token) => AfterMarker?.Invoke(token) ?? ValueTask.CompletedTask;
+        public ValueTask DuringCreateCommandAsync(CancellationToken token) => ValueTask.CompletedTask;
+        public ValueTask BeforeSuccessPersistedAsync(CancellationToken token) => BeforeSuccess?.Invoke(token) ?? ValueTask.CompletedTask;
+    }
+
+}
+
+public sealed partial class ApplicationGenerationTests
 {
     [Fact]
     public async Task Mixed_external_name_conflict_preserves_old_resources_and_blocks_next_generation()
@@ -134,16 +148,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         await host.StopAsync();
     }
 
-    private sealed class MixedHooks : IDurableCreateDispatchFaultHooks
-    {
-        public Func<CancellationToken, ValueTask>? AfterMarker;
-        public Func<CancellationToken, ValueTask>? BeforeSuccess;
-        public ValueTask BeforeDispatchMarkerAsync(CancellationToken token) => ValueTask.CompletedTask;
-        public ValueTask AfterDispatchMarkerCommittedAsync(CancellationToken token) => AfterMarker?.Invoke(token) ?? ValueTask.CompletedTask;
-        public ValueTask DuringCreateCommandAsync(CancellationToken token) => ValueTask.CompletedTask;
-        public ValueTask BeforeSuccessPersistedAsync(CancellationToken token) => BeforeSuccess?.Invoke(token) ?? ValueTask.CompletedTask;
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -197,4 +201,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(uncertain ? 1 : 2, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
         await restart.StopAsync();
     }
+
 }

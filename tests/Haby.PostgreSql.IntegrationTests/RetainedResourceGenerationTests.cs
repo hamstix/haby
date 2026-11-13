@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public sealed partial class ApplicationGenerationTests
 {
     [Theory]
     [InlineData(false)]
@@ -50,4 +50,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(history, await ReuseHistory(scenario.Connection)); Assert.Equal(oid, await DatabaseOid(added));
         await restarted.StopAsync();
     }
+
 }

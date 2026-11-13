@@ -15,7 +15,8 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PlacementRevisionPersistenceTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
+[Collection("Catalog database group")]
+public sealed partial class PlacementRevisionPersistenceTests(CatalogServerFixture server) : CatalogTestCase(server)
 {
     [Fact]
     public async Task Restart_exact_scopes_retry_original_identity_and_audit_conflict_and_no_other_state()
@@ -207,10 +208,7 @@ public sealed partial class PlacementRevisionPersistenceTests(PostgreSqlFixture 
 
     private async Task<string> Database(bool migrate = true)
     {
-        var name = "haby_placements_" + Guid.NewGuid().ToString("N");
-        await using (var db = new NpgsqlConnection(fixture.ConnectionString))
-        { await db.OpenAsync(); await using var cmd = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", db); await cmd.ExecuteNonQueryAsync(); }
-        var connection = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name }.ConnectionString;
+        var connection = await CreateDatabaseAsync("haby_placement_");
         if (migrate)
         {
             await using (var services = Services(connection)) await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();

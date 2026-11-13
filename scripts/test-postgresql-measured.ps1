@@ -66,6 +66,7 @@ try {
                 if ($discoveryExit -ne 0) { $testExit = $discoveryExit; $primaryPhase = 'discovery'; break }
                 $primaryPhase = 'discovery-coverage'
                 $coverage = @(Get-PostgreSqlCoverageCases (Join-Path $private 'discovery.log') (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/coverage-map.json'))
+                Assert-PostgreSqlBaselineCoverage $coverage (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/baseline-cases.json')
                 [pscustomobject]@{ status = 'discovered-not-executed'; cases = $coverage } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $safe 'coverage.json') -Encoding utf8
                 $timer.Restart()
                 $primaryPhase = 'test'
@@ -92,6 +93,12 @@ try {
             if ($Docker) {
                 $executed = @(Get-Content (Join-Path $safe 'cases.json') -Raw | ConvertFrom-Json)
                 Assert-PostgreSqlCoverage $coverage $executed
+                $resources = Get-Content -LiteralPath (Join-Path $safe 'resources.json') -Raw | ConvertFrom-Json
+                if ($resources.limit -ne $preflight.prerequisites.serverLimit -or $resources.active -ne 0 -or
+                    $resources.cleanupFailed -ne 0 -or $resources.peakReservedServers -gt $resources.limit -or
+                    $resources.readyActive -ne 0 -or $resources.peakReadyServers -gt $resources.limit -or
+                    $resources.startupAttempts -ne $resources.cleaned -or
+                    $resources.catalogDatabasesCreated -ne $resources.catalogDatabasesDropped) { throw 'Owned resource accounting incomplete.' }
                 [pscustomobject]@{ status = 'complete'; discovered = $coverage.Count; executed = $executed.Count; cases = $coverage } |
                     ConvertTo-Json -Depth 6 | Set-Content (Join-Path $safe 'coverage.json') -Encoding utf8
             }
@@ -120,7 +127,7 @@ try {
             os = [Runtime.InteropServices.RuntimeInformation]::OSDescription
             architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
             processors = [Environment]::ProcessorCount; configuration = 'Debug'
-            parallelism = 'xUnit CPU-bound default; existing exclusive collections unchanged'
+            parallelism = $(if ($Docker) { 'Bounded xUnit collections; per-case product concurrency retained; see resources.json' } else { 'xUnit CPU-bound default; existing exclusive collections unchanged' })
             runnerPackages = $runnerPackages
             buildWarningCodes = $buildWarningCodes
             externalCluster = $env:HABY_POSTGRESQL_EPHEMERAL_EXTERNAL -eq '1'

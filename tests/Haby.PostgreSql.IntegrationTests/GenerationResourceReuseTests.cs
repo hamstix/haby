@@ -15,9 +15,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static JsonObject UpdateEnvelope(Scenario scenario, int version, int timeout = 210)
+    private protected static JsonObject UpdateEnvelope(Scenario scenario, int version, int timeout = 210)
     {
         var envelope = PostgreSqlPairPlanningTests.Example();
         envelope["applicationVersion"] = "v" + version;
@@ -27,15 +27,13 @@ public sealed partial class PostgreSqlApplicationLoginTests
         envelope["manifest"]!["spec"]!["components"]!["api"]!["bindings"]!["storage"]!["options"] = new JsonObject { ["timeout"] = timeout };
         return envelope;
     }
-
-    private static async Task<RevisionReference> ImportUpdate(ManifestOperator.ManifestOperatorClient client, JsonObject envelope)
+    private protected static async Task<RevisionReference> ImportUpdate(ManifestOperator.ManifestOperatorClient client, JsonObject envelope)
     {
         var result = await client.ImportAsync(new() { OriginalEnvelope = ByteString.CopyFrom(PostgreSqlPairPlanningTests.Bytes(envelope)) });
         Assert.NotNull(result.Created ?? (object?)result.ExistingEquivalent);
         return result.Created?.Revision.Reference ?? result.ExistingEquivalent.Revision.Reference;
     }
-
-    private static async Task<DurablePlanSummary> UpdatePlan(ManifestOperator.ManifestOperatorClient client, RevisionReference revision, long expected, string? endpoint = null, int created = 0, bool added = false)
+    private protected static async Task<DurablePlanSummary> UpdatePlan(ManifestOperator.ManifestOperatorClient client, RevisionReference revision, long expected, string? endpoint = null, int created = 0, bool added = false)
     {
         var native = endpoint is null ? null : await NativeReuseCommand(endpoint, "changeset", "create", revision.ApplicationRecordId, revision.RevisionNumber.ToString(), "--expected-generation", expected.ToString());
         var change = native is { } nativeChange ? await client.GetChangeSetAsync(new() { ChangeSetId = nativeChange.GetProperty("data"u8).GetProperty("changeSet"u8).GetProperty("changeSetId"u8).GetString()! }) : await client.CreateChangeSetAsync(new()
@@ -50,8 +48,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new() { PlanId = planned.Plan.PlanId })).Status);
         return planned.Plan;
     }
-
-    private static async Task<string> ReuseHistory(string connection)
+    private protected static async Task<string> ReuseHistory(string connection)
     {
         await using var db = Context(connection);
         // Independent complete immutable history oracle, excluding desired/applied pointers and new configuration artifacts.
@@ -65,14 +62,42 @@ public sealed partial class PostgreSqlApplicationLoginTests
             .Select(x => x.ProviderInstanceId + ":" + x.EnvironmentRecordId + ":" + x.ApplicationRecordId + ":" + x.ResourceLocalId + ":" + x.Namespace + ":" + x.Value).ToArrayAsync();
         return string.Join("\n", operations.Concat(attempts).Concat(outputs).Concat(slots).Concat(management).Concat(reservations)) + ":" + await db.SecretVersions.CountAsync() + ":" + await db.GeneratedCredentialCreationAudits.CountAsync();
     }
-
-    private async Task<string> ExternalIdentity(Scenario scenario)
+    private protected async Task<string> ExternalIdentity(Scenario scenario)
     {
         await using var db = new NpgsqlConnection(fixture.ConnectionString); await db.OpenAsync();
         await using var command = new NpgsqlCommand("SELECT json_build_array(d.oid, d.datdba, d.datacl, r.oid, r.rolname, r.rolcanlogin)::text FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba WHERE d.datname = $1", db);
         command.Parameters.AddWithValue(scenario.Database);
         return (string)(await command.ExecuteScalarAsync())!;
     }
+    private protected static async Task<JsonElement?> NativeReuseCommand(string endpoint, params string[] args)
+    {
+        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
+        if (binary is null) return null;
+        var config = Path.Combine(Path.GetTempPath(), "haby-reuse-" + Guid.NewGuid().ToString("N") + ".yaml");
+        try
+        {
+            var fileOptions = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows()) fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            await using (var stream = new FileStream(config, fileOptions))
+            await using (var writer = new StreamWriter(stream))
+                await writer.WriteAsync($"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
+            var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var arg in args.Concat(["--config", config, "--output", "json"])) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start)!;
+            var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try { await process.WaitForExitAsync(deadline.Token); } catch { process.Kill(true); throw; }
+            Assert.Equal(0, process.ExitCode); Assert.True(string.IsNullOrEmpty(await stderr), "Native CLI wrote unexpected diagnostics.");
+            using var json = JsonDocument.Parse(await stdout); return json.RootElement.Clone();
+        }
+        finally { File.Delete(config); }
+    }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Theory]
     [InlineData(false, false)]
@@ -288,28 +313,4 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
     }
 
-    private static async Task<JsonElement?> NativeReuseCommand(string endpoint, params string[] args)
-    {
-        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
-        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
-        if (binary is null) return null;
-        var config = Path.Combine(Path.GetTempPath(), "haby-reuse-" + Guid.NewGuid().ToString("N") + ".yaml");
-        try
-        {
-            var fileOptions = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
-            if (!OperatingSystem.IsWindows()) fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-            await using (var stream = new FileStream(config, fileOptions))
-            await using (var writer = new StreamWriter(stream))
-                await writer.WriteAsync($"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
-            var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var arg in args.Concat(["--config", config, "--output", "json"])) start.ArgumentList.Add(arg);
-            using var process = Process.Start(start)!;
-            var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            try { await process.WaitForExitAsync(deadline.Token); } catch { process.Kill(true); throw; }
-            Assert.Equal(0, process.ExitCode); Assert.True(string.IsNullOrEmpty(await stderr), "Native CLI wrote unexpected diagnostics.");
-            using var json = JsonDocument.Parse(await stdout); return json.RootElement.Clone();
-        }
-        finally { File.Delete(config); }
-    }
 }

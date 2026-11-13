@@ -10,9 +10,9 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private static JsonObject MixedEnvelope(Scenario scenario, int version, string name)
+    private protected static JsonObject MixedEnvelope(Scenario scenario, int version, string name)
     {
         var envelope = UpdateEnvelope(scenario, version);
         envelope["manifest"]!["spec"]!["resources"]!["extra"] = new JsonObject
@@ -26,14 +26,18 @@ public sealed partial class PostgreSqlApplicationLoginTests
             envelope["manifest"]!["spec"]!["resources"]!["db"]!["providerRef"]!.DeepClone();
         return envelope;
     }
-
-    private async Task<long?> DatabaseOid(string name)
+    private protected async Task<long?> DatabaseOid(string name)
     {
         await using var connection = new NpgsqlConnection(fixture.ConnectionString); await connection.OpenAsync();
         await using var command = new NpgsqlCommand("SELECT oid::bigint FROM pg_database WHERE datname = $1", connection);
         command.Parameters.AddWithValue(name);
         return await command.ExecuteScalarAsync() is long oid ? oid : null;
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Theory]
     [InlineData(false)]
@@ -199,4 +203,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
             return string.Join("\n", operations.Concat(attempts).Concat(outputs).Concat(slots)) + ":" + await db.SecretVersions.CountAsync() + ":" + await db.GeneratedCredentialCreationAudits.CountAsync();
         }
     }
+
 }

@@ -13,8 +13,14 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class PostgreSqlFixture : IAsyncLifetime
+public class PostgreSqlFixture : IAsyncLifetime
 {
+    private readonly Func<Task>? _afterStart;
+    private readonly bool _control;
+    private bool _reserved;
+    private bool _ready;
+    public PostgreSqlFixture() { }
+    internal PostgreSqlFixture(bool control, Func<Task>? afterStart = null) { _control = control; _afterStart = afterStart; }
     private PostgreSqlContainer? _container;
     private string? _externalContainer;
     public string ConnectionString { get; private set; } = null!;
@@ -55,18 +61,40 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
         }
         // A unique confidential sentinel cannot collide with ordinary metadata such as
         // "postgresql" in captured CLI output, unlike the fixture's default password.
-        _container = new PostgreSqlBuilder("postgres:17.6-alpine")
-            .WithPassword(Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))
-            .Build();
-        await _container.StartAsync();
-        ConnectionString = new NpgsqlConnectionStringBuilder(_container.GetConnectionString())
-        { Pooling = false }.ConnectionString;
+        PostgreSqlResources.Reserve(_control);
+        _reserved = true;
+        try
+        {
+            _container = new PostgreSqlBuilder("postgres:17.6-alpine")
+                .WithPassword(Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)))
+                .Build();
+            await _container.StartAsync();
+            ConnectionString = new NpgsqlConnectionStringBuilder(_container.GetConnectionString())
+            { Pooling = false }.ConnectionString;
+            _ready = true;
+            PostgreSqlResources.Ready(_control);
+            if (_afterStart is not null) await _afterStart();
+        }
+        catch
+        {
+            PostgreSqlResources.StartupFailed();
+            try { await DisposeAsync(); }
+            catch { Console.Error.WriteLine("Owned startup cleanup failed; primary retained. See resource cleanup counts."); }
+            throw;
+        }
     }
 
     public async Task DisposeAsync()
     {
         using var timing = TestTiming.ClusterCleanup();
-        if (_container is not null) await _container.DisposeAsync();
+        if (!_reserved) return;
+        try
+        {
+            if (_container is not null) await _container.DisposeAsync();
+            _reserved = false;
+            PostgreSqlResources.Cleaned(_control, _ready);
+        }
+        catch { PostgreSqlResources.CleanupFailed(); throw; }
     }
 
     public async Task RunClientUtilityAsync(params string[] command)

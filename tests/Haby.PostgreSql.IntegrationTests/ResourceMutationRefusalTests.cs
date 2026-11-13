@@ -13,14 +13,13 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    // The original grant and delivered bytes are retained privately, never included in assertions.
-    private sealed record RefusalProbe(ConfigurationDocumentReply Document, ConfigurationAccessReply Grant,
-        byte[] Original, string Sentinel, string History, string External, string Accepted, string Database, string Role);
-
-    private async Task<RefusalProbe> PrepareRefusalProbe(Scenario scenario, ManifestOperator.ManifestOperatorClient client, GrpcChannel channel,
-        ConfigurationDocumentRequest? selector = null, string? database = null, string? role = null)
+    private     // The original grant and delivered bytes are retained privately, never included in assertions.
+        protected sealed record RefusalProbe(ConfigurationDocumentReply Document, ConfigurationAccessReply Grant,
+            byte[] Original, string Sentinel, string History, string External, string Accepted, string Database, string Role);
+    private protected async Task<RefusalProbe> PrepareRefusalProbe(Scenario scenario, ManifestOperator.ManifestOperatorClient client, GrpcChannel channel,
+            ConfigurationDocumentRequest? selector = null, string? database = null, string? role = null)
     {
         selector ??= DocumentRequest(scenario); selector.Generation = selector.Generation == 0 ? 1 : selector.Generation;
         database ??= scenario.Database; role ??= scenario.Role;
@@ -38,18 +37,15 @@ public sealed partial class PostgreSqlApplicationLoginTests
         return new(document, grant, original, sentinel, await ReuseHistory(scenario.Connection),
             await RefusalExternalIdentity(database), await RefusalAcceptedState(scenario.Connection), database, role);
     }
-
-    private static async Task<byte[]> RefusalDelivery(GrpcChannel channel, ConfigurationDocumentReply document, ConfigurationAccessReply grant) =>
-        (await new Haby.Configuration.Contracts.ConfigurationDelivery.ConfigurationDeliveryClient(channel)
-            .DeliverAsync(new() { RevisionId = document.Artifact.RevisionId }, Bearer(grant.Credential))).Json.ToByteArray();
-
-    private static string RefusalConnection(byte[] bytes)
+    private protected static async Task<byte[]> RefusalDelivery(GrpcChannel channel, ConfigurationDocumentReply document, ConfigurationAccessReply grant) =>
+            (await new Haby.Configuration.Contracts.ConfigurationDelivery.ConfigurationDeliveryClient(channel)
+                .DeliverAsync(new() { RevisionId = document.Artifact.RevisionId }, Bearer(grant.Credential))).Json.ToByteArray();
+    private protected static string RefusalConnection(byte[] bytes)
     {
         using var json = JsonDocument.Parse(bytes);
         return json.RootElement.GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8).GetString()!;
     }
-
-    private async Task VerifyRefusalProbe(Scenario scenario, GrpcChannel channel, RefusalProbe probe)
+    private protected async Task VerifyRefusalProbe(Scenario scenario, GrpcChannel channel, RefusalProbe probe)
     {
         var delivered = await RefusalDelivery(channel, probe.Document, probe.Grant);
         Assert.True(probe.Original.AsSpan().SequenceEqual(delivered), "Original exact grant configuration changed.");
@@ -65,16 +61,14 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.Equal(probe.History, await ReuseHistory(scenario.Connection));
         Assert.Equal(probe.Accepted, await RefusalAcceptedState(scenario.Connection));
     }
-
-    private async Task<string> RefusalExternalIdentity(string database)
+    private protected async Task<string> RefusalExternalIdentity(string database)
     {
         await using var connection = new NpgsqlConnection(fixture.ConnectionString); await connection.OpenAsync();
         await using var query = new NpgsqlCommand("SELECT json_build_array(d.oid, d.datdba, d.datacl, r.oid, r.rolname, r.rolcanlogin)::text FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba WHERE d.datname = $1", connection);
         query.Parameters.AddWithValue(database);
         return Assert.IsType<string>(await query.ExecuteScalarAsync());
     }
-
-    private static async Task<string> RefusalAcceptedState(string connection)
+    private protected static async Task<string> RefusalAcceptedState(string connection)
     {
         await using var db = Context(connection);
         var owners = await db.ApplicationDeployments.AsNoTracking().Select(x => x.Id + ":" + x.DesiredGeneration + ":" + x.AppliedGeneration).ToArrayAsync();
@@ -95,6 +89,11 @@ public sealed partial class PostgreSqlApplicationLoginTests
         return string.Join("\n", owners.Concat(generations).Concat(commits).Concat(documents).Concat(grants)
             .Concat(slots).Concat(secrets).Concat(versions).Concat(attempts).Concat(outputs));
     }
+
+}
+
+public sealed partial class ApplicationGenerationTests
+{
 
     [Theory]
     [InlineData(false)]
@@ -147,4 +146,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
             Assert.Equal(PlanningStatus.UnsupportedShape, refused.Status); Assert.Null(refused.Plan);
         }
     }
+
 }

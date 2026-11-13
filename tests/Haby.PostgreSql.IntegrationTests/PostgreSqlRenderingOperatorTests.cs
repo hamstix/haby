@@ -13,7 +13,37 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
+{
+    private protected static async Task NativeRendererOutcome(string endpoint, string outcome, string? code, params string[] args)
+    {
+        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
+        if (binary is null) return;
+        var config = Path.Combine(Path.GetTempPath(), "haby-renderer-" + Guid.NewGuid().ToString("N") + ".yaml");
+        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
+        try
+        {
+            foreach (var format in new[] { "text", "json" })
+            {
+                var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+                foreach (var arg in args.Concat(new[] { "--config", config, "-o", format })) start.ArgumentList.Add(arg);
+                using var process = Process.Start(start)!;
+                var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
+                Assert.Equal(code is null ? 0 : 1, process.ExitCode); Assert.Equal("", await stderr);
+                var text = await stdout; Assert.Contains(outcome, text);
+                if (code is not null) Assert.Contains(code, text);
+                foreach (var hidden in new[] { "sslMode", "secretRef", "template", "unavailable.connection", "deferred" }) Assert.DoesNotContain(hidden, text);
+            }
+        }
+        finally { File.Delete(config); }
+    }
+
+}
+
+public sealed partial class ApplicationConfigurationTests
 {
     [Fact]
     public async Task Generated_Host_import_and_plan_validate_partial_layers_compatibility_and_safe_refusals_before_outputs_exist()
@@ -36,7 +66,9 @@ public sealed partial class PostgreSqlApplicationLoginTests
         Assert.NotNull(imported);
         var change = (await client.CreateChangeSetAsync(new()
         {
-            EnvironmentId = "pilot", Precondition = PlanningPrecondition.ExpectedAbsence, Reference = imported.Revision.Reference
+            EnvironmentId = "pilot",
+            Precondition = PlanningPrecondition.ExpectedAbsence,
+            Reference = imported.Revision.Reference
         })).ChangeSet;
         var planned = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSetId });
         Assert.Equal(PlanningStatus.Planned, planned.Status);
@@ -88,29 +120,4 @@ public sealed partial class PostgreSqlApplicationLoginTests
         static ByteString Bytes(JsonNode value) => ByteString.CopyFromUtf8(value.ToJsonString());
     }
 
-    private static async Task NativeRendererOutcome(string endpoint, string outcome, string? code, params string[] args)
-    {
-        var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
-        if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrEmpty(binary));
-        if (binary is null) return;
-        var config = Path.Combine(Path.GetTempPath(), "haby-renderer-" + Guid.NewGuid().ToString("N") + ".yaml");
-        await File.WriteAllTextAsync(config, $"formatVersion: 1\ncurrentContext: pilot\ninstances:\n  local:\n    endpoint: {endpoint}\n    token: {OperatorTestCredentials.Credential(endpoint)}\ncontexts:\n  pilot:\n    instance: local\n    environmentId: pilot\n");
-        try
-        {
-            foreach (var format in new[] { "text", "json" })
-            {
-                var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-                foreach (var arg in args.Concat(new[] { "--config", config, "-o", format })) start.ArgumentList.Add(arg);
-                using var process = Process.Start(start)!;
-                var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                try { await process.WaitForExitAsync(timeout.Token); } catch { process.Kill(true); throw; }
-                Assert.Equal(code is null ? 0 : 1, process.ExitCode); Assert.Equal("", await stderr);
-                var text = await stdout; Assert.Contains(outcome, text);
-                if (code is not null) Assert.Contains(code, text);
-                foreach (var hidden in new[] { "sslMode", "secretRef", "template", "unavailable.connection", "deferred" }) Assert.DoesNotContain(hidden, text);
-            }
-        }
-        finally { File.Delete(config); }
-    }
 }

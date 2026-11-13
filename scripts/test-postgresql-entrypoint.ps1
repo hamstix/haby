@@ -58,6 +58,12 @@ Assert-Check (-not (Test-PostgreSqlRuntimeInventory 'Microsoft.NETCore.App 10.0.
 Assert-Check (-not (Test-PostgreSqlRuntimeInventory ($runtimeInventory.Replace('10.0.15', '11.0.0')))) 'Wrong runtime major accepted.'
 $malformedRuntime = 'MicrosoftXNETCoreXApp 10.0.15 /runtime' + [Environment]::NewLine + 'MicrosoftXAspNetCoreXApp 10.0.15 /runtime'
 Assert-Check (-not (Test-PostgreSqlRuntimeInventory $malformedRuntime)) 'Malformed runtime family names accepted.'
+Assert-Check ((Get-PostgreSqlServerLimit $null) -eq 4 -and (Get-PostgreSqlServerLimit '2') -eq 2 -and (Get-PostgreSqlServerLimit '8') -eq 8) 'Supported resource bound rejected.'
+foreach ($invalid in @('', '1', '9', '04', 'PROTECTED-invalid')) {
+    $refused = $false
+    try { Get-PostgreSqlServerLimit $invalid | Out-Null } catch { $refused = $true }
+    Assert-Check $refused 'Invalid resource bound accepted.'
+}
 $unavailable = Invoke-PostgreSqlCommand 'haby-deliberately-absent-runtime-command' @('--version') 1
 Assert-Check ($unavailable.exitCode -eq 127 -and -not $unavailable.output) 'Missing prerequisite command did not fail safely.'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('haby-coverage-control-' + [Guid]::NewGuid().ToString('N'))
@@ -83,6 +89,12 @@ try {
     $refused = $false
     try { Get-PostgreSqlCoverageCases $discovery $map | Out-Null } catch { $refused = $true }
     Assert-Check $refused 'Unmapped class was accepted.'
+    $baseline = Join-Path $directory 'baseline.json'
+    [pscustomobject]@{ cases = @($cases | ForEach-Object { $_.baselineMethod + '#' + $_.baselineCase }) } | ConvertTo-Json | Set-Content -LiteralPath $baseline
+    Assert-PostgreSqlBaselineCoverage $cases $baseline
+    $refused = $false
+    try { Assert-PostgreSqlBaselineCoverage @($cases[0], $cases[1]) $baseline } catch { $refused = $true }
+    Assert-Check $refused 'Lost baseline multiplicity was accepted.'
 } finally {
     $resolved = [IO.Path]::GetFullPath($directory)
     if ($resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) {

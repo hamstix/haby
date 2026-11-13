@@ -12,15 +12,30 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed partial class PostgreSqlApplicationLoginTests
+public abstract partial class ApplicationLoginScenario
 {
-    private const string RenderingProfile = """
+    private protected const string RenderingProfile = """
         {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"connection-layout","revision":1},"spec":{
         "documents":{"settings":{"fileName":"appsettings.json","format":"json","template":{}}},
         "staticContributions":{"logging":{"documentRef":"settings","path":"/Logging","value":{"Level":"Information"}}},
         "bindingRules":{"connection":{"slot":"main-database","rendererRef":"postgresql.npgsql-connection/v1alpha1","options":{"sslMode":"disable"},
         "documentProjections":[{"documentRef":"settings","path":"/PostgreSQL/DefaultConnection/ConnectionString"}]}}}}
         """;
+    private protected sealed class RenderingReadTrap : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            foreach (var forbidden in new[] { "secret_payloads", "provider_aliases", "provider_configuration_revisions", "generated_credential_slots" })
+                Assert.DoesNotContain(forbidden, command.CommandText);
+            return ValueTask.FromResult(result);
+        }
+    }
+
+}
+
+public sealed partial class ApplicationConfigurationTests
+{
 
     [Fact]
     public async Task Prior_configuration_format_requires_fresh_catalog_in_startup_and_direct_migration_without_reset()
@@ -149,17 +164,6 @@ public sealed partial class PostgreSqlApplicationLoginTests
         }
     }
 
-    private sealed class RenderingReadTrap : DbCommandInterceptor
-    {
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
-            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
-        {
-            foreach (var forbidden in new[] { "secret_payloads", "provider_aliases", "provider_configuration_revisions", "generated_credential_slots" })
-                Assert.DoesNotContain(forbidden, command.CommandText);
-            return ValueTask.FromResult(result);
-        }
-    }
-
     [Theory]
     [InlineData("uncertain")]
     [InlineData("missing")]
@@ -184,4 +188,5 @@ public sealed partial class PostgreSqlApplicationLoginTests
         var renderer = new ConfigurationOutputRenderer(PostgreSqlConnectionRendering.CreateCatalog(), services.GetRequiredService<IConfigurationOutputEvidence>());
         Assert.Null(await renderer.RenderAsync(scenario.Plan.Inputs.Configuration!.RenderPins[0], scenario.Commit.DeploymentId, scenario.Commit.Generation, scenario.Owner, default));
     }
+
 }
