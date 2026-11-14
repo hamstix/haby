@@ -4,8 +4,8 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 76,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1044,
-  "currentFast": 1542,
+  "currentPostgresql": 1048,
+  "currentFast": 1546,
   "currentKubernetesApiObjects": 24,
   "currentKubernetesDurableActions": 36,
   "currentKubernetesProviderAccess": 10,
@@ -502,6 +502,10 @@
     {"method":"Haby.PostgreSql.IntegrationTests.GeneratedCredentialSlotTests.Real_dump_restore_retains_exact_owner_slot_bytes_and_creation_audit","case":"e19453b1f2ccc2438aa31057e07310629e0fd3b5c33612260fe53fcb3dfcdb7c","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
     {"method":"Haby.PostgreSql.IntegrationTests.GeneratedCredentialSlotTests.Restricted_SQL_writer_can_create_and_read_but_cannot_mutate_generated_history","case":"b6ed765e09a90af8137dc244cc39741c96f7c0f9651e4795ba5dcea1a21c736a","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
     {"method":"Haby.PostgreSql.IntegrationTests.GeneratedCredentialSlotTests.Winner_committing_between_absent_slot_lookup_and_orphan_check_is_reused","case":"fe8c1f022ce8775e225b1114f6195a4c51afc59f6c0da24fca7ddb2257583fa7","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Protected_reflection_diagnostic_has_exact_method_case_and_closed_context","case":"a42636480fe6e03eb23da9d6916184391e0622cfbdec5490226c32125534a784","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor221":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Protected_reflection_diagnostic_drops_hostile_payload_and_unknown_values","case":"32d218e1b21444a85104965f1bc0d4499ee45488f0340289e1da97a0859aafc6","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor221":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Protected_reflection_nested_scopes_preserve_primary_and_each_cleanup_before_next_scope","case":"b36ec8f22ce5eba6820b5bc2c069e7a8f561cc7d3ae21d2cfc8b9e953d31f91b","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor221":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Protected_reflection_cleanup_only_failure_is_not_relabelled_as_body","case":"e26abf387f1e2b56f75f8f652f0bfad7a13ba6d4aed4d7c72faa6211fc6c6c30","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor221":true},
     {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Assertion_diagnostic_keeps_observed_status_without_assertion_payload","case":"b7f78b5f139168363d6d774adfb2145c9d5b16c4f4bfa1dad962f9bf28cca120","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
     {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Body_failure_survives_every_failing_disposal_with_separate_safe_evidence","case":"0aa30742c712545e5052519922544875e0ff8aeb5e5c1dd91d4391b458cb72a5","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
     {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Body_failure_survives_every_failing_disposal_with_separate_safe_evidence","case":"6980997c16e9c2499998e853f49a4d2ae6208e4f9fda405b40649be24265bdf5","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
@@ -2869,6 +2873,10 @@
     {"method":"Haby.Kubernetes.Qualification.RuntimeDeliveryCases.Run","case":"9041433206d2d3062ced89edf1455ba9d5f9646acf163f92b92c8faf60a2e8aa","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"every-change","addedFor221":true},
     {"method":"Haby.Kubernetes.Qualification.RuntimeDeliveryCases.Run","case":"63216bd2237197497ae121e7bb93ad858fdd2fb7205516d3d8f9c11f12076e08","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"every-change","addedFor221":true},
     {"method":"Haby.Kubernetes.Qualification.RuntimeDeliveryCases.Run","case":"e9a0ccc0a9d1afb2d91066d4904a614135046f30270d497c79be22ec8204bd68","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"every-change","addedFor221":true},
-    {"method":"Haby.Cli.Tests.RuntimeStartupClientTests.Owned_total_timer_cancellation_is_deadline_failure_even_before_next_elapsed_timestamp","case":"7c83e82c0cfee3824035d0d0eaa463c2337af3bfbb759cd2b16235c328c73be3","suite":"fast","gate":"validate","trigger":"every-change","addedFor221":true}
+    {"method":"Haby.Cli.Tests.RuntimeStartupClientTests.Owned_total_timer_cancellation_is_deadline_failure_even_before_next_elapsed_timestamp","case":"7c83e82c0cfee3824035d0d0eaa463c2337af3bfbb759cd2b16235c328c73be3","suite":"fast","gate":"validate","trigger":"every-change","addedFor221":true},
+    {"method":"Haby.Cli.Tests.RuntimeStartupClientTests.Default_generated_cancelled_preserves_caller_and_total_priority_without_retry","case":"4ba99489c50078d6fa42b1f434e047429faeaccb3f0c10c4af9b3d844dea5186","suite":"fast","gate":"validate","trigger":"every-change","addedFor221":true},
+    {"method":"Haby.Cli.Tests.RuntimeStartupClientTests.Permanent_outcomes_after_owned_timer_and_unrelated_cancelled_remain_terminal","case":"90c43eb45dd1fb7359aadcedd4ffb7a581ea6c002b0cc35c0d01143d3aeace55","suite":"fast","gate":"validate","trigger":"every-change","addedFor221":true},
+    {"method":"Haby.Cli.Tests.RuntimeStartupClientTests.Owned_rpc_timeout_retries_default_generated_cancelled_with_fresh_file","case":"1df4b90e119f3dca7d628d1312b48901fb751dbd46c5bec987c401ed83bfff01","suite":"fast","gate":"validate","trigger":"every-change","addedFor221":true},
+    {"method":"Haby.Cli.Tests.RuntimeStartupClientTests.Default_generated_cancelled_preserves_caller_and_total_priority_without_retry","case":"a33caec76df3aca42cdcb40ced02af7ce028fd7591e81be619bf397855c8fb40","suite":"fast","gate":"validate","trigger":"every-change","addedFor221":true}
   ]
 }

@@ -1,8 +1,14 @@
 using System.Text;
+using System.Net;
 using Google.Protobuf;
 using Grpc.Core;
+using Grpc.Net.Client;
 using Haby.Configuration.Client;
 using Haby.Configuration.Contracts;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Haby.Cli.Tests;
@@ -183,6 +189,220 @@ public sealed class RuntimeStartupClientTests
             Assert.Equal(kind == "expired" ? RuntimeStartupFailure.StartupDeadlineExceeded : kind == "malformed" ? RuntimeStartupFailure.InvalidCredential :
                 RuntimeStartupFailure.CredentialUnavailable, error.Failure);
             Assert.Null(error.InnerException); Assert.DoesNotContain("sentinel", error.ToString()); Assert.Equal(0, calls);
+        }
+    }
+
+    [Fact]
+    public async Task Owned_rpc_timeout_retries_default_generated_cancelled_with_fresh_file()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "haby221-r1-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        var revision = Revision();
+        var service = new OwnedTimeoutDelivery(revision);
+        var reads = 0;
+        var ownedTokens = new List<byte[]>();
+        var observedWire = new TaskCompletionSource<StatusCode>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstWireDeadline = DateTime.MinValue;
+        var primaryEntered = false;
+        RuntimeStartupFailure? refusal = null;
+        try
+        {
+            var path = Path.Combine(root, "projected");
+            await File.WriteAllTextAsync(path, "fixture-original");
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
+            builder.Services.AddGrpc(); builder.Services.AddSingleton(service);
+            await using var host = builder.Build(); host.MapGrpcService<OwnedTimeoutDelivery>();
+            using var caller = new CancellationTokenSource();
+            Task<RuntimeStartupDocuments>? fetch = null;
+            try
+            {
+                await host.StartAsync();
+                // Default cancellation behavior: no ThrowOperationCanceledOnCancellation override or retry configuration.
+                using var channel = GrpcChannel.ForAddress(host.Urls.Single(), new GrpcChannelOptions { MaxReceiveMessageSize = 8 * 1024 * 1024 });
+                var generated = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+                var clock = new Clock();
+                var client = new RuntimeStartupClient(async (request, headers, deadline, token) =>
+                {
+                    if (firstWireDeadline == DateTime.MinValue) firstWireDeadline = deadline;
+                    using var call = generated.DeliverRuntimeAsync(request, headers, deadline: deadline, cancellationToken: token);
+                    try { return await call.ResponseAsync; }
+                    catch (RpcException error) { observedWire.TrySetResult(error.StatusCode); throw; }
+                }, clock, () => 0, async (credentialPath, token) =>
+                {
+                    Interlocked.Increment(ref reads);
+                    var bytes = await ProjectedCredentialFile.ReadAsync(credentialPath, token);
+                    ownedTokens.Add(bytes);
+                    return bytes;
+                });
+                // Anchor only after Host/file setup. The real transport uses wall-clock UTC, the helper timers use Clock.
+                clock.UtcOffset = DateTimeOffset.UtcNow - DateTimeOffset.UnixEpoch;
+                fetch = client.FetchAsync(Binding, [revision], path,
+                    new() { TotalTimeout = TimeSpan.FromSeconds(300), RpcTimeout = TimeSpan.FromSeconds(30) }, caller.Token);
+                await service.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                var replacement = Path.Combine(root, "replacement");
+                await File.WriteAllTextAsync(replacement, "fixture-replaced"); File.Move(replacement, path, true);
+                Assert.True(firstWireDeadline - DateTime.UtcNow > TimeSpan.FromSeconds(10), "Actual wire deadline must remain in the future before advancing only the helper clock.");
+                clock.Advance(TimeSpan.FromSeconds(30));
+                Assert.Equal(StatusCode.Cancelled, await observedWire.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+                try
+                {
+                    using var complete = await fetch.WaitAsync(TimeSpan.FromSeconds(10));
+                    Assert.Single(complete.Documents);
+                    Assert.Equal(revision, complete.Documents[0].RevisionId);
+                    Assert.True(complete.Documents[0].Json.Span.SequenceEqual(Reply(revision).Json.Span));
+                    primaryEntered = true;
+                }
+                catch (RuntimeStartupException error) { refusal = error.Failure; }
+                Assert.Equal(TimeSpan.FromSeconds(30), clock.GetElapsedTime(0));
+            }
+            finally
+            {
+                caller.Cancel();
+                if (fetch is not null)
+                {
+                    try { using var finalResult = await fetch.WaitAsync(TimeSpan.FromSeconds(10)); }
+                    catch (RuntimeStartupException) { }
+                }
+                if (service.Entered.Task.IsCompleted) await service.Exited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+        finally { Directory.Delete(root, true); }
+        Assert.True(service.Exited.Task.IsCompletedSuccessfully);
+        Assert.All(ownedTokens, bytes => Assert.True(bytes.AsSpan().IndexOfAnyExcept((byte)0) < 0));
+        var closedFailure = refusal switch
+        {
+            null => "none",
+            RuntimeStartupFailure.TransportFailure => "transport-failure",
+            RuntimeStartupFailure.CallerCancelled => "caller-cancelled",
+            RuntimeStartupFailure.StartupDeadlineExceeded => "startup-deadline-exceeded",
+            _ => "other-closed-failure"
+        };
+        Assert.True(primaryEntered,
+            $"Expected complete result after owned RPC timeout; wire=Cancelled; startup={closedFailure}; calls={Math.Min(service.Calls, 64)}; reads={Math.Min(reads, 64)}; first-server-exited=True; owned-cleanup=complete.");
+        Assert.Equal(2, service.Calls); Assert.Equal(2, reads); Assert.True(service.ReplacementObserved);
+    }
+
+    [Theory]
+    [InlineData("caller")]
+    [InlineData("total")]
+    public async Task Default_generated_cancelled_preserves_caller_and_total_priority_without_retry(string mode)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "haby221-r1-negative-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        var service = new OwnedTimeoutDelivery(Revision());
+        var reads = 0;
+        var observedWire = new TaskCompletionSource<StatusCode>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstWireDeadline = DateTime.MinValue;
+        try
+        {
+            var path = Path.Combine(root, "projected"); await File.WriteAllTextAsync(path, "fixture-original");
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
+            builder.Services.AddGrpc(); builder.Services.AddSingleton(service);
+            await using var host = builder.Build(); host.MapGrpcService<OwnedTimeoutDelivery>();
+            using var caller = new CancellationTokenSource();
+            Task<RuntimeStartupDocuments>? fetch = null;
+            try
+            {
+                await host.StartAsync();
+                using var channel = GrpcChannel.ForAddress(host.Urls.Single(), new GrpcChannelOptions { MaxReceiveMessageSize = 8 * 1024 * 1024 });
+                var generated = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+                var clock = new Clock();
+                var client = new RuntimeStartupClient(async (request, headers, deadline, token) =>
+                {
+                    firstWireDeadline = deadline;
+                    using var call = generated.DeliverRuntimeAsync(request, headers, deadline: deadline, cancellationToken: token);
+                    try { return await call.ResponseAsync; }
+                    catch (RpcException error) { observedWire.TrySetResult(error.StatusCode); throw; }
+                }, clock, () => 0, async (credentialPath, token) =>
+                {
+                    Interlocked.Increment(ref reads);
+                    return await ProjectedCredentialFile.ReadAsync(credentialPath, token);
+                });
+                clock.UtcOffset = DateTimeOffset.UtcNow - DateTimeOffset.UnixEpoch;
+                fetch = client.FetchAsync(Binding, [service.Revision], path,
+                    new() { TotalTimeout = TimeSpan.FromSeconds(300), RpcTimeout = TimeSpan.FromSeconds(30) }, caller.Token);
+                await service.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.True(firstWireDeadline - DateTime.UtcNow > TimeSpan.FromSeconds(10), "Wire deadline must remain future before controlled local cancellation.");
+                if (mode == "caller") caller.Cancel();
+                else clock.Advance(TimeSpan.FromSeconds(300));
+                Assert.Equal(StatusCode.Cancelled, await observedWire.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+                var error = await Assert.ThrowsAsync<RuntimeStartupException>(async () => await fetch.WaitAsync(TimeSpan.FromSeconds(10)));
+                Assert.Equal(mode == "caller" ? RuntimeStartupFailure.CallerCancelled : RuntimeStartupFailure.StartupDeadlineExceeded, error.Failure);
+                Assert.Equal(1, service.Calls); Assert.Equal(1, reads);
+            }
+            finally
+            {
+                caller.Cancel();
+                if (fetch is not null)
+                {
+                    try { using var finalResult = await fetch.WaitAsync(TimeSpan.FromSeconds(10)); }
+                    catch (RuntimeStartupException) { }
+                }
+                if (service.Entered.Task.IsCompleted) await service.Exited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+        finally { Directory.Delete(root, true); }
+        Assert.True(service.Exited.Task.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task Permanent_outcomes_after_owned_timer_and_unrelated_cancelled_remain_terminal()
+    {
+        foreach (var permanent in new[]
+        {
+            Refused(StatusCode.Unauthenticated), Refused(StatusCode.PermissionDenied), Refused(StatusCode.FailedPrecondition),
+            Refused(StatusCode.ResourceExhausted, RuntimeDeliveryReasons.OutputLimit),
+            Refused(StatusCode.ResourceExhausted, "unknown"), Refused(StatusCode.ResourceExhausted)
+        })
+        {
+            var clock = new Clock(); var calls = 0; var reads = 0;
+            var client = new RuntimeStartupClient((_, _, _, _) =>
+            {
+                calls++; clock.Advance(TimeSpan.FromSeconds(30)); throw permanent;
+            }, clock, () => 0, (_, _) => { reads++; return Task.FromResult("projected"u8.ToArray()); });
+            var error = await Assert.ThrowsAsync<RuntimeStartupException>(() => client.FetchAsync(Binding, [Revision()], "credential"));
+            var expected = permanent.StatusCode switch
+            {
+                StatusCode.Unauthenticated => RuntimeStartupFailure.IdentityRefused,
+                StatusCode.PermissionDenied => RuntimeStartupFailure.AccessDenied,
+                StatusCode.FailedPrecondition => RuntimeStartupFailure.ConfigurationUnavailable,
+                _ when permanent.Trailers.Any(x => x.Value == RuntimeDeliveryReasons.OutputLimit) => RuntimeStartupFailure.OutputLimit,
+                _ => RuntimeStartupFailure.TransportFailure
+            };
+            Assert.Equal(expected, error.Failure); Assert.Equal(1, calls); Assert.Equal(1, reads);
+        }
+        var unrelatedCalls = 0;
+        var unrelated = new RuntimeStartupClient((_, _, _, _) => { unrelatedCalls++; throw Refused(StatusCode.Cancelled); },
+            new Clock(), () => 0, (_, _) => Task.FromResult("projected"u8.ToArray()));
+        Assert.Equal(RuntimeStartupFailure.TransportFailure, (await Assert.ThrowsAsync<RuntimeStartupException>(() =>
+            unrelated.FetchAsync(Binding, [Revision()], "credential"))).Failure);
+        Assert.Equal(1, unrelatedCalls);
+    }
+
+    private sealed class OwnedTimeoutDelivery(string revision) : ConfigurationDelivery.ConfigurationDeliveryBase
+    {
+        internal readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource Exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal int Calls;
+        internal string Revision => revision;
+        internal bool ReplacementObserved;
+        public override async Task<DeliverConfigurationReply> DeliverRuntime(DeliverRuntimeConfigurationRequest request, ServerCallContext context)
+        {
+            var attempt = Interlocked.Increment(ref Calls);
+            Assert.True(request.BindingId == Binding && request.RevisionId == revision);
+            var header = Assert.Single(context.RequestHeaders, x => x.Key == "authorization");
+            Assert.True(header.Value == (attempt == 1 ? "Bearer fixture-original" : "Bearer fixture-replaced"));
+            if (attempt == 1)
+            {
+                Entered.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken); }
+                finally { Exited.TrySetResult(); }
+                throw new InvalidOperationException("The cancelled first RPC must not complete successfully.");
+            }
+            ReplacementObserved = true;
+            return Reply(revision);
         }
     }
 

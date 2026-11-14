@@ -230,6 +230,7 @@ jobs:
             .artifacts/postgresql-measurement/safe/functional/resources.json
             .artifacts/postgresql-measurement/safe/functional/setup.csv
             .artifacts/postgresql-measurement/safe/functional/host-diagnostics.csv
+            .artifacts/postgresql-measurement/safe/functional/protected-reflection-diagnostics.csv
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/cases.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/counts.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/failure-evidence.json

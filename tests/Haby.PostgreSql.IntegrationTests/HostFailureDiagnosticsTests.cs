@@ -136,4 +136,91 @@ public sealed class HostFailureDiagnosticsTests
             new InvalidOperationException("PROTECTED-assertion-payload"), StatusCode.Unavailable);
         Assert.Equal("status-assertion,unavailable", line);
     }
+
+    [Fact]
+    public void Protected_reflection_diagnostic_has_exact_method_case_and_closed_context()
+    {
+        var error = new RpcException(new Status(StatusCode.Unauthenticated, "PROTECTED"));
+        var line = ProtectedReflectionDiagnostics.Render(true, HostFailurePhase.ReflectionRead, error, null,
+            ReflectionRouteKind.V1, ReflectionCredentialPurpose.StaticDelivery);
+        Assert.Equal(ProtectedReflectionDiagnostics.Method + ",enabled-true,reflection-read,v1,static-delivery,unauthenticated,rpc", line);
+        var disabled = ProtectedReflectionDiagnostics.Render(false, HostFailurePhase.StatusAssertion,
+            new Xunit.Sdk.XunitException("PROTECTED"), StatusCode.Unimplemented,
+            ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+        Assert.Equal(ProtectedReflectionDiagnostics.Method + ",enabled-false,status-assertion,v1alpha,operator-admin,unimplemented,assertion", disabled);
+        Assert.NotEqual(HostFailureDiagnostics.Method, ProtectedReflectionDiagnostics.Method);
+    }
+
+    [Fact]
+    public void Protected_reflection_diagnostic_drops_hostile_payload_and_unknown_values()
+    {
+        const string secret = "PROTECTED,\r\nBearer haby_operator_v1.secret /private/route";
+        var error = new RpcException(new Status((StatusCode)999, secret), new Metadata { { "private", "PROTECTED-metadata" } });
+        error.Data[secret] = secret;
+        var line = ProtectedReflectionDiagnostics.Render(true, (HostFailurePhase)999, error, StatusCode.OK,
+            (ReflectionRouteKind)999, (ReflectionCredentialPurpose)999);
+        Assert.Equal(ProtectedReflectionDiagnostics.Method + ",enabled-true,unknown,unknown,unknown,unknown-status,rpc", line);
+        Assert.DoesNotContain(secret, line);
+        Assert.Equal(7, line.Split(',').Length);
+        Assert.DoesNotContain('\r', line); Assert.DoesNotContain('\n', line);
+        Assert.EndsWith(",unavailable-evidence,other", ProtectedReflectionDiagnostics.Render(false, HostFailurePhase.Build,
+            new InvalidOperationException(secret), null, ReflectionRouteKind.None, ReflectionCredentialPurpose.None));
+    }
+
+    [Fact]
+    public async Task Protected_reflection_nested_scopes_preserve_primary_and_each_cleanup_before_next_scope()
+    {
+        var evidence = new List<string>();
+        var order = new List<string>();
+        var primary = new RpcException(new Status(StatusCode.Unauthenticated, "PROTECTED-body"));
+        var cleanup = new IOException("PROTECTED-cleanup");
+        var diagnostic = new ProtectedReflectionDiagnostics(true, evidence.Add);
+        var error = await Record.ExceptionAsync(() => HostFailureDiagnostics.RunAsync(async defer =>
+        {
+            defer(() => { order.Add("host"); throw cleanup; });
+            defer(() => { order.Add("channel"); throw cleanup; });
+            // Successful stream disposal must finish before the next credential/route starts.
+            await HostFailureDiagnostics.RunAsync(release =>
+            {
+                release(() => { order.Add("first-stream"); return ValueTask.CompletedTask; });
+                return Task.CompletedTask;
+            }, () => diagnostic.Phase, () => diagnostic.Observed,
+                diagnostic.Recorder(ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.Anonymous));
+            Assert.Equal(["first-stream"], order);
+            await HostFailureDiagnostics.RunAsync(release =>
+            {
+                diagnostic.At(HostFailurePhase.ReflectionRead, ReflectionRouteKind.V1, ReflectionCredentialPurpose.StaticDelivery);
+                release(() => { order.Add("second-stream"); throw cleanup; });
+                throw primary;
+            }, () => diagnostic.Phase, () => diagnostic.Observed,
+                diagnostic.Recorder(ReflectionRouteKind.V1, ReflectionCredentialPurpose.StaticDelivery));
+        }, () => diagnostic.Phase, () => diagnostic.Observed, diagnostic.RecordRoot));
+        Assert.Same(primary, error);
+        Assert.Equal(["first-stream", "second-stream", "channel", "host"], order);
+        Assert.Equal(4, evidence.Count);
+        Assert.Equal(ProtectedReflectionDiagnostics.Method + ",enabled-true,reflection-read,v1,static-delivery,unauthenticated,rpc", evidence[0]);
+        Assert.Equal(ProtectedReflectionDiagnostics.Method + ",enabled-true,cleanup,v1,static-delivery,unavailable-evidence,io", evidence[1]);
+        Assert.All(evidence.Skip(2), line => Assert.Equal(ProtectedReflectionDiagnostics.Method + ",enabled-true,cleanup,none,none,unavailable-evidence,io", line));
+    }
+
+    [Fact]
+    public async Task Protected_reflection_cleanup_only_failure_is_not_relabelled_as_body()
+    {
+        var evidence = new List<string>();
+        var cleanup = new InvalidOperationException("PROTECTED-cleanup");
+        var diagnostic = new ProtectedReflectionDiagnostics(false, evidence.Add);
+        var error = await Record.ExceptionAsync(() => HostFailureDiagnostics.RunAsync(async _ =>
+        {
+            diagnostic.At(HostFailurePhase.StatusAssertion, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+            diagnostic.Observe(StatusCode.Unimplemented);
+            await HostFailureDiagnostics.RunAsync(release =>
+            {
+                release(() => throw cleanup);
+                return Task.CompletedTask;
+            }, () => diagnostic.Phase, () => diagnostic.Observed,
+                diagnostic.Recorder(ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin));
+        }, () => diagnostic.Phase, () => diagnostic.Observed, diagnostic.RecordRoot));
+        Assert.Same(cleanup, error);
+        Assert.Equal([ProtectedReflectionDiagnostics.Method + ",enabled-false,cleanup,v1alpha,operator-admin,unavailable-evidence,other"], evidence);
+    }
 }

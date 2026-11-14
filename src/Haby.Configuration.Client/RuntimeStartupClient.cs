@@ -92,7 +92,8 @@ public sealed class RuntimeStartupClient
                         catch (RpcException error)
                         {
                             CheckBudget();
-                            if (!Retryable(error)) throw Failure(Classify(error));
+                            var ownedTimeout = error.StatusCode == StatusCode.Cancelled && rpcTimer.IsCancellationRequested;
+                            if (!ownedTimeout && !Retryable(error)) throw Failure(Classify(error));
                             reply = null!;
                         }
                         catch (OperationCanceledException) when (rpcTimer.IsCancellationRequested)
