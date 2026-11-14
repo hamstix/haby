@@ -117,31 +117,9 @@ public sealed class PostgreSqlGeneratedCredentialSlots(IDbContextFactory<Manifes
     internal static async Task<GeneratedCredentialResult?> ReadAsync(ManifestCatalogDbContext context,
         GeneratedCredentialSlot slot, string profile, CancellationToken cancellationToken, bool validateMaterial = true)
     {
-        var env = Guid.Parse(slot.Owner.EnvironmentRecordId.ToString());
-        var app = Guid.Parse(slot.Owner.ApplicationRecordId.ToString());
-        var resource = slot.Owner.ResourceLocalId.Value;
-        var row = await context.GeneratedCredentialSlots.AsNoTracking().SingleOrDefaultAsync(x =>
-            x.EnvironmentRecordId == env && x.ApplicationRecordId == app && x.ResourceLocalId == resource &&
-            x.SlotId == slot.SlotId, cancellationToken);
-        if (row is null) return null;
-        if (row.GenerationProfile != profile) return new(GeneratedCredentialOutcome.ProfileConflict);
-        if (row.GenerationProfile != GeneratedCredentialSlot.RandomPasswordV1)
-            return new(GeneratedCredentialOutcome.MaterialUnavailable);
-        if (!await context.Environments.AnyAsync(x => x.Id == env, cancellationToken) ||
-            !await context.Applications.AnyAsync(x => x.Id == app, cancellationToken))
-            return new(GeneratedCredentialOutcome.MaterialUnavailable);
-        var secret = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.SecretId, cancellationToken);
-        var version = await context.SecretVersions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.VersionId, cancellationToken);
-        var audit = await context.GeneratedCredentialCreationAudits.AsNoTracking().SingleOrDefaultAsync(x => x.SecretId == row.SecretId, cancellationToken);
-        if (secret is null || secret.EnvironmentRecordId != env || secret.ApplicationRecordId != app ||
-            secret.ResourceLocalId != resource || secret.Owner != "Resource" || secret.Purpose != "ApplicationLogin" ||
-            secret.Sensitivity != "Credential" || secret.ContentType != "application/octet-stream" ||
-            secret.OwnershipPolicy != "Managed" || secret.StorageBackend != "PostgreSqlPlaintext" || secret.Name is not null ||
-            secret.CurrentVersionId != row.VersionId || version is null || version.SecretId != row.SecretId ||
-            version.Number != 1 || version.ProtectionFormat != PlaintextProtectionFormat.Name ||
-            version.FormatVersion != PlaintextProtectionFormat.Version || audit is null ||
-            audit.TechnicalActor != TechnicalActor || audit.CreatedAt != secret.CreatedAt || version.CreatedAt != secret.CreatedAt)
-            return new(GeneratedCredentialOutcome.MaterialUnavailable);
+        var (row, refusal) = await ReadCredentialMetadataCoreAsync(context, slot, profile, cancellationToken);
+        if (row is null) return refusal;
+        // Normal callers retain both their presence/length and full material checks.
         if (!validateMaterial)
             return await context.SecretPayloads.AsNoTracking().AnyAsync(x => x.SecretVersionId == row.VersionId && x.Bytes.Length == 43, cancellationToken)
                 ? new(GeneratedCredentialOutcome.Existing, Reference(row.SecretId, row.VersionId)) : new(GeneratedCredentialOutcome.MaterialUnavailable);
@@ -155,6 +133,49 @@ public sealed class PostgreSqlGeneratedCredentialSlots(IDbContextFactory<Manifes
             catch (FormatException) { return new(GeneratedCredentialOutcome.MaterialUnavailable); }
         }
         finally { CryptographicOperations.ZeroMemory(payload.Bytes); }
+    }
+
+    // Only established authentication origin uses this named metadata boundary.
+    // It never queries SecretPayloads, including existence, size or aggregates.
+    internal static async Task<GeneratedCredentialResult?> ReadAuthenticationOriginMetadataAsync(ManifestCatalogDbContext context,
+        GeneratedCredentialSlot slot, string profile, CancellationToken cancellationToken)
+    {
+        var (row, refusal) = await ReadCredentialMetadataCoreAsync(context, slot, profile, cancellationToken);
+        if (row is null) return refusal;
+        try { return new(GeneratedCredentialOutcome.Existing, Reference(row.SecretId, row.VersionId)); }
+        catch (ArgumentException) { return new(GeneratedCredentialOutcome.MaterialUnavailable); }
+        catch (FormatException) { return new(GeneratedCredentialOutcome.MaterialUnavailable); }
+    }
+
+    private static async Task<(GeneratedCredentialSlotRow? Row, GeneratedCredentialResult? Refusal)> ReadCredentialMetadataCoreAsync(
+        ManifestCatalogDbContext context, GeneratedCredentialSlot slot, string profile, CancellationToken cancellationToken)
+    {
+        var env = Guid.Parse(slot.Owner.EnvironmentRecordId.ToString());
+        var app = Guid.Parse(slot.Owner.ApplicationRecordId.ToString());
+        var resource = slot.Owner.ResourceLocalId.Value;
+        var row = await context.GeneratedCredentialSlots.AsNoTracking().SingleOrDefaultAsync(x =>
+            x.EnvironmentRecordId == env && x.ApplicationRecordId == app && x.ResourceLocalId == resource &&
+            x.SlotId == slot.SlotId, cancellationToken);
+        if (row is null) return (null, null);
+        if (row.GenerationProfile != profile) return (null, new(GeneratedCredentialOutcome.ProfileConflict));
+        if (row.GenerationProfile != GeneratedCredentialSlot.RandomPasswordV1)
+            return (null, new(GeneratedCredentialOutcome.MaterialUnavailable));
+        if (!await context.Environments.AnyAsync(x => x.Id == env, cancellationToken) ||
+            !await context.Applications.AnyAsync(x => x.Id == app, cancellationToken))
+            return (null, new(GeneratedCredentialOutcome.MaterialUnavailable));
+        var secret = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.SecretId, cancellationToken);
+        var version = await context.SecretVersions.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.VersionId, cancellationToken);
+        var audit = await context.GeneratedCredentialCreationAudits.AsNoTracking().SingleOrDefaultAsync(x => x.SecretId == row.SecretId, cancellationToken);
+        if (secret is null || secret.EnvironmentRecordId != env || secret.ApplicationRecordId != app ||
+            secret.ResourceLocalId != resource || secret.Owner != "Resource" || secret.Purpose != "ApplicationLogin" ||
+            secret.Sensitivity != "Credential" || secret.ContentType != "application/octet-stream" ||
+            secret.OwnershipPolicy != "Managed" || secret.StorageBackend != "PostgreSqlPlaintext" || secret.Name is not null ||
+            secret.CurrentVersionId != row.VersionId || version is null || version.SecretId != row.SecretId ||
+            version.Number != 1 || version.ProtectionFormat != PlaintextProtectionFormat.Name ||
+            version.FormatVersion != PlaintextProtectionFormat.Version || audit is null ||
+            audit.TechnicalActor != TechnicalActor || audit.CreatedAt != secret.CreatedAt || version.CreatedAt != secret.CreatedAt)
+            return (null, new(GeneratedCredentialOutcome.MaterialUnavailable));
+        return (row, null);
     }
 
     private static SecretRef Reference(Guid secret, Guid version) =>

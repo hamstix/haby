@@ -70,7 +70,13 @@ internal sealed partial class InternalDurableActions
             installation == Guid.Empty && handler.RequiresPreparedConfiguration ? managed : installation), handler);
     }
 
-    private async Task<Loaded> LoadAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token)
+    private enum OriginPurpose { CompleteConfiguration, AuthenticationIdentity }
+    private Task<Loaded> LoadAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token) =>
+        LoadProofAsync(db, key, OriginPurpose.CompleteConfiguration, token);
+    private Task<Loaded> LoadAuthenticationIdentityAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token) =>
+        LoadProofAsync(db, key, OriginPurpose.AuthenticationIdentity, token);
+
+    private async Task<Loaded> LoadProofAsync(ManifestCatalogDbContext db, DurableOperationKey key, OriginPurpose purpose, CancellationToken token)
     {
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         var intent = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.OperationId == key.OperationId.Value, token)
@@ -91,10 +97,14 @@ internal sealed partial class InternalDurableActions
             await RefuseUnboundHistoryAsync(db, deployment, token);
             var stable = await ManagedAsync(db, generation, workload, selected.Context, selected.Handler, false, token);
             if (stable.Id != intent.ManagedIdentity) throw new InvalidDataException("Superseded Workload identity requires an explicitly initialized fresh catalog.");
-            if (selected.Handler.RequiresPreparedConfiguration) await RequireConfigurationAsync(db, generation, token);
+            if (purpose == OriginPurpose.CompleteConfiguration && selected.Handler.RequiresPreparedConfiguration)
+                await RequireConfigurationAsync(db, generation, token);
         }
         var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, key.Generation.Value, resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true);
-        if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token)) throw new InvalidDataException("Current Resource evidence metadata unavailable.");
+        var credentialsValid = metadata is not null && (purpose == OriginPurpose.AuthenticationIdentity
+            ? await DurableAggregateCompletion.CheckAuthenticationOriginCredentialMetadataAsync(db, metadata, token)
+            : await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token));
+        if (!credentialsValid) throw new InvalidDataException("Current Resource evidence metadata unavailable.");
         var contract = selected.Handler.Contract;
         if (contract != new InternalActionContract(intent.SubjectContract, intent.ProviderKind, intent.ConfigurationContract, intent.Implementation,
                 intent.ActionContract, intent.InputFormat, intent.OutputContract) || selected.Handler.ObservationRecovery != intent.ObservationRecovery ||

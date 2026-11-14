@@ -63,6 +63,9 @@ internal static class KubernetesClientFactory
     internal static ValueTask<KernelClient> Create(KubernetesConnection configuration, ISecretStore secrets, CancellationToken token) =>
         CreateConnection(configuration, secrets, false, [], null, token);
 
+    internal static ValueTask<KernelClient> CreateRuntime(KubernetesConnection configuration, ISecretStore secrets,
+        DelegatingHandler[] handlers, CancellationToken token) => CreateConnection(configuration, secrets, false, handlers, null, token);
+
     internal static ValueTask<KernelClient> CreateAccess(EnvironmentRecordId environment,
         KubernetesProviderConfiguration configuration, ISecretStore secrets, CancellationToken token) =>
         CreateCore(environment, configuration, secrets, false, [], null, token);
