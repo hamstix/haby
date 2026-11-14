@@ -44,7 +44,7 @@ public abstract partial class ApplicationLoginScenario : IDisposable
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
             new DurableOperationGraph(spec.Resources.SelectMany(r => new Prefix(r.Value.Type).Plan(spec, r.Key, inputs, configuration))).Equals(graph);
     }
-    private protected static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null, ISecretStore? secretStore = null, bool internalActions = false)
+    internal static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null, ISecretStore? secretStore = null, bool internalActions = false)
     {
         var services = new ServiceCollection().AddSingleton(TimeProvider.System)
             .AddSingleton(PostgreSqlConnectionRendering.CreateCatalog())
@@ -58,6 +58,7 @@ public abstract partial class ApplicationLoginScenario : IDisposable
             .AddPostgreSqlDatabaseRestrict().AddPostgreSqlProviderResourceReservations().AddPostgreSqlApplicationLogin();
         if (internalActions)
         {
+            services.AddSingleton<IProviderPreflightHandler, PostgreSqlPreflightHandler>();
             services.AddSingleton<IInternalActionHandler, Haby.Kubernetes.InternalDeploymentAction>()
                 .AddSingleton<Haby.Kubernetes.KubernetesProviderConfigurationCodec>()
                 .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<Haby.Kubernetes.KubernetesProviderConfigurationCodec>());

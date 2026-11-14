@@ -18,7 +18,7 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
-    private static void ConfiguredDocuments(JsonNode envelope, bool secondDocument = false, bool shared = false)
+    internal static void ConfiguredDocuments(JsonNode envelope, bool secondDocument = false, bool shared = false)
     {
         var component = envelope["manifest"]!["spec"]!["components"]!["api"]!;
         component["documents"] = JsonNode.Parse("""{"settings":{"fileName":"settings.json","format":"json","template":{"Mode":"frozen"}}}"""u8);
@@ -45,65 +45,6 @@ public sealed partial class DurableDeploymentPlanningTests
     }
 
     [Fact]
-    public async Task Initial_configuration_preparation_concurrent_replay_restart_restore_and_public_refusals_preserve_exact_artifacts()
-    {
-        var scenario = await InternalScenarioAsync(initialOnly: true, configureManifest: e => ConfiguredDocuments(e, shared: true));
-        WorkloadConfigurationPreparation first;
-        ConfigurationDocumentRow artifact;
-        await using (var services = InternalServices(scenario.Connection, scenario.Time))
-        {
-            var preparation = ConfigurationPreparation(services);
-            var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => preparation.Preparation.PrepareAsync(scenario.Commit, "tester", default).AsTask()));
-            first = results[0];
-            Assert.Null(first.Failure); Assert.Equal(2, first.Prepared.Count);
-            Assert.Single(first.Prepared.Select(x => x.Revision).Distinct());
-            Assert.All(results, r => Assert.Equal(first.Prepared, r.Prepared));
-            var target = new ConfigurationDocumentTarget(scenario.Commit.DeploymentId, scenario.Commit.Generation, ManifestLocalId.Create("api"), ManifestLocalId.Create("settings"));
-            Assert.Equal(StoreStatus.NotApplied, (await preparation.Documents.MaterializeAsync(target, "tester", default)).Status);
-            Assert.Equal(StoreStatus.NotApplied, (await preparation.Documents.ReadAsync(target, default)).Status);
-            // Executable acceptance refuses before creating an intent, attempt, dispatch marker or Kubernetes client.
-            await Assert.ThrowsAsync<Haby.Kubernetes.Contracts.WorkloadContractException>(async () => await Actions(services,
-                services.GetRequiredService<IInternalActionHandler>()).AcceptAsync(scenario.Commit, first.Prepared[0].Workload,
-                InternalDeploymentAction.Create, "configured-refusal", default));
-        }
-        await using (var verify = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(scenario.Connection).Options))
-        {
-            artifact = await verify.ConfigurationDocuments.AsNoTracking().SingleAsync();
-            Assert.Equal(2, await verify.WorkloadConfigurationRecipients.CountAsync());
-            Assert.Empty(await verify.DurableOperations.AsNoTracking().ToArrayAsync());
-            Assert.Empty(await verify.DurableOperationAttempts.AsNoTracking().ToArrayAsync());
-            Assert.Empty(await verify.ActionIntents.AsNoTracking().ToArrayAsync());
-            Assert.Empty(await verify.ConfigurationAccess.AsNoTracking().ToArrayAsync());
-            Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
-            var proof = await verify.GenerationStageCheckpoints.AsNoTracking().SingleAsync();
-            Assert.Empty(ResourcesReadyCheckpointCodec.Decode(proof.EvidenceJson).Resources);
-        }
-        await PublicConfigurationRefusesAsync(scenario);
-        await VerifyRestart(scenario.Connection);
-        var restored = await NewDatabaseAsync();
-        var dump = "/tmp/haby208-" + Guid.NewGuid().ToString("N") + ".dump";
-        try
-        {
-            await fixture.RunClientUtilityAsync("pg_dump", "-U", "postgres", "--format=custom", "--file=" + dump,
-                "--dbname=" + new NpgsqlConnectionStringBuilder(scenario.Connection).Database);
-            await fixture.RunClientUtilityAsync("pg_restore", "-U", "postgres", "--exit-on-error", "--no-owner", "--no-privileges",
-                "--dbname=" + new NpgsqlConnectionStringBuilder(restored).Database, dump);
-            await VerifyRestart(restored);
-        }
-        finally { await fixture.RunClientUtilityAsync("rm", "-f", dump); }
-        async Task VerifyRestart(string connection)
-        {
-            await using var restarted = InternalServices(connection, scenario.Time);
-            var replay = await ConfigurationPreparation(restarted).Preparation.PrepareAsync(scenario.Commit, "later-actor", default);
-            Assert.Equal(first.Prepared, replay.Prepared);
-            await using var check = await restarted.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-            var saved = await check.ConfigurationDocuments.AsNoTracking().SingleAsync();
-            Assert.Equal(artifact.Payload, saved.Payload); Assert.Equal(artifact.Id, saved.Id);
-            Assert.All(await check.WorkloadConfigurationRecipients.AsNoTracking().ToArrayAsync(), r => Assert.Equal("tester", r.Actor));
-        }
-    }
-
-    [Fact]
     public async Task Preparation_cancellation_after_one_document_commits_an_honest_prefix_and_retry_finishes_the_remainder()
     {
         var scenario = await InternalScenarioAsync(initialOnly: true, configureManifest: e => ConfiguredDocuments(e, secondDocument: true));
@@ -120,7 +61,26 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.Single(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
             Assert.Single(await verify.WorkloadConfigurationRecipients.AsNoTracking().ToArrayAsync());
         }
-        await using var restarted = InternalServices(scenario.Connection, scenario.Time);
+        // Restore the honest partial state before resuming; do not seed a replacement proof or artifact.
+        var restored = await NewDatabaseAsync();
+        var directory = "/tmp/haby208-partial-" + Guid.NewGuid().ToString("N");
+        var dump = directory + "/catalog.dump";
+        Exception? primary = null;
+        try
+        {
+            await fixture.RunClientUtilityAsync("mkdir", "-m", "700", directory);
+            await fixture.RunClientUtilityAsync("pg_dump", "-U", "postgres", "--format=custom", "--file=" + dump,
+                "--dbname=" + new NpgsqlConnectionStringBuilder(scenario.Connection).Database);
+            await fixture.RunClientUtilityAsync("pg_restore", "-U", "postgres", "--exit-on-error", "--no-owner", "--no-privileges",
+                "--dbname=" + new NpgsqlConnectionStringBuilder(restored).Database, dump);
+        }
+        catch (Exception error) { primary = error; throw; }
+        finally
+        {
+            try { await fixture.RunClientUtilityAsync("rm", "-f", dump); await fixture.RunClientUtilityAsync("rmdir", directory); }
+            catch when (primary is not null) { Console.Error.WriteLine("Owned partial dump cleanup failed; primary failure retained."); }
+        }
+        await using var restarted = InternalServices(restored, scenario.Time);
         var complete = await ConfigurationPreparation(restarted).Preparation.PrepareAsync(scenario.Commit, "resume", default);
         Assert.Null(complete.Failure); Assert.Equal(2, complete.Prepared.Count);
     }
@@ -150,6 +110,14 @@ public sealed partial class DurableDeploymentPlanningTests
         await Assert.ThrowsAsync<InvalidDataException>(async () => await preparation.PrepareAsync(scenario.Commit with { ActorId = "foreign" }, "tester", default));
         var prepared = await preparation.PrepareAsync(scenario.Commit, "tester", default);
         Assert.Single(prepared.Prepared);
+        await using (var corrupt = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            await corrupt.Database.ExecuteSqlRawAsync("UPDATE workload_configuration_recipients SET actor = 'foreign'");
+        Assert.Equal(StoreStatus.InputCorrupt, (await preparation.PrepareAsync(scenario.Commit, "tester", default)).Failure);
+        await using (var restore = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            await restore.Database.ExecuteSqlRawAsync("UPDATE workload_configuration_recipients SET actor = 'tester', workload = 'undeclared'");
+        await Assert.ThrowsAsync<InvalidDataException>(async () => await preparation.PrepareAsync(scenario.Commit, "tester", default));
+        await using (var restore = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            await restore.Database.ExecuteSqlRawAsync("UPDATE workload_configuration_recipients SET workload = 'main'");
         await using (var arrange = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
         {
             // Deliberate privileged corruption, never a manufactured accepted generation/proof.
@@ -246,19 +214,22 @@ public sealed partial class DurableDeploymentPlanningTests
         }
     }
 
-    private static async Task PublicConfigurationRefusesAsync(InternalScenario scenario)
+    internal static async Task PublicConfigurationRefusesAsync(InternalScenario scenario)
     {
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
             "--Haby:Tls:Enabled=false", "--Haby:Port=0"]);
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single());
         var client = OperatorTestCredentials.Client(channel);
-        await using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(scenario.Connection).Options);
-        var app = await db.Applications.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(scenario.Revision.ApplicationRecordId.ToString()));
-        var env = await db.Environments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(scenario.Environment.ToString()));
+        string applicationId; string environmentId;
+        await using (var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(scenario.Connection).Options))
+        {
+            applicationId = await db.Applications.AsNoTracking().Where(x => x.Id == Guid.Parse(scenario.Revision.ApplicationRecordId.ToString())).Select(x => x.ApplicationId).SingleAsync();
+            environmentId = await db.Environments.AsNoTracking().Where(x => x.Id == Guid.Parse(scenario.Environment.ToString())).Select(x => x.EnvironmentId).SingleAsync();
+        }
         foreach (var exact in new[] { false, true })
         {
-            var request = new ConfigurationDocumentRequest { Environment = env.EnvironmentId, ApplicationId = app.ApplicationId, ComponentId = "api", DocumentId = "settings" };
+            var request = new ConfigurationDocumentRequest { Environment = environmentId, ApplicationId = applicationId, ComponentId = "api", DocumentId = "settings" };
             if (exact) request.Generation = scenario.Commit.Generation.Value;
             Assert.Equal(RpcStatus.NotApplied, (await client.MaterializeConfigurationAsync(request)).Status);
             Assert.Equal(RpcStatus.NotApplied, (await client.GetConfigurationAsync(request)).Status);

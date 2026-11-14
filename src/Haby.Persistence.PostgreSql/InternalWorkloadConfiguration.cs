@@ -69,7 +69,15 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
     {
         var version = await db.Revisions.AsNoTracking().Where(x => x.ApplicationRecordId == source.ApplicationRecordId && x.LocalRevisionNumber == source.RevisionNumber)
             .Select(x => x.ApplicationVersion).SingleAsync(token);
-        return await planner.SelectInternalDocumentsAsync(db, source.Inputs(), version, handlers, token);
+        var selected = await planner.SelectInternalDocumentsAsync(db, source.Inputs(), version, handlers, token);
+        var stored = db.WorkloadConfigurationRecipients.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation);
+        if (await stored.CountAsync(token) > ConfigurationApplicationLimits.MaxItems)
+            throw new InvalidDataException("Stored preparation coverage exceeds its bound.");
+        var associations = await stored.ToArrayAsync(token);
+        if (associations.Any(x => !selected.Any(pair => pair.Key.Component.Value == x.Component && pair.Key.Id.Value == x.Workload &&
+                pair.Value.Any(document => document.Value == x.Document))))
+            throw new InvalidDataException("Stored preparation contains an undeclared recipient or document.");
+        return selected;
     }
 
     internal sealed class Authority(InternalWorkloadConfiguration owner, DurableChangeSetCommit accepted)
@@ -107,7 +115,8 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
             var old = await db.WorkloadConfigurationRecipients.Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation &&
                 x.Component == target.Component.Value && x.Document == target.Document.Value).ToArrayAsync(token);
             if (old.Any(x => !recipients.Any(r => r.Id.Value == x.Workload) || x.RevisionId.ToString() != revision.Metadata.Id.ToString() ||
-                x.CheckpointId != proof.Id || x.InputFingerprint != source.Fingerprint))
+                x.CheckpointId != proof.Id || x.InputFingerprint != source.Fingerprint || x.Actor != revision.Metadata.Actor ||
+                x.CreatedAt != revision.Metadata.CreatedAt.AddTicks(-(revision.Metadata.CreatedAt.Ticks % TimeSpan.TicksPerMicrosecond))))
                 throw new InvalidDataException("Stored preparation association mismatch.");
             foreach (var recipient in recipients.Where(r => !old.Any(x => x.Workload == r.Id.Value)))
                 db.WorkloadConfigurationRecipients.Add(new()
