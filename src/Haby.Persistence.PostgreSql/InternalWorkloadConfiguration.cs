@@ -108,6 +108,16 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
         return selected;
     }
 
+    internal async Task<WorkloadConfigurationRecipient[]> RequireRecipientsAsync(ManifestCatalogDbContext db,
+        DeploymentGenerationRow source, CancellationToken token)
+    {
+        await RequireCompleteAsync(db, source, token);
+        return (await db.WorkloadConfigurationRecipients.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId &&
+            x.Generation == source.Generation).ToArrayAsync(token)).Select(x => new WorkloadConfigurationRecipient(
+                new(ManifestLocalId.Create(x.Component), ManifestLocalId.Create(x.Workload)), ManifestLocalId.Create(x.Document),
+                ConfigurationDocumentRevisionId.Parse(x.RevisionId.ToString()))).ToArray();
+    }
+
     internal sealed class Authority(InternalWorkloadConfiguration owner, DurableChangeSetCommit accepted)
     {
         internal async Task<(ResourcesReadyCheckpoint Proof, ProviderInput.Workload[] Recipients)> RequireAsync(

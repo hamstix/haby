@@ -9,8 +9,26 @@ public sealed partial class ManifestCatalogDbContext
     internal DbSet<InternalPlanInputRow> InternalPlanInputs => Set<InternalPlanInputRow>();
     private void ValidateInternalActionWrites()
     {
-        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or RuntimeIdentityBindingRow &&
+        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or RuntimePublicationReceiptRow &&
             x.State is EntityState.Modified or EntityState.Deleted)) throw new InvalidOperationException("Action history is immutable.");
+        foreach (var entry in ChangeTracker.Entries<RuntimeIdentityBindingRow>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified &&
+                (entry.Properties.Any(p => p.IsModified && p.Metadata.Name is not (nameof(RuntimeIdentityBindingRow.Status) or
+                    nameof(RuntimeIdentityBindingRow.ConcurrencyToken) or nameof(RuntimeIdentityBindingRow.RevokedAt) or nameof(RuntimeIdentityBindingRow.RevokedBy))) ||
+                 entry.OriginalValues.GetValue<string>(nameof(RuntimeIdentityBindingRow.Status)) != "Prepared" || entry.Entity.Status != "Revoked" ||
+                 entry.Entity.ConcurrencyToken == entry.OriginalValues.GetValue<Guid>(nameof(RuntimeIdentityBindingRow.ConcurrencyToken))))
+                throw new InvalidOperationException("Runtime identity origin is immutable; binding revocation is terminal.");
+            InternalRuntimePublication.ValidateBinding(entry.Entity);
+        }
+        foreach (var entry in ChangeTracker.Entries<RuntimeConfigurationPermissionRow>())
+        {
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified &&
+                entry.Properties.Any(p => p.IsModified && p.Metadata.Name is not (nameof(RuntimeConfigurationPermissionRow.Status) or
+                    nameof(RuntimeConfigurationPermissionRow.ConcurrencyToken) or nameof(RuntimeConfigurationPermissionRow.ChangedBy) or
+                    nameof(RuntimeConfigurationPermissionRow.ChangedAt) or nameof(RuntimeConfigurationPermissionRow.LastRequest))))
+                throw new InvalidOperationException("Runtime permission origin is immutable.");
+        }
     }
     private static void ConfigureInternalActions(ModelBuilder model)
     {

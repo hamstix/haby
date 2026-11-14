@@ -4,7 +4,9 @@ Issue #211 prepares a ServiceAccount and immutable RuntimeIdentityBinding after
 complete exact #208 configuration preparation. It remains friend-only: no Host
 registration, RPC, CLI switch, configured Deployment execution or public Workload
 admission is added. Binding status `Prepared` grants no configuration access.
-Publication, TokenReview delivery, Pod injection, readiness, AppliedGeneration and
+Exact friend-only publication and terminal binding revocation are described in the
+[issue #213 guide](213-runtime-configuration-publication.md). TokenReview delivery,
+Pod injection, readiness, AppliedGeneration and
 #209 static Profile secret execution remain separate capabilities.
 
 ## Stable ownership and exact authority
@@ -56,7 +58,9 @@ missing objects and replacements refuse without recreating or remapping a bindin
 Equivalent calls preserve the original binding and account. Trusted constraints
 (Environment, ManagedWorkload, Provider/configuration, authenticator, audience,
 namespace and UID) cannot mutate the old binding or select current aliases. There
-is no identity-transition/adoption API. Current internal authority still admits
+is no identity-transition/adoption API. Binding revocation preserves the immutable
+proof while disabling preparation and runtime permissions; replay cannot change
+Revoked back to Prepared. Current internal authority still admits
 only genuine initial or real Resource-baseline mixed generations. This slice does
 not manufacture a prior successful Workload generation or claim an executed v1/v2
 rollout. Future supported generation continuation must keep current-call authority

@@ -97,6 +97,8 @@ public sealed partial class ApplicationConfigurationTests
             await arrange.Database.ExecuteSqlRawAsync("""
                 DROP TABLE operator_access_grants;
                 DROP TABLE configuration_access_grants;
+                DROP TABLE runtime_configuration_permissions;
+                DROP TABLE runtime_publication_receipts;
                 DROP TABLE workload_configuration_recipients;
                 DROP TABLE configuration_document_revisions;
                 DROP TABLE resource_management;
@@ -104,6 +106,7 @@ public sealed partial class ApplicationConfigurationTests
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%MaterializeConfigurationDocuments' OR "MigrationId" LIKE '%AddConfigurationAccess' OR "MigrationId" LIKE '%AddOperatorAccess';
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%PrepareWorkloadConfiguration';
+                DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%RuntimeConfigurationPublication';
                 """);
         await using (var act = OwnerServices(scenario))
         {
