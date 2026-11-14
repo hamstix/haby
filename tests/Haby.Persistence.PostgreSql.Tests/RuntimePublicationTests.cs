@@ -74,6 +74,26 @@ public sealed class RuntimePublicationTests
     }
 
     private static ManifestCatalogDbContext Context() => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Database_failure_is_translated_without_exposing_driver_diagnostics(bool update)
+    {
+        var publication = new InternalRuntimePublication(new UnavailablePublicationDatabase(update), null!, null!, TimeProvider.System);
+        var request = new RuntimePublicationRequest("storage-failure", RuntimePublicationOperation.RevokeBinding, Guid.NewGuid(), null, Guid.NewGuid(), "operator");
+        var error = await Assert.ThrowsAsync<IOException>(() => publication.ApplyAsync(request, default));
+        Assert.Equal("Runtime publication storage unavailable.", error.Message);
+        Assert.Null(error.InnerException); Assert.DoesNotContain("private-storage-diagnostic", error.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class UnavailablePublicationDatabase(bool update) : IDbContextFactory<ManifestCatalogDbContext>
+    {
+        public ManifestCatalogDbContext CreateDbContext() => throw Failure();
+        public Task<ManifestCatalogDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromException<ManifestCatalogDbContext>(Failure());
+        private Exception Failure() => update ? new DbUpdateException("private-storage-diagnostic") : new Npgsql.NpgsqlException("private-storage-diagnostic");
+    }
     private static RuntimeIdentityBindingRow Binding() => new()
     {
         Id = Guid.NewGuid(),

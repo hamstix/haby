@@ -1,6 +1,8 @@
 using Haby.Application;
 using Haby.Persistence.PostgreSql;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
@@ -333,5 +335,131 @@ public sealed partial class DurableDeploymentPlanningTests
         var binding = await verify.RuntimeIdentityBindings.AsNoTracking().SingleAsync();
         Assert.NotEqual(Guid.Empty, binding.ConcurrencyToken); Assert.Equal("Prepared", binding.Status);
         Assert.Null(binding.RevokedAt); Assert.Null(binding.RevokedBy); Assert.Empty(await verify.RuntimePublicationReceipts.AsNoTracking().ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Later_member_database_failure_preserves_prefix_and_requires_exact_intent_inspection(bool afterCommit)
+    {
+        var scenario = await InternalScenarioAsync(initialOnly: true, configureManifest: e => ConfiguredDocuments(e, secondDocument: true));
+        var handler = new IdentityFixture(); await using var services = InternalServices(scenario.Connection, scenario.Time);
+        await ConfigurationPreparation(services).Preparation.PrepareAsync(scenario.Commit, "tester", default);
+        await IdentityPreparation(services, handler).PrepareAsync(scenario.Commit, default);
+        var fault = new PublicationStorageFault(afterCommit);
+        await using var failing = Services(scenario.Connection, scenario.Time, saveInterceptor: fault,
+            commandInterceptor: new PublicationCommitFault(fault), internalActions: true);
+        var partial = await new InternalRuntimePublicationPreparation(Publications(failing, handler)).PrepareAsync(scenario.Commit, "tester", default);
+        var first = Assert.Single(partial.Completed);
+        Assert.NotNull(partial.Failed); Assert.Equal(fault.SecondKey, partial.Failed.Key);
+        Assert.Equal("storage-unavailable", partial.Reason); Assert.True(partial.RequiresInspection); Assert.False(partial.Cancelled);
+        Assert.DoesNotContain("private-storage-diagnostic", partial.ToString(), StringComparison.Ordinal);
+        RuntimePublicationReceipt? second;
+        await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
+            Assert.Equal(afterCommit ? 2 : 1, await verify.RuntimeConfigurationPermissions.CountAsync());
+            var receipts = await verify.RuntimePublicationReceipts.AsNoTracking().ToArrayAsync();
+            Assert.Equal(afterCommit ? 2 : 1, receipts.Length);
+            Assert.Equal(first.Receipt, RuntimePublicationCodec.Receipt(receipts.Single(x => x.RequestKey == first.Receipt.Request.Key).Payload));
+            second = receipts.SingleOrDefault(x => x.RequestKey == partial.Failed.Key) is { } row ? RuntimePublicationCodec.Receipt(row.Payload) : null;
+            Assert.Equal(afterCommit, second is not null);
+        }
+        var inspected = await Publications(services, handler).ReadAsync(partial.Failed.Key, default);
+        Assert.Equal(second, inspected?.Receipt);
+        var resumed = await new InternalRuntimePublicationPreparation(Publications(services, handler)).PrepareAsync(scenario.Commit, "tester", default);
+        Assert.Null(resumed.Failed); Assert.False(resumed.RequiresInspection); Assert.Equal(2, resumed.Completed.Count);
+        Assert.Equal(first.Receipt, resumed.Completed[0].Receipt);
+        if (second is not null) Assert.Equal(second, resumed.Completed[1].Receipt);
+        await using var final = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+        Assert.Equal(2, await final.RuntimePublicationReceipts.CountAsync());
+        var permission = await final.RuntimeConfigurationPermissions.AsNoTracking().SingleAsync(x => x.RevisionId == first.CurrentPermission!.Revision);
+        Assert.Equal(first.CurrentPermission!.Token, permission.ConcurrencyToken);
+        Assert.Equal(first.CurrentPermission.CreatedAt, permission.CreatedAt); Assert.Equal(first.CurrentPermission.LastRequest, permission.LastRequest);
+    }
+
+    private sealed class PublicationStorageFault(bool afterCommit) : SaveChangesInterceptor
+    {
+        private int members;
+        internal string? SecondKey;
+        internal bool FailCommitted;
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var receipt = eventData.Context!.ChangeTracker.Entries<RuntimePublicationReceiptRow>().SingleOrDefault(x => x.State == EntityState.Added);
+            if (receipt is not null && ++members == 2)
+            {
+                SecondKey = receipt.Entity.RequestKey;
+                if (!afterCommit) throw new DbUpdateException("private-storage-diagnostic");
+                FailCommitted = true;
+            }
+            return ValueTask.FromResult(result);
+        }
+    }
+    private sealed class PublicationCommitFault(PublicationStorageFault fault) : DbTransactionInterceptor
+    {
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+        {
+            if (fault.FailCommitted) throw new Npgsql.NpgsqlException("private-storage-diagnostic");
+            return Task.CompletedTask;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task First_publish_and_revoked_permission_republish_race_with_permission_revoke(bool republish)
+    {
+        var scenario = await InternalScenarioAsync(initialOnly: true, configureManifest: e => ConfiguredDocuments(e));
+        var handler = new IdentityFixture(); await using var services = InternalServices(scenario.Connection, scenario.Time);
+        await ConfigurationPreparation(services).Preparation.PrepareAsync(scenario.Commit, "tester", default);
+        await IdentityPreparation(services, handler).PrepareAsync(scenario.Commit, default);
+        var publication = Publications(services, handler);
+        var selected = Assert.Single(await publication.PreparationRequestsAsync(scenario.Commit, "tester", default));
+        Guid? expected = null;
+        if (republish)
+        {
+            var original = await publication.ApplyAsync(selected, default);
+            var revoked = await publication.ApplyAsync(Revoke(selected, original.CurrentPermission!.Token), default);
+            expected = revoked.CurrentPermission!.Token;
+        }
+        var publishRequest = selected with { Key = "permission-race-publish", ExpectedToken = expected, Actor = "publisher" };
+        var revokeRequest = Revoke(selected, expected, "permission-race-revoke") with { Actor = "revoker" };
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<RuntimePublicationResult> Run(RuntimePublicationRequest request)
+        { await start.Task; return await Publications(services, handler).ApplyAsync(request, default); }
+        var publishTask = Run(publishRequest); var revokeTask = Run(revokeRequest); start.SetResult();
+        var results = await Task.WhenAll(publishTask, revokeTask);
+        Assert.Equal(RuntimePublicationOutcome.Published, results[0].Receipt.Outcome);
+        Assert.Contains(results[1].Receipt.Outcome, new[] { RuntimePublicationOutcome.Unchanged, RuntimePublicationOutcome.PreconditionFailed });
+        if (results[1].Receipt.Outcome == RuntimePublicationOutcome.Unchanged)
+        {
+            if (republish) Assert.Equal("Revoked", results[1].Receipt.After!.Status);
+            else Assert.Null(results[1].Receipt.After);
+        }
+        await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
+            var permission = await verify.RuntimeConfigurationPermissions.AsNoTracking().SingleAsync();
+            Assert.Equal("Published", permission.Status); Assert.Equal(results[0].CurrentPermission!.Token, permission.ConcurrencyToken);
+            Assert.Equal(publishRequest.Key, permission.LastRequest); Assert.Equal("publisher", permission.ChangedBy);
+            Assert.Equal(republish ? "tester" : "publisher", permission.CreatedBy);
+            Assert.Equal(republish ? 4 : 2, await verify.RuntimePublicationReceipts.CountAsync());
+            foreach (var result in results)
+            {
+                var saved = await verify.RuntimePublicationReceipts.AsNoTracking().SingleAsync(x => x.RequestKey == result.Receipt.Request.Key);
+                Assert.Equal(result.Receipt, RuntimePublicationCodec.Receipt(saved.Payload));
+                Assert.Equal(expected, result.Receipt.Request.ExpectedToken);
+            }
+        }
+        var finalRevoke = await publication.ApplyAsync(Revoke(selected, results[0].CurrentPermission!.Token, "permission-race-final-revoke"), default);
+        Assert.Equal(RuntimePublicationOutcome.Revoked, finalRevoke.Receipt.Outcome);
+        var oldPublish = await publication.ApplyAsync(publishRequest, default);
+        var oldRevoke = await publication.ApplyAsync(revokeRequest, default);
+        Assert.Equal(results[0].Receipt, oldPublish.Receipt); Assert.Equal(results[1].Receipt, oldRevoke.Receipt);
+        Assert.Equal(finalRevoke.CurrentPermission, oldPublish.CurrentPermission); Assert.Equal(finalRevoke.CurrentPermission, oldRevoke.CurrentPermission);
+        Assert.Null(await publication.AuthorizeMetadataAsync(selected.Binding, selected.Revision!.Value, default));
+        await using var final = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+        var persisted = await final.RuntimeConfigurationPermissions.AsNoTracking().SingleAsync();
+        Assert.Equal("Revoked", persisted.Status); Assert.Equal(finalRevoke.CurrentPermission!.Token, persisted.ConcurrencyToken);
+        Assert.Equal("permission-race-final-revoke", persisted.LastRequest); Assert.Equal(republish ? 5 : 3, await final.RuntimePublicationReceipts.CountAsync());
     }
 }

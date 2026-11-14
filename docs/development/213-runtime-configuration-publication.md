@@ -76,6 +76,12 @@ members and the first failed/not-attempted member; it never promises whole-batch
 rollback. Cancellation before commit can roll back that member. A committed result
 is retained even if its response is lost: inspect/replay the same exact key. A
 storage error after commit is not proof that the permission was never published.
+EF/provider failures are translated to a safe storage error without driver detail.
+For a member whose result is unavailable, `RequiresInspection` is true and `Failed`
+identifies that exact unconfirmed request, not a promise of rollback. The result
+retains the known committed prefix. Inspect/resume with the same request identity;
+never invent a new intent to recover an unknown commit outcome. A failure during
+the upfront read-only selection returns no attempted member and an empty prefix.
 
 `AuthorizeMetadataAsync` checks current binding lifecycle and active exact permission
 in one RepeatableRead database snapshot. It returns only the exact non-secret
@@ -106,6 +112,10 @@ Focused tests cover actual initial/mixed service preparation, shared artifacts,
 foreign/missing/corrupt evidence, restart/restore, same-key races, conditional
 publish/revoke, binding-wide revoke, fresh metadata authorization and partial
 cancellation/response loss. Persisted assertions use independent DbContexts.
+The race cases separately cover first publication versus permission revoke and
+revoked-permission republish versus permission revoke, with truthful stale/no-op
+results. Later-member EF save and commit-acknowledgement faults assert the retained
+prefix, exact uncertain target, durable audit and same-intent inspection/resume.
 The existing real Kubernetes contour retains D01-D32 and adds D33-D36 for exact
 publication from genuinely established accounts and revocation-safe origin replay.
 This is metadata/API establishment evidence, not runtime delivery acceptance.

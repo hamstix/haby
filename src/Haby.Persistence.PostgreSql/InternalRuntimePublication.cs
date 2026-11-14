@@ -34,6 +34,13 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
 
     internal async Task<RuntimePublicationRequest[]> PreparationRequestsAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token)
     {
+        try { return await PreparationRequestsCoreAsync(accepted, actor, token); }
+        catch (Exception error) when (error is Npgsql.NpgsqlException or DbUpdateException)
+        { throw new IOException("Runtime publication storage unavailable."); }
+    }
+
+    private async Task<RuntimePublicationRequest[]> PreparationRequestsCoreAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token)
+    {
         PostgreSqlDurableDeploymentPlanner.ValidateActor(actor);
         await using var db = await contexts.CreateDbContextAsync(token);
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -99,6 +106,13 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
     }
 
     internal async Task<RuntimePublicationResult> ApplyAsync(RuntimePublicationRequest request, CancellationToken token)
+    {
+        try { return await ApplyCoreAsync(request, token); }
+        catch (Exception error) when (error is Npgsql.NpgsqlException or DbUpdateException)
+        { throw new IOException("Runtime publication storage unavailable."); }
+    }
+
+    private async Task<RuntimePublicationResult> ApplyCoreAsync(RuntimePublicationRequest request, CancellationToken token)
     {
         RuntimePublicationCodec.Validate(request);
         await using var db = await contexts.CreateDbContextAsync(token);

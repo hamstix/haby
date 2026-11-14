@@ -4,7 +4,7 @@ using System.Text;
 namespace Haby.Persistence.PostgreSql;
 
 internal sealed record RuntimePublicationPreparation(IReadOnlyList<RuntimePublicationResult> Completed,
-    RuntimePublicationRequest? Failed = null, string? Reason = null, bool Cancelled = false);
+    RuntimePublicationRequest? Failed = null, string? Reason = null, bool Cancelled = false, bool RequiresInspection = false);
 
 /// <summary>Sequential exact accepted-generation publication; no identity/materialization repair.</summary>
 internal sealed class InternalRuntimePublicationPreparation(InternalRuntimePublication publication)
@@ -20,6 +20,7 @@ internal sealed class InternalRuntimePublicationPreparation(InternalRuntimePubli
         RuntimePublicationRequest[] requests;
         try { requests = await publication.PreparationRequestsAsync(accepted, actor, token); } // Validate all before the first write.
         catch (RuntimePublicationBlockedException blocked) { return new([], blocked.Request, "runtime-binding-revoked"); }
+        catch (IOException) { return new([], Reason: "storage-unavailable"); }
         var completed = new List<RuntimePublicationResult>();
         foreach (var request in requests)
         {
@@ -32,7 +33,9 @@ internal sealed class InternalRuntimePublicationPreparation(InternalRuntimePubli
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { return new(completed.ToArray(), request, "cancelled", true); }
             catch (InvalidDataException) { return new(completed.ToArray(), request, "runtime-authority-invalid"); }
-            catch (IOException) { return new(completed.ToArray(), request, "storage-unavailable"); }
+            // A driver failure can occur while committing or after commit. Preserve the
+            // known prefix and exact unconfirmed intent; never claim that it rolled back.
+            catch (IOException) { return new(completed.ToArray(), request, "storage-unavailable", RequiresInspection: true); }
         }
         return new(completed.ToArray());
     }
