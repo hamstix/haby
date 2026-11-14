@@ -1,4 +1,4 @@
-# This channel accepts only fixed progress IDs. It never reads child output or credentials.
+# This channel accepts only fixed progress IDs and bounded monotonic managed elapsed milliseconds.
 function Get-QualificationJournalPath([string]$PrivateDirectory) {
     $directory=[IO.Path]::GetFullPath($PrivateDirectory)
     $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -39,7 +39,8 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             'durable-entry'='';'catalog-init-start'='durable-entry';'catalog-init-completed'='catalog-init-start'
             'namespace-create-start'='catalog-init-completed';'namespace-create-completed'='namespace-create-start'
             'durable-suite-start'='namespace-create-completed';'runtime-auth-start'='durable-suite-start'
-            'initial-delivery-start'='durable-suite-start';'mixed-delivery-start'='durable-suite-start'
+            'runtime-auth-completed'='runtime-auth-start'
+            'initial-delivery-start'='runtime-auth-completed';'mixed-delivery-start'='durable-suite-start'
             'mixed-preparation-completed'='mixed-delivery-start';'mixed-documents-completed'='mixed-preparation-completed'
             'mixed-identity-completed'='mixed-documents-completed';'mixed-publication-completed'='mixed-identity-completed'
             'mixed-delivery-completed'='mixed-publication-completed'
@@ -48,15 +49,28 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
         }
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $records=[Collections.Generic.List[string]]::new()
+        $previousElapsed=0L; $authStarts=0; $authCompleted=0; $authOpen=$false
         for($i=0;$i -lt $lines.Length-1;$i++){
             $line=$lines[$i]
-            if($line -cnotmatch '^([1-9][0-9]{0,2}) ([a-z-]+)$' -or [int]$Matches[1] -ne $i+1){return Result 'invalid'}
+            if($line -cnotmatch '^([1-9][0-9]{0,2}) ([a-z-]+) (0|[1-9][0-9]{0,6})$' -or [int]$Matches[1] -ne $i+1){return Result 'invalid'}
             $id=$Matches[2]
+            $elapsed=[long]$Matches[3]
+            if($elapsed -gt 3600000 -or $elapsed -lt $previousElapsed){return Result 'invalid'}
+            $previousElapsed=$elapsed
             if(!$requires.ContainsKey($id) -or ($requires[$id] -and !$seen.Contains($requires[$id])) -or
-                ($seen.Contains($id) -and $id -cne 'runtime-auth-start') -or
+                ($seen.Contains($id) -and $id -cnotin @('runtime-auth-start','runtime-auth-completed')) -or
                 ($i -eq 0 -and $id -cne 'durable-entry')){return Result 'invalid'}
+            if($id -ceq 'runtime-auth-start'){
+                if($authOpen -or $authStarts -ge 2 -or ($authStarts -eq 1 -and !$seen.Contains('initial-delivery-start'))){return Result 'invalid'}
+                $authStarts++; $authOpen=$true
+            }elseif($id -ceq 'runtime-auth-completed'){
+                if(!$authOpen){return Result 'invalid'}
+                $authOpen=$false; $authCompleted++
+            }elseif(($id -ceq 'initial-delivery-start' -and $authCompleted -ne 1) -or
+                ($id -ceq 'mixed-delivery-start' -and $authCompleted -ne 2)){return Result 'invalid'}
+            if($authOpen -and $id -cnotin @('runtime-auth-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-completed')){return Result 'invalid'}
             if(($seen.Contains('namespace-cleanup-start') -or $seen.Contains('catalog-dispose-start')) -and
-                $id -cin @('runtime-auth-start','initial-delivery-start','mixed-delivery-start','durable-suite-start','namespace-create-start','namespace-create-completed',
+                $id -cin @('runtime-auth-start','runtime-auth-completed','initial-delivery-start','mixed-delivery-start','durable-suite-start','namespace-create-start','namespace-create-completed',
                     'mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed','mixed-delivery-completed')){return Result 'invalid'}
             if($seen.Contains('catalog-dispose-start') -and $id -cne 'catalog-dispose-completed'){return Result 'invalid'}
             $seen.Add($id) | Out-Null; $records.Add($line)
@@ -66,7 +80,10 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
 }
 function Format-QualificationJournal($Journal) {
     'Diagnostic journal: '+$Journal.Status
-    if($Journal.Status -ceq 'valid'){foreach($line in $Journal.Records){'Diagnostic progress: '+$line}}
-    'Diagnostic inner namespace: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ namespace-absence-confirmed$'){'confirmed'}else{'unknown'})
-    'Diagnostic inner catalog: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ catalog-dispose-completed$'){'confirmed'}else{'unknown'})
+    if($Journal.Status -ceq 'valid'){
+        'Diagnostic managed elapsed origin: journal-initialization; excludes-build-startup; clock=monotonic'
+        foreach($line in $Journal.Records){'Diagnostic progress: '+$line}
+    }
+    'Diagnostic inner namespace: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ namespace-absence-confirmed [0-9]{1,7}$'){'confirmed'}else{'unknown'})
+    'Diagnostic inner catalog: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ catalog-dispose-completed [0-9]{1,7}$'){'confirmed'}else{'unknown'})
 }

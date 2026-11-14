@@ -43,6 +43,6 @@ function Invoke-QualificationProcess {
             throw (New-QualificationProcessFailure 'command-deadline' $clock.ElapsedMilliseconds)
         }
         Wait-QualificationOutput @($stdout,$stderr) $clock
-        return [pscustomobject]@{ ExitCode=$process.ExitCode; Output=$stdout.GetAwaiter().GetResult(); Error=$stderr.GetAwaiter().GetResult() }
+        return [pscustomobject]@{ ExitCode=$process.ExitCode; Output=$stdout.GetAwaiter().GetResult(); Error=$stderr.GetAwaiter().GetResult(); ElapsedMilliseconds=[Math]::Clamp($clock.ElapsedMilliseconds,0L,3600000L) }
     } finally { $process.Dispose() }
 }

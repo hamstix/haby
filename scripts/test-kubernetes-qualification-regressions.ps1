@@ -4,7 +4,7 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-evidence.ps1')
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
-foreach($scenario in @('success','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','harness-timeout','journal-invalid','journal-invalid-primary')){
+foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','harness-timeout','journal-invalid','journal-invalid-primary')){
     $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@()}
     $syntheticTimeout=$null
     if($scenario -eq 'harness-timeout'){
@@ -15,12 +15,17 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
     }
     $runner={param($file,$arguments,$seconds)
         $state.Calls+=,$arguments
-        $result=[pscustomobject]@{ExitCode=0;Output='';Error=''}
+        $result=[pscustomobject]@{ExitCode=0;Output='';Error='';ElapsedMilliseconds=42L}
         if($file -in @('icacls','chmod')){$state.Private=$arguments[0];if($file -eq 'chmod'){$state.Private=$arguments[1]};[IO.File]::WriteAllText((Join-Path $state.Private 'sentinel'),'harmless');if($scenario -eq 'acl-failure'){$result.ExitCode=17};return $result}
         if($file -eq 'dotnet'){
+            if($arguments[0] -eq 'run'){
+                if($scenario -eq 'elapsed-missing'){$result.PSObject.Properties.Remove('ElapsedMilliseconds')}
+                if($scenario -eq 'elapsed-malformed'){$result.ElapsedMilliseconds='protected-raw-sentinel'}
+                if($scenario -eq 'elapsed-out-of-range'){$result.ElapsedMilliseconds=3600001L}
+            }
             if($arguments[0] -eq 'run' -and $scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary')){
                 $path=Join-Path $state.Private 'diagnostic-progress.txt'
-                [IO.File]::WriteAllText($path, $(if($scenario -like 'journal-invalid*'){ "1 protected-JWT-config-sentinel`n" }else{ "1 durable-entry`n2 catalog-init-start`n" }))
+                [IO.File]::WriteAllText($path, $(if($scenario -like 'journal-invalid*'){ "1 protected-JWT-config-sentinel 0`n" }else{ "1 durable-entry 0`n2 catalog-init-start 10`n" }))
                 if($scenario -eq 'harness-timeout'){throw $syntheticTimeout}
                 if($scenario -eq 'journal-invalid-primary'){$result.ExitCode=17}
             }
@@ -46,9 +51,15 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
     $caught=$false
     $diagnosticMode=$scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary')
     try{& $launcher -Runtime $runtime -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence -DurableActions:$diagnosticMode | Out-Null}catch{$caught=$true}
-    if($caught -ne ($scenario -ne 'success')){throw "Wrong exit: $scenario"}
+    if($caught -ne ($scenario -cnotin @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range'))){throw "Wrong exit: $scenario"}
+    if($scenario -cin @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range')){
+        $lines=Get-Content $evidence
+        $expectedElapsed=if($scenario -ceq 'success'){'Harness command elapsed milliseconds: 42'}else{'Harness command elapsed milliseconds: unavailable'}
+        if($expectedElapsed -notin $lines -or 'Harness command elapsed origin: before-process-start-through-output-drain; includes-build-startup' -notin $lines -or
+            'Harness: PASS' -notin $lines -or $lines -match 'protected-raw-sentinel|3600001'){throw 'Unsafe or missing successful command timing'}
+    }
     if(Test-Path -LiteralPath $state.Private){throw "Private leak: $scenario"}
-    if($scenario -in @('success','stop-failure','evidence-failure','partial-launch','readiness-deadline') -and (!$state.Removed -or $state.Volumes)){throw "Owned storage leaked: $scenario"}
+    if($scenario -in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','stop-failure','evidence-failure','partial-launch','readiness-deadline') -and (!$state.Removed -or $state.Volumes)){throw "Owned storage leaked: $scenario"}
     if($scenario -eq 'foreign' -and $state.Removed){throw 'Foreign container deleted'}
     foreach($call in $state.Calls){if('foreign-volume' -in $call -and $call[0] -in @('remove','volume')){throw 'Foreign volume targeted'}}
     if($diagnosticMode){
@@ -57,7 +68,7 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
         if($scenario -eq 'harness-timeout'){
             $hasPrimaryFailureRecord=-not ('Failure: stage=harness; reason=command; category=TimeoutException' -notin $lines)
             $hasProcessKindElapsedRecord=-not ('Diagnostic process: command-deadline; elapsed-ms=180001' -notin $lines)
-            $hasJournalProgressRecord=-not ('Diagnostic progress: 2 catalog-init-start' -notin $lines)
+            $hasJournalProgressRecord=-not ('Diagnostic progress: 2 catalog-init-start 10' -notin $lines)
             $hasNoHarnessPass=-not ('Harness: PASS' -in $lines)
             $hasCatalogUnknownRecord=-not ('Diagnostic inner catalog: unknown' -notin $lines)
             if(!$hasPrimaryFailureRecord -or !$hasProcessKindElapsedRecord -or !$hasJournalProgressRecord -or !$hasNoHarnessPass -or !$hasCatalogUnknownRecord){
@@ -105,6 +116,11 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
     Write-Output "PASS lifecycle $runtime $scenario (synthetic)"
 }
 }
+# Actual success uses the same process-start-through-output-drain clock; no timing threshold or sleep.
+$success=Invoke-QualificationProcess -File (Get-Process -Id $PID).Path -Arguments @('-NoProfile','-Command',"'harmless-owned-child'")
+if($success.ExitCode -ne 0 -or $success.Output.Trim() -cne 'harmless-owned-child' -or $success.ElapsedMilliseconds -isnot [long] -or
+    $success.ElapsedMilliseconds -lt 0 -or $success.ElapsedMilliseconds -gt 3600000){throw 'Owned success elapsed missing or invalid'}
+Write-Output 'PASS real owned child success elapsed; separate parent command clock'
 # Actual child-process deadline, independent of the fake runtime.
 $clock=[Diagnostics.Stopwatch]::StartNew();$timedOut=$false
 try{Invoke-QualificationProcess -File (Get-Process -Id $PID).Path -Arguments @('-NoProfile','-Command','Start-Sleep -Seconds 60') -TimeoutSeconds 1 | Out-Null}catch [TimeoutException]{
@@ -141,22 +157,58 @@ try{
     if((Read-QualificationJournal $journalRoot).Status -cne 'empty'){throw 'Empty journal not explicit'}
     $rejected=$false;try{Initialize-QualificationJournal $journalRoot}catch{$rejected=$true}
     if(!$rejected){throw 'CreateNew journal overwrote an existing file'}
-    $valid="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 durable-suite-start`n7 mixed-delivery-start`n8 mixed-preparation-completed`n9 mixed-documents-completed`n10 mixed-identity-completed`n11 mixed-publication-completed`n12 mixed-delivery-completed`n13 namespace-cleanup-start`n14 namespace-absence-confirmed`n15 catalog-dispose-start`n16 catalog-dispose-completed`n"
+    $prefix="1 durable-entry 0`n2 catalog-init-start 10`n3 catalog-init-completed 20`n4 namespace-create-start 30`n5 namespace-create-completed 40`n6 durable-suite-start 50`n"
+    $pairs="7 runtime-auth-start 60`n8 runtime-auth-completed 70`n9 initial-delivery-start 80`n10 runtime-auth-start 90`n11 runtime-auth-completed 100`n"
+    $valid=$prefix+$pairs+"12 mixed-delivery-start 110`n13 mixed-preparation-completed 120`n14 mixed-documents-completed 130`n15 mixed-identity-completed 140`n16 mixed-publication-completed 150`n17 mixed-delivery-completed 160`n18 namespace-cleanup-start 170`n19 namespace-absence-confirmed 180`n20 catalog-dispose-start 190`n21 catalog-dispose-completed 200`n"
     [IO.File]::WriteAllText($journal,$valid)
     $parsed=Read-QualificationJournal $journalRoot
-    if($parsed.Status -cne 'valid' -or $parsed.Records.Count -ne 16){throw 'Valid journal rejected'}
+    if($parsed.Status -cne 'valid' -or $parsed.Records.Count -ne 21){throw 'Valid journal rejected'}
     $published=@(Format-QualificationJournal $parsed)
     if($published -match '^PASS |^Harness: PASS$'){throw 'Progress became a passing gate row'}
+    if('Diagnostic managed elapsed origin: journal-initialization; excludes-build-startup; clock=monotonic' -notin $published -or
+        'Diagnostic inner namespace: confirmed' -notin $published -or 'Diagnostic inner catalog: confirmed' -notin $published){throw 'Managed clock origin or actual cleanup evidence missing'}
+    # Incomplete auth pairs are valid progress, including failure paths that reach owned cleanup.
+    foreach($text in @(
+        "1 durable-entry 3600000`n2 catalog-init-start 3600000`n",
+        ($prefix+"7 runtime-auth-start 60`n"),
+        ($prefix+"7 runtime-auth-start 60`n8 runtime-auth-completed 60`n"),
+        ($prefix+"7 runtime-auth-start 60`n8 runtime-auth-completed 70`n9 initial-delivery-start 80`n10 runtime-auth-start 90`n"),
+        ($prefix+"7 runtime-auth-start 60`n8 namespace-cleanup-start 70`n9 namespace-absence-confirmed 80`n10 catalog-dispose-start 90`n11 catalog-dispose-completed 100`n")
+    )){
+        [IO.File]::WriteAllText($journal,$text)
+        $partial=Read-QualificationJournal $journalRoot
+        if($partial.Status -cne 'valid'){throw 'Valid equal/bounded timing or incomplete pair rejected'}
+        $output=@(Format-QualificationJournal $partial)
+        if($output -match '^PASS |^Harness: PASS$'){throw 'Incomplete phase became case success'}
+        if($text -notmatch 'catalog-dispose-completed' -and ('Diagnostic inner namespace: unknown' -notin $output -or 'Diagnostic inner catalog: unknown' -notin $output)){throw 'Incomplete phase claimed cleanup'}
+    }
     foreach($case in @(
-        @{Text="1 durable-entry`n2 catalog-init-start";Status='partial'},
-        @{Text="1 durable-entry`n3 catalog-init-start`n";Status='invalid'},
-        @{Text="1 durable-entry`n2 catalog-dispose-completed`n";Status='invalid'},
-        @{Text="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 namespace-cleanup-start`n7 catalog-dispose-start`n8 namespace-absence-confirmed`n";Status='invalid'},
-        @{Text="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 durable-suite-start`n7 mixed-delivery-start`n8 mixed-documents-completed`n";Status='invalid'},
-        @{Text="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 durable-suite-start`n7 mixed-delivery-start`n8 namespace-cleanup-start`n9 mixed-preparation-completed`n";Status='invalid'},
-        @{Text="1 durable-entry`n2 protected-JWT-SQL-config-argument-sentinel`n";Status='invalid'},
+        @{Text="1 durable-entry 0`n2 catalog-init-start 10";Status='partial'},
+        @{Text="1 durable-entry 0`n3 catalog-init-start 10`n";Status='invalid'},
+        @{Text="1 durable-entry 0`n2 catalog-dispose-completed 10`n";Status='invalid'},
+        @{Text="1 durable-entry 0`n2 catalog-init-start 10`n3 catalog-init-completed 20`n4 namespace-create-start 30`n5 namespace-create-completed 40`n6 namespace-cleanup-start 50`n7 catalog-dispose-start 60`n8 namespace-absence-confirmed 70`n";Status='invalid'},
+        @{Text=($prefix+$pairs+"12 mixed-delivery-start 110`n13 mixed-documents-completed 120`n");Status='invalid'},
+        @{Text=($prefix+$pairs+"12 mixed-delivery-start 110`n13 namespace-cleanup-start 120`n14 mixed-preparation-completed 130`n");Status='invalid'},
+        @{Text="1 durable-entry 0`n2 protected-JWT-SQL-config-argument-sentinel 10`n";Status='invalid'},
+        @{Text="1 durable-entry 00`n";Status='invalid'},
+        @{Text="1 durable-entry -1`n";Status='invalid'},
+        @{Text="1 durable-entry +1`n";Status='invalid'},
+        @{Text="1 durable-entry 1.0`n";Status='invalid'},
+        @{Text="1 durable-entry 1e2`n";Status='invalid'},
+        @{Text="1 durable-entry 3600001`n";Status='invalid'},
+        @{Text="1 durable-entry 99999999999999999999`n";Status='invalid'},
+        @{Text="1 durable-entry 0`n2 catalog-init-start 0 extra`n";Status='invalid'},
+        @{Text=($prefix+"7 runtime-auth-start 49`n");Status='invalid'},
+        @{Text=($prefix+"7 runtime-auth-completed 60`n");Status='invalid'},
+        @{Text=($prefix+"7 runtime-auth-start 60`n8 runtime-auth-start 70`n");Status='invalid'},
+        @{Text=($prefix+"7 runtime-auth-start 60`n8 runtime-auth-completed 70`n9 runtime-auth-completed 80`n");Status='invalid'},
+        @{Text=($prefix+"7 runtime-auth-start 60`n8 runtime-auth-completed 70`n9 runtime-auth-start 80`n");Status='invalid'},
+        @{Text=($prefix+$pairs+"12 runtime-auth-start 110`n");Status='invalid'},
+        @{Text=($prefix+"7 initial-delivery-start 60`n");Status='invalid'},
+        @{Text=($prefix+"7 mixed-delivery-start 60`n");Status='invalid'},
+        @{Text=($prefix+"7 runtime-auth-start 60`n8 namespace-cleanup-start 70`n9 runtime-auth-completed 80`n");Status='invalid'},
         @{Text=('x'*16385);Status='overflow'},
-        @{Text=("1 durable-entry`n"*257);Status='overflow'}
+        @{Text=("1 durable-entry 0`n"*257);Status='overflow'}
     )){
         [IO.File]::WriteAllText($journal,$case.Text)
         $parsed=Read-QualificationJournal $journalRoot

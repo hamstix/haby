@@ -76,6 +76,11 @@ try {
     $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-restore','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
     foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
     if($result.ExitCode -ne 0){$reason='nonzero';throw 'Harness failed.'}
+    $record.Add('Harness command elapsed origin: before-process-start-through-output-drain; includes-build-startup')
+    $elapsed=$result.ElapsedMilliseconds
+    if($elapsed -is [long] -and $elapsed -ge 0 -and $elapsed -le 3600000){
+        $record.Add('Harness command elapsed milliseconds: '+$elapsed.ToString([Globalization.CultureInfo]::InvariantCulture))
+    }else{$record.Add('Harness command elapsed milliseconds: unavailable')}
     $record.Add('Harness: PASS')
 } catch {
     $failed=$true
