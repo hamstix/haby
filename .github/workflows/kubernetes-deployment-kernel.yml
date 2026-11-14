@@ -38,7 +38,7 @@ jobs:
         run: |
           $lines = @(Get-Content .artifacts/durable-actions/evidence.txt)
           $ids = @($lines | Where-Object { $_ -cmatch '^PASS durable-D[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(13,3) } | Sort-Object)
-          $expected = @(1..32 | ForEach-Object { 'D{0:d2}' -f $_ })
+          $expected = @(1..36 | ForEach-Object { 'D{0:d2}' -f $_ })
           if (($ids -join ',') -cne ($expected -join ',') -or 'Harness: PASS' -notin $lines -or
               'Run-owned private directory removed.' -notin $lines -or
               'PASS durable-owned-catalog-cleanup' -notin $lines -or

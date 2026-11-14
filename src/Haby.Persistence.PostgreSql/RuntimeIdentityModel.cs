@@ -55,7 +55,7 @@ public sealed partial class ManifestCatalogDbContext
         });
         model.Entity<RuntimeIdentityBindingRow>(e =>
         {
-            e.ToTable("runtime_identity_bindings", t => t.HasCheckConstraint("CK_runtime_binding", "format > 0 AND status = 'Prepared' AND octet_length(validation_payload) BETWEEN 1 AND 1048576"));
+            e.ToTable("runtime_identity_bindings", t => t.HasCheckConstraint("CK_runtime_binding", "format > 0 AND status IN ('Prepared', 'Revoked') AND concurrency_token <> '00000000-0000-0000-0000-000000000000'::uuid AND octet_length(validation_payload) BETWEEN 1 AND 1048576 AND ((status = 'Prepared' AND revoked_at IS NULL AND revoked_by IS NULL) OR (status = 'Revoked' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL))"));
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnName("id");
             e.Property(x => x.InstallationId).HasColumnName("installation_id");
@@ -66,6 +66,9 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.Authenticator).HasColumnName("authenticator").HasMaxLength(128);
             e.Property(x => x.Audience).HasColumnName("audience").HasMaxLength(256);
             e.Property(x => x.Status).HasColumnName("status").HasMaxLength(32);
+            e.Property(x => x.ConcurrencyToken).HasColumnName("concurrency_token").IsConcurrencyToken();
+            e.Property(x => x.RevokedAt).HasColumnName("revoked_at");
+            e.Property(x => x.RevokedBy).HasColumnName("revoked_by").HasMaxLength(256);
             e.Property(x => x.Contract).HasColumnName("contract").HasMaxLength(128);
             e.Property(x => x.Format).HasColumnName("format");
             e.Property(x => x.ValidationPayload).HasColumnName("validation_payload");
@@ -115,6 +118,9 @@ internal sealed class RuntimeIdentityBindingRow
     public required string Authenticator { get; set; }
     public required string Audience { get; set; }
     public required string Status { get; set; }
+    public Guid ConcurrencyToken { get; set; } = Guid.CreateVersion7();
+    public DateTimeOffset? RevokedAt { get; set; }
+    public string? RevokedBy { get; set; }
     public required string Role { get; set; }
     public required string Contract { get; set; }
     public int Format { get; set; }

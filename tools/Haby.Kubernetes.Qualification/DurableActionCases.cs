@@ -442,6 +442,49 @@ internal static class DurableActionCases
                     "D28-runtime-required-permission-denial-no-create");
             Check(lost.Counter.Barriers == 1 && interrupted.Counter.Barriers == 1 && absent.Counter.Barriers == 0 &&
                 lost.Counter.TransactionChecks > 0 && interrupted.Counter.TransactionChecks > 0 && absent.Counter.TransactionChecks > 0, "D12-committed-marker-no-network-under-catalog-transaction");
+            // Publication uses the same catalog/API contour and actual confirmed identity,
+            // including a genuine mixed baseline. No TokenReview or delivery is introduced.
+            var initialPublication = (Scenario: runtimeLost.Scenario with { Connection = lostRestored }, Key: runtimeLost.Key,
+                Counter: new Counter(lostRestored) { Key = runtimeLost.Key });
+            foreach (var candidate in new[] { runtimeMixed, initialPublication })
+            {
+                await using var services = DurableDeploymentPlanningTests.InternalServices(candidate.Scenario.Connection, candidate.Scenario.Time);
+                var publication = new InternalRuntimePublication(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+                    DurableDeploymentPlanningTests.ConfigurationPreparation(services).Preparation, ComposeRuntime(services, candidate.Counter), candidate.Scenario.Time);
+                var requests = await publication.PreparationRequestsAsync(candidate.Scenario.Commit, "qualifier", token);
+                if (requests.Length != 2) throw new InvalidOperationException("Exact runtime publication selection unavailable.");
+                foreach (var request in requests)
+                {
+                    if (await publication.AuthorizeMetadataAsync(request.Binding, request.Revision!.Value, token) is not null)
+                        throw new InvalidOperationException("Unpublished runtime artifact authorized.");
+                    var first = await publication.ApplyAsync(request, token);
+                    if (first.Receipt.Outcome != RuntimePublicationOutcome.Published ||
+                        await publication.AuthorizeMetadataAsync(request.Binding, request.Revision.Value, token) is null)
+                        throw new InvalidOperationException("Exact runtime publication unavailable.");
+                }
+                Check(true, candidate.Scenario == runtimeMixed.Scenario ? "D33-runtime-mixed-exact-publication" : "D34-runtime-initial-exact-publication");
+                var old = (await publication.ReadAsync(requests[0].Key, token))!;
+                var revoke = requests[0] with
+                {
+                    Key = "qualification-revoke",
+                    Operation = RuntimePublicationOperation.RevokePermission,
+                    Origin = null,
+                    ExpectedToken = old.CurrentPermission!.Token
+                };
+                await publication.ApplyAsync(revoke, token);
+                var replay = await publication.ApplyAsync(requests[0], token);
+                if (replay.Receipt != old.Receipt || replay.CurrentPermission!.Status != "Revoked" ||
+                    await publication.AuthorizeMetadataAsync(requests[0].Binding, requests[0].Revision!.Value, token) is not null)
+                    throw new InvalidOperationException("Old runtime publication restored revoked access.");
+                var blocked = await publication.ApplyAsync(new("qualification-binding-revoke", RuntimePublicationOperation.RevokeBinding,
+                    requests[0].Binding, null, old.CurrentBinding.Token, "qualifier"), token);
+                var historical = await ComposeRuntime(services, candidate.Counter).ExecuteAsync(candidate.Key, token);
+                if (historical.Outcome != InternalActionOutcome.Confirmed || blocked.CurrentBinding.Status != "Revoked" ||
+                    await publication.AuthorizeMetadataAsync(requests[1].Binding, requests[1].Revision!.Value, token) is not null)
+                    throw new InvalidOperationException("Runtime binding revocation or retained origin invalid.");
+            }
+            Check(true, "D35-runtime-old-receipt-does-not-restore-revoked-permission");
+            Check(true, "D36-runtime-binding-revoke-preserves-confirmed-origin-without-access");
         }
         catch (Exception error) { primary = error; throw; }
         finally
