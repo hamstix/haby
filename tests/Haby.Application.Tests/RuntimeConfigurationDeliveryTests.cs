@@ -56,6 +56,24 @@ public sealed partial class ConfigurationDeliveryTests
     }
 
     [Fact]
+    public async Task Runtime_admission_and_both_output_limit_origins_have_distinct_closed_outcomes()
+    {
+        foreach (var origin in new[] { "admission", "materializer", "document" })
+        {
+            var h = await Prepare(); var ports = new RuntimePorts(h);
+            if (origin == "admission") ports.Authentication = RuntimeAuthenticationOutcome.ResourceExhausted;
+            if (origin == "materializer") h.Adapter.Text = new string('a', 4 * 1024 * 1024 + 1);
+            if (origin == "document") ports.BeforeRead = () => throw new ConfigurationDocumentLimitException();
+            using var admission = new RuntimeAuthenticationAdmission(new(), TimeProvider.System);
+            using var result = await ports.Service(admission).ExecuteAsync(ports.Trust.Binding, h.Store.Artifact.Revision.Metadata.Id, "projected"u8.ToArray(), default);
+            Assert.Equal(origin == "admission" ? RuntimeDeliveryOutcome.AdmissionOverload : RuntimeDeliveryOutcome.OutputLimit, result.Outcome);
+            if (origin == "admission") Assert.DoesNotContain("permission", ports.Calls);
+            else Assert.Contains("artifact", ports.Calls);
+            Assert.True(result.Document is null || result.Document.Json.IsEmpty);
+        }
+    }
+
+    [Fact]
     public async Task Runtime_materialization_uses_same_complete_core_without_static_authorization_or_grants()
     {
         var h = await Prepare(separateRequests: true); h.Store.Allowed = false;

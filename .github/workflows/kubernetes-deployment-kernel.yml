@@ -9,6 +9,9 @@ on:
       - 'src/Haby.Persistence.PostgreSql/**'
       - 'src/Haby.Operator.Host/**'
       - 'src/Haby.Configuration.Contracts/**'
+      - 'src/Haby.Configuration.Client/**'
+      - 'examples/Haby.RuntimeStartup.Consumer/**'
+      - 'tests/Haby.Cli.Tests/RuntimeStartup*.cs'
       - 'tests/Haby.PostgreSql.IntegrationTests/**'
       - 'tests/Haby.Kubernetes.Tests/**'
       - 'tools/Haby.Kubernetes.Qualification/**'
@@ -58,7 +61,7 @@ jobs:
               $identity = $runtimeMethod + "`n" + $Matches[1]
               [pscustomobject]@{ method = $runtimeMethod; case = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant(); outcome = 'Passed' }
             }
-            if ($line -cmatch '^PASS delivery-((?:initial|login)-T[0-9]{2}-[a-zA-Z0-9-]+)$') {
+            if ($line -cmatch '^PASS delivery-((?:initial|login)-[TS][0-9]{2}-[a-zA-Z0-9-]+)$') {
               $identity = $deliveryMethod + "`n" + $Matches[1]
               [pscustomobject]@{ method = $deliveryMethod; case = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant(); outcome = 'Passed' }
             }

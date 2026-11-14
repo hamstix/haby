@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/examples/">
     <Project Path="examples/Haby.Configuration.Client/Haby.Configuration.Example.csproj" />
+    <Project Path="examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
