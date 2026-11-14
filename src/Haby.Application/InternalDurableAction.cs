@@ -6,7 +6,7 @@ internal sealed record InternalActionContract(string Subject, string ProviderKin
     string Implementation, string Action, string InputFormat, string OutputContract);
 internal sealed record InternalActionContext(DurableOperationKey Key, DurablePlanningInputs Inputs,
     ProviderInput Subject, ExactProviderResolution Provider, PreparedProviderConfiguration Configuration,
-    string ApplicationVersion, Guid Marker, Guid ManagedIdentity, PlacementDeclaration? Placement);
+    string ApplicationVersion, Guid Marker, Guid ManagedIdentity, PlacementDeclaration? Placement, Guid InstallationId = default);
 internal enum InternalActionOutcome { Confirmed, Uncertain, Refused, Unavailable, NotConfirmed }
 internal sealed record InternalActionResult(InternalActionOutcome Outcome, string Code, string? Receipt = null);
 
@@ -16,6 +16,9 @@ internal interface IInternalActionHandler
 {
     InternalActionContract Contract { get; }
     bool ObservationRecovery { get; }
+    InternalManagedTarget? ManagedTarget(InternalActionContext context) => null;
+    bool RequiresPreparedConfiguration => false;
+    InternalIdentityConfirmation? IdentityConfirmation(InternalActionContext context, string payload, string receipt) => null;
     // Pure preparation admission is distinct from permission to create an executable intent.
     IReadOnlyList<ManifestLocalId> PreparationDocuments(InternalActionContext context)
     {
@@ -48,3 +51,8 @@ internal static class InternalPlacementInput
         return (id, new(ManifestLocalId.Create(Read("name")), revision, Read("contract"), format, Read("payload")));
     }
 }
+
+// Pure adapter projections. Persistence alone owns locks, catalog entities and transactions.
+internal sealed record InternalManagedTarget(string Contract, int Format, string Payload);
+internal sealed record InternalIdentityConfirmation(string Role, string Contract, int Format,
+    string InventoryPayload, string Authenticator, string Audience, string ValidationPayload);

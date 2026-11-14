@@ -44,7 +44,7 @@ public sealed class InternalDeploymentPlacementTests
         Assert.Equal("unsupported-fields", Assert.Throws<WorkloadContractException>(() => handler.Prepare(context)).Code);
     }
 
-    private static InternalActionContext[] Contexts(bool distinct, bool collision = false, bool configured = false)
+    internal static InternalActionContext[] Contexts(bool distinct, bool collision = false, bool configured = false)
     {
         var envelope = JsonNode.Parse("""{"applicationVersion":"v1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"orders"},"spec":{"components":{"api":{"workloads":{"main":{"type":"kubernetes.workload/v1alpha1","providerRef":"kubernetes.primary","properties":{"image":{"reference":"registry.example/app:v1"}}}}},"worker":{"workloads":{"main":{"type":"kubernetes.workload/v1alpha1","providerRef":"kubernetes.primary","properties":{"image":{"reference":"registry.example/worker:v1"}}}}}}}}}"""u8)!;
         if (distinct) envelope["manifest"]!["spec"]!["components"]!["worker"]!["workloads"]!["main"]!["placementRef"] = "worker";

@@ -14,7 +14,7 @@ internal sealed partial class InternalDurableActions(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IEnumerable<IInternalActionHandler> registrations,
     IEnumerable<IProviderConfigurationCodec> codecs, IEnumerable<IExternalOperationOutputContract> resourceOutputs,
     DurableActionAdmission resourceAdmission, DurableOperationSerialization serialization, TimeProvider clock,
-    Action<InternalActionFault>? fault = null)
+    Action<InternalActionFault>? fault = null, InternalWorkloadConfiguration? configurationPreparation = null)
 {
     private readonly IInternalActionHandler[] handlers = ValidateRegistrations(registrations);
     private readonly IProviderConfigurationCodec[] typedCodecs = codecs.ToArray();
@@ -42,6 +42,8 @@ internal sealed partial class InternalDurableActions(
             {
                 var source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
                 var candidate = await ContextAsync(preflight, source, key, subject, action, Guid.CreateVersion7(), Guid.CreateVersion7(), token);
+                if (candidate.Handler.RequiresPreparedConfiguration)
+                    await RequireConfigurationAsync(preflight, source, token);
                 var proposed = candidate.Handler.Prepare(candidate.Context);
                 if (!candidate.Handler.Validate(candidate.Context, proposed)) throw new InvalidDataException("Action preparation refused.");
                 if (await DurableAggregateCompletion.ReadAsync(preflight, source, token, true) is null)
@@ -75,6 +77,16 @@ internal sealed partial class InternalDurableActions(
             }
             var marker = Guid.CreateVersion7(); var managed = Guid.CreateVersion7();
             var exact = await ContextAsync(db, generation, key, subject, action, marker, managed, token);
+            if (subject is ProviderInput.Workload workload)
+            {
+                if (exact.Handler.RequiresPreparedConfiguration) await RequireConfigurationAsync(db, generation, token);
+                // Never attach a superseded per-intent identity, even when initialization was bypassed.
+                await RefuseUnboundHistoryAsync(db, deployment, token);
+                var stable = await ManagedAsync(db, generation, workload, exact.Context, exact.Handler, true, token);
+                managed = stable.Id;
+                var installation = await InstallationAsync(db, token);
+                exact = (exact.Context with { ManagedIdentity = managed, InstallationId = installation }, exact.Handler);
+            }
             var payload = exact.Handler.Prepare(exact.Context);
             if (payload.Length is 0 or > 1_048_576 || System.Text.Encoding.UTF8.GetByteCount(payload) > 1_048_576 || !exact.Handler.Validate(exact.Context, payload)) throw new InvalidDataException("Action intent refused.");
             var contract = exact.Handler.Contract;
@@ -233,6 +245,7 @@ internal sealed partial class InternalDurableActions(
         {
             if (!loaded.Handler.ValidateReceipt(loaded.Context, loaded.Intent.Payload, result.Receipt!, observation) ||
                 !await DurableOperationTransitions.ConfirmAsync(db, key, attempt, at, observation, token)) throw new InvalidDataException("Action completion refused.");
+            await AcceptIdentityAsync(db, loaded, result.Receipt!, token);
             db.OperationOutputs.Add(new()
             {
                 DeploymentId = loaded.Intent.DeploymentId,
@@ -251,7 +264,20 @@ internal sealed partial class InternalDurableActions(
 
     private async ValueTask<InternalActionResult> TerminalAsync(DurableOperationKey key, Loaded loaded, CancellationToken token)
     {
-        await using var db = await contexts.CreateDbContextAsync(token); return await TerminalAsync(db, loaded, token);
+        InternalActionResult saved;
+        await using (var db = await contexts.CreateDbContextAsync(token)) saved = await TerminalAsync(db, loaded, token);
+        if (loaded.Handler.RequiresPreparedConfiguration)
+        {
+            // A saved confirmation does not authorize replacement of a missing/replaced managed object.
+            var observed = await loaded.Handler.ObserveAsync(loaded.Context, loaded.Intent.Payload, token);
+            if (observed.Outcome != InternalActionOutcome.Confirmed || observed.Receipt is null ||
+                !loaded.Handler.ValidateReceipt(loaded.Context, loaded.Intent.Payload, observed.Receipt, true)) return observed with { Receipt = null };
+            var current = loaded.Handler.IdentityConfirmation(loaded.Context, loaded.Intent.Payload, observed.Receipt);
+            var original = loaded.Handler.IdentityConfirmation(loaded.Context, loaded.Intent.Payload, saved.Receipt!);
+            if (current is null || original is null || current.ValidationPayload != original.ValidationPayload)
+                return new(InternalActionOutcome.Refused, "managed-identity-conflict");
+        }
+        return saved;
     }
     private static async ValueTask<InternalActionResult> TerminalAsync(ManifestCatalogDbContext db, Loaded loaded, CancellationToken token)
     {
@@ -266,6 +292,7 @@ internal sealed partial class InternalDurableActions(
             (observation is null ? attempt.Outcome != nameof(DurableAttemptOutcome.Succeeded) :
                 attempt.Outcome != nameof(DurableAttemptOutcome.Uncertain) || observation.AttemptId != attempt.AttemptId || observation.Receipt != output.Payload) ||
             !loaded.Handler.ValidateReceipt(loaded.Context, loaded.Intent.Payload, output.Payload, observation is not null)) throw new InvalidDataException("Terminal action evidence unavailable.");
+        await ValidateIdentityAsync(db, loaded, output.Payload, token);
         return new(InternalActionOutcome.Confirmed, "confirmed", output.Payload);
     }
     internal async ValueTask<InternalActionView?> HistoryAsync(DurableOperationKey key, CancellationToken token)

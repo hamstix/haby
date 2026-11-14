@@ -63,7 +63,11 @@ internal sealed partial class InternalDurableActions
             placement = pin.Declaration;
         }
         var manifestRow = await db.Revisions.AsNoTracking().SingleAsync(x => x.ApplicationRecordId == source.ApplicationRecordId && x.LocalRevisionNumber == source.RevisionNumber, token);
-        return (new(key, inputs, subject, exact, prepared, manifestRow.ApplicationVersion, marker, managed, placement), handler);
+        var installation = handler.RequiresPreparedConfiguration
+            ? await db.InstallationIdentities.AsNoTracking().Where(x => x.Singleton == 1).Select(x => x.Id).SingleOrDefaultAsync(token) : Guid.Empty;
+        // Pure pre-acceptance shape validation has no installation authority; the final acceptance replaces this placeholder.
+        return (new(key, inputs, subject, exact, prepared, manifestRow.ApplicationVersion, marker, managed, placement,
+            installation == Guid.Empty && handler.RequiresPreparedConfiguration ? managed : installation), handler);
     }
 
     private async Task<Loaded> LoadAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token)
@@ -82,6 +86,13 @@ internal sealed partial class InternalDurableActions
             proof is null || proof.Id != intent.CheckpointId || intent.Payload.Length is 0 or > 1_048_576 || System.Text.Encoding.UTF8.GetByteCount(intent.Payload) > 1_048_576 ||
             intent.OperationId != "effect-" + intent.RequestId) throw new InvalidDataException("Immutable action authority mismatch.");
         var selected = await ContextAsync(db, generation, key, Subject(intent), intent.ActionContract, intent.Marker, intent.ManagedIdentity, token);
+        if (Subject(intent) is ProviderInput.Workload workload)
+        {
+            await RefuseUnboundHistoryAsync(db, deployment, token);
+            var stable = await ManagedAsync(db, generation, workload, selected.Context, selected.Handler, false, token);
+            if (stable.Id != intent.ManagedIdentity) throw new InvalidDataException("Superseded Workload identity requires an explicitly initialized fresh catalog.");
+            if (selected.Handler.RequiresPreparedConfiguration) await RequireConfigurationAsync(db, generation, token);
+        }
         var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, key.Generation.Value, resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true);
         if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token)) throw new InvalidDataException("Current Resource evidence metadata unavailable.");
         var contract = selected.Handler.Contract;

@@ -16,6 +16,12 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
         if (applied.Length > 0 && (currentBaseLength == 0 || applied.Length < currentBaseLength ||
             applied.Length > expected.Length || !applied.SequenceEqual(expected.Take(applied.Length))))
             throw new InvalidOperationException("Unsupported catalog schema. Explicitly initialize a fresh catalog; external resources remain unchanged.");
+        var actionBaseLength = Array.IndexOf(expected, "20261113200008_PersistInternalActionIntents") + 1;
+        var identityBaseLength = Array.IndexOf(expected, "20261114033757_StableWorkloadRuntimeIdentity") + 1;
+        // Inspect only tables known to exist in the validated old migration prefix, before any mutation.
+        if (actionBaseLength > 0 && identityBaseLength > 0 && applied.Length >= actionBaseLength && applied.Length < identityBaseLength &&
+            await context.ActionIntents.AsNoTracking().AnyAsync(x => x.SubjectKind == "Workload", cancellationToken))
+            throw new InvalidOperationException("Superseded Workload identity requires an explicitly initialized fresh catalog; external resources remain unchanged.");
         var setBaseLength = Array.IndexOf(expected, "20261112002755_PersistExactProviderInputSets") + 1;
         var checkpointBaseLength = Array.IndexOf(expected, "20261112035955_PersistResourcesReadyCheckpoints") + 1;
         if (applied.Length > 0 && applied.Length < checkpointBaseLength &&
