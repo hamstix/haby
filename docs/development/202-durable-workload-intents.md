@@ -14,9 +14,10 @@ kernel remains available under its existing caller obligations.
 Commit pipeline. A temporary internal scope is persisted on the same Plan and
 generation models; no public flag or Host registration selects it. The path
 requires a fully applied Resource-bearing baseline, a real imported mixed
-declaration and unchanged reusable Resources. It does not support new/retired
-Resources, Workload-only empty stages or configuration documents/Bindings in
-this internal slice. The complete manifest, configuration, exact Provider set,
+declaration and unchanged reusable Resources. [Issue #206](206-workload-only-empty-resource-stage.md) also admits
+initial zero-Resource Workload-only declarations with ExpectedAbsence and an explicit
+empty checkpoint. New/retired Resources and configuration documents/Bindings remain
+unsupported. The complete manifest, configuration, exact Provider set,
 Placement payloads and fingerprint remain frozen. Resource planning uses a
 derived Resource-stage view; it never creates Workload Resource nodes.
 

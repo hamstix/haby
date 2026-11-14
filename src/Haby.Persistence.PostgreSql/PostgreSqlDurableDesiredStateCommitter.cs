@@ -16,11 +16,11 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
     public ValueTask<DurableCommitResult> CommitAsync(DeploymentChangeSetId changeSetId,
         DeploymentPlanId planId, string actorId, CancellationToken cancellationToken) => CommitCoreAsync(changeSetId, planId, actorId, false, cancellationToken);
 
-    internal ValueTask<DurableCommitResult> CommitInternalAsync(DeploymentChangeSetId change, DeploymentPlanId plan, string actor, CancellationToken token) =>
-        CommitCoreAsync(change, plan, actor, true, token);
+    internal ValueTask<DurableCommitResult> CommitInternalAsync(DeploymentChangeSetId change, DeploymentPlanId plan, string actor, CancellationToken token, IReadOnlyList<IInternalActionHandler>? handlers = null) =>
+        CommitCoreAsync(change, plan, actor, true, token, handlers);
 
     private async ValueTask<DurableCommitResult> CommitCoreAsync(DeploymentChangeSetId changeSetId,
-        DeploymentPlanId planId, string actorId, bool internalEffects, CancellationToken cancellationToken)
+        DeploymentPlanId planId, string actorId, bool internalEffects, CancellationToken cancellationToken, IReadOnlyList<IInternalActionHandler>? handlers = null)
     {
         ArgumentNullException.ThrowIfNull(changeSetId);
         ArgumentNullException.ThrowIfNull(planId);
@@ -115,14 +115,19 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             }
             // Existing executable pilot admits only one exact Resource context. The loop above
             // checks the complete set; this restriction is capability admission, not storage.
-            var pilot = (internalEffects ? InternalResourceStage.Project(inputs) : inputs).Providers.RequireUniformResourceProvider();
-            var instance = Guid.Parse(pilot.Instance.ToString());
-            revision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x =>
-                x.ProviderInstanceId == instance && x.RevisionNumber == pilot.Configuration.Value &&
-                x.EnvironmentRecordId == change.EnvironmentRecordId && x.IsSealed, cancellationToken);
+            if (!(internalEffects && inputs.Configuration!.Manifest.Spec.Resources.Count == 0))
+            {
+                var pilot = (internalEffects ? InternalResourceStage.Project(inputs) : inputs).Providers.RequireUniformResourceProvider();
+                var instance = Guid.Parse(pilot.Instance.ToString());
+                revision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x =>
+                    x.ProviderInstanceId == instance && x.RevisionNumber == pilot.Configuration.Value &&
+                    x.EnvironmentRecordId == change.EnvironmentRecordId && x.IsSealed, cancellationToken);
+            }
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
-        if (revision is null) return new DurableCommitResult.UnsupportedShape();
+        var emptyStage = internalEffects && actual is null && change.ExpectedAbsence && change.ExpectedGeneration is null &&
+            InternalResourceStage.IsEmpty(inputs, graph);
+        if (revision is null && !emptyStage) return new DurableCommitResult.UnsupportedShape();
         if (actual is null ? graph.Baseline is not null : graph.Baseline is not { } baseline ||
             baseline.Deployment.ToString() != actual.Id.ToString() || baseline.Generation != actual.DesiredGeneration)
             return new DurableCommitResult.PlanInputUnavailable();
@@ -154,14 +159,19 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
         var resourceInputs = internalEffects ? InternalResourceStage.Project(inputs) : inputs;
         var spec = internalEffects ? resourceInputs.Configuration!.Manifest.Spec : declaration.Spec;
-        if (internalEffects && (actual is null || graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 || !await planner.ValidateInternalProvidersAsync(context, inputs, cancellationToken)))
+        if (internalEffects && ((!emptyStage && actual is null) || graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
+            !await planner.ValidateInternalProvidersAsync(context, inputs, cancellationToken) ||
+            !await planner.AdmitInternalWorkloadsAsync(context, inputs, manifestRow.ApplicationVersion, handlers ?? [], cancellationToken)))
             return new DurableCommitResult.PlanInputUnavailable();
-        if (!DurableActionAdmission.SupportsPilotShape(spec)) return new DurableCommitResult.UnsupportedShape();
-        if (DurableActionAdmission.SingleAlias(spec) != resourceInputs.Providers.RequireUniformResourceProvider().Alias)
-            return new DurableCommitResult.PlanStale();
-        var admitted = await planner.AdmitAsync(context, spec, revision, resourceInputs, cancellationToken);
-        if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
-        if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
+        if (!emptyStage)
+        {
+            if (!DurableActionAdmission.SupportsPilotShape(spec)) return new DurableCommitResult.UnsupportedShape();
+            if (DurableActionAdmission.SingleAlias(spec) != resourceInputs.Providers.RequireUniformResourceProvider().Alias)
+                return new DurableCommitResult.PlanStale();
+            var admitted = await planner.AdmitAsync(context, spec, revision!, resourceInputs, cancellationToken);
+            if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
+            if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
+        }
 
         if (!planner.SupportsRendering(inputs.Configuration) || !declaration.Equals(inputs.Configuration.Manifest)) return new DurableCommitResult.PlanInputUnavailable();
         try
@@ -174,7 +184,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
 
         try
         {
-            if (!await planner.ValidateGraphAsync(context, spec, revision, resourceInputs, graph, cancellationToken))
+            if (!emptyStage && !await planner.ValidateGraphAsync(context, spec, revision!, resourceInputs, graph, cancellationToken))
                 return graph.Baseline is null ? new DurableCommitResult.PlanInputUnavailable() : new DurableCommitResult.PlanStale();
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }

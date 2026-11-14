@@ -78,10 +78,10 @@ internal static class DurableActionCases
                 catch (Exception error) when (error is ArgumentException or CryptographicException) { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
                 catch (Exception error) when (error is HttpRequestException or HttpOperationException) { return new(ProviderPreflightOutcome.ServerUnavailable); }
             }
-            async Task<(DurableDeploymentPlanningTests.InternalScenario Scenario, DurableOperationKey Key, Counter Counter)> Accepted(Action<InternalActionFault>? fault = null)
+            async Task<(DurableDeploymentPlanningTests.InternalScenario Scenario, DurableOperationKey Key, Counter Counter)> Accepted(Action<InternalActionFault>? fault = null, bool initialOnly = false)
             {
-                Console.WriteLine("Durable phase: arrange-real-Resource-and-accepted-mixed-generation");
-                var scenario = await setup.InternalScenarioAsync(Configuration, name, actualKubernetesProbe: Preflight);
+                Console.WriteLine(initialOnly ? "Durable phase: imported-initial-Workload-only-generation" : "Durable phase: arrange-real-Resource-and-accepted-mixed-generation");
+                var scenario = await setup.InternalScenarioAsync(Configuration, name, actualKubernetesProbe: Preflight, initialOnly: initialOnly);
                 await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
                 var counter = new Counter(scenario.Connection);
                 var actions = Compose(services, counter, fault);
@@ -214,6 +214,59 @@ internal static class DurableActionCases
                     Console.WriteLine($"Durable replacement failure: phase={phase}; status={status}");
                     throw;
                 }
+            }
+            var initial = await Accepted(initialOnly: true);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(initial.Scenario.Connection, initial.Scenario.Time))
+            {
+                var actions = Compose(services, initial.Counter);
+                var result = await actions.ExecuteAsync(initial.Key, token);
+                var history = (await actions.HistoryAsync(initial.Key, token))!;
+                Check(result.Outcome == InternalActionOutcome.Confirmed && history.Attempts is [var attempt] && attempt.Outcome == "Succeeded" &&
+                    history.Output?.Payload == result.Receipt && initial.Counter.Writes == 1 && initial.Counter.Barriers == 1,
+                    "D14-initial-create-real-api-confirmed-one-write");
+                var replay = await actions.ExecuteAsync(initial.Key, token);
+                await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync(token);
+                var generation = await verify.DeploymentGenerations.AsNoTracking().SingleAsync(token);
+                var proof = await DurableAggregateCompletion.ReadAsync(verify, generation, token, true);
+                Check(replay.Receipt == result.Receipt && initial.Counter.Writes == 1 && proof is not null && proof.Resources.Count == 0 &&
+                    (await verify.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration is null &&
+                    !await verify.ResourceManagement.AnyAsync(token) && await verify.ProviderInstances.CountAsync(token) == 1,
+                    "D15-initial-empty-proof-replay-no-Resource-no-Applied");
+            }
+            var initialLost = await Accepted(initialOnly: true); initialLost.Counter.DropResponse = true;
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(initialLost.Scenario.Connection, initialLost.Scenario.Time))
+                Check((await Compose(services, initialLost.Counter).ExecuteAsync(initialLost.Key, token)).Outcome == InternalActionOutcome.Uncertain,
+                    "D16-initial-lost-response-preserves-uncertainty");
+            var initialRestored = await Restore(postgres, initialLost.Scenario.Connection, token);
+            initialLost.Counter.Connection = initialRestored; initialLost.Counter.DropResponse = false;
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(initialRestored, initialLost.Scenario.Time))
+            {
+                await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync(token);
+                var actions = Compose(services, initialLost.Counter);
+                var result = await actions.RecoverByObservationAsync(initialLost.Key, token);
+                var history = (await actions.HistoryAsync(initialLost.Key, token))!;
+                await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync(token);
+                var proof = await DurableAggregateCompletion.ReadAsync(verify, await verify.DeploymentGenerations.AsNoTracking().SingleAsync(token), token, true);
+                Check(result.Outcome == InternalActionOutcome.Confirmed && DeploymentIntents.DecodeReceipt(result.Receipt!).Uid == initialLost.Counter.AcceptedUid &&
+                    history.Attempts is [var attempt] && attempt.Outcome == "Uncertain" && history.Observations is [var observation] && observation.Confirmed &&
+                    initialLost.Counter.Writes == 1 && history.Output?.Payload == result.Receipt && proof?.Id == history.Intent.CheckpointId &&
+                    (await verify.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration is null,
+                    "D17-initial-restored-observation-retains-empty-proof-null-Applied");
+            }
+            var initialAbsent = await Accepted(initialOnly: true);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(initialAbsent.Scenario.Connection, initialAbsent.Scenario.Time))
+            {
+                try { await Compose(services, initialAbsent.Counter, point => { if (point == InternalActionFault.AfterMarkerCommit) throw new IOException("Injected interruption."); }).ExecuteAsync(initialAbsent.Key, token); throw new InvalidOperationException("Missing interruption."); }
+                catch (IOException) { }
+            }
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(initialAbsent.Scenario.Connection, initialAbsent.Scenario.Time))
+            {
+                var actions = Compose(services, initialAbsent.Counter);
+                var result = await actions.RecoverByObservationAsync(initialAbsent.Key, token);
+                var history = (await actions.HistoryAsync(initialAbsent.Key, token))!;
+                Check(result.Outcome == InternalActionOutcome.NotConfirmed && initialAbsent.Counter.Writes == 0 && history.Output is null &&
+                    history.Operation.State == "NeedsAttention" && history.Attempts is [var attempt] && attempt.Outcome == "Uncertain",
+                    "D18-initial-marker-before-send-absence-no-replay");
             }
             Check(lost.Counter.Barriers == 1 && interrupted.Counter.Barriers == 1 && absent.Counter.Barriers == 0 &&
                 lost.Counter.TransactionChecks > 0 && interrupted.Counter.TransactionChecks > 0 && absent.Counter.TransactionChecks > 0, "D12-committed-marker-no-network-under-catalog-transaction");

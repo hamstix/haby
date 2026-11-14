@@ -7,6 +7,15 @@ namespace Haby.Application;
 /// The accepted snapshot and fingerprint always retain the complete declaration.</summary>
 internal static class InternalResourceStage
 {
+    // Always inspect the original complete inputs, never the Resource projection.
+    internal static bool IsEmpty(DurablePlanningInputs inputs, DurableOperationGraph graph) =>
+        inputs.Configuration is { } configuration && configuration.Manifest.Equals(inputs.Providers.Declaration) &&
+        configuration.Manifest.Spec.Resources.Count == 0 &&
+        configuration.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count > 0) &&
+        configuration.Manifest.Spec.Components.Values.All(c => c.Bindings.Count == 0 && c.Documents.Count == 0) &&
+        inputs.Providers.Entries.Keys.All(x => x is ProviderInput.Workload) &&
+        graph.Baseline is null && graph.Nodes.Count == 0 && graph.ReusedResources.Count == 0 && graph.RetainedResources.Count == 0;
+
     internal static DurablePlanningInputs Project(DurablePlanningInputs inputs)
     {
         inputs.Validate();

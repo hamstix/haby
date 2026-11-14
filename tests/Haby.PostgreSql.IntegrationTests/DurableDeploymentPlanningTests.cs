@@ -639,7 +639,8 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             .AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore()
             .AddPostgreSqlProviderAliasStore();
-        if (internalActions) services.AddSingleton<Haby.Kubernetes.KubernetesProviderConfigurationCodec>()
+        if (internalActions) services.AddSingleton<IInternalActionHandler, Haby.Kubernetes.InternalDeploymentAction>()
+            .AddSingleton<Haby.Kubernetes.KubernetesProviderConfigurationCodec>()
             .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<Haby.Kubernetes.KubernetesProviderConfigurationCodec>());
         if (saveInterceptor is not null)
             services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(saveInterceptor));

@@ -14,37 +14,6 @@ internal sealed partial class InternalDurableActions
         "Resource" when row.Component == "" => new ProviderInput.Resource(ManifestLocalId.Create(row.LocalId)),
         _ => throw new InvalidDataException("Invalid saved action subject.")
     };
-    private static async Task<DeploymentGenerationRow> SourceAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
-    {
-        var deployment = Guid.Parse(accepted.DeploymentId.ToString());
-        var row = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == accepted.Generation.Value, token)
-            ?? throw new InvalidDataException("Accepted internal generation unavailable.");
-        var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deployment, token);
-        var plan = await db.DurablePlans.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.PlanId, token);
-        var commit = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.ChangeSetId == row.ChangeSetId, token);
-        var change = await db.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.ChangeSetId, token);
-        var inputs = row.Inputs();
-        var graph = DurableOperationGraphCodec.Decode(row.GraphJson); graph.ValidateReferences(inputs);
-        if (!row.InternalEffects || row.Presence != nameof(DesiredPresence.Present) || owner is null || owner.DesiredGeneration != row.Generation ||
-            owner.EnvironmentRecordId != row.EnvironmentRecordId || owner.ApplicationRecordId != row.ApplicationRecordId || owner.AppliedGeneration != graph.Baseline?.Generation ||
-            owner.AppliedGeneration is null || owner.AppliedGeneration >= row.Generation || graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
-            graph.ReusedResources.Count != inputs.Configuration!.Manifest.Spec.Resources.Count || graph.ReusedResources.Count == 0 ||
-            plan is null || !plan.InternalEffects || plan.ChangeSetId != row.ChangeSetId || plan.EnvironmentRecordId != row.EnvironmentRecordId ||
-            plan.ApplicationRecordId != row.ApplicationRecordId || plan.RevisionNumber != row.RevisionNumber || plan.EnvironmentKey != row.EnvironmentKey ||
-            plan.SnapshotFormatVersion != row.SnapshotFormatVersion || plan.Fingerprint != row.Fingerprint || plan.ProviderInputsJson != row.ProviderInputsJson || plan.ConfigurationJson != row.ConfigurationJson || plan.GraphJson != row.GraphJson ||
-            change is null || change.ExpectedAbsence || change.ExpectedGeneration != graph.Baseline?.Generation || change.RevisionNumber != row.RevisionNumber ||
-            change.EnvironmentRecordId != row.EnvironmentRecordId || change.ApplicationRecordId != row.ApplicationRecordId ||
-            commit is null || commit.PlanId != row.PlanId || commit.DeploymentId != row.DeploymentId || commit.Generation != row.Generation ||
-            commit.PlanId != Guid.Parse(accepted.PlanId.ToString()) || commit.ChangeSetId != Guid.Parse(accepted.ChangeSetId.ToString()) ||
-            commit.ActorId != accepted.ActorId || commit.CommittedAt != accepted.CommittedAt || row.AcceptedAt != commit.CommittedAt || row.ActorId != commit.ActorId)
-            throw new InvalidDataException("Accepted internal authority mismatch.");
-        var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token)
-            ?? throw new InvalidDataException("Accepted declaration unavailable.");
-        var manifest = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);
-        if (!manifest.Equals(inputs.Configuration.Manifest) || !await ResourceContinuity.ValidateAsync(db, deployment, graph, token))
-            throw new InvalidDataException("Accepted declaration or original Resource provenance mismatch.");
-        return row;
-    }
 
     private async Task<(InternalActionContext Context, IInternalActionHandler Handler)> ContextAsync(ManifestCatalogDbContext db,
         DeploymentGenerationRow source, DurableOperationKey key, ProviderInput subject, string action, Guid marker, Guid managed, CancellationToken token)
@@ -106,7 +75,7 @@ internal sealed partial class InternalDurableActions
             ?? throw new InvalidDataException("Accepted action generation unavailable.");
         var accepted = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.ChangeSetId == generation.ChangeSetId, token)
             ?? throw new InvalidDataException("Accepted action commit unavailable.");
-        generation = await SourceAsync(db, new(DeploymentChangeSetId.Parse(accepted.ChangeSetId.ToString()), DeploymentPlanId.Parse(accepted.PlanId.ToString()),
+        generation = await InternalGenerationAuthority.RequireAsync(db, new DurableChangeSetCommit(DeploymentChangeSetId.Parse(accepted.ChangeSetId.ToString()), DeploymentPlanId.Parse(accepted.PlanId.ToString()),
             key.DeploymentId, key.Generation, accepted.CommittedAt, accepted.ActorId), token);
         var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true);
         if (intent.FormatVersion != 1 || intent.Marker == Guid.Empty || intent.ManagedIdentity == Guid.Empty || intent.InputFingerprint != generation.Fingerprint ||

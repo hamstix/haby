@@ -88,7 +88,8 @@ internal static partial class DurableAggregateCompletion
                 if (inputs.Configuration is not { } configuration || row.InternalEffects && purpose != EvidencePurpose.InternalResourceStage || !row.InternalEffects && configuration.Manifest.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||
                     !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                         graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
-                    graph.Nodes.Count + graph.ReusedResources.Count == 0) return null;
+                    graph.Nodes.Count + graph.ReusedResources.Count == 0 && !(row.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))) return null;
+                if (row.InternalEffects) _ = await InternalGenerationAuthority.RequireAsync(db, row, token);
                 if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint || admission is not null && !admission.Supports(graph)) return null;
                 var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token);
                 if (revision is null) return null;
@@ -199,6 +200,11 @@ internal static partial class DurableAggregateCompletion
         DurablePlanningInputs inputs, DurableOperationGraph graph, IProviderConfigurationCodec[] codecs,
         DurableActionAdmission admission, CancellationToken token)
     {
+        if (source.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))
+        {
+            _ = await InternalGenerationAuthority.RequireAsync(db, source, token);
+            return true;
+        }
         if (source.InternalEffects) inputs = InternalResourceStage.Project(inputs);
         var pin = inputs.Providers.RequireUniformResourceProvider();
         var id = Guid.Parse(pin.Instance.ToString());

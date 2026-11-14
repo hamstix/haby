@@ -57,13 +57,16 @@ internal static partial class DurableAggregateCompletion
         {
             var inputs = source.Inputs();
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+            var emptyStage = internalResourceStage && InternalResourceStage.IsEmpty(inputs, graph);
+            if (emptyStage) _ = await InternalGenerationAuthority.RequireAsync(context, source, token);
             if (source.Presence != nameof(DesiredPresence.Present) || inputs.Configuration is not { } configuration ||
                 !internalResourceStage && configuration.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
                 !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                     graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
-                graph.Nodes.Count + graph.ReusedResources.Count == 0) return false;
+                graph.Nodes.Count + graph.ReusedResources.Count == 0 && !emptyStage) return false;
             var stored = await ReadAsync(context, source, token, internalResourceStage);
             if (stored is not null) return internalResourceStage || owner.AppliedGeneration >= generation;
+            if (emptyStage && await context.ActionIntents.AsNoTracking().AnyAsync(x => x.DeploymentId == deployment && x.Generation == generation, token)) return false;
             // Applied is never an authority for backfilling evidence.
             if (owner.DesiredGeneration != generation || owner.AppliedGeneration >= generation ||
                 graph.Baseline?.Generation != owner.AppliedGeneration) return false;
@@ -120,6 +123,11 @@ internal static partial class DurableAggregateCompletion
             throw new InvalidDataException("Resource checkpoint identity mismatch.");
         var inputs = source.Inputs();
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        if (graph.Nodes.Count + graph.ReusedResources.Count == 0)
+        {
+            if (!internalResourceStage || !InternalResourceStage.IsEmpty(inputs, graph)) throw new InvalidDataException("Empty stage authority unavailable.");
+            _ = await InternalGenerationAuthority.RequireAsync(context, source, token);
+        }
         if (!internalResourceStage && inputs.Configuration!.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
             !ResourceReadinessCoverage.IsComplete(inputs.Configuration!.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                 graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)))

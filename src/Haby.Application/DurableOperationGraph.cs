@@ -60,7 +60,9 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
             OutputReferences = Array.AsReadOnly(n.OutputReferences.OrderBy(r => r.ProducerOperationId.Value, StringComparer.Ordinal)
               .ThenBy(r => r.OutputContract, StringComparer.Ordinal).ThenBy(r => r.OutputKey, StringComparer.Ordinal).ToArray())
         }).ToArray();
-        if ((ordered.Length == 0 && reuse.Length == 0) || ordered.Length > 256 ||
+        // An empty Resource-stage graph is structural only. Its accepted full
+        // declaration and internal generation authority are checked by admission.
+        if (ordered.Length > 256 ||
             ordered.Any(n => reuse.Any(r => r.Resource == n.ResourceId)) ||
             ordered.Select(n => n.Id).Distinct().Count() != ordered.Length)
             throw new InvalidDataException("Invalid graph identity set.");
