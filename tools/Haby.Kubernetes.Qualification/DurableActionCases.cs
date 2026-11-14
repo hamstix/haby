@@ -411,9 +411,14 @@ internal static class DurableActionCases
                 AutomountServiceAccountToken = false
             }, name, cancellationToken: token);
             await using (var services = DurableDeploymentPlanningTests.InternalServices(runtime.Scenario.Connection, runtime.Scenario.Time))
+            {
                 Check((await ComposeRuntime(services, runtime.Counter).ExecuteAsync(runtime.Key, token)).Outcome != InternalActionOutcome.Confirmed &&
                     runtime.Counter.Writes == 1 && (await RuntimeSaved(runtime.Scenario.Connection)) == originalRuntime,
                     "D24-runtime-foreign-replacement-never-remaps-binding");
+                var replacedStore = new PostgreSqlRuntimeIdentityStore(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(services, runtime.Counter));
+                await RuntimeAuthenticationCases.Run(admin, services.GetRequiredService<ISecretStore>(), replacedStore, originalRuntime.Binding,
+                    () => Task.CompletedTask, token, replaced: true, scenario: "replaced");
+            }
             var foreignRuntime = await RuntimeAccepted();
             await using (var services = DurableDeploymentPlanningTests.InternalServices(foreignRuntime.Scenario.Connection, foreignRuntime.Scenario.Time))
             {
@@ -442,8 +447,7 @@ internal static class DurableActionCases
                     "D28-runtime-required-permission-denial-no-create");
             Check(lost.Counter.Barriers == 1 && interrupted.Counter.Barriers == 1 && absent.Counter.Barriers == 0 &&
                 lost.Counter.TransactionChecks > 0 && interrupted.Counter.TransactionChecks > 0 && absent.Counter.TransactionChecks > 0, "D12-committed-marker-no-network-under-catalog-transaction");
-            // Publication uses the same catalog/API contour and actual confirmed identity,
-            // including a genuine mixed baseline. No TokenReview or delivery is introduced.
+            // Publication and authentication use actual prepared identities, including a mixed baseline.
             var initialPublication = (Scenario: runtimeLost.Scenario with { Connection = lostRestored }, Key: runtimeLost.Key,
                 Counter: new Counter(lostRestored) { Key = runtimeLost.Key });
             foreach (var candidate in new[] { runtimeMixed, initialPublication })
@@ -476,8 +480,15 @@ internal static class DurableActionCases
                 if (replay.Receipt != old.Receipt || replay.CurrentPermission!.Status != "Revoked" ||
                     await publication.AuthorizeMetadataAsync(requests[0].Binding, requests[0].Revision!.Value, token) is not null)
                     throw new InvalidOperationException("Old runtime publication restored revoked access.");
-                var blocked = await publication.ApplyAsync(new("qualification-binding-revoke", RuntimePublicationOperation.RevokeBinding,
-                    requests[0].Binding, null, old.CurrentBinding.Token, "qualifier"), token);
+                var bindingRevoke = new RuntimePublicationRequest("qualification-binding-revoke", RuntimePublicationOperation.RevokeBinding,
+                    requests[0].Binding, null, old.CurrentBinding.Token, "qualifier");
+                var authenticationStore = new PostgreSqlRuntimeIdentityStore(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(services, candidate.Counter));
+                await using var otherServices = DurableDeploymentPlanningTests.InternalServices(runtimeCrash.Scenario.Connection, runtimeCrash.Scenario.Time);
+                var otherStore = new PostgreSqlRuntimeIdentityStore(otherServices.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(otherServices, runtimeCrash.Counter));
+                await RuntimeAuthenticationCases.Run(admin, services.GetRequiredService<ISecretStore>(), authenticationStore, requests[0].Binding,
+                    async () => { await publication.ApplyAsync(bindingRevoke, token); }, token, otherStore, (await RuntimeSaved(runtimeCrash.Scenario.Connection)).Binding,
+                    otherServices.GetRequiredService<ISecretStore>(), scenario: candidate.Scenario == runtimeMixed.Scenario ? "mixed" : "initial");
+                var blocked = await publication.ApplyAsync(bindingRevoke, token);
                 var historical = await ComposeRuntime(services, candidate.Counter).ExecuteAsync(candidate.Key, token);
                 if (historical.Outcome != InternalActionOutcome.Confirmed || blocked.CurrentBinding.Status != "Revoked" ||
                     await publication.AuthorizeMetadataAsync(requests[1].Binding, requests[1].Revision!.Value, token) is not null)

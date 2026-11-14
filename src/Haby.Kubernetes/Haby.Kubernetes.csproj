@@ -7,5 +7,6 @@
     <InternalsVisibleTo Include="Haby.Kubernetes.Tests" />
     <InternalsVisibleTo Include="Haby.PostgreSql.IntegrationTests" />
     <InternalsVisibleTo Include="Haby.Kubernetes.Qualification" />
+    <InternalsVisibleTo Include="Haby.Operator.Host" />
   </ItemGroup>
 </Project>

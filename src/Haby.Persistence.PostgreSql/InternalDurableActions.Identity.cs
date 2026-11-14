@@ -128,13 +128,22 @@ internal sealed partial class InternalDurableActions
 
     // Validates the immutable original CREATE proof without network I/O. Current publication
     // authority is independently revalidated by the caller in the same transaction.
-    internal async Task RequireIdentityOriginAsync(ManifestCatalogDbContext db, RuntimeIdentityBindingRow binding, CancellationToken token)
+    internal Task RequireIdentityOriginAsync(ManifestCatalogDbContext db, RuntimeIdentityBindingRow binding, CancellationToken token) =>
+        RequireIdentityOriginCoreAsync(db, binding, OriginPurpose.CompleteConfiguration, token);
+
+    // Authentication proves original identity, not current document materializability.
+    // Only this named internal entrypoint can select the private closed purpose.
+    internal Task RequireAuthenticationIdentityOriginAsync(ManifestCatalogDbContext db, RuntimeIdentityBindingRow binding, CancellationToken token) =>
+        RequireIdentityOriginCoreAsync(db, binding, OriginPurpose.AuthenticationIdentity, token);
+
+    private async Task RequireIdentityOriginCoreAsync(ManifestCatalogDbContext db, RuntimeIdentityBindingRow binding, OriginPurpose purpose, CancellationToken token)
     {
         var inventory = await db.OwnedObjects.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == binding.ManagedWorkloadId && x.Role == binding.Role, token)
             ?? throw new InvalidDataException("Runtime inventory unavailable.");
         var key = new DurableOperationKey(ApplicationDeploymentId.Parse(inventory.DeploymentId.ToString()),
             DeploymentGeneration.Create(inventory.Generation), OperationId.Create(inventory.OperationId));
-        var loaded = await LoadAsync(db, key, token);
+        var loaded = purpose == OriginPurpose.AuthenticationIdentity
+            ? await LoadAuthenticationIdentityAsync(db, key, token) : await LoadAsync(db, key, token);
         if (loaded.Operation.State != nameof(DurableOperationState.Succeeded) || loaded.Intent.ManagedIdentity != binding.ManagedWorkloadId ||
             !loaded.Handler.RequiresPreparedConfiguration) throw new InvalidDataException("Confirmed identity origin unavailable.");
         await TerminalAsync(db, loaded, token);
