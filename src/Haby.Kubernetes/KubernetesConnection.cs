@@ -26,6 +26,25 @@ public sealed record KubernetesConnection(KubernetesBinding Binding, Uri Endpoin
         Need(BearerToken is not null && ClientCertificate is null && ClientPrivateKey is null ||
             BearerToken is null && ClientCertificate is not null && ClientPrivateKey is not null, "credential-alternative");
         Need(ServerCaPem is null || ServerCaPem.Length is > 0 and <= 1_048_576, "trust-roots");
+        if (ServerCaPem is not null)
+        {
+            var certificates = new X509Certificate2Collection();
+            try
+            {
+                var remaining = ServerCaPem.AsSpan();
+                var count = 0;
+                while (!remaining.Trim().IsEmpty)
+                {
+                    Need(PemEncoding.TryFind(remaining, out var pem) && remaining[..pem.Location.Start.Value].Trim().IsEmpty &&
+                        remaining[pem.Label].SequenceEqual("CERTIFICATE"), "trust-roots");
+                    remaining = remaining[pem.Location.End.Value..]; count++;
+                }
+                certificates.ImportFromPem(ServerCaPem);
+                Need(count > 0 && certificates.Count == count, "trust-roots");
+            }
+            catch (CryptographicException) { throw new Contracts.WorkloadContractException("trust-roots"); }
+            finally { foreach (var certificate in certificates) certificate.Dispose(); }
+        }
     }
 }
 
@@ -42,17 +61,32 @@ internal sealed class KernelClient(k8s.Kubernetes client, X509Certificate2Collec
 internal static class KubernetesClientFactory
 {
     internal static ValueTask<KernelClient> Create(KubernetesConnection configuration, ISecretStore secrets, CancellationToken token) =>
-        CreateCore(configuration, secrets, false, [], null, token);
+        CreateConnection(configuration, secrets, false, [], null, token);
+
+    internal static ValueTask<KernelClient> CreateAccess(EnvironmentRecordId environment,
+        KubernetesProviderConfiguration configuration, ISecretStore secrets, CancellationToken token) =>
+        CreateCore(environment, configuration, secrets, false, [], null, token);
 
     // This is not a configuration option. Only friend test/qualification assemblies can reach this seam.
     internal static ValueTask<KernelClient> CreateFixture(KubernetesConnection configuration, ISecretStore secrets,
-        DelegatingHandler[] handlers, CancellationToken token, string? serverName = null) => CreateCore(configuration, secrets, true, handlers, serverName, token);
+        DelegatingHandler[] handlers, CancellationToken token, string? serverName = null) => CreateConnection(configuration, secrets, true, handlers, serverName, token);
 
-    private static async ValueTask<KernelClient> CreateCore(KubernetesConnection c, ISecretStore secrets,
+    private static ValueTask<KernelClient> CreateConnection(KubernetesConnection c, ISecretStore secrets,
         bool disposableFixture, DelegatingHandler[] handlers, string? fixtureServerName, CancellationToken token)
     {
-        c.Validate(); token.ThrowIfCancellationRequested();
-        var definition = new SecretDefinition(new SecretOwner.Environment(EnvironmentRecordId.Parse(c.Binding.Environment)), SecretPurpose.ProviderAdministrator);
+        c.Validate();
+        return CreateCore(EnvironmentRecordId.Parse(c.Binding.Environment),
+            new(c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey),
+            secrets, disposableFixture, handlers, fixtureServerName, token);
+    }
+
+    private static async ValueTask<KernelClient> CreateCore(EnvironmentRecordId environment,
+        KubernetesProviderConfiguration c, ISecretStore secrets,
+        bool disposableFixture, DelegatingHandler[] handlers, string? fixtureServerName, CancellationToken token)
+    {
+        KubernetesConnection.ValidateAccess(c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey);
+        token.ThrowIfCancellationRequested();
+        var definition = new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator);
         async ValueTask<byte[]> Resolve(SecretRef reference)
         {
             using var material = await secrets.ResolveBoundedAsync(definition, reference, 1_048_576, token);

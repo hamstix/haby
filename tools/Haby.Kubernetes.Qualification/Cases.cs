@@ -78,6 +78,7 @@ internal static class Cases
             Check(subject.Status.UserInfo.Uid == sa.Metadata.Uid && subject.Status.UserInfo.Username == $"system:serviceaccount:{name}:runtime", "F bearer authenticated identity");
             using var invalidClient = ClientFactory.Create(endpoint, directory, "invalid");
             await Refuses(() => invalidClient.AuthenticationV1.CreateSelfSubjectReviewAsync(new V1SelfSubjectReview(), cancellationToken: token), "F invalid bearer", 401);
+            await ProviderAccessCases.Run(endpoint, directory, apiToken.Status.Token, $"system:serviceaccount:{name}:runtime", sa.Metadata.Uid, token);
             var boundToken = await Issue(true);
             Check(Policy(await Review(boundToken, audience)), "D bound identity");
             Check(!Policy(await Review(boundToken, audience + ":wrong")), "D wrong audience");

@@ -467,6 +467,7 @@
           "Grpc.AspNetCore.Server": "[2.84.0, )",
           "Grpc.AspNetCore.Server.Reflection": "[2.84.0, )",
           "Haby.Configuration.Contracts": "[1.0.0, )",
+          "Haby.Kubernetes": "[1.0.0, )",
           "Haby.Kubernetes.Contracts": "[1.0.0, )",
           "Haby.Operator.Contracts": "[1.0.0, )",
           "Haby.Persistence.PostgreSql": "[1.0.0, )",

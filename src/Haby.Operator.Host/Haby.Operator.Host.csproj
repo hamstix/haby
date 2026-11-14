@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <ProjectReference Include="..\Haby.Kubernetes\Haby.Kubernetes.csproj" />
     <ProjectReference Include="..\Haby.Kubernetes.Contracts\Haby.Kubernetes.Contracts.csproj" />
     <PackageReference Include="Grpc.AspNetCore.Server" />
     <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
