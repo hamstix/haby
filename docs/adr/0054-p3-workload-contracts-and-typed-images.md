@@ -207,7 +207,10 @@ Use an isolated disposable/test Kubernetes contour, never a working namespace by
 default. Before the API-adapter slice, separately investigate/select the client
 library, Windows/CI cluster setup and supported Kubernetes versions. Those technical
 choices do not block pure contracts. Mocks alone will not satisfy ADR-049/050/051
-real API, Runtime Identity or >=150-client load evidence requirements.
+real API or Runtime Identity correctness requirements. The separate
+>=150-client/two-document load rehearsal remains pending after P4 under the
+user-approved 2026-11-14 supersession in ADR-050 section 14 and ADR-055 section 17;
+it does not gate P3 completion or current runtime-delivery acceptance.
 
 ## Required evidence and implementation boundaries
 

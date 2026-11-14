@@ -208,7 +208,7 @@ using Haby-managed configuration and the same durable state/operation model.
 - [x] Accept [ADR-050](docs/adr/0050-kubernetes-runtime-identity-and-configuration-publication.md): stable per-ManagedWorkload ServiceAccount/binding, service-account-bound TokenReview, separate exact-document publication/revocation and bounded mass startup. Old Pods may request newer explicitly published revisions; materialization alone grants no access. Design acceptance, not implementation.
 - [ ] Implement exact runtime publication and checked pre-readiness preparation, stable identity/projected token integration, revocation-safe replay and generated delivery clients under ADR-050. Document audience, restore/clone identity and operator procedures using the [mechanism guide](docs/architecture/kubernetes-runtime-configuration.md).
 - [x] Persist friend-only exact runtime publication/revocation metadata with immutable intent receipts, conditional permission lifecycle and terminal binding revoke: [issue #213 guide](docs/development/213-runtime-configuration-publication.md). This opens no runtime authentication, delivery endpoint or configured Workload execution.
-- [ ] Implement validated operator-configurable TokenReview concurrency/rate/queue/timeouts and client startup/retry settings under ADR-055. Ordinary CI covers fast deterministic correctness plus existing gates. Separately prove >=150 simultaneous clients, two documents each, against a real Kubernetes API; run manually/periodically before capability acceptance and after material runtime-path changes, not on every commit. Record exact source/settings, latency, retries and API calls; no positive cache or gate reduction.
+- [ ] Implement validated operator-configurable TokenReview concurrency/rate/queue/timeouts and client startup/retry settings under ADR-055. Ordinary CI covers fast deterministic correctness, cancellation/revocation/identity, token rotation and real API validation plus existing mandatory gates. Preserve bounded queue/memory/credential lifetimes, no positive cache and the total client startup deadline with backoff/jitter. Separate mass-start qualification is deferred until after P4; it does not gate P3 completion or current runtime-delivery acceptance.
 - [ ] Implement Kubernetes Runtime Identity and scoped configuration retrieval using the accepted projected-token/TokenReview model.
 - [ ] Support image/version updates through a new accepted desired generation, with observable completion and safe failure behavior.
 - [ ] Separate desired replicas from suspend/resume and temporary operational overrides.
@@ -250,8 +250,9 @@ infrastructure; stopping an investigation does not close its unresolved failures
 
 GitHub-hosted Linux is the primary full integration gate; a separate Linux runner
 can support diagnostics and periodic heavy qualification. Preserve Windows-specific
-and published Native AOT checks, real external semantics and ADR-055 mass-start
-qualification. This is accepted work, not completed migration or a waiver of
+and published Native AOT checks and real external semantics. ADR-055 mass-start
+qualification remains pending after P4 under the user-approved 2026-11-14
+supersession; it does not block P3. This is accepted work, not completed migration or a waiver of
 current checks. Ordinary validation uses source/build/results attribution rather
 than immutable Git-index or repeated forensic preparation requirements.
 
@@ -262,7 +263,7 @@ Under [ADR-055](docs/adr/0055-p3-implementation-closure-and-coordination.md):
 3. Placement persistence and administration.
 4. Durable multi-Provider inputs and stage checkpoints, including Workload-only empty Resource stages.
 5. Conditional Kubernetes writes and uncertain-result observation.
-6. Runtime Identity/publication/client, operator-configurable limits and separate mass-start proof.
+6. Runtime Identity/publication/client and operator-configurable protection limits; separate mass-start qualification follows P4.
 7. Deployment submission, exact readiness and bounded product/CI batch wait.
 8. Explicit retirement and removal.
 9. Corrective generations with fenced execution and accumulated inventory.
@@ -299,6 +300,19 @@ SDK/NuGet packaging and documented downstream server/CLI extension are separate
 later work, informed by several real adapters rather than prerequisites for P4.
 Dynamic managed DLL loading, runtime provider protocols and WebAssembly execution
 are not introduced.
+
+## Post-P4 - Deferred mass-start qualification
+
+User-approved scheduling supersession, 2026-11-14: [issue #217](https://github.com/hamstix/haby/issues/217)
+and this unchecked item track the deferred work; no duplicate implementation issue
+is needed. This is not a gate for P3 completion or current runtime-delivery
+acceptance. Capacity at this load remains unverified and must not be advertised as
+demonstrated. Ordinary protection, correctness/security tests and mandatory CI
+remain required; P3 is not declared complete. This timing also supersedes the
+future load-gate wording in [issue #215](https://github.com/hamstix/haby/issues/215),
+without excusing its functional failures or changing its authentication acceptance.
+
+- [ ] After P4, run the separate real-cluster rehearsal with at least 150 simultaneous clients, two mandatory documents each. Require healthy-profile retrieval within the configured total startup deadline and a constrained-overload scenario proving queue saturation, bounded rate/concurrency/memory/credential lifetimes, cancellation and deadline expiry. Record exact SHA/settings, payload/fan-out, latency, retries/rejections and actual TokenReview calls, with failures and omissions. Run manually/periodically, then after material runtime-path changes; ordinary CI does not substitute for this evidence.
 
 ## Supporting capabilities and release gates
 

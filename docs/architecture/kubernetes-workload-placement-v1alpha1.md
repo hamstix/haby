@@ -149,8 +149,11 @@ revision validation/import/exact read. Named/scoped selections and conditional
 updates remain separate, followed by durable exact Provider sets and stage
 checkpoints with explicit freshness. Those slices must deliberately
 integrate this result into Plan storage/Commit/runner. Kubernetes access/preflight,
-conditional objects, runtime identity/publication/TokenReview, 150-client proof,
+conditional objects, runtime identity/publication/TokenReview,
 submission/readiness, retirement and corrective generations remain unimplemented.
+Separate >=150-client/two-document qualification remains pending after P4 under
+[ADR-055 section 17](../adr/0055-p3-implementation-closure-and-coordination.md#17-load-proof-and-test-cadence);
+it does not gate P3 completion or current runtime-delivery acceptance.
 Managed container/object renames and namespace/Provider relocation remain future
 runtime refusals; the pure layer has no owned-object inventory and grants no adoption.
 

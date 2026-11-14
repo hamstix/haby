@@ -158,7 +158,7 @@ Bound request/credential lifetimes, cancellation, memory and limiter burst behav
 concrete algorithm/bounds must remain documented and tested.
 
 Defaults are a starting admitted profile, not a proven performance SLA. The real
-load rehearsal must validate them or supply evidence for a reviewed adjustment.
+post-P4 load rehearsal must validate them or supply evidence for a reviewed adjustment.
 
 ### 15. One client startup deadline
 
@@ -183,6 +183,13 @@ or bypass authentication/authorization boundaries.
 
 ### 17. Load proof and test cadence
 
+**User-approved scheduling supersession, 2026-11-14 ([issue #217](https://github.com/hamstix/haby/issues/217)):** the separate real-cluster
+mass-start rehearsal (at least 150 concurrent clients, two mandatory documents
+each) is deferred until after P4. It is not a gate for P3 completion or current
+runtime-delivery acceptance. Configurable protection limits and ordinary
+correctness/security tests remain mandatory. Until the rehearsal is performed,
+capacity at that load is unverified and must not be advertised as demonstrated.
+
 The healthy-profile rehearsal starts at least 150 clients simultaneously, each
 fetching two mandatory documents. All complete within the configured total startup
 deadline; temporary rejections with successful bounded retry are acceptable.
@@ -191,10 +198,11 @@ deadline expiry and actual API limits without unbounded tasks/memory.
 
 Ordinary PR/commit CI runs fast deterministic correctness tests for limiter/queue,
 cancellation, temporary outcomes, backoff/jitter and deadline semantics, alongside
-existing applicable full gates. Do not require the full real-cluster load rehearsal
-on every commit. Run it manually or periodically from a developer machine/dedicated
-runner, obligatorily before acceptance of the P3 runtime-delivery capability and
-after material changes to TokenReview, limiters or runtime-client behavior.
+existing applicable full gates, including ordinary identity, revocation, token
+rotation and real API validation. The separate load rehearsal runs manually or
+periodically from a developer machine/dedicated runner after P4, then after material
+changes to TokenReview, limiters or runtime-client behavior. It is not a per-commit
+requirement or a P3 acceptance gate.
 
 Record exact SHA, environment/settings, payload/fan-out, actual TokenReview calls,
 latency distribution, retries/rejections, failures and omissions. A green ordinary
@@ -272,11 +280,13 @@ coding questions. Preserve API-only CLI and Provider-neutral shared models/stora
   -> Placement persistence and administration
   -> durable multi-Provider inputs and stage checkpoints
   -> conditional Kubernetes create/update and uncertainty
-  -> runtime identity/publication/client and mass-start proof
+  -> runtime identity/publication/client and configurable protection limits
   -> Deployment submission/readiness/batch wait
   -> retirement and removal
   -> corrective generations
   -> complete P3 operator rehearsal
+  -> P4 standard Providers
+  -> separate real-cluster mass-start qualification (pending)
 ```
 
 Qualification can run alongside contract work; production slices are accepted

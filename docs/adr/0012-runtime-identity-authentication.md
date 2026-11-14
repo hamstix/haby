@@ -163,8 +163,11 @@ mode and a target Environment.
 [ADR-050](0050-kubernetes-runtime-identity-and-configuration-publication.md) now
 accepts the P3 delivery integration: stable per-Workload ServiceAccount/binding,
 explicit exact-document permissions independent of static P2 grants, no Pod
-generation check, and mandatory bounded TokenReview load handling with a real
-150-client simultaneous-start rehearsal. Audience/restore/clone semantics remain
+generation check, and mandatory bounded TokenReview load handling. The separate
+>=150-client/two-document rehearsal is deferred until after P4 by the user-approved
+2026-11-14 supersession in ADR-050 section 14; it does not gate P3 completion or
+current runtime-delivery acceptance. Capacity at that load remains unverified.
+Audience/restore/clone semantics remain
 explicitly documented in the [mechanism guide](../architecture/kubernetes-runtime-configuration.md).
 The M2.2/M4/M6 staging below is historical; it does not postpone the accepted P3
 scope or claim that those capabilities have been implemented.
