@@ -9,7 +9,7 @@ public sealed partial class ManifestCatalogDbContext
     internal DbSet<InternalPlanInputRow> InternalPlanInputs => Set<InternalPlanInputRow>();
     private void ValidateInternalActionWrites()
     {
-        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow &&
+        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or RuntimeIdentityBindingRow &&
             x.State is EntityState.Modified or EntityState.Deleted)) throw new InvalidOperationException("Action history is immutable.");
     }
     private static void ConfigureInternalActions(ModelBuilder model)

@@ -991,6 +991,24 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.InstallationIdentityRow", b =>
+                {
+                    b.Property<int>("Singleton")
+                        .HasColumnType("integer")
+                        .HasColumnName("singleton");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.HasKey("Singleton");
+
+                    b.ToTable("installation_identity", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_installation_singleton", "singleton = 1 AND id <> '00000000-0000-0000-0000-000000000000'::uuid");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.InternalPlanInputRow", b =>
                 {
                     b.Property<Guid>("PlanId")
@@ -1021,6 +1039,71 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasIndex("ProviderId", "ConfigurationRevision");
 
                     b.ToTable("internal_plan_inputs", (string)null);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ManagedWorkloadRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ApplicationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_id");
+
+                    b.Property<string>("Component")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("component");
+
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<Guid>("EnvironmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_id");
+
+                    b.Property<Guid>("ProviderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_id");
+
+                    b.Property<string>("TargetContract")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("target_contract");
+
+                    b.Property<int>("TargetFormat")
+                        .HasColumnType("integer")
+                        .HasColumnName("target_format");
+
+                    b.Property<string>("TargetPayload")
+                        .IsRequired()
+                        .HasMaxLength(16384)
+                        .HasColumnType("character varying(16384)")
+                        .HasColumnName("target_payload");
+
+                    b.Property<string>("Workload")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("workload");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId");
+
+                    b.HasIndex("EnvironmentId");
+
+                    b.HasIndex("ProviderId");
+
+                    b.HasIndex("DeploymentId", "Component", "Workload")
+                        .IsUnique();
+
+                    b.ToTable("managed_workloads", (string)null);
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ManifestRevisionRow", b =>
@@ -1186,6 +1269,56 @@ namespace Haby.Persistence.PostgreSql.Migrations
                             t.HasCheckConstraint("ck_operator_access_purpose", "purpose = 'operator-admin/v1'");
 
                             t.HasCheckConstraint("ck_operator_access_revoke", "(revoked_at IS NULL) = (revoked_by IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.OwnedObjectRow", b =>
+                {
+                    b.Property<Guid>("ManagedWorkloadId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("managed_workload_id");
+
+                    b.Property<string>("Role")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("role");
+
+                    b.Property<string>("Contract")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("contract");
+
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<int>("Format")
+                        .HasColumnType("integer")
+                        .HasColumnName("format");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("operation_id");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload");
+
+                    b.HasKey("ManagedWorkloadId", "Role");
+
+                    b.HasIndex("DeploymentId", "Generation", "OperationId");
+
+                    b.ToTable("owned_objects", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_owned_object_payload", "format > 0 AND octet_length(payload) BETWEEN 1 AND 1048576");
                         });
                 });
 
@@ -1915,6 +2048,92 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("resource_naming_selections", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.RuntimeIdentityBindingRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Audience")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("audience");
+
+                    b.Property<string>("Authenticator")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("authenticator");
+
+                    b.Property<long>("ConfigurationRevision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("configuration_revision");
+
+                    b.Property<string>("Contract")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("contract");
+
+                    b.Property<Guid>("EnvironmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_id");
+
+                    b.Property<int>("Format")
+                        .HasColumnType("integer")
+                        .HasColumnName("format");
+
+                    b.Property<Guid>("InstallationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("installation_id");
+
+                    b.Property<Guid>("ManagedWorkloadId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("managed_workload_id");
+
+                    b.Property<Guid>("ProviderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_id");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("role");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("ValidationPayload")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("validation_payload");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnvironmentId");
+
+                    b.HasIndex("InstallationId");
+
+                    b.HasIndex("ManagedWorkloadId")
+                        .IsUnique();
+
+                    b.HasIndex("ManagedWorkloadId", "Role")
+                        .IsUnique();
+
+                    b.HasIndex("ProviderId", "ConfigurationRevision");
+
+                    b.ToTable("runtime_identity_bindings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_runtime_binding", "format > 0 AND status = 'Prepared' AND octet_length(validation_payload) BETWEEN 1 AND 1048576");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.SecretCreationReceiptRow", b =>
                 {
                     b.Property<Guid>("EnvironmentRecordId")
@@ -2405,6 +2624,33 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ManagedWorkloadRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
+                        .WithMany()
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ApplicationDeploymentRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("EnvironmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ProviderInstanceRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ManifestRevisionRow", b =>
                 {
                     b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
@@ -2417,6 +2663,21 @@ namespace Haby.Persistence.PostgreSql.Migrations
             modelBuilder.Entity("Haby.Persistence.PostgreSql.OperationOutputRow", b =>
                 {
                     b.HasOne("Haby.Persistence.PostgreSql.DurableOperationRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation", "OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.OwnedObjectRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ManagedWorkloadRow", null)
+                        .WithMany()
+                        .HasForeignKey("ManagedWorkloadId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableActionIntentRow", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId", "Generation", "OperationId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -2594,6 +2855,34 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.ResourceNamingPolicyRow", null)
                         .WithMany()
                         .HasForeignKey("Environment", "Name", "Revision")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.RuntimeIdentityBindingRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("EnvironmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.InstallationIdentityRow", null)
+                        .WithMany()
+                        .HasForeignKey("InstallationId")
+                        .HasPrincipalKey("Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.OwnedObjectRow", null)
+                        .WithOne()
+                        .HasForeignKey("Haby.Persistence.PostgreSql.RuntimeIdentityBindingRow", "ManagedWorkloadId", "Role")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ProviderConfigurationRevisionRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderId", "ConfigurationRevision")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

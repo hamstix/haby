@@ -3,6 +3,7 @@
 This document explains the accepted P3 design in
 [ADR-050](../adr/0050-kubernetes-runtime-identity-and-configuration-publication.md).
 It is a basis for program/operator instructions, not an implemented command guide.
+Internal stable ServiceAccount/binding preparation is bounded by the [issue #211 guide](../development/211-stable-workload-runtime-identity.md); publication and runtime delivery remain unimplemented.
 Current static-token delivery remains documented in the
 [P2 delivery runbook](../development/148-authorized-configuration-delivery.md).
 

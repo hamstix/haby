@@ -230,6 +230,19 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {deployment} FOR SHARE", token);
     }
 
+    internal static async Task<ConfigurationDocumentRevision> RequireStoredPreparationAsync(ManifestCatalogDbContext db,
+        DeploymentGenerationRow source, ConfigurationDocumentTarget target, CancellationToken token)
+    {
+        var row = await Row(db, target, token) ?? throw new InvalidDataException("Prepared artifact unavailable.");
+        var revision = Existing(row, source, target).Revision ?? throw new InvalidDataException("Prepared artifact integrity mismatch.");
+        if (revision.Metadata.Plan.ToString() != source.PlanId.ToString() ||
+            revision.Metadata.Revision.ApplicationRecordId.ToString() != source.ApplicationRecordId.ToString() ||
+            revision.Metadata.Revision.RevisionNumber.Value != source.RevisionNumber || revision.Metadata.Environment.Value != source.EnvironmentKey ||
+            revision.Metadata.Application != source.Inputs().Configuration!.Manifest.ApplicationId)
+            throw new InvalidDataException("Prepared artifact authority mismatch.");
+        return revision;
+    }
+
     private static ConfigurationDocumentResult Existing(ConfigurationDocumentRow row, DeploymentGenerationRow source, ConfigurationDocumentTarget target)
     {
         var saved = Decode(row, target);

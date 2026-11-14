@@ -16,6 +16,7 @@ using Npgsql;
 
 internal static class DurableActionCases
 {
+    private sealed class InjectedCrash : Exception;
     private enum ReplacementPhase { ReadOriginal, DeleteOriginal, ObserveDeletion, CreateReplacement, ObserveForeign }
     private static readonly ProviderInput Subject = new ProviderInput.Workload(ManifestLocalId.Create("api"), ManifestLocalId.Create("main"));
     internal static async Task Run(Kubernetes admin, Uri endpoint, string directory, CancellationToken token)
@@ -268,6 +269,177 @@ internal static class DurableActionCases
                     history.Operation.State == "NeedsAttention" && history.Attempts is [var attempt] && attempt.Outcome == "Uncertain",
                     "D18-initial-marker-before-send-absence-no-replay");
             }
+            ValueTask<ProviderPreflightResult> AccessOnlyPreflight(ISecretStore store, EnvironmentRecordId environment,
+                ProviderAliasBinding target, KubernetesProviderConfiguration configuration, CancellationToken cancellationToken)
+            {
+                // The restricted credential needs authentication-only admission. Runtime preparation
+                // independently checks actual namespace/account rights and must deny them below.
+                var handler = new KubernetesPreflightHandler(new KubernetesProviderConfigurationCodec(), (scope, exact, ct) =>
+                {
+                    var binding = new KubernetesBinding(scope.ToString(), target.InstanceId.ToString(), target.RevisionNumber.Value,
+                        KubernetesProviderConfigurationCodec.Implementation);
+                    var connection = new KubernetesConnection(binding, exact.Endpoint, exact.ServerCaPem, exact.BearerToken,
+                        exact.ClientCertificate, exact.ClientPrivateKey);
+                    return KubernetesClientFactory.CreateFixture(connection, store, [], ct);
+                });
+                return handler.CheckTypedAsync(environment, configuration, cancellationToken);
+            }
+            async Task<(DurableDeploymentPlanningTests.InternalScenario Scenario, DurableOperationKey Key, Counter Counter)> RuntimeAccepted(
+                bool initial = true, string? targetNamespace = null,
+                Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? configuration = null)
+            {
+                var scenario = await setup.InternalScenarioAsync(configuration ?? Configuration, targetNamespace ?? name,
+                    actualKubernetesProbe: configuration is null ? Preflight : AccessOnlyPreflight, initialOnly: initial,
+                    configureManifest: e => DurableDeploymentPlanningTests.ConfiguredDocuments(e, secondDocument: true));
+                await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
+                var documents = await DurableDeploymentPlanningTests.ConfigurationPreparation(services).Preparation.PrepareAsync(scenario.Commit, "qualifier", token);
+                if (documents.Failure is not null || documents.Prepared.Count != 2) throw new InvalidOperationException("Exact runtime documents unavailable.");
+                var counter = new Counter(scenario.Connection);
+                var actions = ComposeRuntime(services, counter);
+                var key = await actions.AcceptAsync(scenario.Commit, Subject, InternalRuntimeIdentityAction.Create, "runtime-identity", token);
+                counter.Key = key; return (scenario, key, counter);
+            }
+            async Task<(Guid Binding, string Audience, string Receipt)> RuntimeSaved(string connection)
+            {
+                await using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
+                var binding = await db.RuntimeIdentityBindings.AsNoTracking().SingleAsync(token);
+                var inventory = await db.OwnedObjects.AsNoTracking().SingleAsync(token);
+                if (await db.ConfigurationAccess.AnyAsync(token)) throw new InvalidOperationException("Runtime preparation granted static access.");
+                return (binding.Id, binding.Audience, inventory.Payload);
+            }
+            var accountsBefore = (await admin.CoreV1.ListNamespacedServiceAccountAsync(name, cancellationToken: token)).Items.Count;
+            var rolesBefore = (await admin.RbacAuthorizationV1.ListNamespacedRoleBindingAsync(name, cancellationToken: token)).Items.Count;
+            var secretsBefore = (await admin.CoreV1.ListNamespacedSecretAsync(name, cancellationToken: token)).Items.Count;
+            var runtime = await RuntimeAccepted();
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtime.Scenario.Connection, runtime.Scenario.Time))
+            {
+                var result = await ComposeRuntime(services, runtime.Counter).ExecuteAsync(runtime.Key, token);
+                var receipt = RuntimeIdentityCodec.Receipt(result.Receipt!);
+                var account = await admin.CoreV1.ReadNamespacedServiceAccountAsync(receipt.Intent.Name, name, cancellationToken: token);
+                Check(result.Outcome == InternalActionOutcome.Confirmed && runtime.Counter.Writes == 1 && account.AutomountServiceAccountToken == false &&
+                    account.Metadata.Uid == receipt.Uid, "D19-runtime-initial-owned-disabled-automount");
+            }
+            var originalRuntime = await RuntimeSaved(runtime.Scenario.Connection);
+            var runtimeRestored = await Restore(postgres, runtime.Scenario.Connection, token);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeRestored, runtime.Scenario.Time))
+            {
+                var counter = new Counter(runtimeRestored) { Key = runtime.Key };
+                var result = await ComposeRuntime(services, counter).ExecuteAsync(runtime.Key, token);
+                var saved = await RuntimeSaved(runtimeRestored);
+                Check(result.Outcome == InternalActionOutcome.Confirmed && counter.Writes == 0 && saved == originalRuntime,
+                    "D20-runtime-current-restore-retains-binding-audience-uid");
+            }
+            Check((await admin.CoreV1.ListNamespacedServiceAccountAsync(name, cancellationToken: token)).Items.Count == accountsBefore + 1 &&
+                (await admin.RbacAuthorizationV1.ListNamespacedRoleBindingAsync(name, cancellationToken: token)).Items.Count == rolesBefore &&
+                (await admin.CoreV1.ListNamespacedSecretAsync(name, cancellationToken: token)).Items.Count == secretsBefore,
+                "D30-runtime-no-rbac-or-token-secret-side-effects");
+            var runtimeMixed = await RuntimeAccepted(initial: false);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeMixed.Scenario.Connection, runtimeMixed.Scenario.Time))
+            {
+                var result = await ComposeRuntime(services, runtimeMixed.Counter).ExecuteAsync(runtimeMixed.Key, token);
+                await using var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync(token);
+                Check(result.Outcome == InternalActionOutcome.Confirmed && runtimeMixed.Counter.Writes == 1 &&
+                    (await db.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration == 1 && !await db.ConfigurationAccess.AnyAsync(token),
+                    "D21-runtime-mixed-exact-preparation-no-access-or-Applied");
+            }
+            var runtimeLost = await RuntimeAccepted(); runtimeLost.Counter.DropResponse = true;
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeLost.Scenario.Connection, runtimeLost.Scenario.Time))
+                Check((await ComposeRuntime(services, runtimeLost.Counter).ExecuteAsync(runtimeLost.Key, token)).Outcome == InternalActionOutcome.Uncertain,
+                    "D31-runtime-lost-response-preserves-original-dispatch");
+            runtimeLost.Counter.DropResponse = false;
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeLost.Scenario.Connection, runtimeLost.Scenario.Time))
+            {
+                var history = (await ComposeRuntime(services, runtimeLost.Counter).HistoryAsync(runtimeLost.Key, token))!;
+                var intent = RuntimeIdentityCodec.Decode(history.Intent.Payload);
+                var account = await admin.CoreV1.ReadNamespacedServiceAccountAsync(intent.Name, name, cancellationToken: token);
+                account.AutomountServiceAccountToken = true;
+                await admin.CoreV1.ReplaceNamespacedServiceAccountAsync(account, intent.Name, name, cancellationToken: token);
+                Check((await ComposeRuntime(services, runtimeLost.Counter).RecoverByObservationAsync(runtimeLost.Key, token)).Outcome == InternalActionOutcome.NotConfirmed && runtimeLost.Counter.Writes == 1,
+                    "D29-runtime-observation-rejects-owned-projection-edit");
+                account = await admin.CoreV1.ReadNamespacedServiceAccountAsync(intent.Name, name, cancellationToken: token);
+                account.AutomountServiceAccountToken = false;
+                await admin.CoreV1.ReplaceNamespacedServiceAccountAsync(account, intent.Name, name, cancellationToken: token);
+            }
+            var lostRestored = await Restore(postgres, runtimeLost.Scenario.Connection, token);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(lostRestored, runtimeLost.Scenario.Time))
+            {
+                var counter = new Counter(lostRestored) { Key = runtimeLost.Key };
+                var actions = ComposeRuntime(services, counter);
+                var result = await actions.RecoverByObservationAsync(runtimeLost.Key, token);
+                var history = (await actions.HistoryAsync(runtimeLost.Key, token))!;
+                _ = await RuntimeSaved(lostRestored);
+                Check(result.Outcome == InternalActionOutcome.Confirmed && counter.Writes == 0 && runtimeLost.Counter.Writes == 1 &&
+                    history.Attempts is [var attempt] && attempt.Outcome == "Uncertain" && history.Observations.Last().Confirmed,
+                    "D32-runtime-lost-response-restored-observation-one-original-write");
+            }
+            var runtimeCrash = await RuntimeAccepted();
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeCrash.Scenario.Connection, runtimeCrash.Scenario.Time))
+            {
+                try { await ComposeRuntime(services, runtimeCrash.Counter, p => { if (p == InternalActionFault.BeforeCompletionCommit) throw new InjectedCrash(); }).ExecuteAsync(runtimeCrash.Key, token); }
+                catch (InjectedCrash) { }
+                await using var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync(token);
+                if (await db.RuntimeIdentityBindings.AnyAsync(token) || await db.OwnedObjects.AnyAsync(token)) throw new InvalidOperationException("Partial runtime confirmation committed.");
+            }
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeCrash.Scenario.Connection, runtimeCrash.Scenario.Time))
+            {
+                Check((await ComposeRuntime(services, runtimeCrash.Counter).RecoverByObservationAsync(runtimeCrash.Key, token)).Outcome == InternalActionOutcome.Confirmed &&
+                    runtimeCrash.Counter.Writes == 1 && (await RuntimeSaved(runtimeCrash.Scenario.Connection)).Binding != Guid.Empty,
+                    "D22-runtime-prebinding-crash-atomic-observation-recovery");
+            }
+            var runtimeAbsent = await RuntimeAccepted();
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeAbsent.Scenario.Connection, runtimeAbsent.Scenario.Time))
+            {
+                try { await ComposeRuntime(services, runtimeAbsent.Counter, p => { if (p == InternalActionFault.AfterMarkerCommit) throw new InjectedCrash(); }).ExecuteAsync(runtimeAbsent.Key, token); }
+                catch (InjectedCrash) { }
+            }
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeAbsent.Scenario.Connection, runtimeAbsent.Scenario.Time))
+                Check((await ComposeRuntime(services, runtimeAbsent.Counter).RecoverByObservationAsync(runtimeAbsent.Key, token)).Outcome == InternalActionOutcome.NotConfirmed && runtimeAbsent.Counter.Writes == 0,
+                    "D23-runtime-marker-before-send-absence-never-replays");
+            var savedIntent = RuntimeIdentityCodec.Receipt(originalRuntime.Receipt).Intent;
+            await admin.CoreV1.DeleteNamespacedServiceAccountAsync(savedIntent.Name, name, new V1DeleteOptions { Preconditions = new() { Uid = runtime.Counter.AcceptedUid } }, cancellationToken: token);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtime.Scenario.Connection, runtime.Scenario.Time))
+                Check((await ComposeRuntime(services, runtime.Counter).ExecuteAsync(runtime.Key, token)).Outcome == InternalActionOutcome.NotConfirmed && runtime.Counter.Writes == 1,
+                    "D25-runtime-known-missing-account-no-recreation");
+            await admin.CoreV1.CreateNamespacedServiceAccountAsync(new V1ServiceAccount
+            {
+                Metadata = new()
+                {
+                    Name = savedIntent.Name,
+                    Labels = new Dictionary<string, string> { [DeploymentIntents.OwnerKey] = savedIntent.Owner.ToString("N"), [DeploymentIntents.ManagedKey] = savedIntent.ManagedWorkload.ToString("N") },
+                    Annotations = new Dictionary<string, string> { [DeploymentIntents.OperationKey] = savedIntent.Operation.ToString("N"), [DeploymentIntents.GenerationKey] = savedIntent.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture) }
+                },
+                AutomountServiceAccountToken = false
+            }, name, cancellationToken: token);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(runtime.Scenario.Connection, runtime.Scenario.Time))
+                Check((await ComposeRuntime(services, runtime.Counter).ExecuteAsync(runtime.Key, token)).Outcome != InternalActionOutcome.Confirmed &&
+                    runtime.Counter.Writes == 1 && (await RuntimeSaved(runtime.Scenario.Connection)) == originalRuntime,
+                    "D24-runtime-foreign-replacement-never-remaps-binding");
+            var foreignRuntime = await RuntimeAccepted();
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(foreignRuntime.Scenario.Connection, foreignRuntime.Scenario.Time))
+            {
+                var actions = ComposeRuntime(services, foreignRuntime.Counter); var intent = RuntimeIdentityCodec.Decode((await actions.HistoryAsync(foreignRuntime.Key, token))!.Intent.Payload);
+                await admin.CoreV1.CreateNamespacedServiceAccountAsync(new V1ServiceAccount { Metadata = new() { Name = intent.Name }, AutomountServiceAccountToken = false }, name, cancellationToken: token);
+                Check((await actions.ExecuteAsync(foreignRuntime.Key, token)).Outcome == InternalActionOutcome.Refused && foreignRuntime.Counter.Writes == 0,
+                    "D26-runtime-occupied-foreign-name-no-adoption");
+            }
+            var missingNamespace = await RuntimeAccepted(targetNamespace: name + "-absent");
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(missingNamespace.Scenario.Connection, missingNamespace.Scenario.Time))
+                Check((await ComposeRuntime(services, missingNamespace.Counter).ExecuteAsync(missingNamespace.Key, token)).Outcome == InternalActionOutcome.Refused && missingNamespace.Counter.Writes == 0,
+                    "D27-runtime-missing-selected-namespace-no-create");
+            await admin.CoreV1.CreateNamespacedServiceAccountAsync(new V1ServiceAccount { Metadata = new() { Name = "unprivileged-probe" }, AutomountServiceAccountToken = false }, name, cancellationToken: token);
+            var issued = await admin.CoreV1.CreateNamespacedServiceAccountTokenAsync(new Authenticationv1TokenRequest { Spec = new() { Audiences = [], ExpirationSeconds = 600 } }, "unprivileged-probe", name, cancellationToken: token);
+            async Task<KubernetesProviderConfiguration> Restricted(ISecretStore store, EnvironmentRecordId environment)
+            {
+                var reference = new SecretRef(SecretId.New(), SecretVersionId.New()); var bytes = System.Text.Encoding.UTF8.GetBytes(issued.Status.Token);
+                try { await store.CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, bytes, token); }
+                finally { CryptographicOperations.ZeroMemory(bytes); }
+                return new(endpoint, await File.ReadAllTextAsync(Path.Combine(directory, "ca.crt"), token), reference, null, null);
+            }
+            Console.WriteLine("Durable phase: accept-real-restricted-Provider-with-access-only-preflight");
+            var deniedRuntime = await RuntimeAccepted(configuration: Restricted);
+            await using (var services = DurableDeploymentPlanningTests.InternalServices(deniedRuntime.Scenario.Connection, deniedRuntime.Scenario.Time))
+                Check((await ComposeRuntime(services, deniedRuntime.Counter).ExecuteAsync(deniedRuntime.Key, token)).Outcome == InternalActionOutcome.Refused && deniedRuntime.Counter.Writes == 0,
+                    "D28-runtime-required-permission-denial-no-create");
             Check(lost.Counter.Barriers == 1 && interrupted.Counter.Barriers == 1 && absent.Counter.Barriers == 0 &&
                 lost.Counter.TransactionChecks > 0 && interrupted.Counter.TransactionChecks > 0 && absent.Counter.TransactionChecks > 0, "D12-committed-marker-no-network-under-catalog-transaction");
         }
@@ -306,6 +478,12 @@ internal static class DurableActionCases
             ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new BoundaryHandler(counter)], ct)));
         return DurableDeploymentPlanningTests.Actions(services, handler, fault);
     }
+    private static InternalDurableActions ComposeRuntime(ServiceProvider services, Counter counter, Action<InternalActionFault>? fault = null)
+    {
+        var secrets = services.GetRequiredService<ISecretStore>();
+        var handler = new InternalRuntimeIdentityAction(secrets, (connection, ct) => KubernetesClientFactory.CreateFixture(connection, secrets, [new BoundaryHandler(counter)], ct));
+        return DurableDeploymentPlanningTests.IdentityActions(services, handler, fault);
+    }
     private static async Task<string> Restore(PostgreSqlFixture fixture, string source, CancellationToken token)
     {
         var target = "haby202_restore_" + Guid.NewGuid().ToString("N");
@@ -335,7 +513,9 @@ internal static class DurableActionCases
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
-            var write = request.Method != HttpMethod.Get;
+            var review = request.RequestUri!.AbsolutePath.EndsWith("/selfsubjectreviews", StringComparison.Ordinal) ||
+                request.RequestUri.AbsolutePath.EndsWith("/selfsubjectaccessreviews", StringComparison.Ordinal);
+            var write = request.Method != HttpMethod.Get && !review;
             await using (var db = new NpgsqlConnection(counter.Connection))
             {
                 await db.OpenAsync(token);
@@ -354,7 +534,7 @@ internal static class DurableActionCases
             if (write) counter.Writes++; else counter.Reads++;
             if (counter.Unavailable) throw new HttpRequestException("Injected unavailability.");
             var response = await base.SendAsync(request, token);
-            if (request.Method == HttpMethod.Post && response.StatusCode == HttpStatusCode.Created)
+            if (write && request.Method == HttpMethod.Post && response.StatusCode == HttpStatusCode.Created)
             {
                 using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
                 counter.AcceptedUid = json.RootElement.GetProperty("metadata"u8).GetProperty("uid"u8).GetString();

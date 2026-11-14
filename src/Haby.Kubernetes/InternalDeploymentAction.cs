@@ -14,6 +14,7 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation, Create,
         "haby.kubernetes.deployment-intent/v1", "haby.kubernetes.deployment-receipt/v1");
     public bool ObservationRecovery => true;
+    public InternalManagedTarget ManagedTarget(InternalActionContext context) => RuntimeIdentityCodec.Target(Resolve(context));
     public string Prepare(InternalActionContext context) => DeploymentIntents.Encode(DeploymentIntents.Prepare(Resolve(context),
         Guid.Parse(context.Key.DeploymentId.ToString()), context.ManagedIdentity, context.Key.Generation.Value, context.Marker));
 
@@ -28,7 +29,7 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         return workload.Declaration.Documents.OrderBy(x => x.Value, StringComparer.Ordinal).ToArray();
     }
 
-    private static EffectiveWorkload Resolve(InternalActionContext context)
+    internal static EffectiveWorkload Resolve(InternalActionContext context)
     {
         if (context.Subject is not ProviderInput.Workload subject || context.Placement is null) throw new InvalidDataException("Deployment subject unavailable.");
         var manifest = context.Inputs.Providers.Declaration;

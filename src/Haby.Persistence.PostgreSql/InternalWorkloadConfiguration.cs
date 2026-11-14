@@ -64,6 +64,34 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
         return new(results.ToArray());
     }
 
+    // Read-only downstream authority: a partial PrepareAsync result never authorizes effects.
+    internal async Task<ProviderInput.Workload[]> RequireCompleteAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
+    {
+        source = await InternalGenerationAuthority.RequireAsync(db, source, token);
+        var selected = await SelectAsync(db, source, token);
+        var proof = await DurableAggregateCompletion.ReadAsync(db, source, token, true)
+            ?? throw new InvalidDataException("Resource-stage proof unavailable.");
+        var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, source.DeploymentId, source.Generation,
+            outputs, codecs, token, admission, internalResourceStage: true);
+        if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token))
+            throw new InvalidDataException("Current Resource evidence metadata unavailable.");
+        var pairs = selected.SelectMany(x => x.Value.Select(d => (Workload: x.Key, Document: d))).ToArray();
+        var rows = await db.WorkloadConfigurationRecipients.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation).ToArrayAsync(token);
+        if (rows.Length != pairs.Length) throw new InvalidDataException("Complete exact configuration preparation required.");
+        foreach (var (workload, document) in pairs)
+        {
+            var row = rows.SingleOrDefault(x => x.Component == workload.Component.Value && x.Workload == workload.Id.Value && x.Document == document.Value)
+                ?? throw new InvalidDataException("Exact prepared recipient unavailable.");
+            var target = new ConfigurationDocumentTarget(ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
+                DeploymentGeneration.Create(source.Generation), workload.Component, document);
+            var revision = await PostgreSqlConfigurationDocumentStore.RequireStoredPreparationAsync(db, source, target, token);
+            if (row.RevisionId.ToString() != revision.Metadata.Id.ToString() || row.CheckpointId != proof.Id || row.InputFingerprint != source.Fingerprint ||
+                row.Actor != revision.Metadata.Actor || row.CreatedAt != revision.Metadata.CreatedAt.AddTicks(-(revision.Metadata.CreatedAt.Ticks % TimeSpan.TicksPerMicrosecond)))
+                throw new InvalidDataException("Exact prepared artifact association mismatch.");
+        }
+        return selected.Where(x => x.Value.Count > 0).Select(x => x.Key).ToArray();
+    }
+
     private async Task<IReadOnlyDictionary<ProviderInput.Workload, IReadOnlyList<ManifestLocalId>>> SelectAsync(
         ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
