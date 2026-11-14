@@ -4,6 +4,7 @@ using System.Text.Json;
 using Haby.Application;
 using Haby.Domain;
 using Haby.Kubernetes;
+using Haby.Kubernetes.Qualification;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql.IntegrationTests;
 using Haby.Tests;
@@ -19,18 +20,22 @@ internal static class DurableActionCases
     private sealed class InjectedCrash : Exception;
     private enum ReplacementPhase { ReadOriginal, DeleteOriginal, ObserveDeletion, CreateReplacement, ObserveForeign }
     private static readonly ProviderInput Subject = new ProviderInput.Workload(ManifestLocalId.Create("api"), ManifestLocalId.Create("main"));
-    internal static async Task Run(Kubernetes admin, Uri endpoint, string directory, CancellationToken token)
+    internal static async Task Run(Kubernetes admin, Uri endpoint, string directory, QualificationDiagnosticJournal diagnostics, CancellationToken token)
     {
         // Reuse the ordinary owned PostgreSQL fixture and real public P2 baseline.
         // This tool is test composition, never a production dependency or a second launcher.
         var postgres = new PostgreSqlFixture();
+        diagnostics.Mark(QualificationMilestone.CatalogInitStart);
         await postgres.InitializeAsync();
+        diagnostics.Mark(QualificationMilestone.CatalogInitCompleted);
         var name = "haby202-" + Guid.NewGuid().ToString("N")[..12];
         V1Namespace? ns = null;
         Exception? primary = null;
         try
         {
+            diagnostics.Mark(QualificationMilestone.NamespaceCreateStart);
             ns = await admin.CoreV1.CreateNamespaceAsync(new() { Metadata = new() { Name = name, Labels = new Dictionary<string, string> { ["haby.dev/qualification"] = name } } }, cancellationToken: token);
+            diagnostics.Mark(QualificationMilestone.NamespaceCreateCompleted);
             var setup = new DurableDeploymentPlanningTests(postgres);
             async Task<KubernetesProviderConfiguration> Configuration(ISecretStore store, EnvironmentRecordId environment)
             {
@@ -93,6 +98,7 @@ internal static class DurableActionCases
 
             // API acceptance followed by a deliberately dropped response. Preserve catalog,
             // restart the service on a real pg_dump/restore and learn the original UID by read.
+            diagnostics.Mark(QualificationMilestone.DurableSuiteStart);
             var lost = await Accepted(); lost.Counter.DropResponse = true;
             await using (var services = DurableDeploymentPlanningTests.InternalServices(lost.Scenario.Connection, lost.Scenario.Time))
                 Check((await Compose(services, lost.Counter).ExecuteAsync(lost.Key, token)).Outcome == InternalActionOutcome.Uncertain, "D01-accepted-response-lost");
@@ -467,6 +473,11 @@ internal static class DurableActionCases
                         throw new InvalidOperationException("Exact runtime publication unavailable.");
                 }
                 Check(true, candidate.Scenario == runtimeMixed.Scenario ? "D33-runtime-mixed-exact-publication" : "D34-runtime-initial-exact-publication");
+                if (candidate.Scenario != runtimeMixed.Scenario)
+                {
+                    diagnostics.Mark(QualificationMilestone.InitialDeliveryStart);
+                    await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token);
+                }
                 var old = (await publication.ReadAsync(requests[0].Key, token))!;
                 var revoke = requests[0] with
                 {
@@ -485,6 +496,7 @@ internal static class DurableActionCases
                 var authenticationStore = new PostgreSqlRuntimeIdentityStore(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(services, candidate.Counter));
                 await using var otherServices = DurableDeploymentPlanningTests.InternalServices(runtimeCrash.Scenario.Connection, runtimeCrash.Scenario.Time);
                 var otherStore = new PostgreSqlRuntimeIdentityStore(otherServices.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(otherServices, runtimeCrash.Counter));
+                diagnostics.Mark(QualificationMilestone.RuntimeAuthStart);
                 await RuntimeAuthenticationCases.Run(admin, services.GetRequiredService<ISecretStore>(), authenticationStore, requests[0].Binding,
                     async () => { await publication.ApplyAsync(bindingRevoke, token); }, token, otherStore, (await RuntimeSaved(runtimeCrash.Scenario.Connection)).Binding,
                     otherServices.GetRequiredService<ISecretStore>(), scenario: candidate.Scenario == runtimeMixed.Scenario ? "mixed" : "initial");
@@ -496,6 +508,33 @@ internal static class DurableActionCases
             }
             Check(true, "D35-runtime-old-receipt-does-not-restore-revoked-permission");
             Check(true, "D36-runtime-binding-revoke-preserves-confirmed-origin-without-access");
+            // The standalone-database mixed identity contour above is not ApplicationLogin delivery proof.
+            diagnostics.Mark(QualificationMilestone.MixedDeliveryStart);
+            using (var login = new DurableDeploymentPlanningTests.RuntimeAuthenticationLoginScenario(postgres))
+            {
+                var scenario = await login.PrepareMixedAsync(Configuration, name, Preflight);
+                diagnostics.Mark(QualificationMilestone.MixedPreparationCompleted);
+                await using var services = ApplicationLoginScenario.Services(scenario.Connection, full: true, access: true, internalActions: true);
+                var preparation = DurableDeploymentPlanningTests.ConfigurationPreparation(services, rendering: Haby.PostgreSql.PostgreSqlConnectionRendering.CreateCatalog(),
+                    formatters: Haby.PostgreSql.PostgreSqlConnectionRendering.FormatterCatalog()).Preparation;
+                var documents = await preparation.PrepareAsync(scenario.Commit, "qualifier", token);
+                if (documents.Failure is not null) throw new InvalidOperationException("Mixed login exact documents unavailable.");
+                diagnostics.Mark(QualificationMilestone.MixedDocumentsCompleted);
+                var secrets = services.GetRequiredService<ISecretStore>();
+                var handler = new InternalRuntimeIdentityAction(secrets, (connection, ct) => KubernetesClientFactory.CreateFixture(connection, secrets, [], ct));
+                var actions = DurableDeploymentPlanningTests.IdentityActions(services, handler);
+                var identity = await new InternalRuntimeIdentityPreparation(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+                    preparation, actions, handler.Contract.Action).PrepareAsync(scenario.Commit, token);
+                if (identity.Count != 1 || identity[0].Result.Outcome != InternalActionOutcome.Confirmed)
+                    throw new InvalidOperationException("Mixed login real runtime identity unavailable.");
+                diagnostics.Mark(QualificationMilestone.MixedIdentityCompleted);
+                var publication = new InternalRuntimePublication(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), preparation, actions, scenario.Time);
+                var request = (await publication.PreparationRequestsAsync(scenario.Commit, "qualifier", token)).Single();
+                await publication.ApplyAsync(request, token);
+                diagnostics.Mark(QualificationMilestone.MixedPublicationCompleted);
+                await RuntimeDeliveryCases.Run(admin, scenario, services, publication, request, true, token);
+                diagnostics.Mark(QualificationMilestone.MixedDeliveryCompleted);
+            }
         }
         catch (Exception error) { primary = error; throw; }
         finally
@@ -505,6 +544,7 @@ internal static class DurableActionCases
             {
                 if (ns is not null)
                 {
+                    diagnostics.Mark(QualificationMilestone.NamespaceCleanupStart);
                     using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                     var current = await admin.CoreV1.ReadNamespaceAsync(name, cancellationToken: cleanup.Token);
                     if (current.Metadata.Uid != ns.Metadata.Uid || current.Metadata.Labels["haby.dev/qualification"] != name) throw new InvalidOperationException("Namespace cleanup ownership mismatch.");
@@ -517,10 +557,17 @@ internal static class DurableActionCases
                         await Task.Delay(200, cleanup.Token);
                     }
                     Check(absent, "D13-owned-namespace-absent");
+                    diagnostics.Mark(QualificationMilestone.NamespaceAbsenceConfirmed);
                 }
             }
             catch (Exception error) { cleanupFailure = error; }
-            try { await postgres.DisposeAsync(); Console.WriteLine("PASS durable-owned-catalog-cleanup"); }
+            try
+            {
+                diagnostics.Mark(QualificationMilestone.CatalogDisposeStart);
+                await postgres.DisposeAsync();
+                diagnostics.Mark(QualificationMilestone.CatalogDisposeCompleted);
+                Console.WriteLine("PASS durable-owned-catalog-cleanup");
+            }
             catch (Exception error) { cleanupFailure = cleanupFailure is null ? error : new AggregateException(cleanupFailure, error); }
             if (cleanupFailure is not null) throw primary is null ? cleanupFailure : new AggregateException(primary, cleanupFailure);
         }

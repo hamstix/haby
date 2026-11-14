@@ -16,10 +16,15 @@ public sealed class ConfigurationDeliveryContractTests
         Assert.Equal("configuration_delivery.proto", service.File.Name);
         Assert.Empty(service.File.Dependencies);
         Assert.Single(service.File.Services);
-        var method = Assert.Single(service.Methods);
+        Assert.Equal(new[] { "Deliver", "DeliverRuntime" }, service.Methods.Select(x => x.Name));
+        var method = service.Methods[0];
         Assert.Equal("Deliver", method.Name);
         Assert.Same(service.File, method.InputType.File);
         Assert.Same(service.File, method.OutputType.File);
+        var runtime = service.Methods[1];
+        Assert.Equal(new[] { "binding_id", "revision_id" }, runtime.InputType.Fields.InFieldNumberOrder().Select(x => x.Name));
+        Assert.Same(method.OutputType, runtime.OutputType);
+        Assert.Same(service.File, runtime.InputType.File);
         Assert.Equal("Haby.Configuration.Contracts", service.File.GetOptions().CsharpNamespace);
         Assert.NotEqual(typeof(ManifestOperator).Assembly, typeof(DeliverConfigurationRequest).Assembly);
         Assert.DoesNotContain(typeof(DeliverConfigurationRequest).Assembly.GetReferencedAssemblies(), x => x.Name!.StartsWith("Haby.", StringComparison.Ordinal));

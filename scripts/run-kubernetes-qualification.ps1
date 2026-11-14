@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
+. (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
 Set-Location (Split-Path $PSScriptRoot -Parent)
 if(!$EvidencePath){$EvidencePath=Join-Path '.artifacts' ($EvidenceId+'.txt')}
 if(Test-Path -LiteralPath $EvidencePath){throw 'Evidence path already exists; fresh report required.'}
@@ -51,6 +52,7 @@ try {
     if($IsWindows){$acl=Call 'icacls' @($private,'/inheritance:r','/grant:r',"$($env:USERNAME):(OI)(CI)F")}
     else{$acl=Call 'chmod' @('700',$private)}
     if($acl.ExitCode -ne 0){throw 'Private directory permissions failed.'}
+    if($DurableActions){Initialize-QualificationJournal $private}
     $record.Add('Runtime version: '+(RuntimeCall @('--version')).Trim())
     $sdk=Call 'dotnet' @('--version'); if($sdk.ExitCode -ne 0){throw 'SDK unavailable.'}; $record.Add('SDK: '+$sdk.Output.Trim())
     $stage='launch'; $record.Add('Stage: launch-start'); $launchAttempted=$true
@@ -75,8 +77,20 @@ try {
     foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
     if($result.ExitCode -ne 0){$reason='nonzero';throw 'Harness failed.'}
     $record.Add('Harness: PASS')
-} catch { $failed=$true; if($stage -eq 'readiness'){$record.Add('Readiness elapsed milliseconds: '+$timer.ElapsedMilliseconds); if($_.Exception -is [TimeoutException]){$reason=if($timer.Elapsed.TotalSeconds -ge $ReadinessTimeoutSeconds){'deadline'}else{'child-deadline'}}}; $record.Add('Failure: stage='+$stage+'; reason='+$reason+'; category='+$_.Exception.GetType().Name) }
+} catch {
+    $failed=$true
+    $diagnostic=Get-QualificationProcessDiagnostic $_.Exception
+    if($diagnostic.Kind -cne 'unknown'){$record.Add('Diagnostic process: '+$diagnostic.Kind+'; elapsed-ms='+$diagnostic.ElapsedMilliseconds)}
+    else{$record.Add('Diagnostic process: unknown')}
+    if($stage -eq 'readiness'){$record.Add('Readiness elapsed milliseconds: '+$timer.ElapsedMilliseconds); if($_.Exception -is [TimeoutException]){$reason=if($timer.Elapsed.TotalSeconds -ge $ReadinessTimeoutSeconds){'deadline'}else{'child-deadline'}}}
+    $record.Add('Failure: stage='+$stage+'; reason='+$reason+'; category='+$_.Exception.GetType().Name)
+}
 finally {
+    if($DurableActions){
+        $journal=if($privateOwned){Read-QualificationJournal $private}else{[pscustomobject]@{Status='not-owned';Records=@()}}
+        foreach($line in @(Format-QualificationJournal $journal)){$record.Add($line)}
+        if($journal.Status -cne 'valid'){$failed=$true}
+    }
     # Each cleanup stage is independent. No evidence/daemon failure suppresses private cleanup.
     if($launchAttempted){
         try {

@@ -31,14 +31,12 @@ public sealed class ConfigurationDeliveryResult(ConfigurationDeliveryStatus stat
     public override string ToString() => "[Configuration delivery result]";
 }
 
-/// <summary>One exact authorization followed by saved-artifact-only, all-or-nothing transient preparation.</summary>
+/// <summary>Static grant authorization remains independent of runtime identity.</summary>
 public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConfigurationDeliveryDocumentStore documents,
     ISecretStore secrets, ConfigurationRenderingCatalog rendering, IEnumerable<IConfigurationResolutionBinding> registrations)
 {
-    public const int MaxSecretBytes = 64 * 1024;
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-    private readonly IConfigurationResolutionBinding[] bindings = registrations.ToArray();
-
+    public const int MaxSecretBytes = ConfigurationDeliveryMaterializer.MaxSecretBytes;
+    private readonly ConfigurationDeliveryMaterializer materializer = new(secrets, rendering, registrations);
     public async ValueTask<ConfigurationDeliveryResult> ExecuteAsync(string credential, ConfigurationDocumentRevisionId revisionId, CancellationToken token)
     {
         var grant = await access.AuthorizeAsync(credential, revisionId, token);
@@ -47,7 +45,28 @@ public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConf
         {
             var artifact = await documents.ReadAsync(grant, token);
             if (artifact is null || artifact.Revision.Metadata != grant.Document) return new(ConfigurationDeliveryStatus.InputUnavailable);
+            return await materializer.ExecuteAsync(artifact, token);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (ConfigurationDocumentLimitException) { return new(ConfigurationDeliveryStatus.LimitExceeded); }
+        catch (ConfigurationDeliveryStorageException) { return new(ConfigurationDeliveryStatus.StorageUnavailable); }
+        catch (Exception) { return new(ConfigurationDeliveryStatus.InputUnavailable); }
+    }
+}
+
+/// <summary>Saved-artifact-only materialization. Callers establish their distinct authority before entry.</summary>
+internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, ConfigurationRenderingCatalog rendering,
+    IEnumerable<IConfigurationResolutionBinding> registrations)
+{
+    internal const int MaxSecretBytes = 64 * 1024;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private readonly IConfigurationResolutionBinding[] bindings = registrations.ToArray();
+    internal async ValueTask<ConfigurationDeliveryResult> ExecuteAsync(ConfigurationDeliveryArtifact artifact, CancellationToken token)
+    {
+        try
+        {
             var revision = artifact.Revision;
+            token.ThrowIfCancellationRequested();
             ConfigurationDocumentCodec.ValidateTree(revision.Tree);
             var frozen = ConfigurationPlanningSnapshotCodec.Decode(revision.FrozenInputs, revision.Metadata.Revision);
             var layout = frozen.Layouts.Single(x => x.Component == revision.Metadata.Target.Component);
@@ -57,7 +76,7 @@ public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConf
             if (associations.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
             var outputs = associations.RootElement.EnumerateArray().Select(a =>
             {
-                if (a.ValueKind != JsonValueKind.Array || a.GetArrayLength() != 5 || !Guid.TryParse(a[1].GetString(), out var attempt)) throw new InvalidDataException();
+                if (a.ValueKind != JsonValueKind.Array || a.GetArrayLength() != 5 || !Guid.TryParse(a[1].GetString(), out var attempt) || attempt == Guid.Empty) throw new InvalidDataException();
                 return (Producer: a[0].GetString(), Attempt: attempt, Output: new ExternalOperationOutput(a[2].GetString()!, a[3].GetString()!, a[4].GetString()!));
             }).ToArray();
             var authorized = new Dictionary<string, (ConfigurationRenderPin Pin, ConfigurationDeferredValue Value, SecretDefinition Definition, SecretRef Reference, IConfigurationResolutionBinding Adapter)>(StringComparer.Ordinal);
@@ -65,6 +84,7 @@ public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConf
             var confirmed = new Dictionary<(string Producer, string Contract, string Key), (Guid Attempt, ExternalOperationOutput Output)>();
             for (var i = 0; i < layout.BindingRequests.Count; i++)
             {
+                token.ThrowIfCancellationRequested();
                 var request = layout.BindingRequests[i];
                 var projections = request.Projections.Where(x => x.Document == revision.Metadata.Target.Document).ToArray();
                 if (projections.Length == 0) continue;
@@ -126,12 +146,13 @@ public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConf
                 finally { CryptographicOperations.ZeroMemory(bytes); if (chars is not null) Array.Clear(chars); }
             }
             token.ThrowIfCancellationRequested();
-            var json = ConfigurationJson.SerializeDelivery(revision.Tree, resolved);
+            var json = ConfigurationJson.SerializeDelivery(revision.Tree, resolved, token);
             if (token.IsCancellationRequested) { CryptographicOperations.ZeroMemory(json); token.ThrowIfCancellationRequested(); }
             return new(ConfigurationDeliveryStatus.Delivered, json, revision.Metadata.Fingerprint);
 
             void Validate(ConfigurationValue node, string path)
             {
+                token.ThrowIfCancellationRequested();
                 switch (node)
                 {
                     case ConfigurationDeferredValue d:

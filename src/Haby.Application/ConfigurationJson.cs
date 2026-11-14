@@ -61,15 +61,16 @@ public static class ConfigurationJson
         return new(Encoding.UTF8.GetString(stream.ToArray()), paths);
     }
 
-    internal static byte[] SerializeDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved = null)
+    internal static byte[] SerializeDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved = null,
+        CancellationToken token = default)
     {
         ConfigurationDocumentCodec.ValidateTree(value);
         if (resolved is null && Confidential(value)) throw new InvalidDataException();
-        MeasureDelivery(value, resolved);
+        MeasureDelivery(value, resolved, token);
         using var stream = new ConfigurationBoundedStream(ConfigurationDocumentCodec.MaxBytes, reserve: true);
         try
         {
-            using (var writer = Writer(stream)) Write(writer, value, "", null, resolved);
+            using (var writer = Writer(stream)) Write(writer, value, "", null, resolved, token);
             return stream.ToArray();
         }
         finally
@@ -80,7 +81,7 @@ public static class ConfigurationJson
 
     // Count actual escaped UTF-8 before Utf8JsonWriter can allocate a large value buffer.
     // The same pinned encoder is used below; bounded scratch space never grows with material.
-    private static void MeasureDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved)
+    private static void MeasureDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved, CancellationToken token)
     {
         long remaining = ConfigurationDocumentCodec.MaxBytes;
         Visit(value, "");
@@ -94,6 +95,7 @@ public static class ConfigurationJson
             {
                 while (!input.IsEmpty)
                 {
+                    token.ThrowIfCancellationRequested();
                     var status = JavaScriptEncoder.Default.Encode(input, encoded, out var consumed, out var written, isFinalBlock: true);
                     Charge(Encoding.UTF8.GetByteCount(encoded[..written]));
                     if (status is not (OperationStatus.Done or OperationStatus.DestinationTooSmall) || consumed == 0) throw new InvalidDataException();
@@ -104,6 +106,7 @@ public static class ConfigurationJson
         }
         void Visit(ConfigurationValue node, string path)
         {
+            token.ThrowIfCancellationRequested();
             switch (node)
             {
                 case ConfigurationNull: Charge(4); break;
@@ -133,8 +136,9 @@ public static class ConfigurationJson
         _ => false
     };
     private static void Write(Utf8JsonWriter writer, ConfigurationValue value, string path, List<string>? redacted,
-        IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved = null)
+        IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved = null, CancellationToken token = default)
     {
+        token.ThrowIfCancellationRequested();
         switch (value)
         {
             case ConfigurationNull: writer.WriteNullValue(); break;
@@ -144,7 +148,7 @@ public static class ConfigurationJson
             case ConfigurationArray array:
                 writer.WriteStartArray();
                 for (var i = 0; i < array.Items.Count; i++)
-                    Write(writer, array.Items[i], path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), redacted, resolved);
+                    Write(writer, array.Items[i], path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), redacted, resolved, token);
                 writer.WriteEndArray();
                 break;
             case ConfigurationObject obj:
@@ -152,7 +156,7 @@ public static class ConfigurationJson
                 foreach (var (key, child) in obj.Members.OrderBy(x => x.Key, StringComparer.Ordinal))
                 {
                     writer.WritePropertyName(key);
-                    Write(writer, child, path + "/" + ConfigurationComposer.Escape(key), redacted, resolved);
+                    Write(writer, child, path + "/" + ConfigurationComposer.Escape(key), redacted, resolved, token);
                 }
                 writer.WriteEndObject();
                 break;

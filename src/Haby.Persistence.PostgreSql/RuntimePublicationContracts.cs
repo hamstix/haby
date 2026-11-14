@@ -25,7 +25,7 @@ internal sealed record RuntimePublicationReceipt(Guid Id, RuntimePublicationRequ
     DateTimeOffset At, RuntimePermissionState? Before, RuntimePermissionState? After, RuntimeBindingState Binding, int Version = 1);
 internal sealed record RuntimePublicationResult(RuntimePublicationReceipt Receipt, RuntimeBindingState CurrentBinding, RuntimePermissionState? CurrentPermission);
 internal sealed record RuntimeMetadataAuthority(Guid Binding, Guid Permission, Guid Revision, Guid Environment,
-    Guid Application, Guid Deployment, long Generation, string Component, string Workload, string Document);
+    Guid Application, Guid Deployment, long Generation, string Component, string Workload, string Document, Guid ManagedWorkload, Guid Provider, Guid Plan, long ManifestRevision, string Fingerprint, string InputFingerprint, Guid Checkpoint);
 internal sealed class RuntimePublicationBlockedException(RuntimePublicationRequest request) : Exception("Runtime binding is revoked.")
 {
     internal RuntimePublicationRequest Request { get; } = request;

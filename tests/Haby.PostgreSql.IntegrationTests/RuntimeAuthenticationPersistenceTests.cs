@@ -258,18 +258,23 @@ public sealed partial class DurableDeploymentPlanningTests
 
     // A narrow bridge to the existing pair fixture, using the same owned server.
     // Application credentials are created ONLY by its normal Plan/Commit/Execute.
-    private sealed class RuntimeAuthenticationLoginScenario(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture)
+    internal sealed class RuntimeAuthenticationLoginScenario(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture)
     {
         private string? ownedCatalog;
         internal bool OwnsCatalog(string connection) => ownedCatalog is not null && connection == ownedCatalog;
 
-        internal async Task<InternalScenario> PrepareMixedAsync()
+        internal async Task<InternalScenario> PrepareMixedAsync(
+            Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? suppliedConfiguration = null, string namespaceName = "test",
+            Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualProbe = null)
         {
             var baseline = await Prepare(full: true, render: true);
             ownedCatalog = baseline.Connection;
             await using (var execute = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true))
                 Assert.Null((await execute.GetRequiredService<DurableGenerationRunner>().RunAsync(baseline.Commit.DeploymentId, baseline.Commit.Generation, default)).StopOutcome);
-            await using var services = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true, internalActions: true);
+            ProviderAliasBinding? exactProvider = null;
+            Haby.Tests.InternalKubernetesFixtureProbe? probe = actualProbe is null ? null : (secrets, scopeEnvironment, scopeConfiguration, token) =>
+                actualProbe(secrets, scopeEnvironment, exactProvider ?? throw new InvalidDataException(), scopeConfiguration, token);
+            await using var services = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true, internalActions: true, kubernetesProbe: probe);
             var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
             await using (var verify = await contexts.CreateDbContextAsync())
             {
@@ -285,15 +290,17 @@ public sealed partial class DurableDeploymentPlanningTests
             var admin = new SecretRef(SecretId.New(), SecretVersionId.New());
             await services.GetRequiredService<ISecretStore>().CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator),
                 admin, "fixture-token"u8.ToArray(), default);
-            var configuration = new KubernetesProviderConfiguration(new Uri("https://127.0.0.1:6443"), null, admin, null, null);
+            var configuration = suppliedConfiguration is null ? new KubernetesProviderConfiguration(new Uri("https://127.0.0.1:6443"), null, admin, null, null) :
+                await suppliedConfiguration(services.GetRequiredService<ISecretStore>(), environment);
             var providers = services.GetRequiredService<IProviderConfigurationStore>();
             var provider = await providers.CreateInstanceAsync(environment, configuration, default);
             await providers.AddRevisionAsync(environment, provider, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
+            exactProvider = new(provider, ProviderConfigurationRevisionNumber.Create(1));
             var alias = ProviderAlias.Create("kubernetes.primary");
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environment,
                 alias, null, new(provider, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
             var codec = new KubernetesPlacementCodec();
-            var placement = codec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"test"}}"""u8.ToArray());
+            var placement = codec.Decode(Encoding.UTF8.GetBytes("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"NAMESPACE"}}""".Replace("NAMESPACE", namespaceName, StringComparison.Ordinal)));
             var placementKey = new PlacementRevisionKey(environment, alias, placement.Name, placement.Revision);
             await new PostgreSqlPlacementRevisionStore(contexts, codec).CompareAndCreateAsync(placementKey, placement, new("tester", DateTimeOffset.UtcNow), default);
             await new PostgreSqlPlacementSelectionStore(contexts, codec).ApplyAsync(PlacementSelectionTarget.Create("environment", "", "", ""), placementKey,
