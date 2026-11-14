@@ -4,10 +4,10 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 75,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 925,
+  "currentPostgresql": 943,
   "currentFast": 1436,
   "currentKubernetesApiObjects": 24,
-  "currentKubernetesDurableActions": 13,
+  "currentKubernetesDurableActions": 18,
   "currentKubernetesProviderAccess": 10,
   "entries": [
     {"method":"Haby.PostgreSql.IntegrationTests.AdministrativeSecretTests.Cancellation_after_secret_insert_before_receipt_commit_rolls_back_every_row","case":"47c71fd82d68e86c4703545bc858b1a26040263e880667ca757d553f8f2f7581","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full"},
@@ -2584,6 +2584,12 @@
     {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"29e90faa5015faf9e48153727b03f68098fb9374c4572f298f9ef93c8eda0ae7","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor206":true},
     {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"673ac0404fab799808a124dd10741ed4f5508ab14cc71e61535b6c5e2d5cf0b0","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor206":true},
     {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"d3acf6abe6f175390e67e60fad6376aac741ae2ce55100ef58a70166500f5f37","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor206":true},
-    {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"30bd38e94a77a198e7e19a6ffc65396a229d098adc8f118090856e266968d28c","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor206":true}
+    {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"30bd38e94a77a198e7e19a6ffc65396a229d098adc8f118090856e266968d28c","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor206":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_empty_stage_refuses_corrupt_or_forged_authority_without_repair","case":"ff375a7bf5093a47258bc065ec7340d985afb75e9686742f788e3a7e91b506d0","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor206":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_empty_stage_refuses_corrupt_or_forged_authority_without_repair","case":"864854fc05e916d20ceea0f167b04eab06abd8a5b67e0a42e4ea7edee9f76fad","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor206":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_empty_stage_refuses_corrupt_or_forged_authority_without_repair","case":"8c62e1af9cef9dccc80a91d32f445dbb537a140621b1dea4a3cff7eb396ad697","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor206":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_empty_stage_refuses_corrupt_or_forged_authority_without_repair","case":"442e14f828795442940b55e5f83a4cf0a9ac7c94943cc9710ece76ea1119129c","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor206":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_empty_stage_refuses_corrupt_or_forged_authority_without_repair","case":"405bfd525ffdf654bd1a43171c68eff0736f0def4636b30fdb455058e26cd07f","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor206":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_empty_stage_refuses_corrupt_or_forged_authority_without_repair","case":"e0aad5211ad92fd0e86ffa020156973dfe4e1a018c2aa3b792f74edb0e74764b","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor206":true}
   ]
 }

@@ -36,8 +36,8 @@ existing full-generation resolver and exact per-subject intent semantics.
 
 ## Empty ResourcesReady is evidence
 
-The existing graph format 3 explicitly stores empty Nodes, Reuse and Retained
-arrays and no Baseline. It is a structural Resource-stage view, not permission to
+The existing graph format 3 stores an explicit empty Nodes array, omits empty
+optional Reuse/Retained arrays and has no Baseline. It is a structural Resource-stage view, not permission to
 execute. The original full declaration remains frozen separately; stripping
 Workloads in the Resource projection does not grant empty-stage authority.
 

@@ -52,6 +52,17 @@ internal static class InternalGenerationAuthority
         if (initial && await db.DurableOperations.AsNoTracking().AnyAsync(operation => operation.DeploymentId == deployment && operation.Generation == row.Generation &&
             !db.ActionIntents.Any(intent => intent.DeploymentId == deployment && intent.Generation == row.Generation && intent.OperationId == operation.OperationId), token))
             throw new InvalidDataException("Unexpected empty-stage operation.");
+        if (initial)
+        {
+            var intents = await db.ActionIntents.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == row.Generation).ToArrayAsync(token);
+            if (intents.Any(intent => intent.SubjectKind != "Workload" || !inputs.Providers.Entries.Values.Any(exact =>
+                exact.Input is ProviderInput.Workload w && w.Component.Value == intent.Component && w.Id.Value == intent.LocalId &&
+                exact.Instance.ToString() == intent.ProviderId.ToString() && exact.Configuration.Value == intent.ConfigurationRevision &&
+                exact.Placement is { } placement && intent.PlacementId == InternalPlacementInput.Decode(placement).Id &&
+                intent.SubjectContract == manifest.Spec.Components[w.Component].Workloads[w.Id].Type.Value &&
+                intent.InputFingerprint == row.Fingerprint)))
+                throw new InvalidDataException("Empty stage contains undeclared or Resource action evidence.");
+        }
         return row;
     }
 

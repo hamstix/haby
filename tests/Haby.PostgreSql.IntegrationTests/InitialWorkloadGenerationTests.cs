@@ -193,6 +193,12 @@ public sealed partial class DurableDeploymentPlanningTests
     [InlineData("checkpoint")]
     [InlineData("missing-checkpoint")]
     [InlineData("nonempty-proof")]
+    [InlineData("resource-action")]
+    [InlineData("undeclared-workload")]
+    [InlineData("action-provider")]
+    [InlineData("action-placement")]
+    [InlineData("action-fingerprint")]
+    [InlineData("orphan-operation")]
     [InlineData("expected-generation")]
     public async Task Initial_empty_stage_refuses_corrupt_or_forged_authority_without_repair(string corruption)
     {
@@ -214,6 +220,12 @@ public sealed partial class DurableDeploymentPlanningTests
                 "checkpoint" => "UPDATE generation_stage_checkpoints SET evidence_fingerprint = repeat('0',64)",
                 "missing-checkpoint" => "DELETE FROM generation_stage_checkpoints",
                 "nonempty-proof" => "UPDATE generation_stage_checkpoints SET evidence_json = @evidence, evidence_fingerprint = @hash",
+                "resource-action" => "UPDATE durable_action_intents SET subject_kind = 'Resource', component = '', local_id = 'fabricated'",
+                "undeclared-workload" => "UPDATE durable_action_intents SET component = 'undeclared'",
+                "action-provider" => "UPDATE durable_action_intents SET provider_id = '00000000-0000-0000-0000-000000000001'",
+                "action-placement" => "UPDATE durable_action_intents SET placement_id = NULL",
+                "action-fingerprint" => "UPDATE durable_action_intents SET input_fingerprint = 'v4:' || repeat('0',64)",
+                "orphan-operation" => "UPDATE durable_create_operations SET operation_id = 'unattributed'",
                 _ => "UPDATE deployment_change_sets SET expected_absence = false, expected_generation = 1"
             };
             await using var command = new NpgsqlCommand(sql, edit);
@@ -230,6 +242,9 @@ public sealed partial class DurableDeploymentPlanningTests
         await Assert.ThrowsAsync<InvalidDataException>(async () => await actions.AcceptAsync(scenario.Commit, InitialSubject, InternalDeploymentAction.Create, "initial", default));
         await Assert.ThrowsAsync<InvalidDataException>(async () => await actions.ExecuteAsync(key, default));
         await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+        var source = await verify.DeploymentGenerations.AsNoTracking().SingleAsync();
+        if (corruption == "missing-checkpoint") Assert.Null(await DurableAggregateCompletion.ReadAsync(verify, source, default, true));
+        else await Assert.ThrowsAsync<InvalidDataException>(() => DurableAggregateCompletion.ReadAsync(verify, source, default, true));
         Assert.Equal(corruption == "missing-checkpoint" ? 0 : 1, await verify.GenerationStageCheckpoints.CountAsync());
         Assert.Single(await verify.ActionIntents.AsNoTracking().ToArrayAsync());
         Assert.Empty(await verify.DurableOperationAttempts.AsNoTracking().ToArrayAsync());
