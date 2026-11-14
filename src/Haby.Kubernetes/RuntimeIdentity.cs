@@ -106,8 +106,8 @@ internal sealed class InternalRuntimeIdentityAction(ISecretStore secrets,
     {
         var result = RuntimeIdentityCodec.Receipt(receipt);
         Need(ValidateReceipt(context, payload, receipt, result.Source == ConfirmationSource.Observation), "runtime-confirmation");
-        return new(RuntimeIdentityCodec.Role, RuntimeIdentityCodec.ValidationContract, 1, receipt,
-            "haby.kubernetes.token-review/v1", RuntimeIdentityCodec.Audience(result.Intent), RuntimeIdentityCodec.Validation(result));
+        return new(RuntimeIdentityCodec.Role, Contract.OutputContract, 1, receipt,
+            "haby.kubernetes.token-review/v1", RuntimeIdentityCodec.Audience(result.Intent), RuntimeIdentityCodec.ValidationContract, RuntimeIdentityCodec.Validation(result));
     }
     private ValueTask<KernelClient> Connect(InternalActionContext context, CancellationToken token)
     {

@@ -14,6 +14,29 @@ public sealed class RuntimeIdentityTests
     private static InternalActionContext Context() => InternalDeploymentPlacementTests.Contexts(false, configured: true)[0] with { InstallationId = Guid.NewGuid() };
     private static InternalRuntimeIdentityAction Handler(Api api) => new(null!, (_, _) => ValueTask.FromResult(new KernelClient(
         new k8s.Kubernetes(new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, api))));
+    [Theory]
+    [InlineData("inventory", "haby.kubernetes.runtime-account-receipt/v1")]
+    [InlineData("binding", "haby.kubernetes.runtime-validation/v1")]
+    public void Receipt_and_validation_envelopes_identify_their_actual_payload_contract(string envelope, string expected)
+    {
+        var context = Context(); var handler = new InternalRuntimeIdentityAction(null!); var payload = handler.Prepare(context);
+        var receipt = RuntimeIdentityCodec.Encode(new RuntimeAccountReceipt(RuntimeIdentityCodec.Decode(payload), "confirmed-uid", false, ConfirmationSource.Response));
+        var confirmation = handler.IdentityConfirmation(context, payload, receipt);
+        Assert.Equal(expected, envelope == "inventory" ? confirmation.InventoryContract : confirmation.ValidationContract);
+        if (envelope == "inventory")
+        {
+            var saved = RuntimeIdentityCodec.Receipt(confirmation.InventoryPayload);
+            Assert.Equal("confirmed-uid", saved.Uid); Assert.Equal(payload, RuntimeIdentityCodec.Encode(saved.Intent));
+            Assert.Null(JsonNode.Parse(confirmation.InventoryPayload)!["mode"]);
+        }
+        else
+        {
+            var saved = System.Text.Json.JsonSerializer.Deserialize(confirmation.ValidationPayload, RuntimeIdentityJson.Default.RuntimeValidationContext)!;
+            Assert.Equal("confirmed-uid", saved.ServiceAccountUid); Assert.Equal("service-account-bound", saved.Mode);
+            Assert.Equal(context.Provider.Instance.ToString(), saved.Binding.Provider);
+            Assert.Null(JsonNode.Parse(confirmation.ValidationPayload)!["intent"]);
+        }
+    }
     [Fact]
     public async Task Confirmed_identity_has_disabled_automount_exact_audience_and_no_incidental_privileges()
     {
@@ -26,6 +49,8 @@ public sealed class RuntimeIdentityTests
         var projection = handler.IdentityConfirmation(context, payload, result.Receipt!);
         Assert.Equal($"urn:haby:{context.InstallationId:D}:{Guid.Parse(context.Provider.Instance.ToString()):D}", projection.Audience);
         Assert.Contains("service-account-bound", projection.ValidationPayload);
+        Assert.Equal(handler.Contract.OutputContract, projection.InventoryContract);
+        Assert.Equal(RuntimeIdentityCodec.ValidationContract, projection.ValidationContract);
         Assert.Single(api.Writes); Assert.EndsWith("/serviceaccounts", api.Writes[0]);
         Assert.False(api.Account!["automountServiceAccountToken"]!.GetValue<bool>());
         Assert.Null(api.Account["secrets"]); Assert.Null(api.Account["imagePullSecrets"]);

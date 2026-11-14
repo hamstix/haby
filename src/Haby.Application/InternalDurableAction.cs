@@ -54,5 +54,5 @@ internal static class InternalPlacementInput
 
 // Pure adapter projections. Persistence alone owns locks, catalog entities and transactions.
 internal sealed record InternalManagedTarget(string Contract, int Format, string Payload);
-internal sealed record InternalIdentityConfirmation(string Role, string Contract, int Format,
-    string InventoryPayload, string Authenticator, string Audience, string ValidationPayload);
+internal sealed record InternalIdentityConfirmation(string Role, string InventoryContract, int Format,
+    string InventoryPayload, string Authenticator, string Audience, string ValidationContract, string ValidationPayload);

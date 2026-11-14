@@ -70,7 +70,7 @@ internal sealed partial class InternalDurableActions
     {
         var value = loaded.Handler.IdentityConfirmation(loaded.Context, loaded.Intent.Payload, receipt)
             ?? throw new InvalidDataException("Identity receipt projection unavailable.");
-        Bound(value.Role, 128); Bound(value.Contract, 128); Bound(value.InventoryPayload, 1_048_576);
+        Bound(value.Role, 128); Bound(value.InventoryContract, 128); Bound(value.ValidationContract, 128); Bound(value.InventoryPayload, 1_048_576);
         Bound(value.Authenticator, 128); Bound(value.Audience, 256); Bound(value.ValidationPayload, 1_048_576);
         if (value.Format <= 0 || loaded.Context.InstallationId == Guid.Empty) throw new InvalidDataException("Identity authority unavailable.");
         return value;
@@ -86,7 +86,7 @@ internal sealed partial class InternalDurableActions
         {
             ManagedWorkloadId = loaded.Intent.ManagedIdentity,
             Role = value.Role,
-            Contract = value.Contract,
+            Contract = value.InventoryContract,
             Format = value.Format,
             Payload = value.InventoryPayload,
             DeploymentId = loaded.Intent.DeploymentId,
@@ -105,7 +105,7 @@ internal sealed partial class InternalDurableActions
             Audience = value.Audience,
             Status = "Prepared",
             Role = value.Role,
-            Contract = value.Contract,
+            Contract = value.ValidationContract,
             Format = value.Format,
             ValidationPayload = value.ValidationPayload
         });
@@ -116,11 +116,11 @@ internal sealed partial class InternalDurableActions
         var value = Confirmation(loaded, receipt);
         var inventory = await db.OwnedObjects.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity && x.Role == value.Role, token);
         var binding = await db.RuntimeIdentityBindings.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity, token);
-        if (inventory is null || binding is null || inventory.Contract != value.Contract || inventory.Format != value.Format || inventory.Payload != value.InventoryPayload ||
+        if (inventory is null || binding is null || inventory.Contract != value.InventoryContract || inventory.Format != value.Format || inventory.Payload != value.InventoryPayload ||
             inventory.DeploymentId != loaded.Intent.DeploymentId || inventory.Generation != loaded.Intent.Generation || inventory.OperationId != loaded.Intent.OperationId ||
             binding.InstallationId != loaded.Context.InstallationId || binding.EnvironmentId.ToString() != loaded.Context.Provider.Environment.ToString() ||
             binding.ProviderId != loaded.Intent.ProviderId || binding.ConfigurationRevision != loaded.Intent.ConfigurationRevision || binding.Authenticator != value.Authenticator ||
-            binding.Audience != value.Audience || binding.Status != "Prepared" || binding.Role != value.Role || binding.Contract != value.Contract || binding.Format != value.Format ||
+            binding.Audience != value.Audience || binding.Status != "Prepared" || binding.Role != value.Role || binding.Contract != value.ValidationContract || binding.Format != value.Format ||
             binding.ValidationPayload != value.ValidationPayload)
             throw new InvalidDataException("Immutable runtime identity evidence mismatch.");
     }

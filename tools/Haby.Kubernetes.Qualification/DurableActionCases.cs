@@ -269,12 +269,27 @@ internal static class DurableActionCases
                     history.Operation.State == "NeedsAttention" && history.Attempts is [var attempt] && attempt.Outcome == "Uncertain",
                     "D18-initial-marker-before-send-absence-no-replay");
             }
+            ValueTask<ProviderPreflightResult> AccessOnlyPreflight(ISecretStore store, EnvironmentRecordId environment,
+                ProviderAliasBinding target, KubernetesProviderConfiguration configuration, CancellationToken cancellationToken)
+            {
+                // The restricted credential needs authentication-only admission. Runtime preparation
+                // independently checks actual namespace/account rights and must deny them below.
+                var handler = new KubernetesPreflightHandler(new KubernetesProviderConfigurationCodec(), (scope, exact, ct) =>
+                {
+                    var binding = new KubernetesBinding(scope.ToString(), target.InstanceId.ToString(), target.RevisionNumber.Value,
+                        KubernetesProviderConfigurationCodec.Implementation);
+                    var connection = new KubernetesConnection(binding, exact.Endpoint, exact.ServerCaPem, exact.BearerToken,
+                        exact.ClientCertificate, exact.ClientPrivateKey);
+                    return KubernetesClientFactory.CreateFixture(connection, store, [], ct);
+                });
+                return handler.CheckTypedAsync(environment, configuration, cancellationToken);
+            }
             async Task<(DurableDeploymentPlanningTests.InternalScenario Scenario, DurableOperationKey Key, Counter Counter)> RuntimeAccepted(
                 bool initial = true, string? targetNamespace = null,
                 Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? configuration = null)
             {
                 var scenario = await setup.InternalScenarioAsync(configuration ?? Configuration, targetNamespace ?? name,
-                    actualKubernetesProbe: configuration is null ? Preflight : null, initialOnly: initial,
+                    actualKubernetesProbe: configuration is null ? Preflight : AccessOnlyPreflight, initialOnly: initial,
                     configureManifest: e => DurableDeploymentPlanningTests.ConfiguredDocuments(e, secondDocument: true));
                 await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
                 var documents = await DurableDeploymentPlanningTests.ConfigurationPreparation(services).Preparation.PrepareAsync(scenario.Commit, "qualifier", token);
@@ -420,6 +435,7 @@ internal static class DurableActionCases
                 finally { CryptographicOperations.ZeroMemory(bytes); }
                 return new(endpoint, await File.ReadAllTextAsync(Path.Combine(directory, "ca.crt"), token), reference, null, null);
             }
+            Console.WriteLine("Durable phase: accept-real-restricted-Provider-with-access-only-preflight");
             var deniedRuntime = await RuntimeAccepted(configuration: Restricted);
             await using (var services = DurableDeploymentPlanningTests.InternalServices(deniedRuntime.Scenario.Connection, deniedRuntime.Scenario.Time))
                 Check((await ComposeRuntime(services, deniedRuntime.Counter).ExecuteAsync(deniedRuntime.Key, token)).Outcome == InternalActionOutcome.Refused && deniedRuntime.Counter.Writes == 0,

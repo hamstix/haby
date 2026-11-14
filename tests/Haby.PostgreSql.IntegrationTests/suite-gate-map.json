@@ -5,7 +5,7 @@
   "nativePerPlatform": 75,
   "regularFullRetainsQualification": true,
   "currentPostgresql": 964,
-  "currentFast": 1450,
+  "currentFast": 1452,
   "currentKubernetesApiObjects": 24,
   "currentKubernetesDurableActions": 18,
   "currentKubernetesProviderAccess": 10,
@@ -2639,6 +2639,8 @@
     {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"11741e53fc0d791502fcb7727419a413d6d160976a1e7d61ebf858ce50efaf46","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor211":true},
     {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"28f3f30931990d426fb1a6d65a899c0147d531ab15741e13b23436b6a3a945fa","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor211":true},
     {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"984edfd9f02f25cafc369ebfcc7b4548700e66dd6f1e5792d03497e200e66e59","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor211":true},
-    {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"444da3d8921b5e6b1109a8617fef2159cd9c7bb8abcf0be362693c16db51d177","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor211":true}
+    {"method":"Haby.Kubernetes.Qualification.DurableActionCases.Run","case":"444da3d8921b5e6b1109a8617fef2159cd9c7bb8abcf0be362693c16db51d177","suite":"api-catalog","gate":"kubernetes-durable-actions","trigger":"relevant-change-manual","addedFor211":true},
+    {"method":"Haby.Kubernetes.Tests.RuntimeIdentityTests.Receipt_and_validation_envelopes_identify_their_actual_payload_contract","case":"37d683cf1890d506b3c4e9da166b74179e81d71b919fbac08c4b97d7d077ce7f","suite":"fast","gate":"validate","trigger":"every-change","addedFor211":true},
+    {"method":"Haby.Kubernetes.Tests.RuntimeIdentityTests.Receipt_and_validation_envelopes_identify_their_actual_payload_contract","case":"564a8ae9687a5238949c2f35d134a4df1536d2169195017ad3ac2afc76c1d56b","suite":"fast","gate":"validate","trigger":"every-change","addedFor211":true}
   ]
 }
