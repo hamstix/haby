@@ -6,7 +6,9 @@ It is a basis for program/operator instructions, not an implemented command guid
 Internal stable ServiceAccount/binding preparation is bounded by the [issue #211 guide](../development/211-stable-workload-runtime-identity.md).
 The [issue #213 guide](../development/213-runtime-configuration-publication.md)
 describes friend-only exact publication, revocation and current-state metadata
-authorization. Runtime authentication and delivery remain unimplemented.
+authorization. The [issue #215 guide](../development/215-runtime-tokenreview-authentication.md)
+describes internal exact-binding TokenReview authentication and validated Host
+admission limits. Runtime delivery remains unimplemented.
 Current static-token delivery remains documented in the
 [P2 delivery runbook](../development/148-authorized-configuration-delivery.md).
 

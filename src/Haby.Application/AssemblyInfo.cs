@@ -8,3 +8,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Haby.Kubernetes")]
 [assembly: InternalsVisibleTo("Haby.Kubernetes.Tests")]
 [assembly: InternalsVisibleTo("Haby.Kubernetes.Qualification")]
+[assembly: InternalsVisibleTo("Haby.Operator.Host")]

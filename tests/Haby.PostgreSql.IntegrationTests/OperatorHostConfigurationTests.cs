@@ -4,12 +4,39 @@ using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
 using Grpc.Reflection.V1Alpha;
 using Haby.Operator.Host;
+using Haby.Application;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class OperatorHostConfigurationTests
 {
+    [Fact]
+    public async Task Runtime_authentication_is_one_internal_host_composition_with_validated_nondefaults()
+    {
+        await using var app = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false",
+            "--Haby:RuntimeAuthentication:GlobalConcurrency=3", "--Haby:RuntimeAuthentication:ProviderConcurrency=2",
+            "--Haby:RuntimeAuthentication:GlobalRequestsPerSecond=7", "--Haby:RuntimeAuthentication:ProviderRequestsPerSecond=5",
+            "--Haby:RuntimeAuthentication:QueueCapacity=4", "--Haby:RuntimeAuthentication:QueueWaitSeconds=2", "--Haby:RuntimeAuthentication:CallTimeoutSeconds=1"]);
+        Assert.Equal(new RuntimeAuthenticationOptions(3, 2, 7, 5, 4, 2, 1), app.Services.GetRequiredService<RuntimeAuthenticationOptions>());
+        Assert.Same(app.Services.GetRequiredService<RuntimeAuthenticationAdmission>(), app.Services.GetRequiredService<RuntimeAuthenticationAdmission>());
+        Assert.Same(app.Services.GetRequiredService<RuntimeAuthentication>(), app.Services.GetRequiredService<RuntimeAuthentication>());
+        Assert.IsType<Haby.Persistence.PostgreSql.PostgreSqlRuntimeIdentityStore>(app.Services.GetRequiredService<IRuntimeIdentityStore>());
+    }
+
+    [Theory]
+    [InlineData("GlobalConcurrency", "0")]
+    [InlineData("ProviderConcurrency", "33")]
+    [InlineData("GlobalRequestsPerSecond", "not-an-integer")]
+    [InlineData("ProviderRequestsPerSecond", "51")]
+    [InlineData("QueueCapacity", "4097")]
+    [InlineData("QueueWaitSeconds", "61")]
+    [InlineData("CallTimeoutSeconds", "31")]
+    public void Invalid_runtime_authentication_options_fail_host_construction(string key, string value) =>
+        Assert.Throws<ArgumentException>(() => OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0",
+            "--Haby:Tls:Enabled=false", "--Haby:RuntimeAuthentication:" + key + "=" + value]));
+
     [Fact]
     public async Task Wildcard_url_configuration_cannot_override_loopback_and_tls_defaults()
     {
