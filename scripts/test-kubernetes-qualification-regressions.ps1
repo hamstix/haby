@@ -59,6 +59,30 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
                 Write-Output ('journal-progress-record='+$hasJournalProgressRecord.ToString().ToLowerInvariant())
                 Write-Output ('harness-pass-absent='+$hasNoHarnessPass.ToString().ToLowerInvariant())
                 Write-Output ('catalog-unknown-record='+$hasCatalogUnknownRecord.ToString().ToLowerInvariant())
+                $primaryRecords=@($lines | Where-Object {$_ -cmatch '^Failure:'})
+                $primaryCategory='other'
+                if($primaryRecords.Count -eq 0){$primaryCategory='missing'}
+                elseif($primaryRecords.Count -gt 1){$primaryCategory='ambiguous'}
+                elseif($primaryRecords[0] -cmatch '^Failure: stage=(?:setup|launch|readiness|copy|harness); reason=(?:command|nonzero|deadline|child-deadline); category=([A-Za-z][A-Za-z0-9]{0,63})$'){
+                    $primaryCategory=switch -CaseSensitive ($Matches[1]){
+                        'TimeoutException' {'timeout'}
+                        'RuntimeException' {'runtime'}
+                        'MethodInvocationException' {'method-invocation'}
+                        'CommandNotFoundException' {'command-not-found'}
+                        'ParameterBindingException' {'parameter-binding'}
+                        default {'other'}
+                    }
+                }
+                $processRecords=@($lines | Where-Object {$_ -cmatch '^Diagnostic process:'})
+                $processOutcome='invalid'
+                if($processRecords.Count -eq 0){$processOutcome='missing'}
+                elseif($processRecords.Count -gt 1){$processOutcome='ambiguous'}
+                elseif($processRecords[0] -ceq 'Diagnostic process: unknown'){$processOutcome='unknown'}
+                elseif($processRecords[0] -cmatch '^Diagnostic process: (command-deadline|output-drain-deadline|owned-termination-failure); elapsed-ms=([0-9]{1,7})$'){
+                    if([long]$Matches[2] -le 3600000){$processOutcome=$Matches[1]}
+                }
+                Write-Output ('primary-category='+$primaryCategory)
+                Write-Output ('process-outcome='+$processOutcome)
                 throw 'Primary timeout/progress/unknown cleanup not retained'
             }
         }
