@@ -101,7 +101,10 @@ internal sealed partial class InternalDurableActions
                 await RequireConfigurationAsync(db, generation, token);
         }
         var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, key.Generation.Value, resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true);
-        if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token)) throw new InvalidDataException("Current Resource evidence metadata unavailable.");
+        var credentialsValid = metadata is not null && (purpose == OriginPurpose.AuthenticationIdentity
+            ? await DurableAggregateCompletion.CheckAuthenticationOriginCredentialMetadataAsync(db, metadata, token)
+            : await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token));
+        if (!credentialsValid) throw new InvalidDataException("Current Resource evidence metadata unavailable.");
         var contract = selected.Handler.Contract;
         if (contract != new InternalActionContract(intent.SubjectContract, intent.ProviderKind, intent.ConfigurationContract, intent.Implementation,
                 intent.ActionContract, intent.InputFormat, intent.OutputContract) || selected.Handler.ObservationRecovery != intent.ObservationRecovery ||

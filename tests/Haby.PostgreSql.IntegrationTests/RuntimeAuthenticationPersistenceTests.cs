@@ -1,6 +1,13 @@
 using Haby.Application;
+using Haby.Domain;
+using Haby.Kubernetes;
+using Haby.Kubernetes.Contracts;
+using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
+using Haby.PostgreSql;
 using System.Data.Common;
+using System.Text;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +17,106 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("invalid-length")]
+    public async Task Mixed_authentication_origin_ignores_application_payload_but_normal_preparation_publication_and_effects_stay_guarded(string fault)
+    {
+        using var baseline = new RuntimeAuthenticationLoginScenario(fixture);
+        var scenario = await baseline.PrepareMixedAsync();
+        var identity = new IdentityFixture();
+        await using var services = ApplicationLoginScenario.Services(scenario.Connection, full: true, access: true, internalActions: true);
+        await ConfigurationPreparation(services, rendering: PostgreSqlConnectionRendering.CreateCatalog(),
+            formatters: PostgreSqlConnectionRendering.FormatterCatalog()).Preparation.PrepareAsync(scenario.Commit, "tester", default);
+        var prepared = Assert.Single(await IdentityPreparation(services, identity).PrepareAsync(scenario.Commit, default));
+        var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+        var publication = Publications(services, identity);
+        var request = Assert.Single(await publication.PreparationRequestsAsync(scenario.Commit, "tester", default));
+        var original = (await new PostgreSqlRuntimeIdentityStore(factory, IdentityActions(services, identity)).ReadAsync(prepared.Binding!.Value, default))!;
+        await using (var arrange = await factory.CreateDbContextAsync())
+        {
+            var versions = await arrange.GeneratedCredentialSlots.Select(x => x.VersionId).ToArrayAsync();
+            Assert.NotEmpty(versions); // A genuine mixed Resource/application-login contour, not an empty stage.
+            if (fault == "missing") Assert.True(await arrange.SecretPayloads.Where(x => versions.Contains(x.SecretVersionId)).ExecuteDeleteAsync() > 0);
+            else Assert.True(await arrange.SecretPayloads.Where(x => versions.Contains(x.SecretVersionId)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Bytes, new byte[] { 1 })) > 0);
+        }
+
+        // The exact pre-fix helper remains required by normal paths. This independent SQL
+        // oracle detects its application-payload query, without returning material bytes.
+        var oldOracle = new NoAuthenticationDocuments();
+        IDbContextFactory<ManifestCatalogDbContext> oldFactory = new AuthenticationContextFactory(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(scenario.Connection).AddInterceptors(oldOracle).Options);
+        await using (var counterfactual = await oldFactory.CreateDbContextAsync())
+        {
+            var metadata = await DurableAggregateCompletion.InspectMetadataAsync(counterfactual,
+                Guid.Parse(scenario.Commit.DeploymentId.ToString()), scenario.Commit.Generation.Value,
+                services.GetServices<IExternalOperationOutputContract>(), services.GetServices<IProviderConfigurationCodec>(), default,
+                services.GetRequiredService<DurableActionAdmission>(), internalResourceStage: true);
+            Assert.NotNull(metadata); Assert.NotEmpty(metadata.Credentials);
+            await Assert.ThrowsAsync<AuthenticationMaterialQueryException>(() => DurableAggregateCompletion.CheckCredentialMetadataAsync(counterfactual, metadata, default));
+            Assert.Equal(1, oldOracle.ApplicationPayloadQueries);
+        }
+
+        var oracle = new NoAuthenticationDocuments();
+        var isolated = new AuthenticationContextFactory(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(scenario.Connection).AddInterceptors(oracle).Options);
+        var store = new PostgreSqlRuntimeIdentityStore(isolated, IdentityActions(services, identity));
+        var adapter = new AuthenticationProbe(original); adapter.Continue.TrySetResult();
+        using var limits = new RuntimeAuthenticationAdmission(new(), TimeProvider.System);
+        var authentication = new RuntimeAuthentication(store, [adapter], limits, TimeProvider.System);
+        var result = await authentication.AuthenticateAsync(original.Binding, "projected"u8.ToArray(), default);
+        Assert.Equal(RuntimeAuthenticationOutcome.Authenticated, result.Outcome); Assert.NotNull(result.Context);
+        Assert.Equal(1, adapter.Calls); Assert.True(oracle.Commands > 0);
+        Assert.Equal(0, oracle.DocumentQueries); Assert.Equal(0, oracle.ApplicationPayloadQueries);
+        await Assert.ThrowsAnyAsync<InvalidDataException>(() => IdentityPreparation(services, identity).PrepareAsync(scenario.Commit, default));
+        await Assert.ThrowsAnyAsync<InvalidDataException>(() => publication.ApplyAsync(request, default));
+        await Assert.ThrowsAnyAsync<InvalidDataException>(() => IdentityActions(services, identity).AcceptAsync(scenario.Commit, RuntimeSubject,
+            identity.Contract.Action, "mixed-effect-after-payload-fault", default).AsTask());
+        Assert.Equal(1, identity.Writes);
+        await publication.ApplyAsync(new("mixed-payload-binding-revoke", RuntimePublicationOperation.RevokeBinding, original.Binding,
+            null, prepared.CurrentBinding!.Token, "operator"), default);
+        Assert.Equal(RuntimeAuthenticationOutcome.PermissionDenied,
+            (await authentication.AuthenticateAsync(original.Binding, "replacement"u8.ToArray(), default)).Outcome);
+        Assert.Equal(1, adapter.Calls); Assert.Equal(0, oracle.ApplicationPayloadQueries); Assert.Equal(0, oracle.DocumentQueries);
+        await using var verify = await factory.CreateDbContextAsync();
+        Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        Assert.Empty(await verify.RuntimeConfigurationPermissions.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await verify.ConfigurationAccess.AsNoTracking().ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("slot")]
+    [InlineData("version")]
+    [InlineData("owner")]
+    [InlineData("audit")]
+    public async Task Mixed_authentication_origin_still_requires_exact_application_credential_metadata(string fault)
+    {
+        using var baseline = new RuntimeAuthenticationLoginScenario(fixture);
+        var scenario = await baseline.PrepareMixedAsync();
+        var identity = new IdentityFixture();
+        await using var services = ApplicationLoginScenario.Services(scenario.Connection, full: true, access: true, internalActions: true);
+        await ConfigurationPreparation(services, rendering: PostgreSqlConnectionRendering.CreateCatalog(),
+            formatters: PostgreSqlConnectionRendering.FormatterCatalog()).Preparation.PrepareAsync(scenario.Commit, "tester", default);
+        var prepared = Assert.Single(await IdentityPreparation(services, identity).PrepareAsync(scenario.Commit, default));
+        var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+        var original = (await new PostgreSqlRuntimeIdentityStore(factory, IdentityActions(services, identity)).ReadAsync(prepared.Binding!.Value, default))!;
+        await using (var arrange = await factory.CreateDbContextAsync())
+        {
+            var slots = await arrange.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync(); Assert.NotEmpty(slots);
+            var versions = slots.Select(x => x.VersionId).ToArray(); var secrets = slots.Select(x => x.SecretId).ToArray();
+            if (fault == "slot") await arrange.GeneratedCredentialSlots.ExecuteDeleteAsync();
+            else if (fault == "version") await arrange.SecretVersions.Where(x => versions.Contains(x.Id)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Number, 2));
+            else if (fault == "owner") await arrange.Secrets.Where(x => secrets.Contains(x.Id)).ExecuteUpdateAsync(s => s.SetProperty(x => x.ResourceLocalId, "foreign-resource"));
+            else await arrange.GeneratedCredentialCreationAudits.Where(x => secrets.Contains(x.SecretId)).ExecuteDeleteAsync();
+        }
+        var oracle = new NoAuthenticationDocuments();
+        var isolated = new AuthenticationContextFactory(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(scenario.Connection).AddInterceptors(oracle).Options);
+        var adapter = new AuthenticationProbe(original); adapter.Continue.TrySetResult();
+        using var limits = new RuntimeAuthenticationAdmission(new(), TimeProvider.System);
+        var result = await new RuntimeAuthentication(new PostgreSqlRuntimeIdentityStore(isolated, IdentityActions(services, identity)), [adapter], limits, TimeProvider.System)
+            .AuthenticateAsync(original.Binding, "projected"u8.ToArray(), default);
+        Assert.Equal(RuntimeAuthenticationOutcome.Unauthenticated, result.Outcome); Assert.Null(result.Context);
+        Assert.Equal(0, adapter.Calls); Assert.Equal(0, oracle.ApplicationPayloadQueries); Assert.Equal(0, oracle.DocumentQueries);
+    }
+
     [Fact]
     public async Task Established_identity_authenticates_without_document_queries_while_new_preparation_and_publication_stay_guarded()
     {
@@ -118,6 +225,58 @@ public sealed partial class DurableDeploymentPlanningTests
         Assert.Equal(0, adapter.Calls);
     }
 
+    // A narrow bridge to the existing pair fixture, using the same owned server.
+    // Application credentials are created ONLY by its normal Plan/Commit/Execute.
+    private sealed class RuntimeAuthenticationLoginScenario(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture)
+    {
+        internal async Task<InternalScenario> PrepareMixedAsync()
+        {
+            var baseline = await Prepare(full: true, render: true);
+            await using (var execute = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true))
+                Assert.Null((await execute.GetRequiredService<DurableGenerationRunner>().RunAsync(baseline.Commit.DeploymentId, baseline.Commit.Generation, default)).StopOutcome);
+            await using var services = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true, internalActions: true);
+            var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+            await using (var verify = await contexts.CreateDbContextAsync())
+            {
+                Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+                var slot = Assert.Single(await verify.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync());
+                var output = await verify.OperationOutputs.AsNoTracking().SingleAsync(x => x.OperationId == "app-login-material");
+                var reference = GeneratedCredentialOutputCodec.Decode(output.Contract, output.Payload)!.Reference;
+                Assert.Equal(slot.SecretId.ToString(), reference.SecretId.ToString());
+                Assert.Equal(slot.VersionId.ToString(), reference.SecretVersionId.ToString());
+                Assert.Equal("Succeeded", (await verify.DurableOperations.AsNoTracking().SingleAsync(x => x.OperationId == "app-login-material")).State);
+            }
+            var environment = baseline.Plan.Inputs.Environment;
+            var admin = new SecretRef(SecretId.New(), SecretVersionId.New());
+            await services.GetRequiredService<ISecretStore>().CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator),
+                admin, "fixture-token"u8.ToArray(), default);
+            var configuration = new KubernetesProviderConfiguration(new Uri("https://127.0.0.1:6443"), null, admin, null, null);
+            var providers = services.GetRequiredService<IProviderConfigurationStore>();
+            var provider = await providers.CreateInstanceAsync(environment, configuration, default);
+            await providers.AddRevisionAsync(environment, provider, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
+            var alias = ProviderAlias.Create("kubernetes.primary");
+            Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environment,
+                alias, null, new(provider, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
+            var codec = new KubernetesPlacementCodec();
+            var placement = codec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"test"}}"""u8.ToArray());
+            var placementKey = new PlacementRevisionKey(environment, alias, placement.Name, placement.Revision);
+            await new PostgreSqlPlacementRevisionStore(contexts, codec).CompareAndCreateAsync(placementKey, placement, new("tester", DateTimeOffset.UtcNow), default);
+            await new PostgreSqlPlacementSelectionStore(contexts, codec).ApplyAsync(PlacementSelectionTarget.Create("environment", "", "", ""), placementKey,
+                new PlacementSelectionPrecondition.ExpectedAbsence(), new("tester", DateTimeOffset.UtcNow, null), default);
+            var envelope = UpdateEnvelope(baseline, 2);
+            envelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"] = JsonNode.Parse("""{"main":{"type":"kubernetes.workload/v1alpha1","providerRef":"kubernetes.primary","properties":{"image":{"reference":"registry.example/app:v2"},"configuration":{"documents":["settings"]}}}}"""u8);
+            var catalog = new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition],
+                [KubernetesContract.Definition], [new(OutputContractId.Create(PostgreSqlApplicationConnectionContract.Contract), PostgreSqlConsumerOptions.Schema)],
+                [new(PostgreSqlConnectionRendering.Renderer)]);
+            var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(
+                services.GetRequiredService<IManifestImportStore>(), catalog, TimeProvider.System).ExecuteAsync(Encoding.UTF8.GetBytes(envelope.ToJsonString()), "tester"));
+            var accepted = await new InternalAcceptedGenerationBuilder(services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(),
+                (PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>(), services.GetServices<IInternalActionHandler>().ToArray())
+                .AcceptForEffectAsync(environment, imported.ManifestRevisionRef.ApplicationRecordId, imported.ManifestRevisionRef, baseline.Commit.Generation, "tester", default);
+            return new(baseline.Connection, TimeProvider.System, environment, accepted, imported.ManifestRevisionRef);
+        }
+    }
+
     private sealed class AuthenticationProbe(RuntimeTrust trust) : IRuntimeAuthenticator
     {
         internal int Calls;
@@ -136,7 +295,7 @@ public sealed partial class DurableDeploymentPlanningTests
     }
     private sealed class NoAuthenticationDocuments : DbCommandInterceptor
     {
-        internal int Commands, DocumentQueries;
+        internal int Commands, DocumentQueries, ApplicationPayloadQueries;
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
             InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
         {
@@ -144,7 +303,10 @@ public sealed partial class DurableDeploymentPlanningTests
             if (command.CommandText.Contains("configuration_document_revisions", StringComparison.Ordinal) ||
                 command.CommandText.Contains("workload_configuration_recipients", StringComparison.Ordinal))
             { DocumentQueries++; throw new InvalidOperationException("Authentication attempted a document lookup."); }
+            if (command.CommandText.Contains("secret_payloads", StringComparison.Ordinal))
+            { ApplicationPayloadQueries++; throw new AuthenticationMaterialQueryException(); }
             return ValueTask.FromResult(result);
         }
     }
+    private sealed class AuthenticationMaterialQueryException : InvalidOperationException;
 }

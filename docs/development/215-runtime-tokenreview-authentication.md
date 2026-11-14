@@ -24,6 +24,16 @@ Normal preparation, publication and effects retain their complete configuration
 checks. Authentication alone can succeed when stored document content is unusable;
 that grants no publication or delivery success.
 
+For mixed applications the origin proof retains generated credential slot/profile,
+exact SecretRef version, Environment/Application/Resource owner, purpose/sensitivity,
+version/protection-format metadata and original creation-audit consistency.
+Its separately named authentication reader never queries application SecretPayloads,
+including existence, byte length, hashes or aggregates. Missing or invalid-length
+application material does not invalidate an established runtime identity. Normal
+credential checks retain their existing payload presence/length and material
+validation. Only the Kubernetes adapter resolves exact Provider administrative
+credentials for TokenReview; this grants no application-material access.
+
 The pinned KubernetesClient 19.0.2 uses the existing connection factory: explicit
 HTTPS, exact Environment-owned ProviderAdministrator SecretRefs, strict hostname,
 chain/server-auth validation, Online certificate revocation and no redirects.
@@ -142,13 +152,13 @@ service-account-bound mode, not managed-generation isolation.
 | --- | --- |
 | A1 persisted real positive | `PostgreSqlRuntimeIdentityStore`, `RuntimeAuthenticationCases` initial/mixed R01 |
 | A2 exact identity and unsupported/malformed refusal | `KubernetesRuntimeAuthenticator`, adapter controlled-response tests, real R03-R06/R10-R12/R15 |
-| A3 current lifecycle and no publication bypass | fresh store snapshot, PostgreSQL in-flight revoke/no-document-query tests, real R07-R09 |
+| A3 current lifecycle and no publication bypass | fresh store snapshot, PostgreSQL in-flight revoke and mixed no-document/application-payload query oracles, real R07-R09 |
 | A4 independent credentials and actual invalidation | real R02/R13/R14; API-only fixture limitations below |
 | A5 combined limits and finite state | `RuntimeAuthenticationAdmission`, deterministic application tests and Host option tests |
 | A6 safe failures, bytes and cancellation | request ownership/orchestration, bounded HTTP handler, adapter and deadline tests |
 | A7 unchanged mandatory gates and ownership | existing Build and Kubernetes workflows, exact case ledger and launcher cleanup |
 
-The ledger adds 52 fast rows, 19 PostgreSQL/Host rows and 28 API assertion rows in
+The ledger adds 52 fast rows, 25 PostgreSQL/Host rows and 28 API assertion rows in
 the existing durable-actions job. API rows distinguish initial, mixed and replaced
 identity scenarios; the existing 36 durable rows remain required. Ledger entries
 declare required execution; they are not proof that a run passed.

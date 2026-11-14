@@ -231,6 +231,18 @@ internal static partial class DurableAggregateCompletion
         return true;
     }
 
+    internal static async Task<bool> CheckAuthenticationOriginCredentialMetadataAsync(ManifestCatalogDbContext db, ReadinessMetadata metadata, CancellationToken token)
+    {
+        if (metadata.Purpose != EvidencePurpose.InternalResourceStage) throw new InvalidOperationException("Authentication origin metadata purpose mismatch.");
+        foreach (var credential in metadata.Credentials)
+        {
+            var slot = await PostgreSqlGeneratedCredentialSlots.ReadAuthenticationOriginMetadataAsync(db,
+                new(credential.Input.Owner, credential.Input.SlotId), credential.Input.GenerationProfile, token);
+            if (slot?.Outcome != GeneratedCredentialOutcome.Existing || slot.Reference != credential.Output.Reference) return false;
+        }
+        return true;
+    }
+
     internal static async Task<ReadinessPreparation?> PrepareAsync(ManifestCatalogDbContext db, ReadinessMetadata? metadata, CancellationToken token)
     {
         if (metadata is null || !metadata.Complete) return null;
