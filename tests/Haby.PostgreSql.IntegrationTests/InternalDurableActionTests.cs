@@ -20,7 +20,8 @@ public sealed partial class DurableDeploymentPlanningTests
         DurableChangeSetCommit Commit, ManifestRevisionRef Revision);
     internal async Task<InternalScenario> InternalScenarioAsync(Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? suppliedConfiguration = null, string namespaceName = "test", bool subMicrosecondCommit = false,
         Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualKubernetesProbe = null, bool twoComponents = false, bool distinctPlacements = false, bool initialOnly = false, bool invalidSecondWorkload = false,
-        Func<ServiceProvider, EnvironmentRecordId, ManifestRevisionRef, Task<DurableChangeSetCommit>>? acceptGeneration = null)
+        Func<ServiceProvider, EnvironmentRecordId, ManifestRevisionRef, Task<DurableChangeSetCommit>>? acceptGeneration = null,
+        Action<JsonNode>? configureManifest = null)
     {
         var prepared = initialOnly ? ((string Connection, AdjustableTimeProvider Time, EnvironmentRecordId Environment, ManifestRevisionRef Revision, ProviderAliasBinding First, ProviderAliasBinding Second, string Password)?)null : await PrepareCommitAsync();
         var connection = prepared?.Connection ?? await NewDatabaseAsync();
@@ -92,6 +93,7 @@ public sealed partial class DurableDeploymentPlanningTests
             invalid["workloads"]!["main"]!["properties"]!["env"] = JsonNode.Parse("{\"FEATURE\":{\"value\":\"on\"}}"u8);
             envelope["manifest"]!["spec"]!["components"]!["invalid"] = invalid;
         }
+        configureManifest?.Invoke(envelope);
         var target = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await importer.ExecuteAsync(Encoding.UTF8.GetBytes(envelope.ToJsonString()), "tester"));
         if (subMicrosecondCommit) time.Advance(TimeSpan.FromTicks(1));
         var accepted = acceptGeneration is not null ? await acceptGeneration(services, environmentId, target.ManifestRevisionRef) : await new InternalAcceptedGenerationBuilder(services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(),

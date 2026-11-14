@@ -35,6 +35,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigureInternalActions(modelBuilder);
+        ConfigureWorkloadConfigurationRecipients(modelBuilder);
         ConfigureGenerationStageCheckpoints(modelBuilder);
         ConfigureResourceNaming(modelBuilder);
         ConfigureResourceManagement(modelBuilder);

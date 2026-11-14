@@ -16,6 +16,13 @@ internal interface IInternalActionHandler
 {
     InternalActionContract Contract { get; }
     bool ObservationRecovery { get; }
+    // Pure preparation admission is distinct from permission to create an executable intent.
+    IReadOnlyList<ManifestLocalId> PreparationDocuments(InternalActionContext context)
+    {
+        var payload = Prepare(context);
+        if (!Validate(context, payload)) throw new InvalidDataException("Preparation admission refused.");
+        return [];
+    }
     string Prepare(InternalActionContext context);
     bool Validate(InternalActionContext context, string payload);
     bool ValidateReceipt(InternalActionContext context, string payload, string receipt, bool observation);

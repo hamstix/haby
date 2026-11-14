@@ -14,7 +14,21 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation, Create,
         "haby.kubernetes.deployment-intent/v1", "haby.kubernetes.deployment-receipt/v1");
     public bool ObservationRecovery => true;
-    public string Prepare(InternalActionContext context)
+    public string Prepare(InternalActionContext context) => DeploymentIntents.Encode(DeploymentIntents.Prepare(Resolve(context),
+        Guid.Parse(context.Key.DeploymentId.ToString()), context.ManagedIdentity, context.Key.Generation.Value, context.Marker));
+
+    public IReadOnlyList<ManifestLocalId> PreparationDocuments(InternalActionContext context)
+    {
+        var workload = Resolve(context);
+        DeploymentIntents.ValidatePreparation(workload);
+        var layout = context.Inputs.Configuration?.Layouts.Single(x => x.Component == workload.Input.Component)
+            ?? throw new InvalidDataException("Frozen configuration unavailable.");
+        if (workload.Declaration.Documents.Any(id => !layout.Documents.Any(d => d.Definition.Id == id)))
+            throw new InvalidDataException("Selected Component document unavailable.");
+        return workload.Declaration.Documents.OrderBy(x => x.Value, StringComparer.Ordinal).ToArray();
+    }
+
+    private static EffectiveWorkload Resolve(InternalActionContext context)
     {
         if (context.Subject is not ProviderInput.Workload subject || context.Placement is null) throw new InvalidDataException("Deployment subject unavailable.");
         var manifest = context.Inputs.Providers.Declaration;
@@ -42,11 +56,10 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         }
         // Resolve the complete frozen generation once, including cross-Workload name
         // collisions, before selecting this action's exact declared subject.
-        var effective = KubernetesWorkloadPlanner.Resolve(manifest, ApplicationVersion.Create(context.ApplicationVersion),
-            context.Inputs.Providers, new PlacementInputs(revisions, assignments));
-        var workload = effective.Single(x => x.Input == subject);
-        return DeploymentIntents.Encode(DeploymentIntents.Prepare(workload, Guid.Parse(context.Key.DeploymentId.ToString()),
-            context.ManagedIdentity, context.Key.Generation.Value, context.Marker));
+        var effective = KubernetesWorkloadPlanner.ResolvePreparation(manifest, ApplicationVersion.Create(context.ApplicationVersion),
+            context.Inputs.Providers, new PlacementInputs(revisions, assignments), context.Inputs.Configuration
+                ?? throw new InvalidDataException("Frozen configuration unavailable."));
+        return effective.Single(x => x.Input == subject);
     }
     public bool Validate(InternalActionContext context, string payload)
     {

@@ -6,6 +6,7 @@ using Haby.Domain;
 using Haby.Manifest;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
+using Haby.Tests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,7 +44,7 @@ public abstract partial class ApplicationLoginScenario : IDisposable
         public bool ValidateGraph(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurableOperationGraph graph) =>
             new DurableOperationGraph(spec.Resources.SelectMany(r => new Prefix(r.Value.Type).Plan(spec, r.Key, inputs, configuration))).Equals(graph);
     }
-    private protected static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null, ISecretStore? secretStore = null)
+    private protected static ServiceProvider Services(string connection, IPostgreSqlLoginFaultHooks? fault = null, bool full = false, bool access = false, IPostgreSqlAccessFaultHooks? accessFault = null, IInterceptor? queryTrap = null, IDurableCreateDispatchFaultHooks? createFault = null, ISecretStore? secretStore = null, bool internalActions = false)
     {
         var services = new ServiceCollection().AddSingleton(TimeProvider.System)
             .AddSingleton(PostgreSqlConnectionRendering.CreateCatalog())
@@ -55,6 +56,15 @@ public abstract partial class ApplicationLoginScenario : IDisposable
             .AddPostgreSqlDurableOperationExecution().AddPostgreSqlDatabaseRecoveryJournal().AddPostgreSqlDatabaseRecovery()
             .AddSingleton<IGeneratedCredentialOperations, PostgreSqlGeneratedCredentialOperations>()
             .AddPostgreSqlDatabaseRestrict().AddPostgreSqlProviderResourceReservations().AddPostgreSqlApplicationLogin();
+        if (internalActions)
+        {
+            services.AddSingleton<IInternalActionHandler, Haby.Kubernetes.InternalDeploymentAction>()
+                .AddSingleton<Haby.Kubernetes.KubernetesProviderConfigurationCodec>()
+                .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<Haby.Kubernetes.KubernetesProviderConfigurationCodec>());
+            services.AddInternalKubernetesFixturePreflight(p => new Haby.Tests.InternalKubernetesFixturePreflight(
+                p.GetRequiredService<Haby.Kubernetes.KubernetesProviderConfigurationCodec>(), p.GetRequiredService<ISecretStore>(),
+                Haby.Tests.InternalKubernetesFixturePreflight.DeterministicProbe));
+        }
         if (queryTrap is not null) services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(queryTrap));
         services.RemoveAll<IDurableActionAdmissionHandler>();
         foreach (var contract in new[] { PostgreSqlDatabaseContract.Id, PostgreSqlApplicationLoginContract.Id })

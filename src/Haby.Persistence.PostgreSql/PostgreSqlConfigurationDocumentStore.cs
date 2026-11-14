@@ -31,6 +31,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             // Source and eligibility use the same exact-generation implementation as single documents.
             var source = await Source(db, target, token);
             if (source is null) return new(ConfigurationDocumentStatus.NotFound, target);
+            if (source.InternalEffects) return new(ConfigurationDocumentStatus.NotApplied, target);
             if (source.EnvironmentRecordId != owner.EnvironmentRecordId || source.ApplicationRecordId != owner.ApplicationRecordId || source.EnvironmentKey != selection.Environment.Value)
                 throw new InvalidDataException("Stored deployment owner is inconsistent.");
             var frozen = Layout(source);
@@ -63,6 +64,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             return new(ConfigurationDocumentStatus.NotApplied, Target: target);
         var source = await Source(db, target, token);
         if (source is null) return new(ConfigurationDocumentStatus.NotFound, Target: target);
+        if (source.InternalEffects) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
         if (source.EnvironmentRecordId != owner.EnvironmentRecordId || source.ApplicationRecordId != owner.ApplicationRecordId || source.EnvironmentKey != selection.Environment.Value)
             throw new InvalidDataException("Stored deployment owner is inconsistent.");
         var frozen = Layout(source);
@@ -81,12 +83,21 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
     private async ValueTask<ConfigurationDocumentResult> ReadCoreAsync(ConfigurationDocumentTarget target, CancellationToken token)
     {
         await using var db = await contexts.CreateDbContextAsync(token);
+        var source = await Source(db, target, token);
+        if (source?.InternalEffects == true) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
         var row = await Row(db, target, token);
         return row is null ? new(ConfigurationDocumentStatus.NotFound, Target: target) :
             new(ConfigurationDocumentStatus.Found, Decode(row, target), target);
     }
 
-    public async ValueTask<ConfigurationDocumentResult> MaterializeAsync(ConfigurationDocumentTarget target, string actor, CancellationToken token)
+    public ValueTask<ConfigurationDocumentResult> MaterializeAsync(ConfigurationDocumentTarget target, string actor, CancellationToken token) =>
+        MaterializeCoreAsync(target, actor, null, token);
+
+    internal ValueTask<ConfigurationDocumentResult> MaterializeInternalAsync(ConfigurationDocumentTarget target, string actor,
+        InternalWorkloadConfiguration.Authority authority, CancellationToken token) => MaterializeCoreAsync(target, actor, authority, token);
+
+    private async ValueTask<ConfigurationDocumentResult> MaterializeCoreAsync(ConfigurationDocumentTarget target, string actor,
+        InternalWorkloadConfiguration.Authority? authority, CancellationToken token)
     {
         PostgreSqlDurableDeploymentPlanner.ValidateActor(actor);
         try
@@ -94,10 +105,24 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             // Fast repeat needs no active renderer or evidence. Frozen identity is still checked.
             await using (var read = await contexts.CreateDbContextAsync(token))
             {
+                await using var view = await read.Database.BeginTransactionAsync(token);
+                if (authority is not null) await LockDocumentAsync(read, target, token);
                 var source = await Source(read, target, token);
                 if (source is null) return new(ConfigurationDocumentStatus.NotFound, Target: target);
+                if (authority is null && source.InternalEffects) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
+                if (authority is not null) _ = await authority.RequireAsync(read, source, target, token);
                 var existing = await Row(read, target, token);
-                if (existing is not null) return Existing(existing, source, target);
+                if (existing is not null)
+                {
+                    var result = Existing(existing, source, target);
+                    if (authority is not null && result.Revision is not null)
+                    {
+                        await authority.AssociateAsync(read, source, result.Revision, token);
+                        await read.SaveChangesAsync(token);
+                        token.ThrowIfCancellationRequested(); await view.CommitAsync(CancellationToken.None);
+                    }
+                    return result;
+                }
             }
             DeploymentGenerationRow inputs;
             ConfigurationPlanningSnapshot frozen;
@@ -107,7 +132,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
                 inputs = await Source(read, target, token) ?? throw new InvalidDataException();
                 frozen = Frozen(inputs);
                 if (!HasDocument(frozen, target)) return new(ConfigurationDocumentStatus.NotFound, Target: target);
-                if (!await Eligible(read, inputs, token)) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
+                if (!await EligibilityAsync(read, inputs, target, authority, token)) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
             }
             var composed = await composer.ExecuteAsync(frozen, target, EnvironmentRecordId.Parse(inputs.EnvironmentRecordId.ToString()), token);
             if (composed is null) return new(ConfigurationDocumentStatus.InputUnavailable, Target: target);
@@ -138,22 +163,25 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var transaction = await db.Database.BeginTransactionAsync(token);
             // Serialize same-key acceptance before reading the winner. Different documents use separate locks/transactions.
-            var lockKey = $"haby-configuration:{target.Deployment}:{target.Generation.Value}:{target.Component.Value}:{target.Document.Value}";
-            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", token);
-            // Block deployment advancement through acceptance. Never resolve a name or current generation again.
-            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {inputs.DeploymentId} FOR SHARE", token);
+            await LockDocumentAsync(db, target, token);
             var current = await Source(db, target, token) ?? throw new InvalidDataException();
             if (InputFingerprint(current) != metadata.FrozenInputFingerprint) return new(ConfigurationDocumentStatus.IntegrityConflict, Target: target);
             _ = current.Inputs();
             var winner = await Row(db, target, token);
+            if (!await EligibilityAsync(db, current, target, authority, token)) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
             if (winner is not null)
             {
                 var saved = Decode(winner, target);
                 var equivalent = candidate with { Metadata = saved.Metadata };
-                return ConfigurationDocumentCodec.Encode(equivalent) == winner.Payload ? new(ConfigurationDocumentStatus.Existing, saved, target) :
-                    new(ConfigurationDocumentStatus.IntegrityConflict, Target: target);
+                if (ConfigurationDocumentCodec.Encode(equivalent) != winner.Payload) return new(ConfigurationDocumentStatus.IntegrityConflict, Target: target);
+                if (authority is not null)
+                {
+                    await authority.AssociateAsync(db, current, saved, token);
+                    await db.SaveChangesAsync(token);
+                    token.ThrowIfCancellationRequested(); await transaction.CommitAsync(CancellationToken.None);
+                }
+                return new(ConfigurationDocumentStatus.Existing, saved, target);
             }
-            if (!await Eligible(db, current, token)) return new(ConfigurationDocumentStatus.NotApplied, Target: target);
             foreach (var (output, attempt) in associations)
             {
                 var key = await ResourceContinuity.ResolveAsync(db, new(target.Deployment, target.Generation, output.Pin.Producer), output.Pin.ResourceLocalId, token);
@@ -174,6 +202,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
                 Payload = payload,
                 Fingerprint = fingerprint
             });
+            if (authority is not null) await authority.AssociateAsync(db, current, candidate, token);
             await db.SaveChangesAsync(token);
             token.ThrowIfCancellationRequested();
             // Once commit starts, caller cancellation cannot discard a confirmed receipt.
@@ -182,6 +211,23 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         }
         catch (ConfigurationDocumentLimitException) { return new(ConfigurationDocumentStatus.LimitExceeded, Target: target); }
         catch (Exception e) when (e is Npgsql.NpgsqlException or DbUpdateException) { throw new IOException("Configuration storage unavailable."); }
+    }
+
+    private static async Task<bool> EligibilityAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
+        ConfigurationDocumentTarget target, InternalWorkloadConfiguration.Authority? authority, CancellationToken token)
+    {
+        if (authority is null) return await Eligible(db, source, token);
+        _ = await authority.RequireAsync(db, source, target, token);
+        return true;
+    }
+
+    private static async Task LockDocumentAsync(ManifestCatalogDbContext db, ConfigurationDocumentTarget target, CancellationToken token)
+    {
+        // One lock order for initial acceptance, concurrent winners and missing recipient associations.
+        var lockKey = $"haby-configuration:{target.Deployment}:{target.Generation.Value}:{target.Component.Value}:{target.Document.Value}";
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", token);
+        var deployment = Guid.Parse(target.Deployment.ToString());
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {deployment} FOR SHARE", token);
     }
 
     private static ConfigurationDocumentResult Existing(ConfigurationDocumentRow row, DeploymentGenerationRow source, ConfigurationDocumentTarget target)
@@ -227,7 +273,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         return await query.SingleOrDefaultAsync(token);
     }
     private static async Task<bool> Eligible(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) =>
-        await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.AppliedGeneration >= source.Generation, token) &&
+        !source.InternalEffects && await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.AppliedGeneration >= source.Generation, token) &&
         await DurableAggregateCompletion.HasProofAsync(db, source.DeploymentId, source.Generation, token) && await Complete(db, source, token);
     private static async Task<bool> Complete(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
