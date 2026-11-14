@@ -11,6 +11,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
@@ -33,12 +34,28 @@ public sealed partial class DurableDeploymentPlanningTests
         var publication = Publications(services, identity);
         var request = Assert.Single(await publication.PreparationRequestsAsync(scenario.Commit, "tester", default));
         var original = (await new PostgreSqlRuntimeIdentityStore(factory, IdentityActions(services, identity)).ReadAsync(prepared.Binding!.Value, default))!;
-        await using (var arrange = await factory.CreateDbContextAsync())
+        Assert.True(baseline.OwnsCatalog(scenario.Connection), "Corruption requires this case's owned catalog.");
+        await using (var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(scenario.Connection) { Pooling = false }.ConnectionString))
         {
+            await connection.OpenAsync();
+            await using var arrange = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
+            await using var corrupt = await arrange.Database.BeginTransactionAsync();
+            // LOCAL resets the corruption override before act and connection close.
+            await arrange.Database.ExecuteSqlRawAsync("SET LOCAL session_replication_role = replica");
             var versions = await arrange.GeneratedCredentialSlots.Select(x => x.VersionId).ToArrayAsync();
             Assert.NotEmpty(versions); // A genuine mixed Resource/application-login contour, not an empty stage.
-            if (fault == "missing") Assert.True(await arrange.SecretPayloads.Where(x => versions.Contains(x.SecretVersionId)).ExecuteDeleteAsync() > 0);
-            else Assert.True(await arrange.SecretPayloads.Where(x => versions.Contains(x.SecretVersionId)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Bytes, new byte[] { 1 })) > 0);
+            if (fault == "missing") Assert.Equal(1, await arrange.SecretPayloads.Where(x => versions.Contains(x.SecretVersionId)).ExecuteDeleteAsync());
+            else Assert.Equal(1, await arrange.SecretPayloads.Where(x => versions.Contains(x.SecretVersionId)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Bytes, new byte[] { 1 })));
+            await corrupt.CommitAsync();
+        }
+        await using (var verifyCorruption = await factory.CreateDbContextAsync())
+        {
+            var versions = await verifyCorruption.GeneratedCredentialSlots.Select(x => x.VersionId).ToArrayAsync();
+            Assert.Single(versions);
+            var lengths = await verifyCorruption.SecretPayloads.Where(x => versions.Contains(x.SecretVersionId)).Select(x => x.Bytes.Length).ToArrayAsync();
+            if (fault == "missing") Assert.Empty(lengths);
+            else Assert.Equal(1, Assert.Single(lengths));
+            await AssertAuthenticationCorruptionGuardsRestoredAsync(verifyCorruption);
         }
 
         // The exact pre-fix helper remains required by normal paths. This independent SQL
@@ -98,14 +115,28 @@ public sealed partial class DurableDeploymentPlanningTests
         var prepared = Assert.Single(await IdentityPreparation(services, identity).PrepareAsync(scenario.Commit, default));
         var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         var original = (await new PostgreSqlRuntimeIdentityStore(factory, IdentityActions(services, identity)).ReadAsync(prepared.Binding!.Value, default))!;
-        await using (var arrange = await factory.CreateDbContextAsync())
+        Assert.True(baseline.OwnsCatalog(scenario.Connection), "Corruption requires this case's owned catalog.");
+        await using (var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(scenario.Connection) { Pooling = false }.ConnectionString))
         {
+            await connection.OpenAsync();
+            await using var arrange = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
+            await using var corrupt = await arrange.Database.BeginTransactionAsync();
+            await arrange.Database.ExecuteSqlRawAsync("SET LOCAL session_replication_role = replica");
             var slots = await arrange.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync(); Assert.NotEmpty(slots);
             var versions = slots.Select(x => x.VersionId).ToArray(); var secrets = slots.Select(x => x.SecretId).ToArray();
-            if (fault == "slot") await arrange.GeneratedCredentialSlots.ExecuteDeleteAsync();
-            else if (fault == "version") await arrange.SecretVersions.Where(x => versions.Contains(x.Id)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Number, 2));
-            else if (fault == "owner") await arrange.Secrets.Where(x => secrets.Contains(x.Id)).ExecuteUpdateAsync(s => s.SetProperty(x => x.ResourceLocalId, "foreign-resource"));
-            else await arrange.GeneratedCredentialCreationAudits.Where(x => secrets.Contains(x.SecretId)).ExecuteDeleteAsync();
+            if (fault == "slot") Assert.Equal(1, await arrange.GeneratedCredentialSlots.ExecuteDeleteAsync());
+            else if (fault == "version") Assert.Equal(1, await arrange.SecretVersions.Where(x => versions.Contains(x.Id)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Number, 2)));
+            else if (fault == "owner") Assert.Equal(1, await arrange.Secrets.Where(x => secrets.Contains(x.Id)).ExecuteUpdateAsync(s => s.SetProperty(x => x.ResourceLocalId, "foreign-resource")));
+            else Assert.Equal(1, await arrange.GeneratedCredentialCreationAudits.Where(x => secrets.Contains(x.SecretId)).ExecuteDeleteAsync());
+            await corrupt.CommitAsync();
+        }
+        await using (var verifyCorruption = await factory.CreateDbContextAsync())
+        {
+            if (fault == "slot") Assert.Empty(await verifyCorruption.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync());
+            else if (fault == "version") Assert.Equal(2, await verifyCorruption.SecretVersions.Where(x => verifyCorruption.GeneratedCredentialSlots.Any(s => s.VersionId == x.Id)).Select(x => x.Number).SingleAsync());
+            else if (fault == "owner") Assert.Equal("foreign-resource", await verifyCorruption.Secrets.Where(x => x.Purpose == "ApplicationLogin").Select(x => x.ResourceLocalId).SingleAsync());
+            else Assert.Empty(await verifyCorruption.GeneratedCredentialCreationAudits.AsNoTracking().ToArrayAsync());
+            await AssertAuthenticationCorruptionGuardsRestoredAsync(verifyCorruption);
         }
         var oracle = new NoAuthenticationDocuments();
         var isolated = new AuthenticationContextFactory(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(scenario.Connection).AddInterceptors(oracle).Options);
@@ -229,9 +260,13 @@ public sealed partial class DurableDeploymentPlanningTests
     // Application credentials are created ONLY by its normal Plan/Commit/Execute.
     private sealed class RuntimeAuthenticationLoginScenario(PostgreSqlFixture fixture) : ApplicationLoginScenario(fixture)
     {
+        private string? ownedCatalog;
+        internal bool OwnsCatalog(string connection) => ownedCatalog is not null && connection == ownedCatalog;
+
         internal async Task<InternalScenario> PrepareMixedAsync()
         {
             var baseline = await Prepare(full: true, render: true);
+            ownedCatalog = baseline.Connection;
             await using (var execute = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true))
                 Assert.Null((await execute.GetRequiredService<DurableGenerationRunner>().RunAsync(baseline.Commit.DeploymentId, baseline.Commit.Generation, default)).StopOutcome);
             await using var services = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true, internalActions: true);
@@ -275,6 +310,18 @@ public sealed partial class DurableDeploymentPlanningTests
                 .AcceptForEffectAsync(environment, imported.ManifestRevisionRef.ApplicationRecordId, imported.ManifestRevisionRef, baseline.Commit.Generation, "tester", default);
             return new(baseline.Connection, TimeProvider.System, environment, accepted, imported.ManifestRevisionRef);
         }
+    }
+
+    private static async Task AssertAuthenticationCorruptionGuardsRestoredAsync(ManifestCatalogDbContext fresh)
+    {
+        await fresh.Database.OpenConnectionAsync();
+        await using var command = fresh.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SHOW session_replication_role";
+        Assert.Equal("origin", await command.ExecuteScalarAsync());
+        // A no-op update must still hit the original immutable-version trigger.
+        Assert.True(await fresh.SecretVersions.AnyAsync());
+        var refusal = await Assert.ThrowsAsync<PostgresException>(() => fresh.SecretVersions.ExecuteUpdateAsync(s => s.SetProperty(x => x.Number, x => x.Number)));
+        Assert.Equal("P0001", refusal.SqlState);
     }
 
     private sealed class AuthenticationProbe(RuntimeTrust trust) : IRuntimeAuthenticator
