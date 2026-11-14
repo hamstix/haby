@@ -125,6 +125,8 @@ jobs:
           }
           dotnet publish ./src/habyctl/habyctl.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/aot/${{ matrix.rid }}
           if ($LASTEXITCODE -ne 0) { throw "Native AOT publish failed: $LASTEXITCODE" }
+          dotnet publish ./examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/runtime-consumer/${{ matrix.rid }}
+          if ($LASTEXITCODE -ne 0) { throw "Runtime consumer Native AOT publish failed: $LASTEXITCODE" }
       - name: Execute published help and version
         run: |
           $cli = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
@@ -136,6 +138,8 @@ jobs:
         run: |
           $env:HABY_AOT_CLI_REQUIRED = '1'
           $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
+          $consumer = if ($IsWindows) { 'Haby.RuntimeStartup.Consumer.exe' } else { 'Haby.RuntimeStartup.Consumer' }
+          $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ matrix.rid }}/$consumer).Path
           dotnet test ./tests/Haby.Cli.Tests/Haby.Cli.Tests.csproj -c Release --filter FullyQualifiedName~CliLoopbackTests -p:TreatWarningsAsErrors=true --logger trx --results-directory ./.artifacts/native-results/${{ matrix.rid }}/private
           if ($LASTEXITCODE -ne 0) { throw "Native AOT loopback tests failed: $LASTEXITCODE" }
       - name: Verify published-native case and parameter gate inventory
@@ -143,6 +147,8 @@ jobs:
         run: |
           $env:HABY_AOT_CLI_REQUIRED = '1'
           $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
+          $consumer = if ($IsWindows) { 'Haby.RuntimeStartup.Consumer.exe' } else { 'Haby.RuntimeStartup.Consumer' }
+          $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ matrix.rid }}/$consumer).Path
           $trx = @(Get-ChildItem ./.artifacts/native-results/${{ matrix.rid }}/private -Filter *.trx -File).FullName
           ./scripts/export-test-gate.ps1 -TrxPath $trx -OutputDirectory ./.artifacts/native-results/${{ matrix.rid }}/safe -Gate 'Native AOT (${{ matrix.rid }})' -Suite published-native
       - name: Publish allowlisted native inventory

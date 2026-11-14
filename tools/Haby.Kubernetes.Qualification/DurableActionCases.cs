@@ -476,7 +476,7 @@ internal static class DurableActionCases
                 if (candidate.Scenario != runtimeMixed.Scenario)
                 {
                     diagnostics.Mark(QualificationMilestone.InitialDeliveryStart);
-                    await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token);
+                    await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token, requests);
                 }
                 var old = (await publication.ReadAsync(requests[0].Key, token))!;
                 var revoke = requests[0] with
