@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using Haby.Kubernetes.Qualification;
 using k8s;
 
 if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] is not ("--probe-stock-tls" or "--deployment-kernel" or "--durable-actions")))
@@ -13,9 +14,25 @@ try
     var directory = Path.GetFullPath(args[1]);
     if (args.Length == 3 && args[2] == "--durable-actions")
     {
-        using var bootstrap = ClientFactory.Create(endpoint, directory);
-        using var actionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
-        await DurableActionCases.Run(bootstrap, endpoint, directory, actionDeadline.Token);
+        var diagnostics = new QualificationDiagnosticJournal(directory);
+        Exception? primary = null;
+        try
+        {
+            diagnostics.Mark(QualificationMilestone.DurableEntry);
+            using var bootstrap = ClientFactory.Create(endpoint, directory);
+            using var actionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+            await DurableActionCases.Run(bootstrap, endpoint, directory, diagnostics, actionDeadline.Token);
+        }
+        catch (Exception error) { primary = error; throw; }
+        finally
+        {
+            diagnostics.Dispose();
+            if (diagnostics.Failed)
+            {
+                Console.Error.WriteLine("Diagnostic journal: writer-failure");
+                if (primary is null) throw new IOException("Qualification diagnostic journal failed.");
+            }
+        }
         return 0;
     }
     if (args.Length == 3 && args[2] == "--deployment-kernel")
