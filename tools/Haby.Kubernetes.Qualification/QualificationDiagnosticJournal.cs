@@ -7,6 +7,7 @@ internal enum QualificationMilestone
 {
     DurableEntry, CatalogInitStart, CatalogInitCompleted, NamespaceCreateStart, NamespaceCreateCompleted,
     DurableSuiteStart, RuntimeAuthStart, InitialDeliveryStart, MixedDeliveryStart,
+    MixedPreparationCompleted, MixedDocumentsCompleted, MixedIdentityCompleted, MixedPublicationCompleted, MixedDeliveryCompleted,
     NamespaceCleanupStart, NamespaceAbsenceConfirmed, CatalogDisposeStart, CatalogDisposeCompleted
 }
 
@@ -51,6 +52,11 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
                 QualificationMilestone.RuntimeAuthStart => "runtime-auth-start",
                 QualificationMilestone.InitialDeliveryStart => "initial-delivery-start",
                 QualificationMilestone.MixedDeliveryStart => "mixed-delivery-start",
+                QualificationMilestone.MixedPreparationCompleted => "mixed-preparation-completed",
+                QualificationMilestone.MixedDocumentsCompleted => "mixed-documents-completed",
+                QualificationMilestone.MixedIdentityCompleted => "mixed-identity-completed",
+                QualificationMilestone.MixedPublicationCompleted => "mixed-publication-completed",
+                QualificationMilestone.MixedDeliveryCompleted => "mixed-delivery-completed",
                 QualificationMilestone.NamespaceCleanupStart => "namespace-cleanup-start",
                 QualificationMilestone.NamespaceAbsenceConfirmed => "namespace-absence-confirmed",
                 QualificationMilestone.CatalogDisposeStart => "catalog-dispose-start",

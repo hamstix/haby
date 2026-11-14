@@ -40,6 +40,9 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             'namespace-create-start'='catalog-init-completed';'namespace-create-completed'='namespace-create-start'
             'durable-suite-start'='namespace-create-completed';'runtime-auth-start'='durable-suite-start'
             'initial-delivery-start'='durable-suite-start';'mixed-delivery-start'='durable-suite-start'
+            'mixed-preparation-completed'='mixed-delivery-start';'mixed-documents-completed'='mixed-preparation-completed'
+            'mixed-identity-completed'='mixed-documents-completed';'mixed-publication-completed'='mixed-identity-completed'
+            'mixed-delivery-completed'='mixed-publication-completed'
             'namespace-cleanup-start'='namespace-create-completed';'namespace-absence-confirmed'='namespace-cleanup-start'
             'catalog-dispose-start'='catalog-init-completed';'catalog-dispose-completed'='catalog-dispose-start'
         }
@@ -53,7 +56,8 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
                 ($seen.Contains($id) -and $id -cne 'runtime-auth-start') -or
                 ($i -eq 0 -and $id -cne 'durable-entry')){return Result 'invalid'}
             if(($seen.Contains('namespace-cleanup-start') -or $seen.Contains('catalog-dispose-start')) -and
-                $id -cin @('runtime-auth-start','initial-delivery-start','mixed-delivery-start','durable-suite-start','namespace-create-start','namespace-create-completed')){return Result 'invalid'}
+                $id -cin @('runtime-auth-start','initial-delivery-start','mixed-delivery-start','durable-suite-start','namespace-create-start','namespace-create-completed',
+                    'mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed','mixed-delivery-completed')){return Result 'invalid'}
             if($seen.Contains('catalog-dispose-start') -and $id -cne 'catalog-dispose-completed'){return Result 'invalid'}
             $seen.Add($id) | Out-Null; $records.Add($line)
         }

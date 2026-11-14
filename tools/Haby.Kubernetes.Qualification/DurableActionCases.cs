@@ -513,11 +513,13 @@ internal static class DurableActionCases
             using (var login = new DurableDeploymentPlanningTests.RuntimeAuthenticationLoginScenario(postgres))
             {
                 var scenario = await login.PrepareMixedAsync(Configuration, name, Preflight);
+                diagnostics.Mark(QualificationMilestone.MixedPreparationCompleted);
                 await using var services = ApplicationLoginScenario.Services(scenario.Connection, full: true, access: true, internalActions: true);
                 var preparation = DurableDeploymentPlanningTests.ConfigurationPreparation(services, rendering: Haby.PostgreSql.PostgreSqlConnectionRendering.CreateCatalog(),
                     formatters: Haby.PostgreSql.PostgreSqlConnectionRendering.FormatterCatalog()).Preparation;
                 var documents = await preparation.PrepareAsync(scenario.Commit, "qualifier", token);
                 if (documents.Failure is not null) throw new InvalidOperationException("Mixed login exact documents unavailable.");
+                diagnostics.Mark(QualificationMilestone.MixedDocumentsCompleted);
                 var secrets = services.GetRequiredService<ISecretStore>();
                 var handler = new InternalRuntimeIdentityAction(secrets, (connection, ct) => KubernetesClientFactory.CreateFixture(connection, secrets, [], ct));
                 var actions = DurableDeploymentPlanningTests.IdentityActions(services, handler);
@@ -525,10 +527,13 @@ internal static class DurableActionCases
                     preparation, actions, handler.Contract.Action).PrepareAsync(scenario.Commit, token);
                 if (identity.Count != 1 || identity[0].Result.Outcome != InternalActionOutcome.Confirmed)
                     throw new InvalidOperationException("Mixed login real runtime identity unavailable.");
+                diagnostics.Mark(QualificationMilestone.MixedIdentityCompleted);
                 var publication = new InternalRuntimePublication(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), preparation, actions, scenario.Time);
                 var request = (await publication.PreparationRequestsAsync(scenario.Commit, "qualifier", token)).Single();
                 await publication.ApplyAsync(request, token);
+                diagnostics.Mark(QualificationMilestone.MixedPublicationCompleted);
                 await RuntimeDeliveryCases.Run(admin, scenario, services, publication, request, true, token);
+                diagnostics.Mark(QualificationMilestone.MixedDeliveryCompleted);
             }
         }
         catch (Exception error) { primary = error; throw; }

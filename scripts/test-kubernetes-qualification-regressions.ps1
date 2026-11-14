@@ -6,6 +6,13 @@ $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
 foreach($scenario in @('success','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','harness-timeout','journal-invalid','journal-invalid-primary')){
     $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@()}
+    $syntheticTimeout=$null
+    if($scenario -eq 'harness-timeout'){
+        $syntheticTimeout=New-QualificationProcessFailure 'command-deadline' 180001
+        $syntheticTimeoutDiagnostic=Get-QualificationProcessDiagnostic $syntheticTimeout
+        if($syntheticTimeout.GetType() -ne [TimeoutException] -or $syntheticTimeoutDiagnostic.Kind -cne 'command-deadline' -or
+            $syntheticTimeoutDiagnostic.ElapsedMilliseconds -isnot [long] -or $syntheticTimeoutDiagnostic.ElapsedMilliseconds -ne 180001){throw 'Synthetic timeout fixture construction failed'}
+    }
     $runner={param($file,$arguments,$seconds)
         $state.Calls+=,$arguments
         $result=[pscustomobject]@{ExitCode=0;Output='';Error=''}
@@ -14,7 +21,7 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
             if($arguments[0] -eq 'run' -and $scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary')){
                 $path=Join-Path $state.Private 'diagnostic-progress.txt'
                 [IO.File]::WriteAllText($path, $(if($scenario -like 'journal-invalid*'){ "1 protected-JWT-config-sentinel`n" }else{ "1 durable-entry`n2 catalog-init-start`n" }))
-                if($scenario -eq 'harness-timeout'){throw (New-QualificationProcessFailure 'command-deadline' 180001)}
+                if($scenario -eq 'harness-timeout'){throw $syntheticTimeout}
                 if($scenario -eq 'journal-invalid-primary'){$result.ExitCode=17}
             }
             $result.Output='synthetic-sdk/harness';return $result
@@ -134,10 +141,10 @@ try{
     if((Read-QualificationJournal $journalRoot).Status -cne 'empty'){throw 'Empty journal not explicit'}
     $rejected=$false;try{Initialize-QualificationJournal $journalRoot}catch{$rejected=$true}
     if(!$rejected){throw 'CreateNew journal overwrote an existing file'}
-    $valid="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 durable-suite-start`n7 namespace-cleanup-start`n8 namespace-absence-confirmed`n9 catalog-dispose-start`n10 catalog-dispose-completed`n"
+    $valid="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 durable-suite-start`n7 mixed-delivery-start`n8 mixed-preparation-completed`n9 mixed-documents-completed`n10 mixed-identity-completed`n11 mixed-publication-completed`n12 mixed-delivery-completed`n13 namespace-cleanup-start`n14 namespace-absence-confirmed`n15 catalog-dispose-start`n16 catalog-dispose-completed`n"
     [IO.File]::WriteAllText($journal,$valid)
     $parsed=Read-QualificationJournal $journalRoot
-    if($parsed.Status -cne 'valid' -or $parsed.Records.Count -ne 10){throw 'Valid journal rejected'}
+    if($parsed.Status -cne 'valid' -or $parsed.Records.Count -ne 16){throw 'Valid journal rejected'}
     $published=@(Format-QualificationJournal $parsed)
     if($published -match '^PASS |^Harness: PASS$'){throw 'Progress became a passing gate row'}
     foreach($case in @(
@@ -145,6 +152,8 @@ try{
         @{Text="1 durable-entry`n3 catalog-init-start`n";Status='invalid'},
         @{Text="1 durable-entry`n2 catalog-dispose-completed`n";Status='invalid'},
         @{Text="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 namespace-cleanup-start`n7 catalog-dispose-start`n8 namespace-absence-confirmed`n";Status='invalid'},
+        @{Text="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 durable-suite-start`n7 mixed-delivery-start`n8 mixed-documents-completed`n";Status='invalid'},
+        @{Text="1 durable-entry`n2 catalog-init-start`n3 catalog-init-completed`n4 namespace-create-start`n5 namespace-create-completed`n6 durable-suite-start`n7 mixed-delivery-start`n8 namespace-cleanup-start`n9 mixed-preparation-completed`n";Status='invalid'},
         @{Text="1 durable-entry`n2 protected-JWT-SQL-config-argument-sentinel`n";Status='invalid'},
         @{Text=('x'*16385);Status='overflow'},
         @{Text=("1 durable-entry`n"*257);Status='overflow'}
