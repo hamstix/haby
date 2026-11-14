@@ -2102,6 +2102,64 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.WorkloadConfigurationRecipientRow", b =>
+                {
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("Component")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("component");
+
+                    b.Property<string>("Workload")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("workload");
+
+                    b.Property<string>("Document")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("document");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
+                    b.Property<Guid>("CheckpointId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("checkpoint_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("InputFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("input_fingerprint");
+
+                    b.Property<Guid>("RevisionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("revision_id");
+
+                    b.HasKey("DeploymentId", "Generation", "Component", "Workload", "Document");
+
+                    b.HasIndex("CheckpointId");
+
+                    b.HasIndex("RevisionId");
+
+                    b.ToTable("workload_configuration_recipients", (string)null);
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ApplicationDeploymentRow", b =>
                 {
                     b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
@@ -2591,6 +2649,28 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.SecretRow", null)
                         .WithMany()
                         .HasForeignKey("SecretId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.WorkloadConfigurationRecipientRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.GenerationStageCheckpointRow", null)
+                        .WithMany()
+                        .HasForeignKey("CheckpointId")
+                        .HasPrincipalKey("Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ConfigurationDocumentRow", null)
+                        .WithMany()
+                        .HasForeignKey("RevisionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

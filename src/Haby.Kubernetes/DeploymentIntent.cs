@@ -39,25 +39,13 @@ public static class DeploymentIntents
     public static DeploymentIntent Prepare(EffectiveWorkload workload, Guid owner, Guid managedWorkload,
         long generation, Guid operation, DeploymentReceipt? previous = null)
     {
-        var d = workload.Declaration; var s = workload.Settings; var p = workload.Placement;
-        Need(d.Environment.Count == 0 && d.Ports.Count == 0 && d.Volumes.Count == 0 && d.Mounts.IsEmpty &&
-            d.Routes.IsEmpty && d.Documents.IsEmpty && d.Probes == new Probes(null, null, null) &&
-            s.Resources is null && d.Overrides.Resources is null && p.Declaration.Settings.Resources is null &&
-            s.Service != true && s.HeadlessService != true && s.Ingress?.Enabled != true,
-            "unsupported-fields");
-        Need(workload.Objects.Length == 1, "unsupported-objects");
+        Need(workload.Declaration.Documents.IsEmpty, "unsupported-fields");
+        ValidatePreparation(workload);
+        var d = workload.Declaration; var p = workload.Placement;
         var obj = workload.Objects[0]; var provider = workload.Provider;
-        Need(obj.Group == "apps" && obj.Kind == "Deployment" && obj.Provider == provider.Instance &&
-            obj.Namespace == p.Declaration.Namespace && p.Provider == provider.Instance && p.Configuration == provider.Configuration &&
-            p.Implementation == provider.Implementation && p.Environment == provider.Environment && p.Alias == provider.Alias &&
-            provider.Input == workload.Input, "exact-input");
         var binding = new KubernetesBinding(provider.Environment.ToString()!, provider.Instance.ToString(),
             provider.Configuration.Value, provider.Implementation.Value);
-        var strategy = s.Strategy ?? new RolloutStrategy("RollingUpdate", new(25, true), new(25, true));
-        string? Bound(RolloutBound? b) => b is null ? null : b.Value.ToString(CultureInfo.InvariantCulture) + (b.Percent ? "%" : "");
-        var target = new DeploymentProjection(d.ContainerName, workload.ImageReference, s.Replicas ?? 1, strategy.Type,
-            Bound(strategy.MaxSurge), Bound(strategy.MaxUnavailable), s.MinReadySeconds ?? 0, s.RolloutSeconds ?? 600,
-            p.Declaration.NodeSelector.ToImmutableSortedDictionary(StringComparer.Ordinal), p.Declaration.ImagePullSecrets.Order(StringComparer.Ordinal).ToImmutableArray());
+        var target = ProjectionFor(workload);
         if (previous is not null)
         {
             Validate(previous);
@@ -69,6 +57,40 @@ public static class DeploymentIntents
             p.Declaration.Reference.Name.Value, p.Declaration.Reference.Revision, obj.Namespace, obj.Name, owner,
             managedWorkload, generation, operation, target, previous?.Uid, previous?.Projection);
         Validate(intent); return intent;
+    }
+
+    private static DeploymentProjection ProjectionFor(EffectiveWorkload workload)
+    {
+        var d = workload.Declaration; var s = workload.Settings; var p = workload.Placement;
+        var strategy = s.Strategy ?? new RolloutStrategy("RollingUpdate", new(25, true), new(25, true));
+        string? Bound(RolloutBound? b) => b is null ? null : b.Value.ToString(CultureInfo.InvariantCulture) + (b.Percent ? "%" : "");
+        return new DeploymentProjection(d.ContainerName, workload.ImageReference, s.Replicas ?? 1, strategy.Type,
+            Bound(strategy.MaxSurge), Bound(strategy.MaxUnavailable), s.MinReadySeconds ?? 0, s.RolloutSeconds ?? 600,
+            p.Declaration.NodeSelector.ToImmutableSortedDictionary(StringComparer.Ordinal), p.Declaration.ImagePullSecrets.Order(StringComparer.Ordinal).ToImmutableArray());
+    }
+
+    // Validates every supported effective field while deliberately granting no write intent.
+    internal static void ValidatePreparation(EffectiveWorkload workload)
+    {
+        var d = workload.Declaration; var s = workload.Settings; var p = workload.Placement;
+        Need(d.Environment.Count == 0 && d.Ports.Count == 0 && d.Volumes.Count == 0 && d.Mounts.IsEmpty &&
+            d.Routes.IsEmpty && d.Probes == new Probes(null, null, null) &&
+            s.Resources is null && d.Overrides.Resources is null && p.Declaration.Settings.Resources is null &&
+            s.Service != true && s.HeadlessService != true && s.Ingress?.Enabled != true,
+            "unsupported-fields");
+        Need(workload.Objects.Length == (d.Documents.IsEmpty ? 1 : 2), "unsupported-objects");
+        if (!d.Documents.IsEmpty)
+        {
+            var account = workload.Objects[1];
+            Need(account.Group == "" && account.Kind == "ServiceAccount" && account.Provider == workload.Provider.Instance &&
+                account.Namespace == p.Declaration.Namespace, "unsupported-objects");
+        }
+        var obj = workload.Objects[0]; var provider = workload.Provider;
+        Need(obj.Group == "apps" && obj.Kind == "Deployment" && obj.Provider == provider.Instance &&
+            obj.Namespace == p.Declaration.Namespace && p.Provider == provider.Instance && p.Configuration == provider.Configuration &&
+            p.Implementation == provider.Implementation && p.Environment == provider.Environment && p.Alias == provider.Alias &&
+            provider.Input == workload.Input, "exact-input");
+        Projection(ProjectionFor(workload));
     }
 
     public static string Encode(DeploymentIntent intent) { Validate(intent); return JsonSerializer.Serialize(intent, KernelJson.Default.DeploymentIntent); }

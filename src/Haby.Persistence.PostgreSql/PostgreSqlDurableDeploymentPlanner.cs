@@ -137,25 +137,16 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), reference, providers);
-        // Capture the complete configuration before projecting the Resource-stage view.
+        // Describe supported Resource producers before capturing the complete configuration.
+        // Only graph planning uses the final Resource-stage view; accepted inputs stay complete.
         DurablePlanStatus admitted = DurablePlanStatus.Planned;
         var resourceInputs = inputs;
         try
         {
-            if (internalEffects && spec.Components.Values.Any(c => c.Bindings.Count != 0 || c.Documents.Count != 0))
-                return new(DurablePlanStatus.UnsupportedShape);
-            if (internalEffects)
-            {
-                var initial = await ConfigurationPlanningCapture.CaptureAsync(context, new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering);
-                if (initial.Snapshot is null) return new(DurablePlanStatus.ConfigurationRefused, ConfigurationReport: initial.Expansion);
-                inputs = inputs with { Configuration = initial.Snapshot };
-                resourceInputs = InternalResourceStage.Project(inputs);
-            }
-            if (internalEffects && !await AdmitInternalWorkloadsAsync(context, inputs, revision.ApplicationVersion.Value, handlers ?? [], cancellationToken))
-                return new(DurablePlanStatus.UnsupportedShape);
-            admitted = emptyStage ? DurablePlanStatus.Planned : await AdmitAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow!, resourceInputs, cancellationToken);
+            if (internalEffects) resourceInputs = InternalResourceStage.Structure(inputs);
+            admitted = emptyStage ? DurablePlanStatus.Planned : await AdmitAsync(context, internalEffects ? resourceInputs.Providers.Declaration.Spec : spec, revisionRow!, resourceInputs, cancellationToken);
             var producers = !emptyStage && admitted == DurablePlanStatus.Planned
-                ? await DescribeProducersAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow!, resourceInputs, cancellationToken) : [];
+                ? await DescribeProducersAsync(context, internalEffects ? resourceInputs.Providers.Declaration.Spec : spec, revisionRow!, resourceInputs, cancellationToken) : [];
             var configuration = await ConfigurationPlanningCapture.CaptureAsync(context,
                 new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering, producers: producers);
             if (configuration.Snapshot is null)
@@ -173,10 +164,12 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             }
             if (admitted != DurablePlanStatus.Planned) return new(admitted);
             inputs = inputs with { Configuration = configuration.Snapshot };
+            if (internalEffects && !await AdmitInternalWorkloadsAsync(context, inputs, revision.ApplicationVersion.Value, handlers ?? [], cancellationToken))
+                return new(DurablePlanStatus.UnsupportedShape);
         }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         resourceInputs = internalEffects ? InternalResourceStage.Project(inputs) : inputs;
-        var resourceSpec = internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec;
+        var resourceSpec = internalEffects ? resourceInputs.Providers.Declaration.Spec : spec;
         DurableOperationGraph graph;
         try
         {

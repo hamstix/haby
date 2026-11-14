@@ -12,11 +12,10 @@ internal static class InternalResourceStage
         inputs.Configuration is { } configuration && configuration.Manifest.Equals(inputs.Providers.Declaration) &&
         configuration.Manifest.Spec.Resources.Count == 0 &&
         configuration.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count > 0) &&
-        configuration.Manifest.Spec.Components.Values.All(c => c.Bindings.Count == 0 && c.Documents.Count == 0) &&
         inputs.Providers.Entries.Keys.All(x => x is ProviderInput.Workload) &&
         graph.Baseline is null && graph.Nodes.Count == 0 && graph.ReusedResources.Count == 0 && graph.RetainedResources.Count == 0;
 
-    internal static DurablePlanningInputs Project(DurablePlanningInputs inputs)
+    internal static DurablePlanningInputs Structure(DurablePlanningInputs inputs)
     {
         inputs.Validate();
         var original = inputs.Providers.Declaration;
@@ -27,15 +26,21 @@ internal static class InternalResourceStage
                 spec.Exports.ToImmutableDictionary(), spec.Components.ToImmutableDictionary(x => x.Key,
                     x => new NormalizedComponent(x.Value.DisplayName, x.Value.Labels.ToImmutableDictionary(),
                         x.Value.Bindings.ToImmutableDictionary(), x.Value.Documents.ToImmutableDictionary(), []))));
-        var frozen = inputs.Configuration ?? throw new InvalidDataException("Configuration snapshot unavailable.");
-        var configuration = ConfigurationPlanningSnapshot.PrepareCore(inputs.Revision, manifest,
-            frozen.Scopes, frozen.Profiles, frozenPins: frozen.RenderPins).Snapshot
-            ?? throw new InvalidDataException("Resource-stage configuration unavailable.");
         return inputs with
         {
-            Configuration = configuration,
+            Configuration = null,
             Providers = new(manifest, inputs.Environment,
             inputs.Providers.Entries.Values.Where(x => x.Input is ProviderInput.Resource))
         };
     }
+    internal static DurablePlanningInputs Project(DurablePlanningInputs inputs)
+    {
+        var structural = Structure(inputs);
+        var frozen = inputs.Configuration ?? throw new InvalidDataException("Configuration snapshot unavailable.");
+        var configuration = ConfigurationPlanningSnapshot.PrepareCore(inputs.Revision, structural.Providers.Declaration,
+            frozen.Scopes, frozen.Profiles, frozenPins: frozen.RenderPins).Snapshot
+            ?? throw new InvalidDataException("Resource-stage configuration unavailable.");
+        return structural with { Configuration = configuration };
+    }
+
 }

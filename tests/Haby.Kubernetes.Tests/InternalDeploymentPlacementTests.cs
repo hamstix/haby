@@ -35,12 +35,26 @@ public sealed class InternalDeploymentPlacementTests
         foreach (var context in contexts)
             Assert.Equal("name.collision", Assert.Throws<WorkloadContractException>(() => handler.Prepare(context)).Code);
     }
-    private static InternalActionContext[] Contexts(bool distinct, bool collision = false)
+    [Fact]
+    public void Configured_workload_is_eligible_for_documents_but_never_an_executable_intent()
+    {
+        var context = Contexts(false, configured: true)[0];
+        IInternalActionHandler handler = new InternalDeploymentAction(new NoSecrets());
+        Assert.Equal(new[] { ManifestLocalId.Create("settings") }, handler.PreparationDocuments(context));
+        Assert.Equal("unsupported-fields", Assert.Throws<WorkloadContractException>(() => handler.Prepare(context)).Code);
+    }
+
+    private static InternalActionContext[] Contexts(bool distinct, bool collision = false, bool configured = false)
     {
         var envelope = JsonNode.Parse("""{"applicationVersion":"v1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"orders"},"spec":{"components":{"api":{"workloads":{"main":{"type":"kubernetes.workload/v1alpha1","providerRef":"kubernetes.primary","properties":{"image":{"reference":"registry.example/app:v1"}}}}},"worker":{"workloads":{"main":{"type":"kubernetes.workload/v1alpha1","providerRef":"kubernetes.primary","properties":{"image":{"reference":"registry.example/worker:v1"}}}}}}}}}"""u8)!;
         if (distinct) envelope["manifest"]!["spec"]!["components"]!["worker"]!["workloads"]!["main"]!["placementRef"] = "worker";
         if (collision) foreach (var component in new[] { "api", "worker" })
             envelope["manifest"]!["spec"]!["components"]![component]!["workloads"]!["main"]!["properties"]!["nameOverride"] = "shared";
+        if (configured)
+        {
+            envelope["manifest"]!["spec"]!["components"]!["api"]!["documents"] = JsonNode.Parse("""{"settings":{"fileName":"settings.json","format":"json","template":{}}}"""u8);
+            envelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["configuration"] = JsonNode.Parse("""{"documents":["settings"]}"""u8);
+        }
         var manifest = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Encoding.UTF8.GetBytes(envelope.ToJsonString()),
             new([], [KubernetesContract.Definition], [], []))).Candidate.Declaration;
         var environment = EnvironmentRecordId.New(); var provider = ProviderInstanceId.New(); var revision = ProviderConfigurationRevisionNumber.Create(1);

@@ -4,6 +4,20 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class FixtureLayoutTests
 {
+    [Fact]
+    public void Mixed_configuration_fixture_registers_exact_preflight_for_every_declared_Provider_without_io()
+    {
+        // Exercise the actual mixed fixture composition. No server/secret/API operation is invoked.
+        using var services = ApplicationLoginScenario.Services("Host=127.0.0.1;Port=1;Database=not_opened;Username=fixture",
+            full: true, access: true, internalActions: true);
+        var registry = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<Haby.Application.ProviderPreflightRegistry>(services);
+        Assert.IsType<Haby.PostgreSql.PostgreSqlPreflightHandler>(registry.Find(new(Haby.PostgreSql.PostgreSqlProviderConfigurationCodec.Kind,
+            Haby.PostgreSql.PostgreSqlProviderConfigurationCodec.Shape, Haby.PostgreSql.PostgreSqlDatabaseProvisioner.ImplementationId)));
+        Assert.IsType<Haby.Tests.InternalKubernetesFixturePreflight>(registry.Find(new(Haby.Kubernetes.KubernetesProviderConfigurationCodec.Kind,
+            Haby.Kubernetes.KubernetesProviderConfigurationCodec.Shape, Haby.Kubernetes.KubernetesProviderConfigurationCodec.Implementation)));
+    }
+
     [Theory]
     [InlineData(null, 4, 2)]
     [InlineData(null, 2, 1)]

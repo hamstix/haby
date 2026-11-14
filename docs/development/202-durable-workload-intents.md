@@ -16,8 +16,9 @@ generation models; no public flag or Host registration selects it. The path
 requires a fully applied Resource-bearing baseline, a real imported mixed
 declaration and unchanged reusable Resources. [Issue #206](206-workload-only-empty-resource-stage.md) also admits
 initial zero-Resource Workload-only declarations with ExpectedAbsence and an explicit
-empty checkpoint. New/retired Resources and configuration documents/Bindings remain
-unsupported. The complete manifest, configuration, exact Provider set,
+empty checkpoint. New/retired Resources remain unsupported. [Issue #208](208-preapplied-workload-configuration.md)
+adds preparation of selected ordinary static/Profile documents and existing typed
+Binding outputs while configured Deployment execution remains closed. The complete manifest, configuration, exact Provider set,
 Placement payloads and fingerprint remain frozen. Resource planning uses a
 derived Resource-stage view; it never creates Workload Resource nodes.
 

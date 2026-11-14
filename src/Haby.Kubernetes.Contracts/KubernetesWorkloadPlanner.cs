@@ -39,6 +39,19 @@ public static class KubernetesWorkloadPlanner
     public static ImmutableArray<EffectiveWorkload> Resolve(NormalizedApplicationManifest manifest, ApplicationVersion version,
         ExactProviderResolutionSet providers, PlacementInputs placements, string? expectedNamespace = null)
     {
+        return ResolveCore(manifest, version, providers, placements, expectedNamespace, null);
+    }
+
+    internal static ImmutableArray<EffectiveWorkload> ResolvePreparation(NormalizedApplicationManifest manifest, ApplicationVersion version,
+        ExactProviderResolutionSet providers, PlacementInputs placements, ConfigurationPlanningSnapshot configuration)
+    {
+        Require(configuration.Manifest.Equals(manifest), "configuration.declaration-mismatch");
+        return ResolveCore(manifest, version, providers, placements, null, configuration);
+    }
+
+    private static ImmutableArray<EffectiveWorkload> ResolveCore(NormalizedApplicationManifest manifest, ApplicationVersion version,
+        ExactProviderResolutionSet providers, PlacementInputs placements, string? expectedNamespace, ConfigurationPlanningSnapshot? configuration)
+    {
         Require(providers.Declaration.Equals(manifest), "provider.declaration-mismatch");
         var results = ImmutableArray.CreateBuilder<EffectiveWorkload>();
         var names = new HashSet<ObjectName>();
@@ -59,7 +72,8 @@ public static class KubernetesWorkloadPlanner
                 var selected = placement.Declaration;
                 Require(expectedNamespace is null || expectedNamespace == selected.Namespace, "placement.namespace-mismatch");
                 var declaration = Decode(workload);
-                foreach (var document in declaration.Documents) Require(component.Documents.ContainsKey(document), "configuration.document-reference");
+                foreach (var document in declaration.Documents) Require(configuration is null ? component.Documents.ContainsKey(document) :
+                    configuration.Layouts.Single(x => x.Component == componentId).Documents.Any(x => x.Definition.Id == document), "configuration.document-reference");
                 var settings = Effective(selected.Settings, declaration.Overrides);
                 Require(settings.Ingress!.Enabled == false || settings.Service == true && declaration.Routes.Length > 0, "ingress.routes-service");
                 Require(settings.Service != true && settings.HeadlessService != true || declaration.Ports.Count > 0, "service.ports");

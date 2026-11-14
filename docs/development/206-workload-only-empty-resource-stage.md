@@ -29,9 +29,11 @@ administrative secret authority through the existing client boundary.
 Supported fields are the existing Deployment kernel subset: explicit/composed image,
 stable main container name, supported replicas/strategy/rollout settings,
 nodeSelector and references to existing imagePullSecrets. Effective env, ports,
-probes, volumes/mounts, resources, routes, configuration documents and companion
-objects remain unsupported. Bindings, Component documents, Parameters and Exports
-are not admitted by this bounded path. Multiple supported Workloads retain the
+probes, volumes/mounts, resources, routes and companion objects remain unsupported
+for execution. [Issue #208](208-preapplied-workload-configuration.md) separately admits
+ordinary static/Profile documents and existing supported Binding configuration for
+preparation; selected configuration still refuses executable Deployment intents.
+Parameters and Exports remain unsupported. Multiple supported Workloads retain the
 existing full-generation resolver and exact per-subject intent semantics.
 
 ## Empty ResourcesReady is evidence

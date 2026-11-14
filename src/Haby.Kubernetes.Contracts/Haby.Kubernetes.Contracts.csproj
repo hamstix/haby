@@ -4,4 +4,5 @@
     <EmbeddedResource Include="..\..\schemas\kubernetes-workload.v1alpha1.json" LogicalName="Haby.Kubernetes.Contracts.workload.json" />
     <EmbeddedResource Include="..\..\schemas\kubernetes-placement.v1alpha1.json" LogicalName="Haby.Kubernetes.Contracts.placement.json" />
   </ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="Haby.Kubernetes" /></ItemGroup>
 </Project>
