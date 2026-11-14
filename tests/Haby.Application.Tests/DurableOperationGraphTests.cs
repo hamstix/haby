@@ -125,7 +125,7 @@ public sealed class DurableOperationGraphTests
             "self" => [Node("a", "a")],
             _ => []
         };
-        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph(nodes));
+        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph(nodes).ValidateReferences(Inputs));
     }
 
     [Fact]

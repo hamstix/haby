@@ -65,11 +65,11 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
     public ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId,
         string actorId, CancellationToken cancellationToken) => CreatePlanCoreAsync(changeSetId, actorId, false, cancellationToken);
 
-    internal ValueTask<DurablePlanResult> CreateInternalPlanAsync(DeploymentChangeSetId id, string actor, CancellationToken token) =>
-        CreatePlanCoreAsync(id, actor, true, token);
+    internal ValueTask<DurablePlanResult> CreateInternalPlanAsync(DeploymentChangeSetId id, string actor, CancellationToken token, IReadOnlyList<IInternalActionHandler>? handlers = null) =>
+        CreatePlanCoreAsync(id, actor, true, token, handlers);
 
     private async ValueTask<DurablePlanResult> CreatePlanCoreAsync(DeploymentChangeSetId changeSetId, string actorId,
-        bool internalEffects, CancellationToken cancellationToken)
+        bool internalEffects, CancellationToken cancellationToken, IReadOnlyList<IInternalActionHandler>? handlers = null)
     {
         ArgumentNullException.ThrowIfNull(changeSetId);
         ValidateActor(actorId);
@@ -103,27 +103,39 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
         if (!internalEffects && !DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
-        if (internalEffects && (baseline is null || !spec.Components.Values.Any(x => x.Workloads.Count > 0)))
+        if (internalEffects && (!spec.Components.Values.Any(x => x.Workloads.Count > 0) ||
+            baseline is null && (!row.ExpectedAbsence || spec.Resources.Count != 0) || baseline is not null && spec.Resources.Count == 0))
             return new(DurablePlanStatus.UnsupportedShape);
-        var alias = DurableActionAdmission.SingleAlias(spec);
-        if (alias is null) return new(DurablePlanStatus.UnsupportedShape);
+        var emptyStage = internalEffects && baseline is null && spec.Resources.Count == 0;
+        ProviderConfigurationRevisionRow? revisionRow = null;
+        ExactProviderResolution[] resourceProviders = [];
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
-        await PostgreSqlResourceNamingStore.LockAsync(context, row.EnvironmentRecordId, alias.Value, true, cancellationToken);
-        var resolved = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
-        if (resolved is null) return new(DurablePlanStatus.AliasNotResolved);
-        if (resolved.Alias != alias) return new(DurablePlanStatus.PlanInputUnavailable);
-        var revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.ProviderInstanceId == Guid.Parse(resolved.Binding.InstanceId.ToString()) &&
-            item.RevisionNumber == resolved.Binding.RevisionNumber.Value &&
-            item.EnvironmentRecordId == row.EnvironmentRecordId && item.IsSealed, cancellationToken);
-        if (revisionRow is null || revisionRow.ImplementationId != resolved.ImplementationId)
-            return new(DurablePlanStatus.ProviderRevisionUnavailable);
-        ResourceNamingSnapshot naming;
-        try { naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot; }
+        if (!emptyStage)
+        {
+            var alias = DurableActionAdmission.SingleAlias(spec);
+            if (alias is null) return new(DurablePlanStatus.UnsupportedShape);
+            await PostgreSqlResourceNamingStore.LockAsync(context, row.EnvironmentRecordId, alias.Value, true, cancellationToken);
+            var resolved = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
+            if (resolved is null) return new(DurablePlanStatus.AliasNotResolved);
+            if (resolved.Alias != alias) return new(DurablePlanStatus.PlanInputUnavailable);
+            revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
+                item.ProviderInstanceId == Guid.Parse(resolved.Binding.InstanceId.ToString()) &&
+                item.RevisionNumber == resolved.Binding.RevisionNumber.Value &&
+                item.EnvironmentRecordId == row.EnvironmentRecordId && item.IsSealed, cancellationToken);
+            if (revisionRow is null || revisionRow.ImplementationId != resolved.ImplementationId)
+                return new(DurablePlanStatus.ProviderRevisionUnavailable);
+            ResourceNamingSnapshot naming;
+            try { naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot; }
+            catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
+            resourceProviders = revision.Declaration.Spec.Resources.Select(r => new ExactProviderResolution(new ProviderInput.Resource(r.Key), environmentId, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber, ProviderImplementationId.Create(resolved.ImplementationId), ResourceNamingCodec.Exact(naming))).ToArray();
+        }
+        ExactProviderResolutionSet providers;
+        try
+        {
+            providers = internalEffects ? await CaptureInternalProvidersAsync(context, revision.Declaration, environmentId, resourceProviders, cancellationToken)
+                : new ExactProviderResolutionSet(revision.Declaration, environmentId, resourceProviders);
+        }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
-        var resourceProviders = revision.Declaration.Spec.Resources.Select(r => new ExactProviderResolution(new ProviderInput.Resource(r.Key), environmentId, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber, ProviderImplementationId.Create(resolved.ImplementationId), ResourceNamingCodec.Exact(naming))).ToArray();
-        var providers = internalEffects ? await CaptureInternalProvidersAsync(context, revision.Declaration, environmentId, resourceProviders, cancellationToken)
-            : new ExactProviderResolutionSet(revision.Declaration, environmentId, resourceProviders);
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), reference, providers);
         // Capture the complete configuration before projecting the Resource-stage view.
         DurablePlanStatus admitted = DurablePlanStatus.Planned;
@@ -139,9 +151,11 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
                 inputs = inputs with { Configuration = initial.Snapshot };
                 resourceInputs = InternalResourceStage.Project(inputs);
             }
-            admitted = await AdmitAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow, resourceInputs, cancellationToken);
-            var producers = admitted == DurablePlanStatus.Planned
-                ? await DescribeProducersAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow, resourceInputs, cancellationToken) : [];
+            if (internalEffects && !await AdmitInternalWorkloadsAsync(context, inputs, revision.ApplicationVersion.Value, handlers ?? [], cancellationToken))
+                return new(DurablePlanStatus.UnsupportedShape);
+            admitted = emptyStage ? DurablePlanStatus.Planned : await AdmitAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow!, resourceInputs, cancellationToken);
+            var producers = !emptyStage && admitted == DurablePlanStatus.Planned
+                ? await DescribeProducersAsync(context, internalEffects ? resourceInputs.Configuration!.Manifest.Spec : spec, revisionRow!, resourceInputs, cancellationToken) : [];
             var configuration = await ConfigurationPlanningCapture.CaptureAsync(context,
                 new(environmentId, inputs.EnvironmentKey), reference, revision.Declaration, cancellationToken, _rendering, producers: producers);
             if (configuration.Snapshot is null)
@@ -166,8 +180,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         DurableOperationGraph graph;
         try
         {
-            graph = baseline is null ? await PlanGraphAsync(context, resourceSpec, revisionRow, resourceInputs, cancellationToken) :
-                await ReuseGraphAsync(context, baseline, resourceSpec, revisionRow, resourceInputs, cancellationToken)
+            graph = emptyStage ? new DurableOperationGraph([]) : baseline is null ? await PlanGraphAsync(context, resourceSpec, revisionRow!, resourceInputs, cancellationToken) :
+                await ReuseGraphAsync(context, baseline, resourceSpec, revisionRow!, resourceInputs, cancellationToken)
                     ?? throw new NotSupportedException();
         }
         catch (NotSupportedException) { return new(DurablePlanStatus.UnsupportedShape); }

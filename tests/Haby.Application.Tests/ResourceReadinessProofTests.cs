@@ -9,7 +9,8 @@ public sealed class ResourceReadinessProofTests
     public void Empty_resource_proof_requires_zero_declarations_operations_and_reuse()
     {
         Assert.True(ResourceReadinessCoverage.IsComplete([], [], []));
-        Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([]));
+        var empty = new DurableOperationGraph([]);
+        Assert.Empty(DurableOperationGraphCodec.Decode(DurableOperationGraphCodec.Encode(empty)).Nodes);
         Assert.False(ResourceReadinessCoverage.IsComplete(["database"], [], []));
         Assert.False(ResourceReadinessCoverage.IsComplete([], ["database"], []));
         Assert.False(ResourceReadinessCoverage.IsComplete([], [], ["database"]));

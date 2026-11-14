@@ -149,11 +149,11 @@ summary. `ResourcesReady` does not claim Workload readiness. No stage, wait or
 resume commands are added; the CLI remains API-only and Native AOT.
 
 The pure coverage policy permits an empty Resource proof only for zero declared
-Resources, zero Resource operations and zero reuse requirements. This is a pure
-preparatory rule. Empty executable graphs remain refused, and the central
-completion boundary explicitly refuses declarations containing any Workload.
-There is no dummy Resource, synthetic successful operation or Workload-only/mixed
-production admission.
+Resources, zero Resource operations and zero reuse requirements. The [internal Workload-only path](206-workload-only-empty-resource-stage.md)
+now binds this case to accepted full manifest/graph and initial Plan/Commit authority.
+An empty structural graph alone grants no execution permission. Public Resource-only
+completion still refuses Workloads; internal checkpoints never advance Applied.
+There is no dummy Resource or synthetic successful operation.
 
 ## Current-alpha catalog boundary
 

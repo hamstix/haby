@@ -74,16 +74,20 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
 
 /// <summary>Friend composition only. Uses the same Plan/Commit pipeline, never caller snapshots.</summary>
 internal sealed class InternalAcceptedGenerationBuilder(PostgreSqlDurableDeploymentPlanner planner,
-    PostgreSqlDurableDesiredStateCommitter committer)
+    PostgreSqlDurableDesiredStateCommitter committer, IReadOnlyList<IInternalActionHandler>? handlers = null)
 {
     internal async ValueTask<DurableChangeSetCommit> AcceptForEffectAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, DeploymentGeneration expected, string actor, CancellationToken token)
+        => await AcceptForEffectAsync(environment, application, revision, new DeploymentPrecondition.ExpectedGeneration(expected), actor, token);
+
+    internal async ValueTask<DurableChangeSetCommit> AcceptForEffectAsync(EnvironmentRecordId environment,
+        ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition, string actor, CancellationToken token)
     {
-        var change = await planner.CreateChangeSetAsync(environment, application, revision, new DeploymentPrecondition.ExpectedGeneration(expected), actor, token);
+        var change = await planner.CreateChangeSetAsync(environment, application, revision, precondition, actor, token);
         if (change.ChangeSet is null) throw new InvalidDataException("Internal ChangeSet refused.");
-        var plan = await planner.CreateInternalPlanAsync(change.ChangeSet.Id, actor, token);
+        var plan = await planner.CreateInternalPlanAsync(change.ChangeSet.Id, actor, token, handlers);
         if (plan.Plan is null) throw new InvalidDataException("Internal Plan refused.");
-        var commit = await committer.CommitInternalAsync(change.ChangeSet.Id, plan.Plan.Id, actor, token);
+        var commit = await committer.CommitInternalAsync(change.ChangeSet.Id, plan.Plan.Id, actor, token, handlers);
         return commit is DurableCommitResult.Committed accepted ? accepted.Commit : throw new InvalidDataException("Internal Commit refused.");
     }
 }

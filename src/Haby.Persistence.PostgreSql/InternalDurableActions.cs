@@ -40,7 +40,7 @@ internal sealed partial class InternalDurableActions(
             // Metadata and exact handler checks precede Resource material preflight.
             await using (var preflight = await contexts.CreateDbContextAsync(token))
             {
-                var source = await SourceAsync(preflight, accepted, token);
+                var source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
                 var candidate = await ContextAsync(preflight, source, key, subject, action, Guid.CreateVersion7(), Guid.CreateVersion7(), token);
                 var proposed = candidate.Handler.Prepare(candidate.Context);
                 if (!candidate.Handler.Validate(candidate.Context, proposed)) throw new InvalidDataException("Action preparation refused.");
@@ -52,7 +52,7 @@ internal sealed partial class InternalDurableActions(
                         ?? throw new InvalidDataException("Resource-stage evidence unavailable.");
                     await using var tx = await preflight.Database.BeginTransactionAsync(token);
                     await DurableAggregateCompletion.LockAsync(preflight, source.DeploymentId, token);
-                    source = await SourceAsync(preflight, accepted, token);
+                    source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
                     if (!await DurableAggregateCompletion.TryAdvanceAsync(preflight, source.DeploymentId, source.Generation, token,
                         resourceOutputs, resourceAdmission, typedCodecs, prepared, internalResourceStage: true)) throw new InvalidDataException("Resource-stage proof refused.");
                     token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
@@ -62,7 +62,7 @@ internal sealed partial class InternalDurableActions(
             await using var transaction = await db.Database.BeginTransactionAsync(token);
             var deployment = Guid.Parse(key.DeploymentId.ToString());
             await DurableAggregateCompletion.LockAsync(db, deployment, token);
-            var generation = await SourceAsync(db, accepted, token);
+            var generation = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
             var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true)
                 ?? throw new InvalidDataException("Resource-stage proof unavailable.");
             var old = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.RequestId == request, token);
