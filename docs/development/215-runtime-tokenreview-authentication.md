@@ -178,9 +178,13 @@ immediate deletion guarantee.
 
 Mandatory solution, both full PostgreSQL suites, both published Native AOT targets,
 qualification/kernel/durable, formatting and diff gates remain required. The
-separate rehearsal with at least 150 simultaneous clients and two documents each
-is still required before later runtime-delivery capability acceptance. This slice
-does not claim that proof, deliver documents, inject projected volumes into managed
+separate real-cluster rehearsal with at least 150 simultaneous clients and two
+mandatory documents each is deferred until after P4 under the explicit user-approved
+2026-11-14 scheduling supersession in [issue #217](https://github.com/hamstix/haby/issues/217).
+It is not a gate for P3 completion or current runtime-delivery acceptance. The
+rehearsal remains pending; capacity at that load is unverified and must not be
+advertised as demonstrated. This slice does not claim that proof, deliver documents,
+inject projected volumes into managed
 Deployments, change static P2 grants, implement #209, or change AppliedGeneration.
 
 Sources: [ADR-050](../adr/0050-kubernetes-runtime-identity-and-configuration-publication.md),

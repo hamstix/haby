@@ -126,8 +126,12 @@ evidence limits; simplifying the procedure does not make failed checks successfu
 Keep mandatory functional coverage. Run heavy infrastructure fault/recovery and
 load qualification when the relevant mechanism changes and periodically, with an
 explicit trigger/ownership map. Fast deterministic infrastructure checks remain
-regular. ADR-055's real Kubernetes mass-start qualification of at least 150 clients
-remains required at capability acceptance and after material runtime-path changes.
+regular. Under the user-approved 2026-11-14 supersession in ADR-055 section 17,
+the separate real Kubernetes mass-start qualification (at least 150 clients, two
+mandatory documents each) is deferred until after P4, then repeated after material
+runtime-path changes. It does not gate P3 completion or current runtime-delivery
+acceptance. Capacity at that load remains unverified; ordinary functional/security
+coverage and mandatory CI remain required.
 
 ### 14. Repeat only invalidated evidence
 

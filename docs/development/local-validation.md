@@ -90,7 +90,11 @@ outputs and must be reviewed/verified for the current source and venue.
    the permitted local Dependency Review equivalent. If dependencies changed,
    inspect exact binaries, transitive terms and advisories under repository policy;
    unresolved or restrictive terms block. Never claim the hosted service ran.
-7. Add real runtime/Kubernetes/load proof when the slice implements that behavior.
+7. Add real runtime/Kubernetes correctness proof when the slice implements that behavior.
+   The separate >=150-client/two-document load rehearsal is deferred until after P4
+   under [ADR-055 section 17](../adr/0055-p3-implementation-closure-and-coordination.md#17-load-proof-and-test-cadence);
+   it does not gate P3 completion or current runtime-delivery acceptance. Ordinary
+   correctness/security checks remain required.
    Metadata/input-set work adds no cluster/load gate. Existing qualification carries
    only while its qualified code and dependencies remain unchanged.
 

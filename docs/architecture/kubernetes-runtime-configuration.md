@@ -70,9 +70,15 @@ failures; clients use backoff/jitter within a total startup deadline. Invalid
 identity/revocation is not an overload retry. Existing processes continue with
 already loaded configuration during service outages.
 
-The supported mass-start scenario requires a real >=150-simultaneous-client
-rehearsal with documented limits/deadline, bounded server/API work and successful
-completion under the admitted healthy load profile. Concrete configuration keys,
+The accepted design requires bounded protection mechanisms; it does not
+demonstrate capacity, throughput or an SLA for 150 simultaneous clients. The
+separate real-cluster rehearsal of at least 150 simultaneous clients, two mandatory
+documents each, is deferred until after P4 under the user-approved 2026-11-14
+supersession in [issue #217](https://github.com/hamstix/haby/issues/217). It is not a
+gate for P3 completion or current runtime-delivery acceptance. Capacity at that
+load remains unverified. The future rehearsal requires documented limits/deadline,
+bounded server/API work, healthy-profile completion within the total startup
+deadline and constrained overload/cancellation evidence. Concrete configuration keys,
 limits, RPC errors and executable recovery procedures accompany implementation;
 do not infer them from this design document.
 
@@ -94,8 +100,10 @@ temporary-versus-permanent outcomes. Actual setting keys/ranges and restart/appl
 semantics must be documented with implementation; invalid configuration is rejected.
 No dynamic administration API or reload support is implied by configurability.
 
-Ordinary CI tests bounded queue/limiter/cancellation/retry/deadline correctness.
-The full real-cluster >=150-client run (two documents per client) is separate,
-manual or periodic on a developer machine/dedicated runner, and mandatory before
-capability acceptance and after material runtime-path changes. Preserve exact-source,
-configuration/latency/retry/API-rate evidence; green ordinary CI cannot replace it.
+Ordinary CI tests bounded queue/limiter/cancellation/retry/deadline correctness;
+ordinary identity/revocation, token rotation, real API validation and existing
+mandatory security/full gates remain required. After P4, the separate real-cluster
+>=150-client/two-document run is manual or periodic on a developer machine/dedicated
+runner, then repeated after material runtime-path changes. Preserve exact-source,
+configuration/latency/retry/API-rate evidence; green ordinary CI cannot replace the
+deferred rehearsal or establish demonstrated capacity.

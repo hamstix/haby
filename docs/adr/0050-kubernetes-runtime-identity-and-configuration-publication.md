@@ -12,7 +12,8 @@ can become ready. P2 already provides immutable documents, scoped static deliver
 grants and transient secret materialization. P3 uses projected Runtime Identity
 without adding storage/transfer of static bearer credentials into Kubernetes.
 A stable ServiceAccount is the Workload boundary, not a per-generation identity.
-Mass startup is a required supported scenario, not an optional optimization.
+Bounded mass-start protection is required; separate load qualification is deferred
+until after P4 as specified in section 14.
 
 This ADR refines ADR-012's older milestone scheduling and separates binding
 identity from per-document publication. It does not implement Workloads, Runtime
@@ -177,6 +178,13 @@ offline snapshots, discovery and automatic hot reload are separate capabilities.
 
 ### 14. Fail closed with bounded mass-start handling
 
+**User-approved scheduling supersession, 2026-11-14 ([issue #217](https://github.com/hamstix/haby/issues/217)):** the separate real-cluster
+mass-start rehearsal (at least 150 concurrent clients, two mandatory documents
+each) is deferred until after P4. It is not a gate for P3 completion or current
+runtime-delivery acceptance. Configurable protection limits and ordinary
+correctness/security tests remain mandatory. Until the rehearsal is performed,
+capacity at that load is unverified and must not be advertised as demonstrated.
+
 No positive TokenReview cache or last-known-good configuration fallback initially.
 Invalid identity, audience, revoked binding/permission or wrong scope fails without
 configuration. Temporary Host/Kubernetes failure can be retried within a total
@@ -184,7 +192,7 @@ startup deadline; already running processes keep their loaded configuration.
 Use TokenReview rather than offline-only JWT validation to check current bound
 identity: [ServiceAccount validation](https://kubernetes.io/docs/reference/access-authn-authz/service-accounts-admin/).
 
-Mass startup is mandatory. Haby limits TokenReview concurrency and rate, uses a
+Mass-start protection remains mandatory. Haby limits TokenReview concurrency and rate, uses a
 bounded queue and returns controlled temporary overload outcomes. Absence of a
 positive cache does not authorize unbounded Kubernetes API calls, tasks, memory
 or credential retention. Waiting work observes cancellation/deadlines and disposes
@@ -196,7 +204,8 @@ failure is not retried as if it were overload. No hidden unbounded retry loop.
 Concrete limit scopes/defaults, queue/byte capacities, temporary error codes and
 retry hints require an explicit executable contract and operator documentation.
 
-A real load rehearsal must start at least 150 clients simultaneously. Assert
+The deferred post-P4 real load rehearsal must start at least 150 clients
+simultaneously, each fetching two mandatory documents. Assert
 successful authorized retrieval within the configured startup deadline under the
 admitted healthy profile, bounded queue/concurrency/request rate, actual token
 rotation behavior in its separate scenario and controlled overload/cancellation
@@ -210,9 +219,9 @@ configurable Host/client limits and exact permanent/temporary transport categori
 Values are validated configuration defaults, not immutable constants; no dynamic
 settings API is required. Its >=150-client healthy rehearsal requests two documents
 per client. Ordinary CI retains fast deterministic correctness checks and existing
-gates; full real-cluster load runs are manual/periodic, mandatory before capability
-acceptance and after material TokenReview/limiter/client changes. Passing ordinary
-CI never substitutes for required load evidence. Stable publication intents and
+gates. After P4, full real-cluster load runs are manual/periodic and are repeated
+after material TokenReview/limiter/client changes. Passing ordinary CI never
+substitutes for the deferred load evidence. Stable publication intents and
 conditional revoke/republish semantics are also refined there.
 
 ### 15. Stable identity through rollout and retirement
@@ -230,8 +239,11 @@ Prove v1/v2 keep ServiceAccount UID/binding, materialized-but-unpublished refusa
 old/new Pods fetching a new published exact revision, old request stability,
 foreign identity/audience/non-Pod refusal, revoke versus Execute replay, token
 rotation, Pod/Host restart and operator/static-grant separation on a real cluster.
-Add the mandatory >=150-client load rehearsal above, with honest exact-source and
-independent versus CI evidence. No Workload/generation-bound isolation claim.
+The >=150-client/two-document load rehearsal above remains pending until after P4,
+with honest exact-source and independent versus CI evidence; it does not gate P3
+completion or current runtime-delivery acceptance. Ordinary real-cluster identity,
+rotation, revocation and API correctness evidence remains required. No
+Workload/generation-bound isolation claim.
 
 Shared authentication/mapping/permission/persistence contracts remain neutral;
 Kubernetes TokenReview/client types and object interpretation remain adapter-owned.
