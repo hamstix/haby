@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Haby.Application.Tests;
 
-public sealed class ConfigurationDeliveryTests
+public sealed partial class ConfigurationDeliveryTests
 {
     private static readonly ConfigurationRendererId Renderer = ConfigurationRendererId.Create("sample.delivery/v1");
     private static readonly ConfigurationFormatterId Formatter = ConfigurationFormatterId.Create("sample.delivery-string/v1");

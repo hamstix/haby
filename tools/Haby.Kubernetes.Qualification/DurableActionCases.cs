@@ -467,6 +467,8 @@ internal static class DurableActionCases
                         throw new InvalidOperationException("Exact runtime publication unavailable.");
                 }
                 Check(true, candidate.Scenario == runtimeMixed.Scenario ? "D33-runtime-mixed-exact-publication" : "D34-runtime-initial-exact-publication");
+                if (candidate.Scenario != runtimeMixed.Scenario)
+                    await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token);
                 var old = (await publication.ReadAsync(requests[0].Key, token))!;
                 var revoke = requests[0] with
                 {
@@ -496,6 +498,27 @@ internal static class DurableActionCases
             }
             Check(true, "D35-runtime-old-receipt-does-not-restore-revoked-permission");
             Check(true, "D36-runtime-binding-revoke-preserves-confirmed-origin-without-access");
+            // The standalone-database mixed identity contour above is not ApplicationLogin delivery proof.
+            using (var login = new DurableDeploymentPlanningTests.RuntimeAuthenticationLoginScenario(postgres))
+            {
+                var scenario = await login.PrepareMixedAsync(Configuration, name, Preflight);
+                await using var services = ApplicationLoginScenario.Services(scenario.Connection, full: true, access: true, internalActions: true);
+                var preparation = DurableDeploymentPlanningTests.ConfigurationPreparation(services, rendering: Haby.PostgreSql.PostgreSqlConnectionRendering.CreateCatalog(),
+                    formatters: Haby.PostgreSql.PostgreSqlConnectionRendering.FormatterCatalog()).Preparation;
+                var documents = await preparation.PrepareAsync(scenario.Commit, "qualifier", token);
+                if (documents.Failure is not null) throw new InvalidOperationException("Mixed login exact documents unavailable.");
+                var secrets = services.GetRequiredService<ISecretStore>();
+                var handler = new InternalRuntimeIdentityAction(secrets, (connection, ct) => KubernetesClientFactory.CreateFixture(connection, secrets, [], ct));
+                var actions = DurableDeploymentPlanningTests.IdentityActions(services, handler);
+                var identity = await new InternalRuntimeIdentityPreparation(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+                    preparation, actions, handler.Contract.Action).PrepareAsync(scenario.Commit, token);
+                if (identity.Count != 1 || identity[0].Result.Outcome != InternalActionOutcome.Confirmed)
+                    throw new InvalidOperationException("Mixed login real runtime identity unavailable.");
+                var publication = new InternalRuntimePublication(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), preparation, actions, scenario.Time);
+                var request = (await publication.PreparationRequestsAsync(scenario.Commit, "qualifier", token)).Single();
+                await publication.ApplyAsync(request, token);
+                await RuntimeDeliveryCases.Run(admin, scenario, services, publication, request, true, token);
+            }
         }
         catch (Exception error) { primary = error; throw; }
         finally

@@ -5,7 +5,10 @@ package haby.configuration.v1alpha1;
 // Independent runtime contract. Bearer credentials use Authorization metadata only.
 service ConfigurationDelivery {
   rpc Deliver(DeliverConfigurationRequest) returns (DeliverConfigurationReply);
+  // Independent online runtime authentication and exact publication authorization.
+  rpc DeliverRuntime(DeliverRuntimeConfigurationRequest) returns (DeliverConfigurationReply);
 }
 message DeliverConfigurationRequest { string revision_id = 1; }
+message DeliverRuntimeConfigurationRequest { string binding_id = 1; string revision_id = 2; }
 // Complete transient JSON; safe identity refers only to the unresolved source artifact.
 message DeliverConfigurationReply { string revision_id = 1; string source_fingerprint = 2; bytes json = 3; }

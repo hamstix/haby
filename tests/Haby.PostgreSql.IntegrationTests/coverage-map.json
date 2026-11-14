@@ -47,7 +47,8 @@
     "DurableDeploymentPlanningTests": {
       "responsibilities": [
         "Persistence",
-        "Provider integration"
+        "Provider integration",
+        "Operator/E2E"
       ],
       "isolation": "class-owned-server",
       "baselineCases": 52,
@@ -58,7 +59,7 @@
         "serverSettings": false,
         "globalClientLogging": false,
         "restoreUtilities": true,
-        "hostOrNative": false,
+        "hostOrNative": true,
         "conservativeClassUnion": true
       },
       "suite": "functional",
@@ -208,6 +209,27 @@
         "globalClientLogging": false,
         "restoreUtilities": true,
         "hostOrNative": false,
+        "conservativeClassUnion": true
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
+    },
+    "RuntimeDeliveryHostTests": {
+      "responsibilities": [
+        "Operator/E2E"
+      ],
+      "isolation": "none",
+      "baselineCases": 0,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": true,
         "conservativeClassUnion": true
       },
       "suite": "functional",

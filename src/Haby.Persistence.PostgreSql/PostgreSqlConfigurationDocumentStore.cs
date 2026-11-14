@@ -295,7 +295,7 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
         var rows = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation).ToArrayAsync(token);
         return rows.Length == graph.Nodes.Count && graph.Nodes.All(n => rows.Any(x => x.OperationId == n.Id.Value && x.State == nameof(DurableOperationState.Succeeded)));
     }
-    private static string InputFingerprint(DeploymentGenerationRow source) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+    internal static string InputFingerprint(DeploymentGenerationRow source) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
         JsonSerializer.Serialize(new[] { "haby.configuration-input/v1", source.PlanId.ToString(), source.Fingerprint, source.GraphJson, source.ConfigurationJson },
             ManifestCatalogJsonContext.Default.StringArray))));
     private static string Associations(IEnumerable<(ConsumedConfigurationOutput Output, Guid Attempt)> outputs)

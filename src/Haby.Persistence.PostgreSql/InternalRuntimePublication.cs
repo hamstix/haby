@@ -23,7 +23,7 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
         ValidateBinding(row);
         return new(row.Id, row.Status, row.ConcurrencyToken, row.RevokedBy, row.RevokedAt);
     }
-    private static RuntimePermissionState? PermissionState(RuntimeConfigurationPermissionRow? row)
+    internal static RuntimePermissionState? PermissionState(RuntimeConfigurationPermissionRow? row)
     {
         if (row is null) return null;
         if (row.Status is not ("Published" or "Revoked") || row.ConcurrencyToken == Guid.Empty || row.Id == Guid.Empty)
@@ -213,7 +213,7 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
         return new(receipt, BindingState(binding), PermissionState(permission));
     }
 
-    private static RuntimePublicationReceipt ReadReceipt(RuntimePublicationReceiptRow row)
+    internal static RuntimePublicationReceipt ReadReceipt(RuntimePublicationReceiptRow row)
     {
         var receipt = RuntimePublicationCodec.Receipt(row.Payload);
         if (receipt.Id != row.Id || receipt.Request.Key != row.RequestKey || receipt.Request.Binding != row.BindingId || receipt.Request.Revision != row.RevisionId)
@@ -221,27 +221,6 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
         return receipt;
     }
 
-    internal async Task<RuntimeMetadataAuthority?> AuthorizeMetadataAsync(Guid bindingId, Guid revisionId, CancellationToken token)
-    {
-        await using var db = await contexts.CreateDbContextAsync(token);
-        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
-        var binding = await db.RuntimeIdentityBindings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == bindingId, token);
-        if (binding is null) return null;
-        ValidateBinding(binding);
-        if (binding.Status != "Prepared") return null;
-        var permission = await db.RuntimeConfigurationPermissions.AsNoTracking().SingleOrDefaultAsync(x => x.BindingId == bindingId && x.RevisionId == revisionId, token);
-        if (PermissionState(permission)?.Status != "Published") return null;
-        var origin = RuntimePublicationCodec.Origin(permission!.OriginPayload);
-        var managed = await db.ManagedWorkloads.AsNoTracking().SingleAsync(x => x.Id == binding.ManagedWorkloadId, token);
-        var document = await db.ConfigurationDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == revisionId, token);
-        var original = await db.RuntimePublicationReceipts.AsNoTracking().SingleAsync(x => x.RequestKey == permission.LastRequest, token);
-        var receipt = ReadReceipt(original);
-        if (document is null || managed.Id != origin.ManagedWorkload || binding.EnvironmentId != origin.Environment || managed.EnvironmentId != origin.Environment ||
-            managed.ApplicationId != origin.Application || managed.DeploymentId != origin.Deployment || managed.Component != origin.Component || managed.Workload != origin.Workload ||
-            document.DeploymentId != origin.Deployment || document.Generation != origin.Generation || document.Component != origin.Component || document.Document != origin.Document ||
-            receipt.After != PermissionState(permission) || receipt.Request.Binding != bindingId || receipt.Request.Revision != revisionId ||
-            receipt.Request.Origin != origin || receipt.Outcome != RuntimePublicationOutcome.Published)
-            throw new InvalidDataException("Runtime permission authority mismatch.");
-        return new(bindingId, permission.Id, revisionId, origin.Environment, origin.Application, origin.Deployment, origin.Generation, origin.Component, origin.Workload, origin.Document);
-    }
+    internal Task<RuntimeMetadataAuthority?> AuthorizeMetadataAsync(Guid bindingId, Guid revisionId, CancellationToken token) =>
+        RuntimePublicationAuthorization.AuthorizeAsync(contexts, bindingId, revisionId, token);
 }

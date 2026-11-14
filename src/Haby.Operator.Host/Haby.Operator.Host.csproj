@@ -9,5 +9,6 @@
     <ProjectReference Include="..\Haby.Persistence.PostgreSql\Haby.Persistence.PostgreSql.csproj" />
     <ProjectReference Include="..\Haby.PostgreSql\Haby.PostgreSql.csproj" />
     <InternalsVisibleTo Include="Haby.PostgreSql.IntegrationTests" />
+    <InternalsVisibleTo Include="Haby.Kubernetes.Qualification" />
   </ItemGroup>
 </Project>

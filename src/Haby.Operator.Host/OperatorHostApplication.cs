@@ -40,6 +40,11 @@ public static class OperatorHostApplication
         var builder = WebApplication.CreateBuilder(args);
         var runtimeAuthentication = RuntimeAuthenticationComposition.Read(builder.Configuration);
         RuntimeAuthenticationComposition.Add(builder.Services, runtimeAuthentication);
+        var runtimeDelivery = RuntimeDeliveryOptions.Read(builder.Configuration);
+        builder.Services.AddSingleton(_ => new RuntimeDeliveryLifetime(runtimeDelivery));
+        builder.Services.AddSingleton<IRuntimeConfigurationStore, PostgreSqlRuntimeConfigurationStore>();
+        builder.Services.AddSingleton<ConfigurationDeliveryMaterializer>();
+        builder.Services.AddSingleton<DeliverRuntimeConfiguration>();
         // Driver/EF diagnostics can contain connection settings, payloads and raw exceptions even
         // when the application catches a bounded failure. Keep them outside the operator log surface.
         builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.None);
