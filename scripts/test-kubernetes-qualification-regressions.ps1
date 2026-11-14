@@ -47,9 +47,21 @@ foreach($scenario in @('success','inspect-failure','stop-failure','remove-failur
     if($diagnosticMode){
         $lines=Get-Content $evidence
         if($lines -match 'protected-|JWT|config-sentinel'){throw 'Protected journal content leaked'}
-        if($scenario -eq 'harness-timeout' -and ('Failure: stage=harness; reason=command; category=TimeoutException' -notin $lines -or
-            'Diagnostic process: command-deadline; elapsed-ms=180001' -notin $lines -or 'Diagnostic progress: 2 catalog-init-start' -notin $lines -or
-            'Harness: PASS' -in $lines -or 'Diagnostic inner catalog: unknown' -notin $lines)){throw 'Primary timeout/progress/unknown cleanup not retained'}
+        if($scenario -eq 'harness-timeout'){
+            $hasPrimaryFailureRecord=-not ('Failure: stage=harness; reason=command; category=TimeoutException' -notin $lines)
+            $hasProcessKindElapsedRecord=-not ('Diagnostic process: command-deadline; elapsed-ms=180001' -notin $lines)
+            $hasJournalProgressRecord=-not ('Diagnostic progress: 2 catalog-init-start' -notin $lines)
+            $hasNoHarnessPass=-not ('Harness: PASS' -in $lines)
+            $hasCatalogUnknownRecord=-not ('Diagnostic inner catalog: unknown' -notin $lines)
+            if(!$hasPrimaryFailureRecord -or !$hasProcessKindElapsedRecord -or !$hasJournalProgressRecord -or !$hasNoHarnessPass -or !$hasCatalogUnknownRecord){
+                Write-Output ('primary-failure-record='+$hasPrimaryFailureRecord.ToString().ToLowerInvariant())
+                Write-Output ('process-kind-elapsed-record='+$hasProcessKindElapsedRecord.ToString().ToLowerInvariant())
+                Write-Output ('journal-progress-record='+$hasJournalProgressRecord.ToString().ToLowerInvariant())
+                Write-Output ('harness-pass-absent='+$hasNoHarnessPass.ToString().ToLowerInvariant())
+                Write-Output ('catalog-unknown-record='+$hasCatalogUnknownRecord.ToString().ToLowerInvariant())
+                throw 'Primary timeout/progress/unknown cleanup not retained'
+            }
+        }
         if($scenario -like 'journal-invalid*' -and 'Diagnostic journal: invalid' -notin $lines){throw 'Diagnostic failure missing'}
         if($scenario -eq 'journal-invalid-primary' -and 'Failure: stage=harness; reason=nonzero; category=RuntimeException' -notin $lines){throw 'Diagnostic failure replaced primary harness failure'}
     }
