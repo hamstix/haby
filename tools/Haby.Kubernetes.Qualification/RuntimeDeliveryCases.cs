@@ -113,7 +113,8 @@ internal static class RuntimeDeliveryCases
                         var expected = new NpgsqlConnectionStringBuilder(connectionString);
                         var confirmed = expectedConnection ?? throw new InvalidOperationException("Confirmed login output unavailable.");
                         Check(!string.IsNullOrEmpty(expected.Password) && expected.Username == confirmed.UserName && expected.Host == confirmed.Host &&
-                            expected.Port == confirmed.Port && expected.Database == confirmed.DatabaseName && expected.Timeout == 200,
+                            // PrepareMixedAsync uses UpdateEnvelope's independently declared default timeout of 210.
+                            expected.Port == confirmed.Port && expected.Database == confirmed.DatabaseName && expected.Timeout == 210,
                             first ? "T02-exact-application-connection-fields" : "T08-restarted-exact-application-connection-fields");
                         await using var application = new NpgsqlConnection(connectionString);
                         await application.OpenAsync(token);

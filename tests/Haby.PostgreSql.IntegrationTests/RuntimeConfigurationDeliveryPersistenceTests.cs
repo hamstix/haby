@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
@@ -102,17 +103,48 @@ public sealed partial class DurableDeploymentPlanningTests
         var setup = await RuntimeDeliverySetup(); await using var services = InternalServices(setup.Scenario.Connection, setup.Scenario.Time);
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(); var store = new PostgreSqlRuntimeConfigurationStore(contexts);
         var authority = (await store.AuthorizeAsync(setup.Identity, ConfigurationDocumentRevisionId.Parse(setup.Request.Revision!.Value.ToString()), default))!;
-        await using (var arrange = await contexts.CreateDbContextAsync())
+        var deployment = Guid.Parse(setup.Scenario.Commit.DeploymentId.ToString());
+        var generation = setup.Scenario.Commit.Generation.Value;
+        if (fault == "source")
+        {
+            // RuntimeDeliverySetup creates a fresh disposable catalog for this case.
+            await using (var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(setup.Scenario.Connection) { Pooling = false }.ConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var arrange = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection).Options);
+                await using var corrupt = await arrange.Database.BeginTransactionAsync();
+                await arrange.Database.ExecuteSqlRawAsync("SET LOCAL session_replication_role = replica");
+                Assert.Equal(1, await arrange.DeploymentGenerations.Where(x => x.DeploymentId == deployment && x.Generation == generation)
+                    .ExecuteUpdateAsync(x => x.SetProperty(r => r.ConfigurationJson, "{}")));
+                await corrupt.CommitAsync();
+            }
+            await using var verifyCorruption = await contexts.CreateDbContextAsync();
+            await AssertRuntimeSourceCorruptionGuardsRestoredAsync(verifyCorruption, deployment, generation);
+        }
+        else await using (var arrange = await contexts.CreateDbContextAsync())
         {
             if (fault == "fingerprint") await arrange.ConfigurationDocuments.ExecuteUpdateAsync(x => x.SetProperty(r => r.Fingerprint, "corrupt"));
             if (fault == "payload") await arrange.ConfigurationDocuments.ExecuteUpdateAsync(x => x.SetProperty(r => r.Payload, "[]"));
-            if (fault == "source") await arrange.DeploymentGenerations.ExecuteUpdateAsync(x => x.SetProperty(r => r.ConfigurationJson, "{}"));
             if (fault == "recipient") await arrange.WorkloadConfigurationRecipients.ExecuteDeleteAsync();
         }
         await Assert.ThrowsAsync<InvalidDataException>(async () => await store.ReadAsync(authority, default));
         await using var verify = await contexts.CreateDbContextAsync();
+        if (fault == "source") await AssertRuntimeSourceCorruptionGuardsRestoredAsync(verify, deployment, generation);
         Assert.Empty(await verify.ConfigurationAccess.AsNoTracking().ToArrayAsync());
         Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+    }
+
+    private static async Task AssertRuntimeSourceCorruptionGuardsRestoredAsync(ManifestCatalogDbContext fresh, Guid deployment, long generation)
+    {
+        await fresh.Database.OpenConnectionAsync();
+        await using var command = fresh.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SHOW session_replication_role";
+        Assert.Equal("origin", await command.ExecuteScalarAsync());
+        var source = fresh.DeploymentGenerations.Where(x => x.DeploymentId == deployment && x.Generation == generation);
+        Assert.Equal("{}", await source.AsNoTracking().Select(x => x.ConfigurationJson).SingleAsync());
+        // Even a no-op update must be refused by the original generation immutability trigger.
+        var refusal = await Assert.ThrowsAsync<PostgresException>(() => source.ExecuteUpdateAsync(x => x.SetProperty(r => r.ConfigurationJson, r => r.ConfigurationJson)));
+        Assert.Equal("P0001", refusal.SqlState);
     }
 
     private sealed class RuntimeRpcIdentity : IRuntimeAuthenticator
@@ -128,7 +160,7 @@ public sealed partial class DurableDeploymentPlanningTests
     private sealed class RuntimeRpcOrder : DbCommandInterceptor
     {
         internal bool InAuthorization, Authorized, Violation;
-        internal int Bodies;
+        internal int SizeProbes, BodyReads;
         internal void BeginRequest() { InAuthorization = false; Authorized = false; }
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
             CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
@@ -137,7 +169,11 @@ public sealed partial class DurableDeploymentPlanningTests
             var body = document && command.CommandText.Contains("payload", StringComparison.Ordinal);
             var material = command.CommandText.Contains("secret_payloads", StringComparison.Ordinal);
             if (document && !InAuthorization || (body || material) && !Authorized) Violation = true;
-            if (body) Bodies++;
+            if (body)
+            {
+                if (command.CommandText.Contains("length(", StringComparison.Ordinal)) SizeProbes++;
+                else BodyReads++;
+            }
             return ValueTask.FromResult(result);
         }
     }
@@ -182,13 +218,13 @@ public sealed partial class DurableDeploymentPlanningTests
             order.BeginRequest();
             Assert.Equal(StatusCode.Unauthenticated, (await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverRuntimeAsync(request, invalid))).StatusCode);
         }
-        Assert.False(order.Violation); Assert.Equal(0, order.Bodies);
+        Assert.False(order.Violation); Assert.Equal(0, order.SizeProbes); Assert.Equal(0, order.BodyReads);
         await publication.ApplyAsync(setup.Request, default);
         order.BeginRequest();
         var reply = await client.DeliverRuntimeAsync(request, headers);
         Assert.Equal(request.RevisionId, reply.RevisionId); Assert.Equal("{\"Mode\":\"frozen\"}", Encoding.UTF8.GetString(reply.Json.Span));
         Assert.DoesNotContain("Mode", reply.ToString(), StringComparison.Ordinal);
-        Assert.False(order.Violation); Assert.Equal(1, order.Bodies);
+        Assert.False(order.Violation); Assert.Equal(1, order.SizeProbes); Assert.Equal(1, order.BodyReads);
         Assert.Equal(StatusCode.PermissionDenied, (await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverAsync(new() { RevisionId = request.RevisionId }, headers))).StatusCode);
         using var unauthenticated = GrpcChannel.ForAddress(host.Urls.Single());
         Assert.ThrowsAny<Exception>(() => new Haby.Operator.Contracts.ManifestOperator.ManifestOperatorClient(unauthenticated)
