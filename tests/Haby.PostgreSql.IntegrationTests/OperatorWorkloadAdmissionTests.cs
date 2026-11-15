@@ -230,7 +230,7 @@ public sealed partial class OperatorHostIntegrationTests
                 var text = await RunNativeCommitCli(binary, restarted.Urls.Single(), ["deployment", "generation", "get", generationRequest.DeploymentId, generationRequest.Generation.ToString()], format: "text");
                 Assert.Contains("notSubmitted", text); Assert.Contains("Readiness is not established", text);
             }
-            var retry = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = Guid.NewGuid().ToString() });
+            var retry = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = Guid.CreateVersion7().ToString() });
             Assert.Equal(accepted, retry);
             var saved = await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(DeploymentChangeSetId.Parse(change.ChangeSetId), default);
             Assert.NotNull(saved);
