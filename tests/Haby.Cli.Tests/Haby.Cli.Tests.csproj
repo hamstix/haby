@@ -19,10 +19,18 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\examples\Haby.Configuration.Client\Haby.Configuration.Example.csproj" />
+    <ProjectReference Include="..\..\examples\Haby.RuntimeStartup.Consumer\Haby.RuntimeStartup.Consumer.csproj" />
     <ProjectReference Include="..\..\src\Haby.Configuration.Contracts\Haby.Configuration.Contracts.csproj" />
     <ProjectReference Include="..\..\src\habyctl\habyctl.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\TestPaths.cs" Link="TestPaths.cs" />
   </ItemGroup>
+  <Target Name="RecordRuntimeStartupConsumerTarget" AfterTargets="Build">
+    <ItemGroup>
+      <RuntimeStartupConsumerTarget Include="@(ReferencePath)" Condition="'%(ReferencePath.Filename)' == 'Haby.RuntimeStartup.Consumer'" />
+    </ItemGroup>
+    <Error Condition="'@(RuntimeStartupConsumerTarget->Count())' != '1'" Text="Runtime startup consumer target must resolve once." />
+    <WriteLinesToFile File="$(OutDir)runtime-startup-consumer.target" Lines="@(RuntimeStartupConsumerTarget->'%(FullPath)')" Overwrite="true" Encoding="UTF-8" />
+  </Target>
 </Project>

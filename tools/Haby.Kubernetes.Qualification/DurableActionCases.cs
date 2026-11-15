@@ -476,7 +476,7 @@ internal static class DurableActionCases
                 if (candidate.Scenario != runtimeMixed.Scenario)
                 {
                     diagnostics.Mark(QualificationMilestone.InitialDeliveryStart);
-                    await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token);
+                    await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token, requests);
                 }
                 var old = (await publication.ReadAsync(requests[0].Key, token))!;
                 var revoke = requests[0] with
@@ -500,6 +500,7 @@ internal static class DurableActionCases
                 await RuntimeAuthenticationCases.Run(admin, services.GetRequiredService<ISecretStore>(), authenticationStore, requests[0].Binding,
                     async () => { await publication.ApplyAsync(bindingRevoke, token); }, token, otherStore, (await RuntimeSaved(runtimeCrash.Scenario.Connection)).Binding,
                     otherServices.GetRequiredService<ISecretStore>(), scenario: candidate.Scenario == runtimeMixed.Scenario ? "mixed" : "initial");
+                diagnostics.Mark(QualificationMilestone.RuntimeAuthCompleted);
                 var blocked = await publication.ApplyAsync(bindingRevoke, token);
                 var historical = await ComposeRuntime(services, candidate.Counter).ExecuteAsync(candidate.Key, token);
                 if (historical.Outcome != InternalActionOutcome.Confirmed || blocked.CurrentBinding.Status != "Revoked" ||

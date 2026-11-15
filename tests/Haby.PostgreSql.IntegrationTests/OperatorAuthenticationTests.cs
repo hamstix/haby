@@ -26,9 +26,10 @@ public sealed partial class OperatorHostIntegrationTests
     private static string[] AuthArguments(string connection, bool reflection = true) =>
         ["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0", "--Haby:Reflection:Enabled=" + reflection];
     private static Metadata OperatorHeaders(string credential) => new() { { "authorization", "Bearer " + credential } };
-    private static async Task<Grpc.Core.RpcException> AuthDenied(Func<Task> action)
+    private static async Task<Grpc.Core.RpcException> AuthDenied(Func<Task> action, Action<StatusCode>? observe = null)
     {
         var error = await Assert.ThrowsAsync<RpcException>(action);
+        observe?.Invoke(error.StatusCode);
         Assert.Equal(StatusCode.Unauthenticated, error.StatusCode);
         Assert.DoesNotContain("haby_operator_v1.", error.Message);
         Assert.DoesNotContain("haby_delivery_v1.", error.Message);
@@ -235,45 +236,101 @@ public sealed partial class OperatorHostIntegrationTests
     [InlineData(false)]
     public async Task Operator_protected_reflection_describes_both_contracts_and_can_be_disabled(bool enabled)
     {
-        var connection = await NewDatabaseAsync();
-        await using var host = await OperatorHostApplication.BuildMigratedAsync(AuthArguments(connection, enabled));
-        var issued = await host.Services.GetRequiredService<IOperatorAccessStore>().CreateAsync(null, LocalOperatorIssuance.LocalActor, null, default);
-        await host.StartAsync(); using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-        var admin = new ManifestOperator.ManifestOperatorClient(channel);
-        Assert.Empty((await admin.ListEnvironmentsAsync(new(), OperatorHeaders(issued.Credential))).Items);
-        var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
-        Assert.Equal(StatusCode.PermissionDenied, (await Assert.ThrowsAsync<RpcException>(async () => await runtime.DeliverAsync(new()))).StatusCode);
-        var routes = host.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>()
-            .Select(x => x.RoutePattern.RawText!).Where(x => x.EndsWith("/ServerReflectionInfo", StringComparison.Ordinal)).ToArray();
-        if (!enabled)
+        var diagnostic = new ProtectedReflectionDiagnostics(enabled);
+        await HostFailureDiagnostics.RunAsync(async defer =>
         {
-            Assert.Empty(routes);
-            using var call = new ServerReflection.ServerReflectionClient(channel).ServerReflectionInfo(OperatorHeaders(issued.Credential));
-            await call.RequestStream.WriteAsync(new() { ListServices = "" }); await call.RequestStream.CompleteAsync();
-            Assert.Equal(StatusCode.Unimplemented, (await Assert.ThrowsAsync<RpcException>(async () => await call.ResponseStream.MoveNext())).StatusCode);
-            return;
-        }
-        Assert.NotEmpty(routes);
-        // Use the generated reflection message contract on every registered protocol route.
-        foreach (var route in routes)
-        {
-            var parts = route.TrimStart('/').Split('/');
-            var method = new Method<ServerReflectionRequest, ServerReflectionResponse>(MethodType.DuplexStreaming, parts[0], parts[1],
-                Marshallers.Create(x => x.ToByteArray(), ServerReflectionRequest.Parser.ParseFrom), Marshallers.Create(x => x.ToByteArray(), ServerReflectionResponse.Parser.ParseFrom));
-            foreach (var credential in new string?[] { null, ConfigurationDeliveryCredential.Create(Guid.CreateVersion7()) })
+            var connection = await NewDatabaseAsync();
+            diagnostic.At(HostFailurePhase.Build);
+            var host = await OperatorHostApplication.BuildMigratedAsync(AuthArguments(connection, enabled));
+            defer(() => host.DisposeAsync());
+            diagnostic.At(HostFailurePhase.LocalIssuance);
+            var issued = await host.Services.GetRequiredService<IOperatorAccessStore>().CreateAsync(null, LocalOperatorIssuance.LocalActor, null, default);
+            diagnostic.At(HostFailurePhase.Start);
+            await host.StartAsync();
+            diagnostic.At(HostFailurePhase.Channel);
+            var channel = GrpcChannel.ForAddress(host.Urls.Single());
+            defer(() => { channel.Dispose(); return ValueTask.CompletedTask; });
+            diagnostic.At(HostFailurePhase.AdministrativeRead, credentialPurpose: ReflectionCredentialPurpose.OperatorAdmin);
+            var admin = new ManifestOperator.ManifestOperatorClient(channel);
+            Assert.Empty((await admin.ListEnvironmentsAsync(new(), OperatorHeaders(issued.Credential))).Items);
+            diagnostic.At(HostFailurePhase.StaticDeliveryRead, credentialPurpose: ReflectionCredentialPurpose.Anonymous);
+            var runtime = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+            var deliveryDenial = await Assert.ThrowsAsync<RpcException>(async () => await runtime.DeliverAsync(new()));
+            diagnostic.Observe(deliveryDenial.StatusCode);
+            Assert.Equal(StatusCode.PermissionDenied, deliveryDenial.StatusCode);
+            diagnostic.At(HostFailurePhase.RouteDiscovery);
+            var routes = host.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>()
+                .Select(x => x.RoutePattern.RawText!).Where(x => x.EndsWith("/ServerReflectionInfo", StringComparison.Ordinal)).ToArray();
+            if (!enabled)
             {
-                using var denied = channel.CreateCallInvoker().AsyncDuplexStreamingCall(method, null, new CallOptions(credential is null ? null : OperatorHeaders(credential)));
-                await denied.RequestStream.WriteAsync(new() { ListServices = "" }); await denied.RequestStream.CompleteAsync();
-                await AuthDenied(async () => await denied.ResponseStream.MoveNext());
+                Assert.Empty(routes);
+                await HostFailureDiagnostics.RunAsync(async release =>
+                {
+                    diagnostic.At(HostFailurePhase.ReflectionCall, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                    var call = new ServerReflection.ServerReflectionClient(channel).ServerReflectionInfo(OperatorHeaders(issued.Credential));
+                    release(() => { call.Dispose(); return ValueTask.CompletedTask; });
+                    diagnostic.At(HostFailurePhase.ReflectionWrite, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                    await call.RequestStream.WriteAsync(new() { ListServices = "" });
+                    diagnostic.At(HostFailurePhase.ReflectionComplete, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                    await call.RequestStream.CompleteAsync();
+                    diagnostic.At(HostFailurePhase.ReflectionRead, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                    var denial = await Assert.ThrowsAsync<RpcException>(async () => await call.ResponseStream.MoveNext());
+                    diagnostic.Observe(denial.StatusCode);
+                    Assert.Equal(StatusCode.Unimplemented, denial.StatusCode);
+                }, () => diagnostic.Phase, () => diagnostic.Observed,
+                    diagnostic.Recorder(ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin));
+                return;
             }
-            using var call = channel.CreateCallInvoker().AsyncDuplexStreamingCall(method, null, new CallOptions(OperatorHeaders(issued.Credential)));
-            foreach (var service in new[] { "haby.operator.v1alpha1.ManifestOperator", "haby.configuration.v1alpha1.ConfigurationDelivery" })
+            Assert.NotEmpty(routes);
+            // Use the generated reflection message contract on every registered protocol route.
+            foreach (var route in routes)
             {
-                await call.RequestStream.WriteAsync(new() { FileContainingSymbol = service });
-                Assert.True(await call.ResponseStream.MoveNext()); Assert.NotEmpty(call.ResponseStream.Current.FileDescriptorResponse.FileDescriptorProto);
+                diagnostic.At(HostFailurePhase.RouteDiscovery);
+                var parts = route.TrimStart('/').Split('/');
+                var routeKind = parts[0] switch
+                {
+                    "grpc.reflection.v1alpha.ServerReflection" => ReflectionRouteKind.V1Alpha,
+                    "grpc.reflection.v1.ServerReflection" => ReflectionRouteKind.V1,
+                    _ => ReflectionRouteKind.Unknown
+                };
+                var method = new Method<ServerReflectionRequest, ServerReflectionResponse>(MethodType.DuplexStreaming, parts[0], parts[1],
+                    Marshallers.Create(x => x.ToByteArray(), ServerReflectionRequest.Parser.ParseFrom), Marshallers.Create(x => x.ToByteArray(), ServerReflectionResponse.Parser.ParseFrom));
+                foreach (var credential in new string?[] { null, ConfigurationDeliveryCredential.Create(Guid.CreateVersion7()) })
+                {
+                    var purpose = credential is null ? ReflectionCredentialPurpose.Anonymous : ReflectionCredentialPurpose.StaticDelivery;
+                    await HostFailureDiagnostics.RunAsync(async release =>
+                    {
+                        diagnostic.At(HostFailurePhase.ReflectionCall, routeKind, purpose);
+                        var denied = channel.CreateCallInvoker().AsyncDuplexStreamingCall(method, null, new CallOptions(credential is null ? null : OperatorHeaders(credential)));
+                        release(() => { denied.Dispose(); return ValueTask.CompletedTask; });
+                        diagnostic.At(HostFailurePhase.ReflectionWrite, routeKind, purpose);
+                        await denied.RequestStream.WriteAsync(new() { ListServices = "" });
+                        diagnostic.At(HostFailurePhase.ReflectionComplete, routeKind, purpose);
+                        await denied.RequestStream.CompleteAsync();
+                        diagnostic.At(HostFailurePhase.ReflectionRead, routeKind, purpose);
+                        await AuthDenied(async () => await denied.ResponseStream.MoveNext(), diagnostic.Observe);
+                    }, () => diagnostic.Phase, () => diagnostic.Observed, diagnostic.Recorder(routeKind, purpose));
+                }
+                await HostFailureDiagnostics.RunAsync(async release =>
+                {
+                    diagnostic.At(HostFailurePhase.ReflectionCall, routeKind, ReflectionCredentialPurpose.OperatorAdmin);
+                    var call = channel.CreateCallInvoker().AsyncDuplexStreamingCall(method, null, new CallOptions(OperatorHeaders(issued.Credential)));
+                    release(() => { call.Dispose(); return ValueTask.CompletedTask; });
+                    foreach (var service in new[] { "haby.operator.v1alpha1.ManifestOperator", "haby.configuration.v1alpha1.ConfigurationDelivery" })
+                    {
+                        diagnostic.At(HostFailurePhase.ReflectionWrite, routeKind, ReflectionCredentialPurpose.OperatorAdmin);
+                        await call.RequestStream.WriteAsync(new() { FileContainingSymbol = service });
+                        diagnostic.At(HostFailurePhase.ReflectionRead, routeKind, ReflectionCredentialPurpose.OperatorAdmin);
+                        var received = await call.ResponseStream.MoveNext();
+                        diagnostic.At(HostFailurePhase.DescriptorAssertion, routeKind, ReflectionCredentialPurpose.OperatorAdmin);
+                        Assert.True(received); Assert.NotEmpty(call.ResponseStream.Current.FileDescriptorResponse.FileDescriptorProto);
+                    }
+                    diagnostic.At(HostFailurePhase.ReflectionComplete, routeKind, ReflectionCredentialPurpose.OperatorAdmin);
+                    await call.RequestStream.CompleteAsync();
+                }, () => diagnostic.Phase, () => diagnostic.Observed,
+                    diagnostic.Recorder(routeKind, ReflectionCredentialPurpose.OperatorAdmin));
             }
-            await call.RequestStream.CompleteAsync();
-        }
+        }, () => diagnostic.Phase, () => diagnostic.Observed, diagnostic.RecordRoot);
     }
 
     private static async Task NativeOperatorAuthentication(string endpoint, string revokedFile, string credential, string folder)

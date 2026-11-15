@@ -32,7 +32,7 @@ internal interface IRuntimeConfigurationStore
     ValueTask<ConfigurationDeliveryArtifact?> ReadAsync(RuntimeConfigurationAuthority authority, CancellationToken token);
 }
 
-internal enum RuntimeDeliveryOutcome { Delivered, Unauthenticated, PermissionDenied, ResourceExhausted, Unavailable, FailedPrecondition }
+internal enum RuntimeDeliveryOutcome { Delivered, Unauthenticated, PermissionDenied, AdmissionOverload, OutputLimit, Unavailable, FailedPrecondition }
 
 internal sealed class RuntimeDeliveryResult(RuntimeDeliveryOutcome outcome, ConfigurationDeliveryResult? document = null) : IDisposable
 {
@@ -55,7 +55,7 @@ internal sealed class DeliverRuntimeConfiguration(RuntimeAuthentication authenti
                 return new(authenticated.Outcome switch
                 {
                     RuntimeAuthenticationOutcome.PermissionDenied => RuntimeDeliveryOutcome.PermissionDenied,
-                    RuntimeAuthenticationOutcome.ResourceExhausted => RuntimeDeliveryOutcome.ResourceExhausted,
+                    RuntimeAuthenticationOutcome.ResourceExhausted => RuntimeDeliveryOutcome.AdmissionOverload,
                     RuntimeAuthenticationOutcome.Unavailable => RuntimeDeliveryOutcome.Unavailable,
                     _ => RuntimeDeliveryOutcome.Unauthenticated
                 });
@@ -72,13 +72,13 @@ internal sealed class DeliverRuntimeConfiguration(RuntimeAuthentication authenti
             return new(result.Status switch
             {
                 ConfigurationDeliveryStatus.Delivered => RuntimeDeliveryOutcome.Delivered,
-                ConfigurationDeliveryStatus.LimitExceeded => RuntimeDeliveryOutcome.ResourceExhausted,
+                ConfigurationDeliveryStatus.LimitExceeded => RuntimeDeliveryOutcome.OutputLimit,
                 ConfigurationDeliveryStatus.StorageUnavailable => RuntimeDeliveryOutcome.Unavailable,
                 _ => RuntimeDeliveryOutcome.FailedPrecondition
             }, result);
         }
         catch (OperationCanceledException) { throw; }
-        catch (ConfigurationDocumentLimitException) { return new(RuntimeDeliveryOutcome.ResourceExhausted); }
+        catch (ConfigurationDocumentLimitException) { return new(RuntimeDeliveryOutcome.OutputLimit); }
         catch (ConfigurationDeliveryStorageException) { return new(RuntimeDeliveryOutcome.Unavailable); }
         catch (InvalidDataException) { return new(RuntimeDeliveryOutcome.FailedPrecondition); }
         catch (Exception) { return new(RuntimeDeliveryOutcome.Unavailable); }

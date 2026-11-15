@@ -13,6 +13,42 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class RuntimeDeliveryHostTests
 {
     [Fact]
+    public async Task Runtime_admission_exhaustion_has_one_closed_temporary_reason_on_the_generated_wire()
+    {
+        var waiting = new WaitingRuntimeTrust();
+        await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false",
+            "--Haby:RuntimeDelivery:RequestTimeoutSeconds=30", "--Haby:RuntimeDelivery:MaxConcurrentRequests=1"], services => services.AddSingleton<IRuntimeIdentityStore>(waiting));
+        await host.StartAsync();
+        try
+        {
+            using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+            var client = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+            var request = new DeliverRuntimeConfigurationRequest { BindingId = Guid.CreateVersion7().ToString(), RevisionId = ConfigurationDocumentRevisionId.New().ToString() };
+            var headers = new Metadata { { "authorization", "Bearer bounded-transient-credential" } };
+            using var firstCancellation = new CancellationTokenSource();
+            using var first = client.DeliverRuntimeAsync(request, headers, deadline: DateTime.UtcNow.AddSeconds(15), cancellationToken: firstCancellation.Token);
+            try
+            {
+                await waiting.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                var refused = await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverRuntimeAsync(request, headers,
+                    deadline: DateTime.UtcNow.AddSeconds(5)));
+                Assert.Equal(StatusCode.ResourceExhausted, refused.StatusCode);
+                var reason = Assert.Single(refused.Trailers, x => x.Key == "haby-runtime-reason");
+                Assert.False(reason.IsBinary);
+                Assert.Equal("admission-overload", reason.Value);
+            }
+            finally
+            {
+                firstCancellation.Cancel();
+                try { await first.ResponseAsync; }
+                catch (RpcException error) when (error.StatusCode == StatusCode.Cancelled) { }
+                await waiting.Exited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        }
+        finally { await host.StopAsync(); }
+    }
+
+    [Fact]
     public async Task Runtime_delivery_composition_has_distinct_store_and_finite_lifetime_through_reply_copy()
     {
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false",
@@ -23,6 +59,46 @@ public sealed class RuntimeDeliveryHostTests
         Assert.Equal(new(7, 1), lifetime.Options);
         using var first = lifetime.Enter(); Assert.NotNull(first); Assert.Null(lifetime.Enter());
         first.Dispose(); using var next = lifetime.Enter(); Assert.NotNull(next);
+    }
+
+    [Fact]
+    public void Runtime_protobuf_limit_has_permanent_reason_while_static_limit_retains_original_trailers()
+    {
+        var reply = new DeliverConfigurationReply { SourceFingerprint = new string('a', 8 * 1024 * 1024) };
+        var runtime = Assert.Throws<RpcException>(() => ConfigurationDeliveryService.ValidateRuntimeResponseSize(reply));
+        Assert.Equal(StatusCode.ResourceExhausted, runtime.StatusCode);
+        var reason = Assert.Single(runtime.Trailers);
+        Assert.Equal(RuntimeDeliveryReasons.Header, reason.Key); Assert.False(reason.IsBinary);
+        Assert.Equal(RuntimeDeliveryReasons.OutputLimit, reason.Value);
+        var retained = Assert.Throws<RpcException>(() => ConfigurationDeliveryService.ValidateResponseSize(reply));
+        Assert.Equal(StatusCode.ResourceExhausted, retained.StatusCode); Assert.Empty(retained.Trailers);
+    }
+
+    [Fact]
+    public void Runtime_outcome_translation_preserves_statuses_and_only_closed_overload_or_output_reasons()
+    {
+        foreach (var outcome in Enum.GetValues<RuntimeDeliveryOutcome>().Where(x => x != RuntimeDeliveryOutcome.Delivered))
+        {
+            var error = ConfigurationDeliveryService.RuntimeFailure(outcome);
+            if (outcome is RuntimeDeliveryOutcome.AdmissionOverload or RuntimeDeliveryOutcome.OutputLimit)
+            {
+                Assert.Equal(StatusCode.ResourceExhausted, error.StatusCode);
+                var reason = Assert.Single(error.Trailers);
+                Assert.Equal(RuntimeDeliveryReasons.Header, reason.Key); Assert.False(reason.IsBinary);
+                Assert.Equal(outcome == RuntimeDeliveryOutcome.AdmissionOverload ? RuntimeDeliveryReasons.AdmissionOverload : RuntimeDeliveryReasons.OutputLimit, reason.Value);
+            }
+            else
+            {
+                Assert.Empty(error.Trailers);
+                Assert.Equal(outcome switch
+                {
+                    RuntimeDeliveryOutcome.Unauthenticated => StatusCode.Unauthenticated,
+                    RuntimeDeliveryOutcome.PermissionDenied => StatusCode.PermissionDenied,
+                    RuntimeDeliveryOutcome.FailedPrecondition => StatusCode.FailedPrecondition,
+                    _ => StatusCode.Unavailable
+                }, error.StatusCode);
+            }
+        }
     }
 
     [Theory]

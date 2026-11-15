@@ -24,6 +24,12 @@ endpoint. The default loopback address is not an in-cluster endpoint. The compil
 deadline, cancellation and transient credential handling. It implements no token
 file reader, startup retry loop, projected volume or Deployment integration.
 
+The subsequent [mandatory startup client](221-runtime-startup-client.md) adds
+bounded per-attempt projected-file reads, eligible retries and complete-set
+ownership over this same generated runtime RPC. Use it before primary work when
+all explicitly selected documents are mandatory; Deployment integration remains
+separate.
+
 The response contains complete sensitive JSON bytes, not the operator redacted
 preview. Do not print, trace, persist, hash or compare it through diagnostic
 serialization. Its revision and source fingerprint identify the saved unresolved

@@ -5,7 +5,8 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 internal enum HostFailurePhase
 {
-    Build, Start, AddressScheme, AddressLoopback, Channel, ReflectionWrite, ReflectionRead, StatusAssertion, Cleanup
+    Build, Start, AddressScheme, AddressLoopback, Channel, ReflectionWrite, ReflectionRead, StatusAssertion, Cleanup,
+    Catalog, LocalIssuance, AdministrativeRead, StaticDeliveryRead, RouteDiscovery, ReflectionCall, ReflectionComplete, DescriptorAssertion
 }
 
 // Structured test instrumentation, not parsing or copying exception messages/stacks.
@@ -85,5 +86,133 @@ internal static class HostFailureDiagnostics
         {
             Console.Error.WriteLine("Allowlisted Host diagnostic unavailable; primary failure preserved.");
         }
+    }
+
+    internal static void RecordProtected(bool enabled, HostFailurePhase phase, Exception error, StatusCode? observed,
+        ReflectionRouteKind route, ReflectionCredentialPurpose purpose)
+    {
+        var directory = Environment.GetEnvironmentVariable("HABY_TEST_TIMING_DIRECTORY");
+        if (directory is null) return;
+        try
+        {
+            lock (Gate)
+            {
+                Directory.CreateDirectory(directory);
+                File.AppendAllText(Path.Combine(directory, "protected-reflection-diagnostics.csv"),
+                    ProtectedReflectionDiagnostics.Render(enabled, phase, error, observed, route, purpose) + Environment.NewLine);
+            }
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine("Allowlisted protected reflection diagnostic unavailable; primary failure preserved.");
+        }
+    }
+}
+
+internal enum ReflectionRouteKind { None, V1Alpha, V1, Unknown }
+internal enum ReflectionCredentialPurpose { None, Anonymous, StaticDelivery, OperatorAdmin, Unknown }
+
+// One test invocation owns this state. Only closed values enter the separate CSV.
+internal sealed class ProtectedReflectionDiagnostics(bool enabled, Action<string>? capture = null)
+{
+    internal const string Method = "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests.Operator_protected_reflection_describes_both_contracts_and_can_be_disabled";
+    private readonly HashSet<Exception> recorded = new(ReferenceEqualityComparer.Instance);
+    internal HostFailurePhase Phase { get; private set; } = HostFailurePhase.Catalog;
+    internal StatusCode? Observed { get; private set; }
+    private ReflectionRouteKind route;
+    private ReflectionCredentialPurpose purpose;
+
+    internal void At(HostFailurePhase phase, ReflectionRouteKind routeKind = ReflectionRouteKind.None,
+        ReflectionCredentialPurpose credentialPurpose = ReflectionCredentialPurpose.None)
+    {
+        Phase = phase; Observed = null; route = routeKind; purpose = credentialPurpose;
+    }
+
+    internal void Observe(StatusCode status) { Phase = HostFailurePhase.StatusAssertion; Observed = status; }
+
+    internal Action<HostFailurePhase, Exception, StatusCode?> Recorder(ReflectionRouteKind routeKind, ReflectionCredentialPurpose credentialPurpose) =>
+        (phase, error, observed) => Record(phase, error, observed, routeKind, credentialPurpose);
+
+    internal void RecordRoot(HostFailurePhase phase, Exception error, StatusCode? observed) =>
+        Record(phase, error, observed, phase == HostFailurePhase.Cleanup ? ReflectionRouteKind.None : route,
+            phase == HostFailurePhase.Cleanup ? ReflectionCredentialPurpose.None : purpose);
+
+    private void Record(HostFailurePhase phase, Exception error, StatusCode? observed, ReflectionRouteKind routeKind, ReflectionCredentialPurpose credentialPurpose)
+    {
+        // Nested scopes rethrow the same primary. Keep every cleanup event, even if a disposer reuses an exception.
+        var first = recorded.Add(error);
+        if (phase != HostFailurePhase.Cleanup && !first) return;
+        if (capture is null) HostFailureDiagnostics.RecordProtected(enabled, phase, error, observed, routeKind, credentialPurpose);
+        else capture(Render(enabled, phase, error, observed, routeKind, credentialPurpose));
+    }
+
+    internal static string Render(bool enabled, HostFailurePhase phase, Exception error, StatusCode? observed,
+        ReflectionRouteKind route, ReflectionCredentialPurpose purpose)
+    {
+        var stage = phase switch
+        {
+            HostFailurePhase.Catalog => "catalog",
+            HostFailurePhase.Build => "host-build",
+            HostFailurePhase.LocalIssuance => "local-issuance",
+            HostFailurePhase.Start => "host-start",
+            HostFailurePhase.Channel => "channel",
+            HostFailurePhase.AdministrativeRead => "administrative-read",
+            HostFailurePhase.StaticDeliveryRead => "static-delivery-read",
+            HostFailurePhase.RouteDiscovery => "route-discovery",
+            HostFailurePhase.ReflectionCall => "reflection-call",
+            HostFailurePhase.ReflectionWrite => "reflection-write",
+            HostFailurePhase.ReflectionComplete => "reflection-complete",
+            HostFailurePhase.ReflectionRead => "reflection-read",
+            HostFailurePhase.StatusAssertion => "status-assertion",
+            HostFailurePhase.DescriptorAssertion => "descriptor-assertion",
+            HostFailurePhase.Cleanup => "cleanup",
+            _ => "unknown"
+        };
+        var routeKind = route switch
+        {
+            ReflectionRouteKind.None => "none",
+            ReflectionRouteKind.V1Alpha => "v1alpha",
+            ReflectionRouteKind.V1 => "v1",
+            _ => "unknown"
+        };
+        var credentialPurpose = purpose switch
+        {
+            ReflectionCredentialPurpose.None => "none",
+            ReflectionCredentialPurpose.Anonymous => "anonymous",
+            ReflectionCredentialPurpose.StaticDelivery => "static-delivery",
+            ReflectionCredentialPurpose.OperatorAdmin => "operator-admin",
+            _ => "unknown"
+        };
+        var status = ((error as RpcException)?.StatusCode ?? observed) switch
+        {
+            StatusCode.OK => "ok",
+            StatusCode.Cancelled => "cancelled",
+            StatusCode.Unknown => "unknown",
+            StatusCode.InvalidArgument => "invalid-argument",
+            StatusCode.DeadlineExceeded => "deadline-exceeded",
+            StatusCode.NotFound => "not-found",
+            StatusCode.AlreadyExists => "already-exists",
+            StatusCode.PermissionDenied => "permission-denied",
+            StatusCode.ResourceExhausted => "resource-exhausted",
+            StatusCode.FailedPrecondition => "failed-precondition",
+            StatusCode.Aborted => "aborted",
+            StatusCode.OutOfRange => "out-of-range",
+            StatusCode.Unimplemented => "unimplemented",
+            StatusCode.Internal => "internal",
+            StatusCode.Unavailable => "unavailable",
+            StatusCode.DataLoss => "data-loss",
+            StatusCode.Unauthenticated => "unauthenticated",
+            null => "unavailable-evidence",
+            _ => "unknown-status"
+        };
+        var category = error switch
+        {
+            RpcException => "rpc",
+            Xunit.Sdk.XunitException => "assertion",
+            OperationCanceledException => "cancelled",
+            IOException => "io",
+            _ => "other"
+        };
+        return Method + "," + (enabled ? "enabled-true" : "enabled-false") + "," + stage + "," + routeKind + "," + credentialPurpose + "," + status + "," + category;
     }
 }

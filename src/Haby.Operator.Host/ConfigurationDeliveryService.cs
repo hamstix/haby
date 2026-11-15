@@ -21,7 +21,7 @@ internal sealed class ConfigurationDeliveryService(DeliverConfiguration delivery
                 !TryRuntimeId(request.BindingId, out var binding) || !TryRuntimeRevision(request.RevisionId, out var revision))
                 throw new RpcException(new(StatusCode.Unauthenticated, "Runtime identity refused."));
             using var lease = lifetime.Enter();
-            if (lease is null) throw new RpcException(new(StatusCode.ResourceExhausted, "Runtime delivery admission exceeded."));
+            if (lease is null) throw RuntimeFailure(RuntimeDeliveryOutcome.AdmissionOverload);
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(lifetime.Options.RequestTimeoutSeconds), clock);
             using var requestLifetime = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken, deadline.Token);
             var token = requestLifetime.Token;
@@ -33,7 +33,7 @@ internal sealed class ConfigurationDeliveryService(DeliverConfiguration delivery
             if (result.Outcome != RuntimeDeliveryOutcome.Delivered) throw RuntimeFailure(result.Outcome);
             var document = result.Document!;
             var reply = new DeliverConfigurationReply { RevisionId = revision.ToString(), SourceFingerprint = document.SourceFingerprint ?? "", Json = ByteString.CopyFrom(document.Json.Span) };
-            ValidateResponseSize(reply);
+            ValidateRuntimeResponseSize(reply);
             token.ThrowIfCancellationRequested();
             return reply;
         }
@@ -63,21 +63,31 @@ internal sealed class ConfigurationDeliveryService(DeliverConfiguration delivery
             if (!(c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9') && !"-._~+/=".Contains(c, StringComparison.Ordinal)) return false;
         return true;
     }
-    private static RpcException RuntimeFailure(RuntimeDeliveryOutcome outcome) => new(new(outcome switch
+    internal static RpcException RuntimeFailure(RuntimeDeliveryOutcome outcome) => new(new(outcome switch
     {
         RuntimeDeliveryOutcome.Unauthenticated => StatusCode.Unauthenticated,
         RuntimeDeliveryOutcome.PermissionDenied => StatusCode.PermissionDenied,
-        RuntimeDeliveryOutcome.ResourceExhausted => StatusCode.ResourceExhausted,
+        RuntimeDeliveryOutcome.AdmissionOverload or RuntimeDeliveryOutcome.OutputLimit => StatusCode.ResourceExhausted,
         RuntimeDeliveryOutcome.FailedPrecondition => StatusCode.FailedPrecondition,
         _ => StatusCode.Unavailable
     }, outcome switch
     {
         RuntimeDeliveryOutcome.Unauthenticated => "Runtime identity refused.",
         RuntimeDeliveryOutcome.PermissionDenied => "Runtime configuration access denied.",
-        RuntimeDeliveryOutcome.ResourceExhausted => "Runtime delivery limit exceeded.",
+        RuntimeDeliveryOutcome.AdmissionOverload or RuntimeDeliveryOutcome.OutputLimit => "Runtime delivery limit exceeded.",
         RuntimeDeliveryOutcome.FailedPrecondition => "Runtime configuration unavailable.",
         _ => "Runtime delivery unavailable."
-    }));
+    }), outcome switch
+    {
+        RuntimeDeliveryOutcome.AdmissionOverload => new Metadata { { RuntimeDeliveryReasons.Header, RuntimeDeliveryReasons.AdmissionOverload } },
+        RuntimeDeliveryOutcome.OutputLimit => new Metadata { { RuntimeDeliveryReasons.Header, RuntimeDeliveryReasons.OutputLimit } },
+        _ => new Metadata()
+    });
+
+    internal static void ValidateRuntimeResponseSize(DeliverConfigurationReply reply)
+    {
+        if (reply.CalculateSize() > 8 * 1024 * 1024) throw RuntimeFailure(RuntimeDeliveryOutcome.OutputLimit);
+    }
 
     public override async Task<DeliverConfigurationReply> Deliver(DeliverConfigurationRequest request, ServerCallContext context)
     {

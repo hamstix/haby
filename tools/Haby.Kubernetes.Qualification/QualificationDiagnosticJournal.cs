@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 
@@ -8,13 +9,14 @@ internal enum QualificationMilestone
     DurableEntry, CatalogInitStart, CatalogInitCompleted, NamespaceCreateStart, NamespaceCreateCompleted,
     DurableSuiteStart, RuntimeAuthStart, InitialDeliveryStart, MixedDeliveryStart,
     MixedPreparationCompleted, MixedDocumentsCompleted, MixedIdentityCompleted, MixedPublicationCompleted, MixedDeliveryCompleted,
-    NamespaceCleanupStart, NamespaceAbsenceConfirmed, CatalogDisposeStart, CatalogDisposeCompleted
+    NamespaceCleanupStart, NamespaceAbsenceConfirmed, CatalogDisposeStart, CatalogDisposeCompleted, RuntimeAuthCompleted
 }
 
-// A private bounded journal survives an outer command timeout. No runtime values enter this channel.
+// A private bounded journal records closed progress and managed elapsed time, never runtime payloads.
 internal sealed class QualificationDiagnosticJournal : IDisposable
 {
     private readonly FileStream stream;
+    private readonly Stopwatch managedClock;
     private int sequence;
     internal bool Failed { get; private set; }
 
@@ -34,6 +36,8 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
         // The launcher exclusively created the empty file; only this writer can modify it while open.
         stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read);
         if (stream.Length != 0) { stream.Dispose(); throw new IOException("Diagnostic journal is not empty."); }
+        // Separate from the parent command clock: compilation and startup have already happened.
+        managedClock = Stopwatch.StartNew();
     }
 
     internal void Mark(QualificationMilestone milestone)
@@ -50,6 +54,7 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
                 QualificationMilestone.NamespaceCreateCompleted => "namespace-create-completed",
                 QualificationMilestone.DurableSuiteStart => "durable-suite-start",
                 QualificationMilestone.RuntimeAuthStart => "runtime-auth-start",
+                QualificationMilestone.RuntimeAuthCompleted => "runtime-auth-completed",
                 QualificationMilestone.InitialDeliveryStart => "initial-delivery-start",
                 QualificationMilestone.MixedDeliveryStart => "mixed-delivery-start",
                 QualificationMilestone.MixedPreparationCompleted => "mixed-preparation-completed",
@@ -63,7 +68,9 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
                 QualificationMilestone.CatalogDisposeCompleted => "catalog-dispose-completed",
                 _ => throw new InvalidOperationException("Unknown diagnostic milestone.")
             };
-            var bytes = Encoding.ASCII.GetBytes((sequence + 1).ToString(CultureInfo.InvariantCulture) + " " + id + "\n");
+            var elapsed = Math.Clamp(managedClock.ElapsedMilliseconds, 0L, 3600000L);
+            var bytes = Encoding.ASCII.GetBytes((sequence + 1).ToString(CultureInfo.InvariantCulture) + " " + id + " " +
+                elapsed.ToString(CultureInfo.InvariantCulture) + "\n");
             if (sequence >= 256 || stream.Position + bytes.Length > 16384) throw new IOException("Diagnostic journal limit exceeded.");
             stream.Write(bytes);
             stream.Flush();

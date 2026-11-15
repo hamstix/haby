@@ -5,6 +5,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Haby.Application;
 using Haby.Configuration.Contracts;
+using Haby.Configuration.Client;
 using Haby.Domain;
 using Haby.Kubernetes;
 using Haby.Operator.Host;
@@ -21,7 +22,8 @@ using Npgsql;
 internal static class RuntimeDeliveryCases
 {
     internal static async Task Run(Kubernetes admin, DurableDeploymentPlanningTests.InternalScenario scenario,
-        ServiceProvider services, InternalRuntimePublication publication, RuntimePublicationRequest request, bool login, CancellationToken token)
+        ServiceProvider services, InternalRuntimePublication publication, RuntimePublicationRequest request, bool login, CancellationToken token,
+        IReadOnlyList<RuntimePublicationRequest>? mandatory = null)
     {
         var label = login ? "login" : "initial";
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
@@ -47,6 +49,16 @@ internal static class RuntimeDeliveryCases
         V1Pod? pod = null;
         Func<Task>? afterReview = null, afterAuthority = null;
         var reviews = 0;
+        byte[]? expectedReviewedCredential = null;
+        var startupReviews = 0;
+        var startupCredentialsMatch = true;
+        void ObserveReview(byte[] payload)
+        {
+            if (expectedReviewedCredential is null) return;
+            using var json = JsonDocument.Parse(payload);
+            startupCredentialsMatch &= json.RootElement.GetProperty("spec"u8).GetProperty("token"u8).ValueEquals(expectedReviewedCredential);
+            startupReviews++;
+        }
         async Task Revoke()
         {
             var current = (await publication.ReadAsync(request.Key, token))!;
@@ -91,7 +103,7 @@ internal static class RuntimeDeliveryCases
                         collection.RemoveAll<IRuntimeAuthenticator>();
                         collection.AddSingleton<IRuntimeAuthenticator>(p => new KubernetesRuntimeAuthenticator(p.GetRequiredService<ISecretStore>(),
                             (connection, handlers, ct) => KubernetesClientFactory.CreateFixture(connection, p.GetRequiredService<ISecretStore>(),
-                                [.. handlers, new ReviewBoundary(async () => { reviews++; if (afterReview is { } hook) { afterReview = null; await hook(); } })], ct)));
+                                [.. handlers, new ReviewBoundary(async () => { reviews++; if (afterReview is { } hook) { afterReview = null; await hook(); } }, ObserveReview)], ct)));
                         collection.AddSingleton<IRuntimeConfigurationStore>(p => new ReadBoundary(new PostgreSqlRuntimeConfigurationStore(
                             p.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()), async () => { if (afterAuthority is { } hook) { afterAuthority = null; await hook(); } }));
                     });
@@ -138,7 +150,122 @@ internal static class RuntimeDeliveryCases
                             "T05-revoke-after-authority-inflight-only-next-request-denied");
                         await Republish();
                     }
+                    if (first && mandatory is not null) await Startup(client, mandatory);
                     await host.StopAsync(token);
+                }
+
+                async Task Startup(ConfigurationDelivery.ConfigurationDeliveryClient client, IReadOnlyList<RuntimePublicationRequest> selection)
+                {
+                    Check(selection.Count == 2 && selection.All(x => x.Binding == request.Binding), "S01-two-explicit-published-documents-same-binding");
+                    var secondPodName = "startup-" + Guid.NewGuid().ToString("N")[..12];
+                    V1Pod? secondPod = null;
+                    var privatePath = Path.Combine(Path.GetTempPath(), "haby221-" + Guid.NewGuid().ToString("N"));
+                    if (OperatingSystem.IsWindows()) Directory.CreateDirectory(privatePath);
+                    else Directory.CreateDirectory(privatePath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    byte[]? replacementBytes = null;
+                    Exception? startupFailure = null;
+                    try
+                    {
+                        secondPod = await admin.CoreV1.CreateNamespacedPodAsync(new V1Pod
+                        {
+                            Metadata = new() { Name = secondPodName },
+                            Spec = new()
+                            {
+                                ServiceAccountName = receipt.Intent.Name,
+                                AutomountServiceAccountToken = false,
+                                Containers = [new() { Name = "app", Image = "registry.k8s.io/pause:3.10" }]
+                            }
+                        }, ns, cancellationToken: token);
+                        var replacementToken = await admin.CoreV1.CreateNamespacedServiceAccountTokenAsync(new Authenticationv1TokenRequest
+                        {
+                            Spec = new()
+                            {
+                                Audiences = [binding.Audience],
+                                ExpirationSeconds = 600,
+                                BoundObjectRef = new() { ApiVersion = "v1", Kind = "Pod", Name = secondPodName, Uid = secondPod.Metadata.Uid }
+                            }
+                        }, receipt.Intent.Name, ns, cancellationToken: token);
+                        replacementBytes = Encoding.ASCII.GetBytes(replacementToken.Status.Token);
+                        Check(!bytes.SequenceEqual(replacementBytes), "S02-two-distinct-real-Pod-bound-issued-tokens");
+                        var credentialPath = Path.Combine(privatePath, "projected");
+                        await File.WriteAllBytesAsync(credentialPath, bytes, token);
+                        var revisions = selection.Select(x => x.Revision!.Value.ToString()).ToArray();
+                        var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
+                        await using (var read = await contexts.CreateDbContextAsync(token))
+                            foreach (var selected in selection)
+                                fingerprints.Add(selected.Revision!.Value.ToString(), await read.ConfigurationDocuments.AsNoTracking()
+                                    .Where(x => x.Id == selected.Revision).Select(x => x.Fingerprint).SingleAsync(token));
+                        expectedReviewedCredential = bytes;
+                        var beforeReviews = reviews;
+                        var firstReviewProven = false;
+                        afterAuthority = async () =>
+                        {
+                            // Runs only after the first real TokenReview and exact publication authorization.
+                            firstReviewProven = reviews == beforeReviews + 1 && startupReviews == 1 && startupCredentialsMatch;
+                            var replacementPath = Path.Combine(privatePath, "replacement");
+                            await File.WriteAllBytesAsync(replacementPath, replacementBytes, token);
+                            File.Move(replacementPath, credentialPath, true);
+                            expectedReviewedCredential = replacementBytes;
+                            throw new ConfigurationDeliveryStorageException();
+                        };
+                        var startup = new RuntimeStartupClient(client);
+                        var beforeState = await State(contexts, token);
+                        using (var complete = await startup.FetchAsync(request.Binding.ToString(), revisions, credentialPath, cancellationToken: token))
+                        {
+                            Check(firstReviewProven, "S03-first-real-review-before-controlled-temporary-boundary");
+                            Check(complete.Documents.Select(x => x.RevisionId).SequenceEqual(revisions) && complete.Documents.All(x =>
+                                x.SourceFingerprint == fingerprints[x.RevisionId]) && Encoding.UTF8.GetString(complete.Documents[0].Json.Span) == "{\"Mode\":\"frozen\"}" &&
+                                Encoding.UTF8.GetString(complete.Documents[1].Json.Span) == "{}",
+                                "S04-complete-two-exact-documents-and-original-content");
+                            Check(reviews == beforeReviews + 3 && startupReviews == 3 && startupCredentialsMatch,
+                                "S05-retry-rereads-atomic-file-replacement-and-real-second-Pod-token");
+                        }
+                        var completedState = await State(contexts, token);
+                        Check(beforeState.SequenceEqual(completedState), "S06-helper-created-no-authority-or-state");
+                        var beforeRestart = reviews;
+                        using (var restarted = await new RuntimeStartupClient(client).FetchAsync(request.Binding.ToString(), revisions, credentialPath, cancellationToken: token))
+                            Check(restarted.Documents.Count == 2 && reviews == beforeRestart + 2 && startupCredentialsMatch,
+                                "S07-restarted-consumer-fresh-file-reads-and-real-delivery");
+                        var second = selection[1];
+                        var current = (await publication.ReadAsync(second.Key, token))!;
+                        await publication.ApplyAsync(second with
+                        {
+                            Key = "startup-revoke-" + Guid.NewGuid().ToString("N"),
+                            Operation = RuntimePublicationOperation.RevokePermission,
+                            Origin = null,
+                            ExpectedToken = current.CurrentPermission!.Token
+                        }, token);
+                        var primaryEntered = false;
+                        try
+                        {
+                            using var partial = await startup.FetchAsync(request.Binding.ToString(), revisions, credentialPath, cancellationToken: token);
+                            primaryEntered = true;
+                        }
+                        catch (RuntimeStartupException failure) when (failure.Failure == RuntimeStartupFailure.AccessDenied) { }
+                        Check(!primaryEntered, "S08-later-independent-revocation-prevents-primary-start");
+                        current = (await publication.ReadAsync(second.Key, token))!;
+                        await publication.ApplyAsync(second with { Key = "startup-republish-" + Guid.NewGuid().ToString("N"), ExpectedToken = current.CurrentPermission!.Token }, token);
+                    }
+                    catch (Exception error) { startupFailure = error; throw; }
+                    finally
+                    {
+                        afterAuthority = null; expectedReviewedCredential = null;
+                        if (replacementBytes is not null) CryptographicOperations.ZeroMemory(replacementBytes);
+                        Exception? cleanupFailure = null;
+                        try
+                        {
+                            if (secondPod is not null) await admin.CoreV1.DeleteNamespacedPodAsync(secondPodName, ns,
+                                new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = secondPod.Metadata.Uid }, GracePeriodSeconds = 0 }, cancellationToken: CancellationToken.None);
+                        }
+                        catch (Exception error) { cleanupFailure = error; }
+                        try { Directory.Delete(privatePath, true); }
+                        catch (Exception error) { cleanupFailure ??= error; }
+                        if (cleanupFailure is not null)
+                        {
+                            if (startupFailure is null) throw new InvalidOperationException("Runtime startup owned cleanup failed.");
+                            Console.Error.WriteLine("Runtime startup owned cleanup failed; primary failure retained.");
+                        }
+                    }
                 }
                 await DeliveryHost(true);
                 await DeliveryHost(false);
@@ -173,10 +300,18 @@ internal static class RuntimeDeliveryCases
         try { await client.DeliverRuntimeAsync(request, headers, cancellationToken: token); throw new InvalidOperationException("Expected runtime refusal."); }
         catch (RpcException error) { return error.StatusCode; }
     }
-    private sealed class ReviewBoundary(Func<Task> after) : DelegatingHandler
+    private sealed class ReviewBoundary(Func<Task> after, Action<byte[]> observe) : DelegatingHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
-        { var response = await base.SendAsync(request, token); await after(); return response; }
+        {
+            var content = request.Content is null ? null : await request.Content.ReadAsByteArrayAsync(token);
+            try
+            {
+                if (content is not null) observe(content);
+                var response = await base.SendAsync(request, token); await after(); return response;
+            }
+            finally { if (content is not null) CryptographicOperations.ZeroMemory(content); }
+        }
     }
     private sealed class ReadBoundary(IRuntimeConfigurationStore inner, Func<Task> after) : IRuntimeConfigurationStore
     {
