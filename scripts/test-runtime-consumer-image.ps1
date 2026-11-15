@@ -1,4 +1,4 @@
-param([switch]$BaselineContract,[ValidateSet('all','central','routing')][string]$Focus='all')
+param([switch]$BaselineContract,[ValidateSet('all','central','routing','hidden')][string]$Focus='all')
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $launcher=[IO.File]::ReadAllText((Join-Path $root 'scripts/run-kubernetes-qualification.ps1'))
@@ -25,6 +25,16 @@ try{
     $copy=Join-Path $fixture 'source';New-Item -ItemType Directory $copy|Out-Null
     foreach($entry in $inputs.files.GetEnumerator()){$target=Join-Path $copy $entry.Key;New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($target))|Out-Null;[IO.File]::WriteAllText($target,$entry.Value,[Text.UTF8Encoding]::new($false))}
     if((Get-HabyConsumerImageInputs $copy).key -cne $inputs.key){throw 'Canonical context changed input identity.'}
+    if($Focus -cin @('all','hidden')){
+        $hidden=Join-Path $copy '.editorconfig';$attributes=[IO.File]::GetAttributes($hidden)
+        try{
+            if($IsWindows){[IO.File]::SetAttributes($hidden,($attributes -bor [IO.FileAttributes]::Hidden))}
+            $observed=Get-HabyConsumerImageInputs $copy
+            if($observed.key -cne $inputs.key -or !$observed.files.ContainsKey('.editorconfig') -or $observed.files['.editorconfig'] -cne $inputs.files['.editorconfig']){throw 'Hidden input changed bytes, context or identity.'}
+        }finally{if($IsWindows){[IO.File]::SetAttributes($hidden,$attributes)}}
+        Write-Output 'PASS hidden .editorconfig: identical bytes/context/key; fixture attribute restored.'
+        if($Focus -ceq 'hidden'){return}
+    }
     [IO.File]::WriteAllText((Join-Path $copy 'unrelated-doc.md'),'unrelated')
     $central=Join-Path $copy 'Directory.Packages.props';$original=[IO.File]::ReadAllText($central)
     [IO.File]::WriteAllText($central,$original.Replace('</ItemGroup>','<PackageVersion Include="Unrelated.Test.Package" Version="1.2.3" /></ItemGroup>'))

@@ -11,7 +11,7 @@ function Get-HabyConsumerImageInputs([string]$Root){
     $files=[Collections.Generic.SortedDictionary[string,string]]::new([StringComparer]::Ordinal)
     function Add-Input([string]$Path){
         $full=Join-Path $Root $Path
-        if(!(Test-Path -LiteralPath $full -PathType Leaf) -or ((Get-Item -LiteralPath $full).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Consumer input missing or linked.'}
+        if(!(Test-Path -LiteralPath $full -PathType Leaf) -or ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Consumer input missing or linked.'}
         $files[$Path]=([IO.File]::ReadAllText($full) -replace '\r\n',"`n")
     }
     foreach($parent in @('','src','examples','src/Haby.Configuration.Client','src/Haby.Configuration.Contracts','examples/Haby.RuntimeStartup.Consumer')){
