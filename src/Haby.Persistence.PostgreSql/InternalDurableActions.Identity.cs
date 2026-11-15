@@ -77,9 +77,9 @@ internal sealed partial class InternalDurableActions
     }
     private static async Task AcceptIdentityAsync(ManifestCatalogDbContext db, Loaded loaded, string receipt, CancellationToken token)
     {
-        if (!loaded.Handler.RequiresPreparedConfiguration) return;
+        if (!loaded.Handler.EstablishesIdentity) return;
         var value = Confirmation(loaded, receipt);
-        if (await db.OwnedObjects.AnyAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity, token) ||
+        if (await db.OwnedObjects.AnyAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity && x.Role == value.Role, token) ||
             await db.RuntimeIdentityBindings.AnyAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity, token))
             throw new InvalidDataException("Existing identity cannot be replaced by a new confirmation.");
         db.OwnedObjects.Add(new()
@@ -112,7 +112,7 @@ internal sealed partial class InternalDurableActions
     }
     private static async Task ValidateIdentityAsync(ManifestCatalogDbContext db, Loaded loaded, string receipt, CancellationToken token)
     {
-        if (!loaded.Handler.RequiresPreparedConfiguration) return;
+        if (!loaded.Handler.EstablishesIdentity) return;
         var value = Confirmation(loaded, receipt);
         var inventory = await db.OwnedObjects.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity && x.Role == value.Role, token);
         var binding = await db.RuntimeIdentityBindings.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity, token);
@@ -145,7 +145,7 @@ internal sealed partial class InternalDurableActions
         var loaded = purpose == OriginPurpose.AuthenticationIdentity
             ? await LoadAuthenticationIdentityAsync(db, key, token) : await LoadAsync(db, key, token);
         if (loaded.Operation.State != nameof(DurableOperationState.Succeeded) || loaded.Intent.ManagedIdentity != binding.ManagedWorkloadId ||
-            !loaded.Handler.RequiresPreparedConfiguration) throw new InvalidDataException("Confirmed identity origin unavailable.");
+            !loaded.Handler.EstablishesIdentity) throw new InvalidDataException("Confirmed identity origin unavailable.");
         await TerminalAsync(db, loaded, token);
     }
 }

@@ -34,6 +34,7 @@ public sealed class DeploymentKernel
             Validate(intent); Need(intent.Binding == _binding, "provider-binding"); budget.Token.ThrowIfCancellationRequested();
             validIntent = true;
             using var lease = await _connect(budget.Token); var client = lease.Client;
+            await RequireRuntimeAccount(client, intent, budget.Token);
             while (true)
             {
                 var current = await Read(client, intent, budget.Token);
@@ -101,6 +102,7 @@ public sealed class DeploymentKernel
             var current = await Read(lease.Client, intent, budget.Token);
             if (current is null) return new(KernelOutcome.NotConfirmed, "object-absent", 0);
             receivedObject = true;
+            await RequireRuntimeAccount(lease.Client, intent, budget.Token);
             DeploymentObjects.Ownership(current, intent);
             Need(intent.ExpectedUid is null || DeploymentObjects.String(current, "metadata", "uid") == intent.ExpectedUid, "uid-conflict");
             return new(KernelOutcome.Confirmed, "observation-confirmed", 0, DeploymentObjects.Receipt(current, intent, ConfirmationSource.Observation));
@@ -114,6 +116,20 @@ public sealed class DeploymentKernel
         { return new(KernelOutcome.ObservationUnavailable, "observation-unavailable", 0); }
     }
 
+    private static async Task RequireRuntimeAccount(k8s.Kubernetes client, DeploymentIntent intent, CancellationToken token)
+    {
+        if (intent.Target.Runtime is not { } runtime) return;
+        try
+        {
+            using var account = await client.CoreV1.ReadNamespacedServiceAccountWithHttpMessagesAsync(runtime.ServiceAccount, intent.Namespace, cancellationToken: token);
+            Need(account.Body.Metadata.Name == runtime.ServiceAccount && account.Body.Metadata.NamespaceProperty == intent.Namespace &&
+                account.Body.Metadata.Uid == runtime.ServiceAccountUid && account.Body.AutomountServiceAccountToken == false &&
+                account.Body.Metadata.Labels is { } labels && labels.TryGetValue(OwnerKey, out var owner) && owner == intent.Owner.ToString("N") &&
+                labels.TryGetValue(ManagedKey, out var managed) && managed == intent.ManagedWorkload.ToString("N"), "runtime-account-unconfirmed");
+        }
+        catch (HttpOperationException error) when (error.Response?.StatusCode == HttpStatusCode.NotFound)
+        { throw new WorkloadContractException("runtime-account-missing"); }
+    }
     private static async Task<System.Text.Json.Nodes.JsonObject?> Read(k8s.Kubernetes client, DeploymentIntent i, CancellationToken token)
     {
         try { using var response = await client.AppsV1.ReadNamespacedDeploymentWithHttpMessagesAsync(i.Name, i.Namespace, cancellationToken: token); return DeploymentObjects.Read(response.Body); }

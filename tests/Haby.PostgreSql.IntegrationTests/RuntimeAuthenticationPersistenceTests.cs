@@ -300,7 +300,7 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environment,
                 alias, null, new(provider, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
             var codec = new KubernetesPlacementCodec();
-            var placement = codec.Decode(Encoding.UTF8.GetBytes("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"NAMESPACE"}}""".Replace("NAMESPACE", namespaceName, StringComparison.Ordinal)));
+            var placement = codec.Decode(Encoding.UTF8.GetBytes("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"NAMESPACE","runtimeConfiguration":{"endpoint":"https://configuration.example/","tls":{"mode":"system"}}}}""".Replace("NAMESPACE", namespaceName, StringComparison.Ordinal)));
             var placementKey = new PlacementRevisionKey(environment, alias, placement.Name, placement.Revision);
             await new PostgreSqlPlacementRevisionStore(contexts, codec).CompareAndCreateAsync(placementKey, placement, new("tester", DateTimeOffset.UtcNow), default);
             await new PostgreSqlPlacementSelectionStore(contexts, codec).ApplyAsync(PlacementSelectionTarget.Create("environment", "", "", ""), placementKey,

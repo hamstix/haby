@@ -7,6 +7,12 @@ externally callable endpoint. TokenReview, delivery clients, projected-token
 injection, configured Deployment execution, readiness and Applied remain closed.
 Static Profile secret projections remain unsupported under pending #209.
 
+[Issue #223](223-configured-deployment-bootstrap.md) adds the internal configured
+submission consumer. It validates original publication proof and the complete set
+of current rights before a new marker. Revoke cannot prevent truthful observation
+of an already-dispatched write, and automatic publication replay cannot restore
+rights. Public execution/readiness/Applied remain closed.
+
 ## Exact authority and separate states
 
 `InternalRuntimePublication.PreparationRequestsAsync` derives every recipient from

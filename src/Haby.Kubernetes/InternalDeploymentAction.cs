@@ -1,6 +1,8 @@
 using Haby.Application;
 using Haby.Domain;
 using Haby.Kubernetes.Contracts;
+using Haby.Configuration.Contracts;
+using System.Collections.Immutable;
 
 namespace Haby.Kubernetes;
 
@@ -12,11 +14,40 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
     internal const string Create = "haby.kubernetes.deployment-create/v1";
     public InternalActionContract Contract { get; } = new("kubernetes.workload/v1alpha1", KubernetesProviderConfigurationCodec.Kind,
         KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation, Create,
-        "haby.kubernetes.deployment-intent/v1", "haby.kubernetes.deployment-receipt/v1");
+        "haby.kubernetes.deployment-intent/v2", "haby.kubernetes.deployment-receipt/v2");
     public bool ObservationRecovery => true;
+    public bool RequiresRuntimePublication => true;
     public InternalManagedTarget ManagedTarget(InternalActionContext context) => RuntimeIdentityCodec.Target(Resolve(context));
-    public string Prepare(InternalActionContext context) => DeploymentIntents.Encode(DeploymentIntents.Prepare(Resolve(context),
-        Guid.Parse(context.Key.DeploymentId.ToString()), context.ManagedIdentity, context.Key.Generation.Value, context.Marker));
+    public string Prepare(InternalActionContext context)
+    {
+        var workload = Resolve(context);
+        DeploymentRuntime? runtime = null;
+        if (!workload.Declaration.Documents.IsEmpty)
+        {
+            var prepared = context.Runtime ?? throw new InvalidDataException("Verified runtime preparation required.");
+            if (prepared.IdentityContract != "haby.kubernetes.runtime-account-receipt/v1") throw new InvalidDataException("Runtime identity contract unavailable.");
+            var account = RuntimeIdentityCodec.Receipt(prepared.IdentityReceipt);
+            if (account.Intent.ManagedWorkload != context.ManagedIdentity || account.Intent.Owner != Guid.Parse(context.Key.DeploymentId.ToString()) ||
+                account.Intent.Binding.Environment != context.Provider.Environment.ToString() || account.Intent.Binding.Provider != context.Provider.Instance.ToString() ||
+                account.Intent.Binding.Configuration != context.Provider.Configuration.Value || account.Intent.Binding.Implementation != context.Provider.Implementation.Value ||
+                account.Intent.Namespace != workload.Placement.Declaration.Namespace || RuntimeIdentityCodec.Audience(account.Intent) != prepared.Audience ||
+                !prepared.Documents.Keys.OrderBy(x => x.Value, StringComparer.Ordinal).SequenceEqual(workload.Declaration.Documents.OrderBy(x => x.Value, StringComparer.Ordinal)))
+                throw new InvalidDataException("Runtime preparation scope mismatch.");
+            var bootstrap = new RuntimeBootstrap(1, prepared.Binding.ToString("D"), prepared.Documents.ToImmutableSortedDictionary(x => x.Key.Value,
+                x => x.Value.ToString(), StringComparer.Ordinal), RuntimeBootstrap.TokenPath,
+                workload.Placement.Declaration.RuntimeConfiguration ?? throw new InvalidDataException("Frozen delivery unavailable."));
+            runtime = new(account.Intent.Name, account.Uid, prepared.Audience, RuntimeBootstrapCodec.Encode(bootstrap));
+        }
+        return DeploymentIntents.Encode(DeploymentIntents.Prepare(workload, Guid.Parse(context.Key.DeploymentId.ToString()),
+            context.ManagedIdentity, context.Key.Generation.Value, context.Marker, runtime: runtime));
+    }
+    public InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt)
+    {
+        if (DeploymentIntents.Decode(payload).Target.Runtime is null) return null;
+        var decoded = DeploymentIntents.DecodeReceipt(receipt);
+        if (!ValidateReceipt(context, payload, receipt, decoded.Source == ConfirmationSource.Observation)) throw new InvalidDataException("Deployment receipt invalid.");
+        return new("deployment", Contract.OutputContract, 2, receipt, decoded.Uid);
+    }
 
     public IReadOnlyList<ManifestLocalId> PreparationDocuments(InternalActionContext context)
     {

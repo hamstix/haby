@@ -5,6 +5,11 @@ TokenReview. It returns an internal authenticated context or a safe typed failur
 It opens no endpoint, issues no credential and grants no configuration permission.
 Public Workload execution, readiness and AppliedGeneration remain unchanged.
 
+[Issue #223](223-configured-deployment-bootstrap.md) adds a separate runnable-node
+consumer contour for production-generated token projection. Its delivery TLS
+policy is distinct from this administrator/API transport's Online policy. Earlier
+API-only results below do not establish Pod startup or kubelet rotation.
+
 ## Trust and lifecycle
 
 The non-secret binding UUID selects saved installation, Environment, ManagedWorkload,

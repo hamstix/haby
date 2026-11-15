@@ -27,7 +27,7 @@ internal static class DeploymentKernelCases
             var key = secrets.Add(File.ReadAllBytes(Path.Combine(directory, "admin.key")));
             var connection = new KubernetesConnection(binding, endpoint, File.ReadAllText(Path.Combine(directory, "ca.crt")), null, cert, key);
             DeploymentKernel Kernel(KubernetesConnection? c = null, params DelegatingHandler[] handlers) => new(binding, ct => KubernetesClientFactory.CreateFixture(c ?? connection, secrets, handlers, ct));
-            DeploymentIntent Intent(string objectName) => new(1, binding, "api", "main", "standard", 1, name, objectName,
+            DeploymentIntent Intent(string objectName) => new(2, binding, "api", "main", "standard", 1, name, objectName,
                 Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(),
                 new("app", "registry.k8s.io/pause:3.10", 1, "RollingUpdate", "25%", "25%", 0, 600,
                     ImmutableSortedDictionary<string, string>.Empty.Add("pool.example/role", "api"), ["registry"]), null, null);

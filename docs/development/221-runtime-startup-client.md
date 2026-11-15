@@ -6,6 +6,15 @@ The caller starts primary application work only after the complete set returns.
 The module is not packaged for public NuGet distribution and provides no SDK/API
 stability promise during this alpha. Existing static `Deliver` clients are unchanged.
 
+[Issue #223](223-configured-deployment-bootstrap.md) adds the closed format-1
+HABY_RUNTIME_BOOTSTRAP environment contract in Haby.Configuration.Contracts and
+RuntimeBootstrapChannel for explicit HTTPS/custom-root transport and exact
+name-to-revision association. The sample's zero-argument mode consumes that wire;
+the controlled argument mode below remains separately tested. Custom-root delivery
+validates names/validity/chain with explicit NoCheck revocation and no downloads;
+this does not change the Kubernetes administrator/API Online policy. Primary work
+still waits for the complete exact mandatory set, never a partial result.
+
 ## Explicit bootstrap and channel ownership
 
 Supply one binding ID, 1..64 unique canonical lowercase UUIDv7 document revision

@@ -5,6 +5,7 @@ param(
     [switch]$ProbeStockTls,
     [switch]$DeploymentKernel,
     [switch]$DurableActions,
+    [switch]$ConfiguredDeployment,
     [ValidateRange(1,120)][int]$CommandTimeoutSeconds=20,
     [ValidateRange(1,300)][int]$ReadinessTimeoutSeconds=120,
     [scriptblock]$CommandRunner
@@ -24,6 +25,7 @@ $listCommand=if($Runtime -eq 'docker'){'ps'}else{'list'}
 $image='rancher/k3s@sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248'
 $record=[Collections.Generic.List[string]]::new()
 $failed=$false; $launchAttempted=$false; $privateOwned=$false
+$consumerImage=$null; $consumerImageId=$null
 $record.Add('Evidence ID: '+$EvidenceId); $record.Add('Run ID: '+$run)
 $record.Add('Source: '+(& git rev-parse HEAD))
 $record.Add('Dirty: '+[bool](& git status --porcelain))
@@ -55,8 +57,26 @@ try {
     if($DurableActions){Initialize-QualificationJournal $private}
     $record.Add('Runtime version: '+(RuntimeCall @('--version')).Trim())
     $sdk=Call 'dotnet' @('--version'); if($sdk.ExitCode -ne 0){throw 'SDK unavailable.'}; $record.Add('SDK: '+$sdk.Output.Trim())
+    if($ConfiguredDeployment){
+        if($Runtime -cne 'docker' -or !$IsLinux){throw 'Configured consumer requires the existing hosted Linux Docker contour.'}
+        $consumerOutput=Join-Path $private 'consumer'
+        $publish=Call 'dotnet' @('publish','examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj','-c','Release','-o',$consumerOutput) 60
+        if($publish.ExitCode -ne 0){throw 'Consumer publication failed.'}
+        $consumerImage='localhost/haby-runtime-consumer:'+$run
+        $build=Call 'docker' @('build','--label',"haby.qualification=$run",'--tag',$consumerImage,'--file','examples/Haby.RuntimeStartup.Consumer/Dockerfile',$consumerOutput) 60
+        if($build.ExitCode -ne 0){throw 'Consumer image build failed.'}
+        $consumerImageId=(RuntimeCall @('image','inspect','--format','{{.Id}}',$consumerImage)).Trim()
+        $record.Add('Consumer image: '+$consumerImageId)
+        RuntimeCall @('image','save','--output',(Join-Path $private 'consumer.tar'),$consumerImage) 60 | Out-Null
+        [IO.File]::WriteAllText((Join-Path $private 'consumer-image'),$consumerImage)
+    }
     $stage='launch'; $record.Add('Stage: launch-start'); $launchAttempted=$true
-    $launch=Call $Runtime @('run','-d','--name',$run,'--label',"haby.qualification=$run",'-p','127.0.0.1:16443:6443',$image,'server','--disable-agent','--disable','traefik','--disable','servicelb','--disable','metrics-server','--disable','coredns','--disable','local-storage','--egress-selector-mode','disabled','--tls-san','127.0.0.1','--write-kubeconfig-mode','600') 180
+    $launchArguments=@('run','-d')
+    if($ConfiguredDeployment){$launchArguments+='--privileged'}
+    $launchArguments+=@('--name',$run,'--label',"haby.qualification=$run",'-p','127.0.0.1:16443:6443',$image,'server')
+    if(!$ConfiguredDeployment){$launchArguments+='--disable-agent'}
+    $launchArguments+=@('--disable','traefik','--disable','servicelb','--disable','metrics-server','--disable','coredns','--disable','local-storage','--egress-selector-mode','disabled','--tls-san','127.0.0.1','--write-kubeconfig-mode','600')
+    $launch=Call $Runtime $launchArguments 180
     if($launch.ExitCode -ne 0){$reason='nonzero';throw 'Launch refused.'}
     $record.Add('Stage: launch-complete'); $stage='readiness'; $record.Add('Stage: readiness-start'); $record.Add('Readiness budget seconds: '+$ReadinessTimeoutSeconds)
     $timer=[Diagnostics.Stopwatch]::StartNew(); $ready=$false
@@ -64,15 +84,31 @@ try {
         $remaining=[Math]::Max(1,[int][Math]::Ceiling($ReadinessTimeoutSeconds-$timer.Elapsed.TotalSeconds))
         $record.Add('Stage: readiness-probe')
         $probe=Call $Runtime @('exec',$run,'/bin/kubectl','--kubeconfig','/etc/rancher/k3s/k3s.yaml','--request-timeout=3s','get','--raw=/readyz') ([Math]::Min($CommandTimeoutSeconds,$remaining))
-        if($probe.ExitCode -eq 0){$ready=$true;break}
+        if($probe.ExitCode -eq 0){
+            if(!$ConfiguredDeployment){$ready=$true;break}
+            $nodes=Call $Runtime @('exec',$run,'/bin/kubectl','--kubeconfig','/etc/rancher/k3s/k3s.yaml','--request-timeout=3s','get','nodes','-o','json') ([Math]::Min($CommandTimeoutSeconds,$remaining))
+            if($nodes.ExitCode -eq 0){
+                $nodeList=$nodes.Output | ConvertFrom-Json
+                if(@($nodeList.items | Where-Object { @($_.status.conditions | Where-Object { $_.type -ceq 'Ready' -and $_.status -ceq 'True' }).Count -eq 1 }).Count -eq 1){$ready=$true;break}
+            }
+        }
         Start-Sleep -Milliseconds 200
     }
     if(!$ready){$reason='deadline';throw [TimeoutException]::new('Readiness deadline exceeded.')}
     $record.Add('Stage: readiness-complete'); $stage='copy'; $record.Add('Stage: copy-start')
     foreach($pair in @(@('server-ca.crt','ca.crt'),@('client-admin.crt','admin.crt'),@('client-admin.key','admin.key'))){RuntimeCall @('cp',"${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])",(Join-Path $private $pair[1])) | Out-Null}
+    if($ConfiguredDeployment){
+        $network=(RuntimeCall @('inspect',$run) | ConvertFrom-Json)[0].NetworkSettings.Networks.bridge
+        $gateway=$network.Gateway
+        $parsedGateway=$null
+        if(![Net.IPAddress]::TryParse($gateway,[ref]$parsedGateway) -or [Net.IPAddress]::IsLoopback($parsedGateway)){throw 'Explicit Pod-reachable fixture gateway unavailable.'}
+        [IO.File]::WriteAllText((Join-Path $private 'pod-host-address'),$gateway)
+        RuntimeCall @('cp',(Join-Path $private 'consumer.tar'),"${run}:/tmp/haby-consumer.tar") 60 | Out-Null
+        RuntimeCall @('exec',$run,'/bin/k3s','ctr','images','import','/tmp/haby-consumer.tar') 60 | Out-Null
+    }
     $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
-    if((@($ProbeStockTls,$DeploymentKernel,$DurableActions) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
-    [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}else{@()}
+    if((@($ProbeStockTls,$DeploymentKernel,$DurableActions,$ConfiguredDeployment) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
+    [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}elseif($ConfiguredDeployment){@('--configured-deployment')}else{@()}
     $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-restore','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
     foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
     if($result.ExitCode -ne 0){$reason='nonzero';throw 'Harness failed.'}
@@ -124,6 +160,12 @@ finally {
             }
         } catch { $failed=$true; $record.Add('Container/storage cleanup: FAIL; category='+$_.Exception.GetType().Name) }
     }
+    if($consumerImage){try {
+        $ownedImage=(RuntimeCall @('image','inspect',$consumerImage) | ConvertFrom-Json)[0]
+        if($ownedImage.Config.Labels.'haby.qualification' -cne $run -or ($consumerImageId -and $ownedImage.Id -cne $consumerImageId)){throw 'Consumer image ownership mismatch.'}
+        RuntimeCall @('image','rm',$ownedImage.Id) | Out-Null
+        $record.Add('Run-owned consumer image removed.')
+    }catch{$failed=$true;$record.Add('Consumer image cleanup: FAIL')}}
     if($privateOwned){
         try {
             if([IO.Path]::GetDirectoryName($private) -ne $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) -or (Split-Path $private -Leaf) -ne $run){throw 'Private cleanup ownership mismatch.'}

@@ -6,6 +6,21 @@ var stage = "args";
 try
 {
     stage = "args";
+    if (args.Length == 0)
+    {
+        var bootstrap = RuntimeBootstrapCodec.Decode(Environment.GetEnvironmentVariable(RuntimeBootstrap.Variable)!);
+        stage = "channel";
+        using var configuredChannel = RuntimeBootstrapChannel.Create(bootstrap.Delivery);
+        stage = "fetch";
+        using var documents = await new RuntimeStartupClient(new ConfigurationDelivery.ConfigurationDeliveryClient(configuredChannel))
+            .FetchAsync(bootstrap.BindingId, bootstrap.Documents.Values.ToArray(), bootstrap.ProjectedTokenPath, RuntimeBootstrapChannel.Options(bootstrap.Delivery.Client));
+        var named = RuntimeBootstrapChannel.Map(bootstrap, documents);
+        if (named.Count != 2 || !named.ContainsKey("settings") || !named.ContainsKey("other")) throw new InvalidOperationException();
+        stage = "primary";
+        Console.WriteLine("primary-started");
+        await Task.Delay(Timeout.InfiniteTimeSpan);
+        return 0;
+    }
     if (args.Length is not (5 or 6)) throw new InvalidOperationException();
     stage = "endpoint-policy";
     var endpoint = new Uri(args[0]);

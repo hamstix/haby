@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using Corvus.Text.Json.Validator;
 using Haby.Domain;
 using Haby.Manifest;
+using Haby.Configuration.Contracts;
 
 namespace Haby.Kubernetes.Contracts;
 
@@ -91,7 +92,8 @@ public static class KubernetesContract
         }
         var secrets = Items(spec, "imagePullSecrets").Select(x => Dns(x.GetString()!)).ToImmutableArray();
         return new(new(ManifestLocalId.Create(Text(metadata, "name")!), Int(metadata, "revision")!.Value), Label(Text(spec, "namespace")!),
-            registry, Text(spec, "repositoryPrefix"), selectors, secrets, Settings(spec));
+            registry, Text(spec, "repositoryPrefix"), selectors, secrets, Settings(spec),
+            spec.TryGetProperty("runtimeConfiguration"u8, out var runtime) ? RuntimeBootstrapCodec.ReadConfiguration(runtime) : null);
     }
 
     internal static readonly OperationalSettings EmptySettings = new(null, null, null, null, null, null, null, null);

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json.Nodes;
 using k8s;
 using k8s.Models;
+using Haby.Configuration.Contracts;
 using static Haby.Kubernetes.DeploymentIntents;
 
 namespace Haby.Kubernetes;
@@ -40,6 +41,16 @@ internal static class DeploymentObjects
                 },
             },
         };
+        if (p.Runtime is { } runtime)
+        {
+            var spec = body["spec"]!["template"]!["spec"]!;
+            spec["serviceAccountName"] = runtime.ServiceAccount;
+            spec["automountServiceAccountToken"] = false;
+            spec["volumes"] = new JsonArray(TokenVolume(runtime));
+            var container = spec["containers"]![0]!;
+            container["env"] = new JsonArray(BootstrapVariable(runtime));
+            container["volumeMounts"] = new JsonArray(TokenMount());
+        }
         return KubernetesJson.Deserialize<V1Deployment>(body.ToJsonString());
     }
     internal static void Ownership(JsonObject obj, DeploymentIntent i)
@@ -70,10 +81,59 @@ internal static class DeploymentObjects
         foreach (var (k, v) in p.NodeSelector) Need(String(obj, "spec", "template", "spec", "nodeSelector", k) == v, "node-selector-drift");
         var pulls = Pulls(obj);
         foreach (var key in p.ImagePullSecrets) Need(pulls.Any(n => String(n!, "name") == key), "pull-secret-drift");
+        if (p.Runtime is { } runtime) MatchesRuntime(obj, found[0]!, containers, runtime);
+    }
+    private static JsonObject BootstrapVariable(DeploymentRuntime runtime) => new() { ["name"] = RuntimeBootstrap.Variable, ["value"] = runtime.Bootstrap };
+    private static JsonObject TokenMount() => new() { ["name"] = "haby-runtime-token", ["mountPath"] = "/var/run/haby/runtime", ["readOnly"] = true };
+    private static JsonObject TokenVolume(DeploymentRuntime runtime) => new()
+    {
+        ["name"] = "haby-runtime-token",
+        ["projected"] = new JsonObject
+        {
+            ["defaultMode"] = 420,
+            ["sources"] = new JsonArray(new JsonObject
+            {
+                ["serviceAccountToken"] = new JsonObject
+                { ["audience"] = runtime.Audience, ["expirationSeconds"] = 3600, ["path"] = "token" }
+            })
+        }
+    };
+    private static void MatchesRuntime(JsonObject obj, JsonNode main, JsonArray containers, DeploymentRuntime runtime)
+    {
+        var spec = At(obj, "spec", "template", "spec")!;
+        Need(String(spec, "serviceAccountName") == runtime.ServiceAccount &&
+            (At(spec, "serviceAccount") is null || String(spec, "serviceAccount") == runtime.ServiceAccount) &&
+            At(spec, "automountServiceAccountToken")?.GetValue<bool>() == false, "runtime-account-drift");
+        JsonArray Keyed(JsonNode node, string field, string key)
+        {
+            Need(At(node, field) is null or JsonArray, "runtime-list-shape");
+            var items = At(node, field)?.AsArray() ?? new JsonArray();
+            Need(items.All(x => x is JsonObject && !string.IsNullOrEmpty(String(x!, key))) &&
+                items.Select(x => String(x!, key)).Distinct(StringComparer.Ordinal).Count() == items.Count, "runtime-list-identity"); return items;
+        }
+        var variables = Keyed(main, "env", "name");
+        Need(At(main, "envFrom") is null && variables.Count(x => String(x!, "name") == RuntimeBootstrap.Variable) == 1 &&
+            JsonNode.DeepEquals(variables.Single(x => String(x!, "name") == RuntimeBootstrap.Variable), BootstrapVariable(runtime)), "runtime-bootstrap-drift");
+        var volumes = Keyed(spec, "volumes", "name");
+        Need(volumes.Count(x => String(x!, "name") == "haby-runtime-token") == 1 &&
+            JsonNode.DeepEquals(volumes.Single(x => String(x!, "name") == "haby-runtime-token"), TokenVolume(runtime)), "runtime-volume-drift");
+        var mounts = Keyed(main, "volumeMounts", "mountPath");
+        Need(mounts.Count(x => String(x!, "name") == "haby-runtime-token") == 1 &&
+            JsonNode.DeepEquals(mounts.Single(x => String(x!, "name") == "haby-runtime-token"), TokenMount()), "runtime-mount-drift");
+        foreach (var mount in mounts.Where(x => String(x!, "name") != "haby-runtime-token"))
+        {
+            var path = String(mount!, "mountPath")!;
+            Need(path != "/" && path != "/var/run/haby/runtime" && !path.StartsWith("/var/run/haby/runtime/", StringComparison.Ordinal) &&
+                !"/var/run/haby/runtime".StartsWith(path.TrimEnd('/') + "/", StringComparison.Ordinal), "runtime-mount-collision");
+        }
+        var injected = containers.Where(x => !ReferenceEquals(x, main)).Concat(At(spec, "initContainers")?.AsArray() ?? []);
+        foreach (var container in injected)
+            Need(!Keyed(container!, "volumeMounts", "mountPath").Any(x => String(x!, "name") == "haby-runtime-token"), "runtime-token-injection");
     }
     internal static JsonArray Patch(JsonObject obj, DeploymentIntent i)
     {
         var old = i.LastConfirmed!; var target = i.Target;
+        Need(old.Runtime is null && target.Runtime is null, "configured-update-unsupported");
         var patch = new JsonArray();
         void Add(string op, string path, JsonNode? value = null)
         {
@@ -123,7 +183,7 @@ internal static class DeploymentObjects
     internal static DeploymentReceipt Receipt(JsonObject obj, DeploymentIntent i, ConfirmationSource source)
     {
         Ownership(obj, i); MatchesTarget(obj, i); Need(HasMarkers(obj, i), "operation-marker");
-        var result = new DeploymentReceipt(1, i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload,
+        var result = new DeploymentReceipt(2, i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload,
             i.TargetGeneration, i.Operation, String(obj, "metadata", "uid")!, long.Parse(At(obj, "metadata", "generation")?.ToJsonString() ?? "0", CultureInfo.InvariantCulture), i.Target, source);
         Validate(result); return result;
     }

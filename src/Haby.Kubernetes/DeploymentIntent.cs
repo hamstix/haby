@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using System.Text;
 using System.Text.RegularExpressions;
 using Haby.Kubernetes.Contracts;
+using Haby.Configuration.Contracts;
 
 namespace Haby.Kubernetes;
 
@@ -14,7 +15,8 @@ namespace Haby.Kubernetes;
 public sealed record KubernetesBinding(string Environment, string Provider, long Configuration, string Implementation);
 public sealed record DeploymentProjection(string Container, string Image, int Replicas, string Strategy,
     string? MaxSurge, string? MaxUnavailable, int MinReadySeconds, int ProgressDeadlineSeconds,
-    ImmutableSortedDictionary<string, string> NodeSelector, ImmutableArray<string> ImagePullSecrets);
+    ImmutableSortedDictionary<string, string> NodeSelector, ImmutableArray<string> ImagePullSecrets, DeploymentRuntime? Runtime = null);
+public sealed record DeploymentRuntime(string ServiceAccount, string ServiceAccountUid, string Audience, string Bootstrap);
 public sealed record DeploymentIntent(int Format, KubernetesBinding Binding, string Component, string Workload,
     string Placement, int PlacementRevision, string Namespace, string Name, Guid Owner, Guid ManagedWorkload,
     long TargetGeneration, Guid Operation, DeploymentProjection Target, string? ExpectedUid,
@@ -37,15 +39,22 @@ public static class DeploymentIntents
 
     /// <summary>Pure preparation; refuses unsupported effective defaults as well as explicit requests.</summary>
     public static DeploymentIntent Prepare(EffectiveWorkload workload, Guid owner, Guid managedWorkload,
-        long generation, Guid operation, DeploymentReceipt? previous = null)
+        long generation, Guid operation, DeploymentReceipt? previous = null, DeploymentRuntime? runtime = null)
     {
-        Need(workload.Declaration.Documents.IsEmpty, "unsupported-fields");
         ValidatePreparation(workload);
+        Need(workload.Declaration.Documents.IsEmpty == (runtime is null), "runtime-preparation-required");
+        if (runtime is not null)
+        {
+            var bootstrap = RuntimeBootstrapCodec.Decode(runtime.Bootstrap);
+            Need(runtime.ServiceAccount == workload.Objects.Single(x => x.Kind == "ServiceAccount").Name &&
+                bootstrap.Documents.Keys.SequenceEqual(workload.Declaration.Documents.Select(x => x.Value).Order(StringComparer.Ordinal)) &&
+                bootstrap.Delivery == workload.Placement.Declaration.RuntimeConfiguration, "runtime-preparation-mismatch");
+        }
         var d = workload.Declaration; var p = workload.Placement;
         var obj = workload.Objects[0]; var provider = workload.Provider;
         var binding = new KubernetesBinding(provider.Environment.ToString()!, provider.Instance.ToString(),
             provider.Configuration.Value, provider.Implementation.Value);
-        var target = ProjectionFor(workload);
+        var target = ProjectionFor(workload) with { Runtime = runtime };
         if (previous is not null)
         {
             Validate(previous);
@@ -53,7 +62,7 @@ public static class DeploymentIntents
                 previous.Owner == owner && previous.ManagedWorkload == managedWorkload && previous.Projection.Container == target.Container,
                 "immutable-identity");
         }
-        var intent = new DeploymentIntent(1, binding, workload.Input.Component.Value, workload.Input.Id.Value,
+        var intent = new DeploymentIntent(2, binding, workload.Input.Component.Value, workload.Input.Id.Value,
             p.Declaration.Reference.Name.Value, p.Declaration.Reference.Revision, obj.Namespace, obj.Name, owner,
             managedWorkload, generation, operation, target, previous?.Uid, previous?.Projection);
         Validate(intent); return intent;
@@ -62,6 +71,13 @@ public static class DeploymentIntents
     private static DeploymentProjection ProjectionFor(EffectiveWorkload workload)
     {
         var d = workload.Declaration; var s = workload.Settings; var p = workload.Placement;
+        if (!d.Documents.IsEmpty)
+        {
+            Need(d.Documents.Length <= 64 && p.Declaration.RuntimeConfiguration is not null, "runtime-delivery-required");
+            Need(!d.Environment.ContainsKey(RuntimeBootstrap.Variable) && !d.Volumes.ContainsKey("haby-runtime-token") &&
+                !d.Mounts.Any(x => x.MountPath == "/var/run/haby/runtime" || x.MountPath.StartsWith("/var/run/haby/runtime/", StringComparison.Ordinal) ||
+                    "/var/run/haby/runtime".StartsWith(x.MountPath + "/", StringComparison.Ordinal)), "runtime-collision");
+        }
         var strategy = s.Strategy ?? new RolloutStrategy("RollingUpdate", new(25, true), new(25, true));
         string? Bound(RolloutBound? b) => b is null ? null : b.Value.ToString(CultureInfo.InvariantCulture) + (b.Percent ? "%" : "");
         return new DeploymentProjection(d.ContainerName, workload.ImageReference, s.Replicas ?? 1, strategy.Type,
@@ -73,6 +89,7 @@ public static class DeploymentIntents
     internal static void ValidatePreparation(EffectiveWorkload workload)
     {
         var d = workload.Declaration; var s = workload.Settings; var p = workload.Placement;
+        Projection(ProjectionFor(workload));
         Need(d.Environment.Count == 0 && d.Ports.Count == 0 && d.Volumes.Count == 0 && d.Mounts.IsEmpty &&
             d.Routes.IsEmpty && d.Probes == new Probes(null, null, null) &&
             s.Resources is null && d.Overrides.Resources is null && p.Declaration.Settings.Resources is null &&
@@ -90,7 +107,6 @@ public static class DeploymentIntents
             obj.Namespace == p.Declaration.Namespace && p.Provider == provider.Instance && p.Configuration == provider.Configuration &&
             p.Implementation == provider.Implementation && p.Environment == provider.Environment && p.Alias == provider.Alias &&
             provider.Input == workload.Input, "exact-input");
-        Projection(ProjectionFor(workload));
     }
 
     public static string Encode(DeploymentIntent intent) { Validate(intent); return JsonSerializer.Serialize(intent, KernelJson.Default.DeploymentIntent); }
@@ -111,16 +127,17 @@ public static class DeploymentIntents
     }
     internal static void Validate(DeploymentIntent i)
     {
-        Need(i is { Format: 1, Binding: not null, Target: not null } && i.Owner != Guid.Empty && i.ManagedWorkload != Guid.Empty &&
+        Need(i is { Format: 2, Binding: not null, Target: not null } && i.Owner != Guid.Empty && i.ManagedWorkload != Guid.Empty &&
             i.Operation != Guid.Empty && i.TargetGeneration > 0 && i.PlacementRevision > 0, "intent-format");
         Binding(i.Binding); Name(i.Namespace); Name(i.Name); Name(i.Component); Name(i.Workload); Name(i.Placement);
         Need(i.Namespace.Length <= 63 && !i.Namespace.Contains('.'), "namespace");
         Projection(i.Target); Need((i.ExpectedUid is null) == (i.LastConfirmed is null), "intent-update-pair");
+        Need(i.Target.Runtime is null || i.ExpectedUid is null && i.LastConfirmed is null, "configured-update-unsupported");
         if (i.LastConfirmed is not null) { Text(i.ExpectedUid!, 128); Projection(i.LastConfirmed); Need(i.LastConfirmed.Container == i.Target.Container, "immutable-container"); }
     }
     internal static void Validate(DeploymentReceipt r)
     {
-        Need(r is { Format: 1, Binding: not null, Projection: not null } && r.Owner != Guid.Empty && r.ManagedWorkload != Guid.Empty &&
+        Need(r is { Format: 2, Binding: not null, Projection: not null } && r.Owner != Guid.Empty && r.ManagedWorkload != Guid.Empty &&
             r.Operation != Guid.Empty && r.TargetGeneration > 0 && r.KubernetesGeneration > 0 && Enum.IsDefined(r.Source), "receipt-format");
         Binding(r.Binding); Name(r.Namespace); Name(r.Name); Text(r.Uid, 128); Projection(r.Projection);
     }
@@ -146,6 +163,12 @@ public static class DeploymentIntents
              p.Strategy == "RollingUpdate" && ValidBound(p.MaxSurge) && ValidBound(p.MaxUnavailable) && (p.MaxSurge != "0" && p.MaxSurge != "0%" || p.MaxUnavailable != "0" && p.MaxUnavailable != "0%")), "projection-settings");
         foreach (var (k, v) in p.NodeSelector) { Need(!Reserved.Contains(k), "reserved-key"); Text(k, 253); Need(v is not null && v.Length <= 63 && !v.Any(char.IsControl), "node-selector"); }
         foreach (var n in p.ImagePullSecrets) Name(n);
+        if (p.Runtime is { } runtime)
+        {
+            Name(runtime.ServiceAccount); Text(runtime.ServiceAccountUid, 128); Text(runtime.Audience, 256);
+            var bootstrap = RuntimeBootstrapCodec.Decode(runtime.Bootstrap);
+            Need(RuntimeBootstrapCodec.Encode(bootstrap) == runtime.Bootstrap && runtime.Audience.StartsWith("urn:haby:", StringComparison.Ordinal), "runtime-projection");
+        }
         Need(p.ImagePullSecrets.Distinct(StringComparer.Ordinal).Count() == p.ImagePullSecrets.Length, "duplicate-key");
         var selector = new JsonObject(); foreach (var (key, value) in p.NodeSelector) selector[key] = value;
         var pulls = new JsonArray(); foreach (var name in p.ImagePullSecrets) pulls.Add(name);
@@ -165,7 +188,7 @@ public static class DeploymentIntents
     internal static void Need([DoesNotReturnIf(false)] bool condition, string code) { if (!condition) throw new WorkloadContractException(code); }
 }
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false)]
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false, RespectRequiredConstructorParameters = true)]
 [JsonSerializable(typeof(DeploymentIntent))]
 [JsonSerializable(typeof(DeploymentReceipt))]
 internal partial class KernelJson : JsonSerializerContext;

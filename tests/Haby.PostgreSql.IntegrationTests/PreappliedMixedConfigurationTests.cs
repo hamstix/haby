@@ -38,7 +38,7 @@ public sealed partial class ApplicationConfigurationTests
             Assert.Equal(StoreStatus.NotApplied, (await preparation.Documents.MaterializeAsync(target, "tester", default)).Status);
             Assert.Equal(StoreStatus.NotApplied, (await preparation.Documents.ReadAsync(target, default)).Status);
             // Executable acceptance refuses before creating an intent, attempt, dispatch marker or Kubernetes client.
-            await Assert.ThrowsAsync<Haby.Kubernetes.Contracts.WorkloadContractException>(async () => await DurableDeploymentPlanningTests.Actions(services,
+            await Assert.ThrowsAsync<InvalidDataException>(async () => await DurableDeploymentPlanningTests.Actions(services,
                 services.GetRequiredService<IInternalActionHandler>()).AcceptAsync(scenario.Commit, first.Prepared[0].Workload,
                 InternalDeploymentAction.Create, "configured-refusal", default));
         }
@@ -106,7 +106,7 @@ public sealed partial class ApplicationConfigurationTests
         Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environment,
             alias, null, new(instance, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
         var codec = new KubernetesPlacementCodec();
-        var placement = codec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"test"}}"""u8.ToArray());
+        var placement = codec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"standard","revision":1},"spec":{"namespace":"test","runtimeConfiguration":{"endpoint":"https://configuration.example/","tls":{"mode":"system"}}}}"""u8.ToArray());
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         var reference = new PlacementRevisionKey(environment, alias, placement.Name, placement.Revision);
         await new PostgreSqlPlacementRevisionStore(contexts, codec).CompareAndCreateAsync(reference, placement, new("tester", DateTimeOffset.UtcNow), default);

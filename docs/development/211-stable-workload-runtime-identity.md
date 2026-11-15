@@ -9,6 +9,12 @@ Exact friend-only publication and terminal binding revocation are described in t
 Pod injection, readiness, AppliedGeneration and
 #209 static Profile secret execution remain separate capabilities.
 
+[Issue #223](223-configured-deployment-bootstrap.md) subsequently consumes this
+confirmed identity for bounded internal configured CREATE. Configuration checks,
+identity establishment and publication requirements are separate capabilities;
+Deployment confirmation uses another generic inventory role and never creates a
+second binding. The public executor/readiness gates remain closed.
+
 ## Stable ownership and exact authority
 
 A managed Workload has one persisted ID for Environment/Application deployment +
