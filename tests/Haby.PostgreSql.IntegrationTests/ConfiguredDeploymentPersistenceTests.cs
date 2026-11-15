@@ -10,11 +10,28 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
-    private sealed class ConfiguredSubmissionFixture : IInternalActionHandler
+    private sealed class ConfiguredSubmissionFixture : IInternalActionHandler, IInternalReadinessHandler
     {
         private readonly InternalDeploymentAction adapter = new(null!);
         internal int Writes, Reads;
         internal bool LoseResponse;
+        internal bool Pending;
+        internal int ReadinessReads;
+        internal Func<CancellationToken, Task>? BeforeRead;
+        public int ObservationSeconds(string intent, string receipt) => adapter.ObservationSeconds(intent, receipt);
+        public bool ValidateObservation(string intent, string receipt, RolloutObservation observation) => adapter.ValidateObservation(intent, receipt, observation);
+        public async ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string payload, string receipt, CancellationToken token)
+        {
+            ReadinessReads++;
+            if (BeforeRead is not null) await BeforeRead(token);
+            var intent = DeploymentIntents.Decode(payload); var saved = DeploymentIntents.DecodeReceipt(receipt);
+            var obj = DeploymentObjects.Read(DeploymentObjects.Create(intent));
+            obj["metadata"]!["uid"] = saved.Uid; obj["metadata"]!["resourceVersion"] = "current"; obj["metadata"]!["generation"] = saved.KubernetesGeneration;
+            var count = Pending ? 0 : intent.Target.Replicas;
+            obj["status"] = new System.Text.Json.Nodes.JsonObject { ["observedGeneration"] = saved.KubernetesGeneration,
+                ["replicas"] = count, ["updatedReplicas"] = count, ["readyReplicas"] = count, ["availableReplicas"] = count };
+            return DeploymentReadiness.Evaluate(obj, intent, saved);
+        }
         public InternalActionContract Contract => adapter.Contract;
         public bool ObservationRecovery => true;
         public bool RequiresRuntimePublication => true;

@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Haby.Persistence.PostgreSql;
 
-internal enum InternalActionFault { BeforeMarkerCommit, AfterMarkerCommit, AfterExternalResult, BeforeCompletionCommit, AfterCompletionCommit }
+internal enum InternalActionFault { BeforeMarkerCommit, AfterMarkerCommit, AfterExternalResult, BeforeCompletionCommit, AfterCompletionCommit, BeforeReadinessCheckpoint }
 internal sealed record InternalActionView(DurableActionIntentRow Intent, DurableOperationRow Operation,
     IReadOnlyList<DurableOperationAttemptRow> Attempts, IReadOnlyList<DurableActionObservationRow> Observations, OperationOutputRow? Output);
 
@@ -260,7 +260,14 @@ internal sealed partial class InternalDurableActions(
                 Payload = result.Receipt!
             });
         }
-        await db.SaveChangesAsync(token); fault?.Invoke(InternalActionFault.BeforeCompletionCommit);
+        await db.SaveChangesAsync(token);
+        if (confirmed && loaded.Handler is IInternalReadinessHandler)
+        {
+            var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == loaded.Intent.DeploymentId && x.Generation == key.Generation.Value, token);
+            _ = await CaptureSubmittedAsync(db, source, token);
+            await db.SaveChangesAsync(token);
+        }
+        fault?.Invoke(InternalActionFault.BeforeCompletionCommit);
         token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
         fault?.Invoke(InternalActionFault.AfterCompletionCommit);
         return confirmed ? new(InternalActionOutcome.Confirmed, "confirmed", result.Receipt) : result with { Receipt = null };

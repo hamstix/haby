@@ -81,18 +81,21 @@ internal static class ConfiguredDeploymentCases
                     var properties = component["workloads"]!["main"]!["properties"]!;
                     properties["configuration"]!["documents"]![1] = "other";
                     properties["image"]!["reference"] = image; properties["containerName"] = "configured-consumer";
+                    properties["overrides"] = new System.Text.Json.Nodes.JsonObject { ["minReadySeconds"] = 1 };
                 }, runtimeConfigurationJson: ConfigurationJson(delivery));
             await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
             var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+            var observationClock = new ObservationClock(services.GetRequiredService<TimeProvider>());
             var secrets = services.GetRequiredService<ISecretStore>();
             var configurationPreparation = DurableDeploymentPlanningTests.ConfigurationPreparation(services).Preparation;
             var identity = new InternalRuntimeIdentityAction(secrets, (connection, ct) => KubernetesClientFactory.CreateFixture(connection, secrets, [], ct));
             var deployment = new InternalDeploymentAction(secrets, connection => new DeploymentKernel(connection.Binding,
                 ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CountCreates(() => Interlocked.Increment(ref deploymentWrites))], ct)));
-            var actions = new InternalDurableActions(contexts, [identity, deployment], services.GetServices<IProviderConfigurationCodec>(), services.GetServices<IExternalOperationOutputContract>(),
-                services.GetRequiredService<DurableActionAdmission>(), services.GetRequiredService<DurableOperationSerialization>(), services.GetRequiredService<TimeProvider>(),
+            InternalDurableActions CreateActions() => new(contexts, [identity, deployment], services.GetServices<IProviderConfigurationCodec>(), services.GetServices<IExternalOperationOutputContract>(),
+                services.GetRequiredService<DurableActionAdmission>(), services.GetRequiredService<DurableOperationSerialization>(), observationClock,
                 fault: point => { if (point == InternalActionFault.AfterExternalResult && loseConfirmation) { loseConfirmation = false; throw new LostConfirmation(); } },
                 configurationPreparation: configurationPreparation);
+            var actions = CreateActions();
             var subject = new ProviderInput.Workload(ManifestLocalId.Create("api"), ManifestLocalId.Create("main"));
             var prepared = await configurationPreparation.PrepareAsync(scenario.Commit, "qualifier", token);
             Check(prepared.Prepared.Count == 2 && prepared.Failure is null, "C01-exact-two-documents-prepared");
@@ -138,6 +141,7 @@ internal static class ConfiguredDeploymentCases
                 await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); await work(); await host.StopAsync(token);
             }
             V1Pod? currentPod = null;
+            RolloutResult? rolloutReady = null;
             async Task<V1Pod> Startup(string marker, string? excludedUid = null)
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(token); wait.CancelAfter(TimeSpan.FromSeconds(35));
@@ -176,6 +180,10 @@ internal static class ConfiguredDeploymentCases
                 DeploymentObjects.Receipt(DeploymentObjects.Read(saved), intent, ConfirmationSource.Observation);
                 Check(saved.Spec.Template.Spec.ServiceAccountName == intent.Target.Runtime.ServiceAccount && currentPod.Spec.AutomountServiceAccountToken == false,
                     "C07-complete-saved-projection-and-Pod-identity");
+                rolloutReady = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-ready", new(RequestMilliseconds: 30000), token);
+                Check(rolloutReady.Ready && rolloutReady.Submitted is not null && rolloutReady.SavedReady is not null &&
+                    intent.Target.MinReadySeconds == 1 && saved.Metadata.Uid == DeploymentIntents.DecodeReceipt((await actions.HistoryAsync(key, token))!.Output!.Payload).Uid,
+                    "R01-controller-produced-available-minReadySeconds-exact-UID");
             });
             requests.Clear(); var beforeRestart = reviews;
             await WithHost(async () =>
@@ -185,6 +193,11 @@ internal static class ConfiguredDeploymentCases
                 currentPod = await Startup("primary-started", previous.Metadata.Uid);
                 Check(reviews >= beforeRestart + 2 && requests.ToArray().Distinct().Order().SequenceEqual(exact.Documents.Values.Select(Guid.Parse).Order()) &&
                     (await actions.HistoryAsync(key, token))!.Intent.Payload == DeploymentIntents.Encode(intent), "C08-restarted-Host-fresh-Pod-same-bootstrap");
+                actions = CreateActions();
+                var observed = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-restarted", new(RequestMilliseconds: 30000), token);
+                Check(observed.Ready && observed.SavedReady == rolloutReady!.SavedReady && observed.Members[0].Attempt == rolloutReady.Members[0].Attempt &&
+                    observed.Members[0].Deadline == rolloutReady.Members[0].Deadline && deploymentWrites == 1,
+                    "R02-reconstructed-observer-original-attempt-deadline-zero-writes");
             });
             requests.Clear(); Interlocked.Exchange(ref revokeNextRead, 1);
             await WithHost(async () =>
@@ -193,6 +206,21 @@ internal static class ConfiguredDeploymentCases
                 await admin.CoreV1.DeleteNamespacedPodAsync(previous.Metadata.Name, ns, new V1DeleteOptions { Preconditions = new() { Uid = previous.Metadata.Uid }, GracePeriodSeconds = 0 }, cancellationToken: token);
                 currentPod = await Startup("runtime-startup-refused:access-denied", previous.Metadata.Uid);
                 Check(requests.Count >= 2, "C09-later-document-revoke-no-primary");
+                RolloutResult? pending = null;
+                for (var n = 0; n < 15; n++)
+                {
+                    pending = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-pending-" + n, new(MaximumRounds: 1), token);
+                    if (!pending.Ready) break;
+                    await Task.Delay(200, token);
+                }
+                Check(pending is { Ready: false } && pending.SavedReady == rolloutReady!.SavedReady &&
+                    pending.Members[0].Observation.Outcome == RolloutOutcome.Pending, "R03-startup-refusal-is-current-incomplete-despite-historical-Ready");
+                observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
+                var resumed = await actions.ResumeRolloutAsync(scenario.Commit, "rollout-resume", "qualifier",
+                    [new(pending!.Members[0].Subject, pending.Members[0].Attempt!.Value)], token);
+                Check(!resumed.Ready && resumed.Members[0].Attempt != pending.Members[0].Attempt &&
+                    resumed.Members[0].Observation.Outcome == RolloutOutcome.NotObserved && deploymentWrites == 1,
+                    "R04-audited-resume-renews-observation-only");
             });
             await AdmissionRefuses("revoked-publication");
             Check((await publication.ApplyAsync(later.Receipt.Request, token)).CurrentPermission!.Status == "Revoked", "C10-revoked-admission-and-no-publication-repair");
@@ -233,6 +261,12 @@ internal static class ConfiguredDeploymentCases
         using var json = JsonDocument.Parse(RuntimeBootstrapCodec.Encode(bootstrap));
         return "{\"endpoint\":" + json.RootElement.GetProperty("delivery"u8).GetProperty("endpoint"u8).GetRawText() + ",\"tls\":" +
             json.RootElement.GetProperty("delivery"u8).GetProperty("tls"u8).GetRawText() + ",\"client\":" + json.RootElement.GetProperty("client"u8).GetRawText() + "}";
+    }
+    private sealed class ObservationClock(TimeProvider source) : TimeProvider
+    {
+        private TimeSpan offset;
+        public override DateTimeOffset GetUtcNow() => source.GetUtcNow() + offset;
+        internal void Advance(TimeSpan value) => offset += value;
     }
     private static void Check(bool value, string id) { if (!value) throw new InvalidOperationException("Configured Deployment case failed: " + id); Console.WriteLine("PASS configured-" + id); }
     private sealed class CountReviews(Action count) : DelegatingHandler

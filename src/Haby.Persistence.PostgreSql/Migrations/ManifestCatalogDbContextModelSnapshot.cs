@@ -937,6 +937,160 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("generated_credential_slots", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.GenerationObservationAttemptRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
+                    b.Property<int>("BudgetSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("budget_seconds");
+
+                    b.Property<DateTimeOffset>("Deadline")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deadline");
+
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("operation_id");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer")
+                        .HasColumnName("ordinal");
+
+                    b.Property<string>("OriginJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("origin_json");
+
+                    b.Property<Guid?>("Previous")
+                        .HasColumnType("uuid")
+                        .HasColumnName("previous");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("subject");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeploymentId", "Generation", "OperationId");
+
+                    b.HasIndex("Previous", "DeploymentId", "Generation");
+
+                    b.HasIndex("DeploymentId", "Generation", "Subject", "Ordinal")
+                        .IsUnique();
+
+                    b.ToTable("generation_observation_attempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_observation_attempt_bounds", "ordinal > 0 AND budget_seconds BETWEEN 1 AND 86400 AND deadline = started_at + budget_seconds * interval '1 second' AND length(subject) BETWEEN 1 AND 256 AND octet_length(origin_json) BETWEEN 1 AND 16384 AND length(actor) BETWEEN 1 AND 256");
+                        });
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.GenerationObservationRecordRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AttemptId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attempt_id");
+
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("InputJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("input_json");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer")
+                        .HasColumnName("ordinal");
+
+                    b.Property<string>("Payload")
+                        .HasColumnType("text")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("Request")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("request");
+
+                    b.Property<DateTimeOffset>("ReservedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reserved_at");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("subject");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttemptId")
+                        .IsUnique()
+                        .HasFilter("kind = 'Expired'");
+
+                    b.HasIndex("AttemptId", "DeploymentId", "Generation");
+
+                    b.HasIndex("DeploymentId", "Generation", "Request")
+                        .IsUnique()
+                        .HasFilter("kind = 'Request'");
+
+                    b.HasIndex("DeploymentId", "Generation", "Request", "Subject", "Ordinal")
+                        .IsUnique()
+                        .HasDatabaseName("IX_generation_observation_records_deployment_id_generation_re~1")
+                        .HasFilter("kind = 'Read'");
+
+                    b.ToTable("generation_observation_records", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_observation_record_bounds", "kind IN ('Request', 'Read', 'Expired') AND ordinal >= 0 AND length(request) BETWEEN 1 AND 128 AND octet_length(input_json) <= 131072 AND (payload IS NULL OR octet_length(payload) BETWEEN 1 AND 2097152) AND (finished_at IS NULL) = (payload IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.GenerationStageCheckpointRow", b =>
                 {
                     b.Property<Guid>("DeploymentId")
@@ -987,7 +1141,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         {
                             t.HasCheckConstraint("CK_generation_stage_checkpoints_bounds", "length(input_fingerprint) = 67 AND octet_length(evidence_json) <= 2097152");
 
-                            t.HasCheckConstraint("CK_generation_stage_checkpoints_identity", "generation > 0 AND format_version = 1 AND stage = 'ResourcesReady'");
+                            t.HasCheckConstraint("CK_generation_stage_checkpoints_identity", "generation > 0 AND format_version = 1 AND stage IN ('ResourcesReady', 'WorkloadsSubmitted', 'RolloutReady')");
                         });
                 });
 
@@ -2718,6 +2872,36 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasPrincipalKey("SecretId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.GenerationObservationAttemptRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableActionIntentRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation", "OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.GenerationObservationAttemptRow", null)
+                        .WithMany()
+                        .HasForeignKey("Previous", "DeploymentId", "Generation")
+                        .HasPrincipalKey("Id", "DeploymentId", "Generation")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.GenerationObservationRecordRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.GenerationObservationAttemptRow", null)
+                        .WithMany()
+                        .HasForeignKey("AttemptId", "DeploymentId", "Generation")
+                        .HasPrincipalKey("Id", "DeploymentId", "Generation")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.GenerationStageCheckpointRow", b =>

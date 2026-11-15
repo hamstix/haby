@@ -2,6 +2,8 @@
 
 Issue #223 extends the friend-only initial Deployment CREATE seam. It is not a
 public operator execution command, readiness observer or AppliedGeneration gate.
+The separate [issue #225 observer](225-deployment-readiness.md) consumes confirmed
+submission evidence without replaying this CREATE or advancing AppliedGeneration.
 The accepted Workload-only empty Resource stage and existing unchanged-Resource
 baseline shape remain the only admitted shapes. Configured UPDATE, companion
 objects, arbitrary container settings, #209 static secret projections, retirement
