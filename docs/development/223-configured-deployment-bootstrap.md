@@ -149,9 +149,15 @@ dotnet restore tools/Haby.Kubernetes.Qualification --locked-mode
 ./scripts/run-kubernetes-qualification.ps1 -Runtime docker -ConfiguredDeployment -EvidencePath .artifacts/configured/evidence.txt
 ```
 
-It packages only the existing consumer, imports a run-owned image into the same
-pinned k3s container, and freezes an explicit reachable fixture HTTPS IP/SAN before
-planning. There is no registry/platform/CRL service or global trust-store mutation.
+The test consumer is published separately to public GHCR, once per actual input
+set. Ordinary runs resolve a reviewed source-to-digest binding under
+`tests/fixtures/runtime-consumer-images/<input-key>.json` and the same pinned k3s
+node pulls that immutable digest normally. No binding is fabricated before the
+publisher proof and anonymous access are independently verified; a missing or
+mismatched binding stops before node launch. The fixture still copies its CA,
+administrator certificate/key and freezes its reachable HTTPS IP/SAN before
+planning. No Pod registry credentials, new registry platform, CRL service or global
+trust-store mutation is introduced.
 The production action creates the target Deployment; handcrafted target YAML does
 not substitute. C01-C11 cover genuine two-document startup, Host restart/fresh Pod
 with unchanged bootstrap, later-document revoke/no-primary and production
@@ -161,13 +167,28 @@ permission absence. Existing API-only and lost-response cases remain separate.
 Natural kubelet rotation is not proven by a short startup. #221's controlled file
 replacement remains separate evidence and is never labeled automatic rotation.
 Primary marker is functional evidence, not rollout readiness. Existing launcher,
-job and API budgets remain; owned namespace/catalog/container/image/private paths
+job and API budgets remain; owned namespace/catalog/container/volume/private paths
 must be cleaned and failures retained separately. No unchanged green-seeking rerun.
 
-Import failure diagnostics recognize only a canonical RPC status literally present
-in bounded command output; native exit codes alone never identify a cause.
-Unrecognized, ambiguous or oversized output remains unknown, and raw output stays
-private. Final durable journal boundaries cover revoke, retained history, final
+The fixed image graph is Consumer -> Configuration.Client -> Configuration.Contracts,
+including proto, SDK-generated locks, relevant shared build settings and effective
+package versions. The pinned SDK/runtime Dockerfile builds a content-only context,
+without Git metadata or ambient credentials. Client/configuration changes invalidate
+the key; unrelated docs/tests and unused central versions do not. Unknown graph or
+conditional imports refuse. The publisher has only contents:read/packages:write;
+ordinary tests never build, save, copy or import a consumer archive and never publish.
+Secure fixture certificate/key copies and their failure cleanup remain mandatory.
+The initial package-creation confirmation is false; package rights/public visibility
+are prerequisites, not presumed from repository visibility. A 404 is ambiguous
+unless first creation has been explicitly confirmed. Other registry/auth failures,
+inconsistent accepted proof and uncertain pushes stop without repair or retry.
+Only independently reviewed publication artifacts may create the committed binding,
+which includes inputKey, digest, builtSource, publisherSource, publisherRunId and
+proofArtifactSha256. Labels alone are not publication proof. No accepted binding is
+included before an actual publisher release. Historical native-import failures
+remain undiagnosed and are not acceptance evidence.
+
+Final durable journal boundaries cover revoke, retained history, final
 authorization, candidate disposal and inner cleanup entry/outcome. They are progress
 evidence, never passing assertion receipts. Existing startup, command and cleanup
 budgets remain unchanged; distinct parent and managed clock origins are not mixed.

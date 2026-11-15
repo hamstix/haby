@@ -1,26 +1,3 @@
-# Observe only canonical RPC status text, never infer a cause from a native exit code.
-function Get-QualificationImportDiagnostic($Result) {
-    if($Result.ExitCode -isnot [int] -or $Result.ExitCode -eq 0){return 'unknown'}
-    $codes=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    $known=@{
-        'Canceled'='canceled';'Unknown'='unknown';'InvalidArgument'='invalid-argument';'DeadlineExceeded'='deadline-exceeded'
-        'NotFound'='not-found';'AlreadyExists'='already-exists';'PermissionDenied'='permission-denied'
-        'ResourceExhausted'='resource-exhausted';'FailedPrecondition'='failed-precondition';'Aborted'='aborted'
-        'OutOfRange'='out-of-range';'Unimplemented'='unimplemented';'Internal'='internal';'Unavailable'='unavailable';'DataLoss'='data-loss';'Unauthenticated'='unauthenticated'
-    }
-    $names=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-    foreach($item in $known.GetEnumerator()){$names.Add($item.Key,$item.Value)}
-    foreach($value in @($Result.Output,$Result.Error)){
-        if($value -isnot [string] -or $value.Length -gt 8192){return 'unknown'}
-        foreach($match in [regex]::Matches($value,'(?m)^(?:ctr: )?rpc error: code = ([A-Za-z]+) desc = ')){
-            if(!$names.ContainsKey($match.Groups[1].Value)){return 'unknown'}
-            $codes.Add($names[$match.Groups[1].Value]) | Out-Null
-        }
-    }
-    if($codes.Count -ne 1){return 'unknown'}
-    return 'observed-rpc-'+@($codes)[0]
-}
-
 # This channel accepts only fixed progress IDs and bounded monotonic managed elapsed milliseconds.
 function Get-QualificationJournalPath([string]$PrivateDirectory) {
     $directory=[IO.Path]::GetFullPath($PrivateDirectory)

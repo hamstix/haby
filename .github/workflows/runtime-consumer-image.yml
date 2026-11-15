@@ -1,0 +1,86 @@
+name: Runtime consumer image publisher
+on:
+  push:
+    branches: [main, codex/ci-223-ghcr-image]
+    paths:
+      - 'examples/Haby.RuntimeStartup.Consumer/**'
+      - 'src/Haby.Configuration.Client/**'
+      - 'src/Haby.Configuration.Contracts/**'
+      - '**/Directory.Build.*'
+      - '**/Directory.Packages.props'
+      - '.editorconfig'
+      - 'global.json'
+      - 'scripts/runtime-consumer-image.ps1'
+      - 'scripts/publish-runtime-consumer-image.ps1'
+      - '.github/workflows/runtime-consumer-image.yml'
+      - '.github/runtime-consumer-first-package.json'
+permissions:
+  contents: read
+concurrency:
+  group: runtime-consumer-image-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Compute fixed input identity
+        id: inputs
+        shell: pwsh
+        run: ./scripts/publish-runtime-consumer-image.ps1 -Prepare
+      - name: Observe authenticated package state without treating errors as absence
+        id: registry
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('fs');
+            const input = JSON.parse(fs.readFileSync('.artifacts/runtime-consumer/inputs.json', 'utf8').replace(/^\uFEFF/, ''));
+            const policy = JSON.parse(fs.readFileSync('.github/runtime-consumer-first-package.json', 'utf8'));
+            if (policy.package !== 'ghcr.io/hamstix/haby-runtime-consumer' || typeof policy.confirmed !== 'boolean') throw new Error('Invalid first-package disposition');
+            let state, digest = null, packageFound = false;
+            try {
+              await github.request('GET /orgs/{org}/packages/{package_type}/{package_name}', {org:'hamstix', package_type:'container', package_name:'haby-runtime-consumer'});
+              packageFound = true;
+            } catch (error) {
+              if (error.status === 404 && policy.confirmed && !input.acceptedImage) state='package-not-found';
+              else throw new Error('Package observation failed or ambiguous; no build/push authorized');
+            }
+            if (packageFound) {
+              try {
+              const versions = await github.paginate('GET /orgs/{org}/packages/{package_type}/{package_name}/versions', {org:'hamstix', package_type:'container', package_name:'haby-runtime-consumer', per_page:100});
+              if (!Array.isArray(versions) || versions.some(v => !v || !/^sha256:[a-f0-9]{64}$/.test(v.name) || !Array.isArray(v.metadata?.container?.tags) || v.metadata.container.tags.some(t => typeof t !== 'string'))) throw new Error('Malformed package version observation');
+              const matches = versions.filter(v => v.metadata?.container?.tags?.includes('inputs-' + input.key));
+              if (matches.length > 1) throw new Error('Inconsistent package alias');
+              state = matches.length ? 'present' : 'absent';
+              if (matches.length) {digest=matches[0].name; if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('Malformed package digest');}
+              } catch {throw new Error('Package version/proof observation failed; never an absence');}
+            }
+            if ((state === 'present') !== Boolean(input.acceptedImage)) throw new Error('Alias/accepted-proof inconsistency; no rebuild');
+            if (input.acceptedImage && input.acceptedImage !== 'ghcr.io/hamstix/haby-runtime-consumer@'+digest) throw new Error('Accepted digest mismatch');
+            fs.writeFileSync('.artifacts/runtime-consumer/registry.json', JSON.stringify({key:input.key, state, digest, authenticated:true, firstPackageConfirmed:policy.confirmed}));
+            core.setOutput('build', state !== 'present' ? 'true' : 'false');
+      - name: Authenticate only the separate publisher
+        if: steps.registry.outputs.build == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reuse or perform one image publication
+        shell: pwsh
+        run: ./scripts/publish-runtime-consumer-image.ps1 -StatePath .artifacts/runtime-consumer/registry.json
+      - name: Upload safe source-to-digest proof
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-consumer-image-${{ steps.inputs.outputs.key }}-${{ github.run_id }}
+          path: |
+            .artifacts/runtime-consumer/inputs.json
+            .artifacts/runtime-consumer/publication.json
+          if-no-files-found: error
+          retention-days: 30

@@ -14,6 +14,7 @@ $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
+. (Join-Path $PSScriptRoot 'runtime-consumer-image.ps1')
 Set-Location (Split-Path $PSScriptRoot -Parent)
 if(!$EvidencePath){$EvidencePath=Join-Path '.artifacts' ($EvidenceId+'.txt')}
 if(Test-Path -LiteralPath $EvidencePath){throw 'Evidence path already exists; fresh report required.'}
@@ -25,7 +26,6 @@ $listCommand=if($Runtime -eq 'docker'){'ps'}else{'list'}
 $image='rancher/k3s@sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248'
 $record=[Collections.Generic.List[string]]::new()
 $failed=$false; $launchAttempted=$false; $privateOwned=$false
-$consumerImage=$null; $consumerImageId=$null
 $copyOperation=$null; $copyNativeExit=$null
 $record.Add('Evidence ID: '+$EvidenceId); $record.Add('Run ID: '+$run)
 $record.Add('Source: '+(& git rev-parse HEAD))
@@ -40,15 +40,12 @@ function Call([string]$File,[string[]]$Arguments,[int]$Seconds=$CommandTimeoutSe
 function RuntimeCall([string[]]$Arguments,[int]$Seconds=$CommandTimeoutSeconds) {
     $result=Call $Runtime $Arguments $Seconds
     if($result.ExitCode -ne 0){
-        if($stage -ceq 'copy' -and $copyOperation -ceq 'import-consumer-image'){
-            $record.Add('Import diagnostic: '+(Get-QualificationImportDiagnostic $result))
-        }
         if($stage -ceq 'copy' -and $copyOperation -and $result.ExitCode -is [int]){$script:copyNativeExit=$result.ExitCode}
         throw 'Runtime command failed.'
     }
     return $result.Output
 }
-function Start-CopyOperation([ValidateSet('copy-server-ca','copy-admin-certificate','copy-admin-key','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address','copy-consumer-archive','import-consumer-image')][string]$Id) {
+function Start-CopyOperation([ValidateSet('copy-server-ca','copy-admin-certificate','copy-admin-key','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address')][string]$Id) {
     $script:copyOperation=$Id; $script:copyNativeExit=$null
     $record.Add('Copy operation: '+$Id+'; state=start')
 }
@@ -73,15 +70,10 @@ try {
     $sdk=Call 'dotnet' @('--version'); if($sdk.ExitCode -ne 0){throw 'SDK unavailable.'}; $record.Add('SDK: '+$sdk.Output.Trim())
     if($ConfiguredDeployment){
         if($Runtime -cne 'docker' -or !$IsLinux){throw 'Configured consumer requires the existing hosted Linux Docker contour.'}
-        $consumerOutput=Join-Path $private 'consumer'
-        $publish=Call 'dotnet' @('publish','examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj','-c','Release','-o',$consumerOutput) 60
-        if($publish.ExitCode -ne 0){throw 'Consumer publication failed.'}
-        $consumerImage='localhost/haby-runtime-consumer:'+$run
-        $build=Call 'docker' @('build','--label',"haby.qualification=$run",'--tag',$consumerImage,'--file','examples/Haby.RuntimeStartup.Consumer/Dockerfile',$consumerOutput) 60
-        if($build.ExitCode -ne 0){throw 'Consumer image build failed.'}
-        $consumerImageId=(RuntimeCall @('image','inspect','--format','{{.Id}}',$consumerImage)).Trim()
-        $record.Add('Consumer image: '+$consumerImageId)
-        RuntimeCall @('image','save','--output',(Join-Path $private 'consumer.tar'),$consumerImage) 60 | Out-Null
+        $inputs=Get-HabyConsumerImageInputs (Split-Path $PSScriptRoot -Parent)
+        $consumerImage=Read-HabyConsumerImageBinding $inputs (Join-Path (Split-Path $PSScriptRoot -Parent) ('tests/fixtures/runtime-consumer-images/'+$inputs.key+'.json'))
+        $record.Add('Consumer input key: '+$inputs.key)
+        $record.Add('Consumer image: '+$consumerImage)
         [IO.File]::WriteAllText((Join-Path $private 'consumer-image'),$consumerImage)
     }
     $stage='launch'; $record.Add('Stage: launch-start'); $launchAttempted=$true
@@ -126,12 +118,6 @@ try {
         Complete-CopyOperation
         Start-CopyOperation 'write-bridge-address'
         [IO.File]::WriteAllText((Join-Path $private 'pod-host-address'),$gateway)
-        Complete-CopyOperation
-        Start-CopyOperation 'copy-consumer-archive'
-        RuntimeCall @('cp',(Join-Path $private 'consumer.tar'),"${run}:/tmp/haby-consumer.tar") 60 | Out-Null
-        Complete-CopyOperation
-        Start-CopyOperation 'import-consumer-image'
-        RuntimeCall @('exec',$run,'/bin/k3s','ctr','images','import','/tmp/haby-consumer.tar') 60 | Out-Null
         Complete-CopyOperation
     }
     $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
@@ -193,12 +179,6 @@ finally {
             }
         } catch { $failed=$true; $record.Add('Container/storage cleanup: FAIL; category='+$_.Exception.GetType().Name) }
     }
-    if($consumerImage){try {
-        $ownedImage=(RuntimeCall @('image','inspect',$consumerImage) | ConvertFrom-Json)[0]
-        if($ownedImage.Config.Labels.'haby.qualification' -cne $run -or ($consumerImageId -and $ownedImage.Id -cne $consumerImageId)){throw 'Consumer image ownership mismatch.'}
-        RuntimeCall @('image','rm',$ownedImage.Id) | Out-Null
-        $record.Add('Run-owned consumer image removed.')
-    }catch{$failed=$true;$record.Add('Consumer image cleanup: FAIL')}}
     if($privateOwned){
         try {
             if([IO.Path]::GetDirectoryName($private) -ne $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) -or (Split-Path $private -Leaf) -ne $run){throw 'Private cleanup ownership mismatch.'}

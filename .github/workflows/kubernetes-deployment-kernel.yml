@@ -12,6 +12,14 @@ on:
       - 'src/Haby.Configuration.Client/**'
       - 'schemas/kubernetes-placement.v1alpha1.json'
       - 'examples/Haby.RuntimeStartup.Consumer/**'
+      - 'tests/fixtures/runtime-consumer-images/**'
+      - 'scripts/runtime-consumer-image.ps1'
+      - 'scripts/publish-runtime-consumer-image.ps1'
+      - '.github/workflows/runtime-consumer-image.yml'
+      - '**/Directory.Build.*'
+      - '**/Directory.Packages.props'
+      - '.editorconfig'
+      - 'global.json'
       - 'tests/Haby.Cli.Tests/RuntimeStartup*.cs'
       - 'tests/Haby.PostgreSql.IntegrationTests/**'
       - 'tests/Haby.Kubernetes.Tests/**'
@@ -46,7 +54,7 @@ jobs:
           $ids = @($lines | Where-Object { $_ -cmatch '^PASS configured-C[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(16,3) })
           if (($ids -join ',') -cne ((1..11 | ForEach-Object { 'C{0:d2}' -f $_ }) -join ',') -or
               'Harness: PASS' -notin $lines -or 'PASS configured-owned-namespace-absent' -notin $lines -or
-              'PASS configured-owned-catalog-cleanup' -notin $lines -or 'Run-owned consumer image removed.' -notin $lines -or
+              'PASS configured-owned-catalog-cleanup' -notin $lines -or
               'Run-owned private directory removed.' -notin $lines -or
               @($lines | Where-Object { $_ -match '^Run-owned container and [0-9]+ anonymous volumes absent\.$' }).Count -ne 1 -or
               @($lines | Where-Object { $_ -match '^FAIL |^Failure:|cleanup: FAIL|stop: FAIL|Evidence write: FAIL' }).Count) { throw 'Configured consumer evidence incomplete.' }

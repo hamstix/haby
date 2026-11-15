@@ -3,22 +3,6 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-evidence.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
-# Literal canonical RPC status is an observed diagnostic, never a native-exit cause mapping.
-foreach($case in @(
-    @{Code=3;Output='';Error='protected-native-three-sentinel';Expected='unknown'},
-    @{Code=3;Output='';Error='ctr: rpc error: code = InvalidArgument desc = protected-token-path-sentinel';Expected='observed-rpc-invalid-argument'},
-    @{Code=17;Output='rpc error: code = Unavailable desc = protected-output-sentinel';Error='';Expected='observed-rpc-unavailable'},
-    @{Code=3;Output='rpc error: code = NotFound desc = protected-sentinel';Error='rpc error: code = InvalidArgument desc = protected-sentinel';Expected='unknown'},
-    @{Code=3;Output='';Error=('x'*8193);Expected='unknown'},
-    @{Code=3;Output='';Error='rpc error: code = ProtectedSentinel desc = protected-sentinel';Expected='unknown'},
-    @{Code=3;Output='';Error='rpc error: code = invalidargument desc = protected-sentinel';Expected='unknown'},
-    @{Code=0;Output='';Error='rpc error: code = InvalidArgument desc = protected-sentinel';Expected='unknown'},
-    @{Code='protected-exit-sentinel';Output='';Error='rpc error: code = InvalidArgument desc = protected-sentinel';Expected='unknown'}
-)){
-    $observed=Get-QualificationImportDiagnostic ([pscustomobject]@{ExitCode=$case.Code;Output=$case.Output;Error=$case.Error})
-    if($observed -cne $case.Expected -or $observed -match 'protected-|token|path|sentinel'){throw 'Unsafe or incorrect import classification'}
-}
-Write-Output 'PASS closed import status classification, bounds, ambiguity and sentinel refusal (synthetic)'
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
 foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary')){
@@ -161,76 +145,53 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     Write-Output "PASS lifecycle $runtime $scenario (synthetic)"
 }
 }
-# The configured-only copy operations remain guarded by the real Linux eligibility check.
+# Keep configured bridge/certificate controls with an isolated synthetic binding;
+# the fixture copy can never become an accepted repository/public image mapping.
 if($IsLinux){
-foreach($operation in @('none','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address','copy-consumer-archive','import-consumer-image')){
-    $state=@{Name='';Private='';Removed=$false;Volumes=$true;ImageRemoved=$false;NetworkInspected=$false;CopyCalls=0;Calls=@()}
-    $runner={param($file,$arguments,$seconds)
-        $state.Calls+=,$arguments
-        $result=[pscustomobject]@{ExitCode=0;Output='';Error='';ElapsedMilliseconds=42L}
-        if($file -ceq 'chmod'){$state.Private=$arguments[1];return $result}
-        if($file -ceq 'dotnet'){$result.Output='synthetic-sdk/harness';return $result}
-        switch($arguments[0]){
-            '--version' {$result.Output='synthetic-runtime'}
-            'build' { }
-            'image' {
-                if($arguments[1] -ceq 'inspect'){
-                    if('--format' -cin $arguments){$result.Output='sha256:owned-image'}
-                    else{$result.Output=ConvertTo-Json -Depth 5 -Compress @(@{Id='sha256:owned-image';Config=@{Labels=@{'haby.qualification'=$state.Name}}})}
-                }elseif($arguments[1] -ceq 'save'){[IO.File]::WriteAllText($arguments[3],'protected-archive-sentinel')}
-                elseif($arguments[1] -ceq 'rm'){$state.ImageRemoved=$true}
-                else{throw 'Unexpected image control command'}
-            }
-            'run' {$state.Name=$arguments[[Array]::IndexOf($arguments,'--name')+1]}
-            'exec' {
-                if('import' -cin $arguments){
-                    if($operation -ceq 'import-consumer-image'){$result.ExitCode=3;$result.Output='protected-copy-sentinel';$result.Error='ctr: rpc error: code = InvalidArgument desc = protected-copy-sentinel'}
-                }elseif('nodes' -cin $arguments){$result.Output='{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}'}
-                elseif('--request-timeout=3s' -cin $arguments){$result.Output='ok'}
-                else{throw 'Unexpected exec control command'}
-            }
-            'cp' {
-                $state.CopyCalls++
-                if($state.CopyCalls -eq 4){
-                    if($operation -ceq 'copy-consumer-archive'){$result.ExitCode=17;$result.Output='protected-copy-sentinel';$result.Error='protected-copy-sentinel'}
-                }else{[IO.File]::WriteAllText($arguments[-1],'protected-key-sentinel')}
-            }
-            'inspect' {
-                $networkRead=!$state.NetworkInspected; $state.NetworkInspected=$true
-                if($networkRead -and $operation -ceq 'inspect-bridge-gateway'){$result.ExitCode=17;$result.Error='protected-copy-sentinel';break}
-                if($networkRead -and $operation -ceq 'write-bridge-address'){New-Item -ItemType Directory (Join-Path $state.Private 'pod-host-address') | Out-Null}
-                $gateway=if($operation -ceq 'validate-bridge-gateway'){'protected-address-sentinel'}else{'192.0.2.2'}
-                $result.Output=ConvertTo-Json -Depth 8 -Compress @(@{Id='owned-id';Config=@{Labels=@{'haby.qualification'=$state.Name}};Mounts=@(@{Type='volume';Name='owned-volume'});NetworkSettings=@{Networks=@{bridge=@{Gateway=$gateway}}}})
-            }
-            'stop' { }
-            'remove' {$state.Removed=$true;$state.Volumes=$false}
-            'ps' {if(!$state.Removed){$result.Output='owned-id'}}
-            'volume' {if($state.Volumes){$result.Output='owned-volume'}}
-            default {throw 'Unexpected configured control command'}
+    . (Join-Path $PSScriptRoot 'runtime-consumer-image.ps1')
+    $inputModel=Get-HabyConsumerImageInputs (Split-Path $PSScriptRoot -Parent)
+    $fixture=Join-Path (Split-Path $PSScriptRoot -Parent) ('.artifacts/haby-image-controls-'+[Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force $fixture|Out-Null
+    try{
+        foreach($entry in $inputModel.files.GetEnumerator()){$target=Join-Path $fixture $entry.Key;New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($target))|Out-Null;[IO.File]::WriteAllText($target,$entry.Value,[Text.UTF8Encoding]::new($false))}
+        foreach($name in @('run-kubernetes-qualification.ps1','kubernetes-qualification-process.ps1','kubernetes-qualification-diagnostics.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $fixture ('scripts/'+$name))}
+        $binding=Join-Path $fixture ('tests/fixtures/runtime-consumer-images/'+$inputModel.key+'.json')
+        New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($binding))|Out-Null
+        [ordered]@{format=1;package=$HabyConsumerPackage;inputKey=$inputModel.key;digest=('sha256:'+('a'*64));builtSource=('b'*40);publisherSource=('c'*40);publisherRunId=1;proofArtifactSha256=('d'*64)}|ConvertTo-Json|Set-Content -LiteralPath $binding -Encoding utf8
+        foreach($operation in @('none','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address')){
+            $state=@{Name='';Private='';Removed=$false;Volumes=$true;NetworkInspected=$false}
+            $runner={param($file,$arguments,$seconds)
+                $result=[pscustomobject]@{ExitCode=0;Output='';Error='';ElapsedMilliseconds=42L}
+                if($file -ceq 'chmod'){$state.Private=$arguments[1];return $result}
+                if($file -ceq 'dotnet'){$result.Output='synthetic-sdk/harness';return $result}
+                switch($arguments[0]){
+                    '--version' {$result.Output='synthetic-runtime'}
+                    'run' {$state.Name=$arguments[[Array]::IndexOf($arguments,'--name')+1]}
+                    'exec' {if('nodes' -cin $arguments){$result.Output='{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}'}elseif('--request-timeout=3s' -cin $arguments){$result.Output='ok'}else{throw 'Forbidden consumer archive/import call'}}
+                    'cp' {[IO.File]::WriteAllText($arguments[-1],'protected-key-sentinel')}
+                    'inspect' {
+                        $networkRead=!$state.NetworkInspected;$state.NetworkInspected=$true
+                        if($networkRead -and $operation -ceq 'inspect-bridge-gateway'){$result.ExitCode=17;break}
+                        if($networkRead -and $operation -ceq 'write-bridge-address'){New-Item -ItemType Directory (Join-Path $state.Private 'pod-host-address')|Out-Null}
+                        $gateway=if($operation -ceq 'validate-bridge-gateway'){'protected-address-sentinel'}else{'192.0.2.2'}
+                        $result.Output=ConvertTo-Json -Depth 8 -Compress @(@{Id='owned-id';Config=@{Labels=@{'haby.qualification'=$state.Name}};Mounts=@(@{Type='volume';Name='owned-volume'});NetworkSettings=@{Networks=@{bridge=@{Gateway=$gateway}}}})
+                    }
+                    'stop' {}
+                    'remove' {$state.Removed=$true;$state.Volumes=$false}
+                    'ps' {if(!$state.Removed){$result.Output='owned-id'}}
+                    'volume' {if($state.Volumes){$result.Output='owned-volume'}}
+                    default {throw 'Forbidden image build/save/publish or unexpected control command'}
+                }
+                return $result
+            }.GetNewClosure()
+            $evidence=Join-Path $fixture ($operation+'.txt');$caught=$false
+            try{& (Join-Path $fixture 'scripts/run-kubernetes-qualification.ps1') -Runtime docker -ConfiguredDeployment -CommandRunner $runner -EvidencePath $evidence|Out-Null}catch{$caught=$true}
+            $lines=@(Get-Content -LiteralPath $evidence)
+            if($caught -ne ($operation -cne 'none') -or !$state.Removed -or $state.Volumes -or (Test-Path -LiteralPath $state.Private) -or $lines -match 'protected-.*-sentinel'){throw 'Configured bridge or cleanup control failed'}
+            if($operation -cne 'none' -and ('Stage: harness-start' -cin $lines -or ('Copy failure: operation='+$operation) -cnotin $lines)){throw 'Configured primary failure lost'}
+            Write-Output ('PASS configured bridge '+$operation+' (synthetic; no registry/image operation)')
         }
-        return $result
-    }.GetNewClosure()
-    $evidence=Join-Path $PSScriptRoot ("../.artifacts/configured-copy-control-"+[Guid]::NewGuid().ToString('N')+'.txt')
-    $caught=$false
-    try{& $launcher -Runtime docker -ConfiguredDeployment -CommandRunner $runner -EvidencePath $evidence | Out-Null}catch{$caught=$true}
-    $lines=@(Get-Content $evidence)
-    $ids=@('copy-server-ca','copy-admin-certificate','copy-admin-key','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address','copy-consumer-archive','import-consumer-image')
-    $last=if($operation -ceq 'none'){7}else{[Array]::IndexOf($ids,$operation)}
-    $expected=@(foreach($index in 0..$last){'Copy operation: '+$ids[$index]+'; state=start';if($index -lt $last -or $operation -ceq 'none'){'Copy operation: '+$ids[$index]+'; state=complete'}})
-    if($caught -ne ($operation -cne 'none') -or
-        (@($lines | Where-Object {$_ -clike 'Copy operation:*'}) -join "`n") -cne ($expected -join "`n") -or
-        !$state.Removed -or $state.Volumes -or !$state.ImageRemoved -or (Test-Path -LiteralPath $state.Private) -or
-        $lines -match 'protected-.*-sentinel'){throw 'Configured copy operation or owned cleanup control failed'}
-    if($operation -cne 'none'){
-        if('Stage: harness-start' -cin $lines -or ('Copy failure: operation='+$operation) -cnotin $lines){throw 'Later configured operation ran or primary operation lost'}
-        $native=@($lines | Where-Object {$_ -clike 'Copy native exit:*'})
-        if($operation -cin @('validate-bridge-gateway','write-bridge-address')){
-            if($native.Count -ne 0 -or 'Diagnostic process: unknown' -cnotin $lines){throw 'Managed configured failure relabeled as native'}
-        }elseif($native.Count -ne 1 -or $native[0] -cne $(if($operation -ceq 'import-consumer-image'){'Copy native exit: 3'}else{'Copy native exit: 17'})){throw 'Configured native exit missing'}
-        if($operation -ceq 'import-consumer-image' -and 'Import diagnostic: observed-rpc-invalid-argument' -cnotin $lines){throw 'Actual import status was lost before result disposal'}
-    }
-    Write-Output ('PASS configured copy '+$operation+' (synthetic)')
-}
+    }finally{Set-Location (Split-Path $PSScriptRoot -Parent);Remove-Item -LiteralPath $fixture -Recurse -Force}
 }
 # The real setup path uses only a fake existing fixture lifetime; no Docker/API is opened.
 & dotnet run --project (Join-Path $PSScriptRoot '../tools/Haby.Kubernetes.Qualification') --no-restore -- --configured-setup-controls
