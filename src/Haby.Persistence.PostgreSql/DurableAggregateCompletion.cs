@@ -112,7 +112,7 @@ internal static partial class DurableAggregateCompletion
     internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token, bool internalResourceStage = false)
     {
         if (source.InternalEffects && !internalResourceStage) throw new InvalidDataException("Internal generation is not publicly admitted.");
-        var rows = await context.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation).ToArrayAsync(token);
+        var rows = await context.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == ResourcesReadyCheckpoint.Stage).ToArrayAsync(token);
         if (rows.Length == 0) return null;
         if (rows is not [var row] || row.Stage != ResourcesReadyCheckpoint.Stage || row.FormatVersion != ResourcesReadyCheckpoint.FormatVersion ||
             row.InputFingerprint != source.Fingerprint || row.EvidenceFingerprint != ResourcesReadyCheckpointCodec.Hash(row.EvidenceJson))

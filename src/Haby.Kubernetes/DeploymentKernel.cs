@@ -13,7 +13,7 @@ using static Haby.Kubernetes.DeploymentIntents;
 namespace Haby.Kubernetes;
 
 /// <summary>Bounded adapter kernel. It neither persists dispatch authority nor advances Haby lifecycle state.</summary>
-public sealed class DeploymentKernel
+public sealed partial class DeploymentKernel
 {
     private readonly KubernetesBinding _binding;
     private readonly Func<CancellationToken, ValueTask<KernelClient>> _connect;

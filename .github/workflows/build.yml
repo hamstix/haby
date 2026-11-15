@@ -134,6 +134,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native AOT publish failed: $LASTEXITCODE" }
           dotnet publish ./examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/runtime-consumer/${{ matrix.rid }}
           if ($LASTEXITCODE -ne 0) { throw "Runtime consumer Native AOT publish failed: $LASTEXITCODE" }
+      - name: Record actual patched Native AOT compiler selection
+        run: |
+          $rid = '${{ matrix.rid }}'
+          $projects = @('src/habyctl', 'examples/Haby.RuntimeStartup.Consumer')
+          $packs = @(foreach ($project in $projects) {
+            $assets = Get-Content "$project/obj/project.assets.json" -Raw | ConvertFrom-Json
+            $compiler = @($assets.libraries.PSObject.Properties.Name | Where-Object { $_.StartsWith('Microsoft.DotNet.ILCompiler/', [StringComparison]::Ordinal) })
+            if ($compiler.Count -ne 1) { throw 'Native compiler selection evidence missing.' }
+            $version = [Version]$compiler[0].Split('/')[1]
+            if ($version.Major -ne 10 -or $version -lt [Version]'10.0.14') { throw 'Native compiler does not meet the patched .NET 10 baseline.' }
+            $runtimeCompiler = "runtime.$rid.Microsoft.DotNet.ILCompiler/$version"
+            if ($runtimeCompiler -notin $assets.libraries.PSObject.Properties.Name) { throw 'Runtime compiler pack does not match selected compiler.' }
+            [pscustomobject]@{ project = $project; compiler = $compiler[0]; runtimeCompiler = $runtimeCompiler }
+          })
+          $directory = ".artifacts/native-results/$rid"
+          New-Item -ItemType Directory -Force $directory | Out-Null
+          [pscustomobject]@{ source = (& git rev-parse HEAD); sdk = (& dotnet --version); rid = $rid; packs = $packs } |
+            ConvertTo-Json -Depth 5 | Set-Content "$directory/compiler.json" -Encoding utf8
       - name: Execute published help and version
         run: |
           $cli = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
@@ -164,6 +182,7 @@ jobs:
         with:
           name: native-inventory-${{ matrix.rid }}-${{ github.sha }}-${{ github.run_attempt }}
           path: |
+            .artifacts/native-results/${{ matrix.rid }}/compiler.json
             .artifacts/native-results/${{ matrix.rid }}/safe/gate.json
             .artifacts/native-results/${{ matrix.rid }}/safe/cases.json
             .artifacts/native-results/${{ matrix.rid }}/safe/counts.json

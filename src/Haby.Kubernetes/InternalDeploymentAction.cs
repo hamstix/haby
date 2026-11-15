@@ -9,7 +9,7 @@ namespace Haby.Kubernetes;
 /// <summary>Internal durable CREATE adapter. UPDATE needs a future genuinely accepted prior
 /// Workload result and is deliberately absent from this registration.</summary>
 internal sealed class InternalDeploymentAction(ISecretStore secrets,
-    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null) : IInternalActionHandler
+    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null) : IInternalActionHandler, IInternalReadinessHandler
 {
     internal const string Create = "haby.kubernetes.deployment-create/v1";
     public InternalActionContract Contract { get; } = new("kubernetes.workload/v1alpha1", KubernetesProviderConfigurationCodec.Kind,
@@ -17,6 +17,10 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         "haby.kubernetes.deployment-intent/v2", "haby.kubernetes.deployment-receipt/v2");
     public bool ObservationRecovery => true;
     public bool RequiresRuntimePublication => true;
+    public int ObservationSeconds(string intent, string receipt) => DeploymentReadiness.Budget(intent, receipt);
+    public bool ValidateObservation(string intent, string receipt, RolloutObservation observation) => DeploymentReadiness.Validate(intent, receipt, observation);
+    public async ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string intent, string receipt, CancellationToken token) =>
+        await Kernel(context).ReadinessAsync(DeploymentIntents.Decode(intent), DeploymentIntents.DecodeReceipt(receipt), token);
     public InternalManagedTarget ManagedTarget(InternalActionContext context) => RuntimeIdentityCodec.Target(Resolve(context));
     public string Prepare(InternalActionContext context)
     {
