@@ -28,10 +28,11 @@ jobs:
         shell: pwsh
         run: ./orchestration/scripts/test-issue-223-import-only.ps1
       - name: Run the single bounded import-only attempt
+        working-directory: product
         shell: pwsh
         env:
           HABY_IMPORT_ORCHESTRATION_SHA: ${{ github.sha }}
-        run: ./orchestration/scripts/issue-223-import-only.ps1 -ProductRoot ./product -EvidencePath ./.artifacts/import-only/evidence.json
+        run: ../orchestration/scripts/issue-223-import-only.ps1 -ProductRoot . -EvidencePath ../.artifacts/import-only/evidence.json
       - name: Upload only sanitized import and cleanup evidence
         if: always()
         uses: actions/upload-artifact@v4
