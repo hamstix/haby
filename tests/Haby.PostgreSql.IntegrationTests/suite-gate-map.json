@@ -4,7 +4,7 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 76,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1077,
+  "currentPostgresql": 1078,
   "currentFast": 1670,
   "currentKubernetesApiObjects": 24,
   "currentKubernetesDurableActions": 36,
@@ -3045,6 +3045,7 @@
     {"method":"Haby.Persistence.PostgreSql.Tests.RolloutDeadlineTests.Reservation_time_cannot_refresh_the_active_read_budget","case":"23f32c7ea2a1bd0ab490c515a4ecabb853ba9e034a166b144c44440dd880bd69","suite":"fast","gate":"validate","trigger":"every-change","addedFor225":true},
     {"method":"Haby.Persistence.PostgreSql.Tests.RolloutDeadlineTests.Retained_expiry_cannot_be_reopened_by_UTC_reversal","case":"c7366f1f31a5d704c61c55a188e9e22f74e2ac9031b7f642077075ab887130f7","suite":"fast","gate":"validate","trigger":"every-change","addedFor225":true},
     {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Rollout_deadline_crossed_during_read_reservation_does_not_dispatch_with_the_stale_active_budget","case":"867cb5e2f0b1c97f331908747ae4de2c60f1357ffe63230756d5ccb44ccdd77e","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor225":true},
-    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Rollout_observed_expiry_survives_UTC_reversal_and_only_explicit_resume_renews_authority","case":"c837f2b2664a323fe1dd74fa3f24d42c767d5e0aa0e1a8f43d03b697924855bc","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor225":true}
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Rollout_observed_expiry_survives_UTC_reversal_and_only_explicit_resume_renews_authority","case":"c837f2b2664a323fe1dd74fa3f24d42c767d5e0aa0e1a8f43d03b697924855bc","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor225":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Rollout_expiry_learned_within_one_call_is_latched_before_UTC_reversal_and_recovery_is_read_once","case":"2290a9f5526472abe940b8bc09fd36af7c850c842c0b7593726a5b9fd4ec4c59","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor225":true}
   ]
 }

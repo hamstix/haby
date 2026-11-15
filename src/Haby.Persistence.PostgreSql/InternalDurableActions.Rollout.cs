@@ -8,6 +8,7 @@ namespace Haby.Persistence.PostgreSql;
 internal sealed partial class InternalDurableActions
 {
     private sealed record ObservationCall(SubmittedSet Set, GenerationObservationRecordRow Request, RolloutResult? Replay, int Offset);
+    private sealed record ReadReservation(Guid? Id, bool Expired, bool Recovery);
     private static DurableOperationKey RolloutKey(DurableChangeSetCommit accepted) => new(accepted.DeploymentId, accepted.Generation, OperationId.Create("rollout"));
     internal async ValueTask<RolloutResult> ObserveRolloutAsync(DurableChangeSetCommit accepted, string request,
         RolloutOptions options, CancellationToken token)
@@ -75,6 +76,8 @@ internal sealed partial class InternalDurableActions
         var observations = new Dictionary<string, RolloutObservation>(StringComparer.Ordinal);
         var reads = 0; var stop = RolloutStop.CallLimit;
         var finished = new HashSet<string>(StringComparer.Ordinal);
+        var expiredMembers = set.Members.Where(x => x.Expired).Select(x => x.Subject).ToHashSet(StringComparer.Ordinal);
+        var recoveryConsumed = new HashSet<string>(StringComparer.Ordinal);
         var budgetStarted = clock.GetTimestamp();
         var remainingBudgets = set.Members.ToDictionary(x => x.Subject, x => x.Attempt.Deadline - Now(), StringComparer.Ordinal);
         var ordered = set.Members.OrderBy(x => (Array.IndexOf(set.Targets, x.Subject) - call.Offset + set.Targets.Length) % set.Targets.Length).ToArray();
@@ -89,32 +92,36 @@ internal sealed partial class InternalDurableActions
                 var remainingCall = TimeSpan.FromMilliseconds(options.RequestMilliseconds) - clock.GetElapsedTime(started);
                 if (remainingCall <= TimeSpan.Zero) break;
                 var monotonicRemaining = remainingBudgets[member.Subject] - clock.GetElapsedTime(budgetStarted);
-                var expired = RolloutDeadlines.Expired(Now(), member.Attempt.Deadline, member.Expired);
-                if (!expired && monotonicRemaining <= TimeSpan.Zero)
-                {
-                    // Exhausting this call's monotonic allowance cannot invent durable UTC expiry or fresh-read authority.
-                    observations[member.Subject] = new(RolloutOutcome.Unavailable, "clock-budget-elapsed");
-                    finished.Add(member.Subject); continue;
-                }
+                var knownExpired = expiredMembers.Contains(member.Subject);
                 var remainingRollout = member.Attempt.Deadline - Now();
                 if (remainingRollout > monotonicRemaining) remainingRollout = monotonicRemaining;
-                var timeout = TimeSpan.FromMilliseconds(options.ReadTimeoutMilliseconds);
-                if (timeout > remainingCall) timeout = remainingCall;
-                if (!expired && timeout > remainingRollout) timeout = remainingRollout;
-                if (timeout <= TimeSpan.Zero) timeout = TimeSpan.FromMilliseconds(1);
+                var readLimit = TimeSpan.FromMilliseconds(options.ReadTimeoutMilliseconds);
+                if (readLimit > remainingCall) readLimit = remainingCall;
+                var activeLimit = remainingRollout < readLimit ? remainingRollout : readLimit;
                 var readStarted = clock.GetTimestamp();
-                // The timer includes catalog reservation/lock time; the network never receives a refreshed active budget.
-                using var readBudget = CancellationTokenSource.CreateLinkedTokenSource(callToken); readBudget.CancelAfter(timeout);
-                var reservation = await ReserveReadAsync(call, member, round, expired, callToken);
+                // Both timers include reservation time. Recovery uses the existing read cap, never a restarted timer.
+                using var readBudget = CancellationTokenSource.CreateLinkedTokenSource(callToken); readBudget.CancelAfter(readLimit);
+                using var activeBudget = CancellationTokenSource.CreateLinkedTokenSource(readBudget.Token);
+                activeBudget.CancelAfter(activeLimit > TimeSpan.Zero ? activeLimit : TimeSpan.FromMilliseconds(1));
+                var reservation = await ReserveReadAsync(call, member, round, knownExpired, recoveryConsumed.Contains(member.Subject),
+                    monotonicRemaining > TimeSpan.Zero, callToken);
+                if (reservation.Expired) expiredMembers.Add(member.Subject);
+                if (reservation.Recovery) recoveryConsumed.Add(member.Subject);
+                if (reservation.Id is null)
+                {
+                    if (!observations.ContainsKey(member.Subject)) observations[member.Subject] = new(RolloutOutcome.Unavailable, "clock-budget-elapsed");
+                    finished.Add(member.Subject); continue;
+                }
+                var readToken = reservation.Recovery ? readBudget.Token : activeBudget.Token;
                 RolloutObservation observed;
                 reads++;
                 try
                 {
-                    readBudget.Token.ThrowIfCancellationRequested();
-                    if (!expired && !RolloutDeadlines.CanReadActive(clock, readStarted, timeout, member.Attempt.Deadline))
-                        throw new OperationCanceledException(readBudget.Token);
+                    readToken.ThrowIfCancellationRequested();
+                    if (!reservation.Recovery && !RolloutDeadlines.CanReadActive(clock, readStarted, activeLimit, member.Attempt.Deadline))
+                        throw new OperationCanceledException(readToken);
                     observed = await ((IInternalReadinessHandler)member.Loaded.Handler).ReadinessAsync(member.Loaded.Context,
-                        member.Loaded.Intent.Payload, member.Receipt, readBudget.Token);
+                        member.Loaded.Intent.Payload, member.Receipt, readToken);
                     if (!((IInternalReadinessHandler)member.Loaded.Handler).ValidateObservation(member.Loaded.Intent.Payload, member.Receipt, observed))
                         throw new InvalidDataException("Invalid adapter readiness evidence.");
                 }
@@ -124,12 +131,13 @@ internal sealed partial class InternalDurableActions
                 }
                 // Catalog closure uses an independent finite budget after caller cancellation; no further API work.
                 using var publish = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                var publication = await PublishReadAsync(call, member, reservation, observed, samples, observations, publish.Token);
+                var publication = await PublishReadAsync(call, member, reservation.Id.Value, observed, samples, observations, publish.Token);
+                if (publication.Expired) expiredMembers.Add(member.Subject);
                 if (publication.Completed is not null) return publication.Completed;
                 var current = publication.Current;
                 observations[member.Subject] = current ? observed : new(RolloutOutcome.Refused, "attempt-superseded");
-                if (current) samples[member.Subject] = reservation;
-                if (expired || !current || observed.Code == "status-invalid" || observed.Outcome is RolloutOutcome.Conflict or RolloutOutcome.Refused ||
+                if (current) samples[member.Subject] = reservation.Id.Value;
+                if (recoveryConsumed.Contains(member.Subject) || !current || observed.Code == "status-invalid" || observed.Outcome is RolloutOutcome.Conflict or RolloutOutcome.Refused ||
                     observed.Outcome == RolloutOutcome.Unavailable && !observed.Temporary) finished.Add(member.Subject);
             }
             if (callToken.IsCancellationRequested || clock.GetElapsedTime(started) >= TimeSpan.FromMilliseconds(options.RequestMilliseconds))
@@ -143,14 +151,20 @@ internal sealed partial class InternalDurableActions
         using var finalBudget = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         return await FinishObservationCallAsync(call, observations, stop, finalBudget.Token);
     }
-    private async Task<Guid> ReserveReadAsync(ObservationCall call, SubmittedMember member, int round, bool expired, CancellationToken token)
+    private async Task<ReadReservation> ReserveReadAsync(ObservationCall call, SubmittedMember member, int round,
+        bool knownExpired, bool recoveryConsumed, bool activeAllowed, CancellationToken token)
     {
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
         await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
         var latest = await db.ObservationAttempts.AsNoTracking().Where(x => x.DeploymentId == call.Set.Source.DeploymentId &&
             x.Generation == call.Set.Source.Generation && x.Subject == member.Subject).OrderByDescending(x => x.Ordinal).FirstAsync(token);
         if (latest.Id != member.Attempt.Id) throw new InvalidDataException("Observation attempt superseded before read.");
-        await ExpireAsync(db, member.Attempt, call.Request.Request, token);
+        var expired = await ExpireAsync(db, member.Attempt, call.Request.Request, token) || knownExpired;
+        if (expired && recoveryConsumed || !expired && !activeAllowed)
+        {
+            await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
+            return new(null, expired, false);
+        }
         var row = new GenerationObservationRecordRow
         {
             Id = Guid.CreateVersion7(),
@@ -164,11 +178,14 @@ internal sealed partial class InternalDurableActions
             ReservedAt = Now(),
             InputJson = expired ? "recovery" : "active"
         };
-        db.ObservationRecords.Add(row); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None); return row.Id;
+        db.ObservationRecords.Add(row); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
+        return new(row.Id, expired, expired);
     }
-    private async Task ExpireAsync(ManifestCatalogDbContext db, GenerationObservationAttemptRow attempt, string request, CancellationToken token)
+    private async Task<bool> ExpireAsync(ManifestCatalogDbContext db, GenerationObservationAttemptRow attempt, string request, CancellationToken token)
     {
-        if (Now() < attempt.Deadline || await db.ObservationRecords.AnyAsync(x => x.AttemptId == attempt.Id && x.Kind == "Expired", token)) return;
+        if (db.ObservationRecords.Local.Any(x => x.AttemptId == attempt.Id && x.Kind == "Expired") ||
+            await db.ObservationRecords.AnyAsync(x => x.AttemptId == attempt.Id && x.Kind == "Expired", token)) return true;
+        if (Now() < attempt.Deadline) return false;
         db.ObservationRecords.Add(new()
         {
             Id = Guid.CreateVersion7(),
@@ -182,15 +199,16 @@ internal sealed partial class InternalDurableActions
             FinishedAt = Now(),
             Payload = "expired"
         });
+        return true;
     }
-    private async Task<(bool Current, RolloutResult? Completed)> PublishReadAsync(ObservationCall call, SubmittedMember member, Guid reservation,
+    private async Task<(bool Current, bool Expired, RolloutResult? Completed)> PublishReadAsync(ObservationCall call, SubmittedMember member, Guid reservation,
         RolloutObservation observation, Dictionary<string, Guid> samples, Dictionary<string, RolloutObservation> observations, CancellationToken token)
     {
         var payload = RolloutJson.Encode(observation);
         if (Encoding.UTF8.GetByteCount(payload) > 16384) throw new InvalidDataException("Observation exceeds bound.");
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
         await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
-        await ExpireAsync(db, member.Attempt, call.Request.Request, token);
+        var expired = await ExpireAsync(db, member.Attempt, call.Request.Request, token);
         if (await db.ObservationRecords.Where(x => x.Id == reservation && x.AttemptId == member.Attempt.Id && x.FinishedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.FinishedAt, Now()).SetProperty(x => x.Payload, payload), token) != 1)
             throw new InvalidDataException("Stale read reservation.");
@@ -202,7 +220,7 @@ internal sealed partial class InternalDurableActions
             samples[member.Subject] = reservation; observations[member.Subject] = observation;
             completed = await FinishRoundAsync(db, call, samples, observations, token);
         }
-        await db.SaveChangesAsync(token); await tx.CommitAsync(CancellationToken.None); return (latest.Id == member.Attempt.Id, completed);
+        await db.SaveChangesAsync(token); await tx.CommitAsync(CancellationToken.None); return (latest.Id == member.Attempt.Id, expired, completed);
     }
     private async Task<RolloutResult?> FinishRoundAsync(ManifestCatalogDbContext db, ObservationCall call, Dictionary<string, Guid> samples,
         Dictionary<string, RolloutObservation> observations, CancellationToken token)

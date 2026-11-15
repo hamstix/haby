@@ -85,7 +85,10 @@ budget without refreshing time through polling. Request cancellation, quota exha
 and Host restart do not renew the attempt. Expiry is at or after deadline and appends
 history before a recovery read; an eventual Ready result retains that expiry.
 Once recorded, expiry remains authoritative if UTC subsequently moves backward;
-only explicit resume creates a new attempt. Read timers start before catalog
+it is reread under the catalog lock and latched for the rest of the same call.
+The call consumes its one recovery allowance when that read is reserved, so a
+later round cannot regain active polling or repeat recovery after clock reversal.
+Only explicit resume creates a new attempt. Read timers start before catalog
 reservation and are checked again before API work, so a lock wait cannot refresh
 the active rollout allowance. A reservation that exhausted its allowance closes
 without sending GET and still consumes its finite call slot. A monotonic allowance

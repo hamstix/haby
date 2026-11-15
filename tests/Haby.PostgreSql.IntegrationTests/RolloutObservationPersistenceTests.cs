@@ -275,8 +275,19 @@ public sealed partial class DurableDeploymentPlanningTests
     private sealed class ReservationDeadlineCrossing(AdjustableTimeProvider time) : DbCommandInterceptor
     {
         internal int Crossings;
+        internal int ExpiryInserts;
+        internal int Reversals;
+        internal void ReverseAfterExpiryCommit()
+        {
+            if (Volatile.Read(ref ExpiryInserts) != 0 && Interlocked.CompareExchange(ref Reversals, 1, 0) == 0)
+                time.Advance(TimeSpan.FromSeconds(-1));
+        }
         private void Cross(DbCommand command)
         {
+            if (command.CommandText.Contains("INSERT INTO", StringComparison.Ordinal) &&
+                command.CommandText.Contains("generation_observation_records", StringComparison.Ordinal) &&
+                command.Parameters.Cast<DbParameter>().Any(x => Equals(x.Value, "Expired")))
+                Interlocked.Increment(ref ExpiryInserts);
             if (command.CommandText.Contains("INSERT INTO", StringComparison.Ordinal) &&
                 command.CommandText.Contains("generation_observation_records", StringComparison.Ordinal) &&
                 command.Parameters.Cast<DbParameter>().Any(x => Equals(x.Value, "Read")) &&
@@ -288,6 +299,12 @@ public sealed partial class DurableDeploymentPlanningTests
         public override ValueTask<int> NonQueryExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
             int result, CancellationToken cancellationToken = default)
         { Cross(command); return ValueTask.FromResult(result); }
+    }
+    private sealed class ExpiryCommitReversal(ReservationDeadlineCrossing boundary) : DbTransactionInterceptor
+    {
+        public override Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        { boundary.ReverseAfterExpiryCommit(); return Task.CompletedTask; }
     }
     [Fact]
     public async Task Rollout_deadline_crossed_during_read_reservation_does_not_dispatch_with_the_stale_active_budget()
@@ -330,5 +347,38 @@ public sealed partial class DurableDeploymentPlanningTests
         var historicalExpiry = Assert.Single(await verify.ObservationRecords.AsNoTracking().Where(x => x.Kind == "Expired").ToArrayAsync());
         Assert.Equal(expired.Members[0].Attempt, historicalExpiry.AttemptId); Assert.Equal(expired.Members[0].Deadline, historicalExpiry.ReservedAt);
         Assert.Equal(2, await verify.ObservationAttempts.CountAsync()); Assert.Equal(1, deployment.Writes);
+    }
+    [Fact]
+    public async Task Rollout_expiry_learned_within_one_call_is_latched_before_UTC_reversal_and_recovery_is_read_once()
+    {
+        var scenario = await RolloutScenario(); var deployment = new ConfiguredSubmissionFixture { Pending = true }; var identity = new IdentityFixture();
+        await using var services = InternalServices(scenario.Connection, scenario.Time);
+        var actions = await PrepareRollout(services, scenario, deployment, identity); await SubmitRollout(actions, scenario, deployment);
+        var boundary = new ReservationDeadlineCrossing((AdjustableTimeProvider)scenario.Time);
+        var observer = new InternalDurableActions(new ConfigFactory(scenario.Connection, boundary, new ExpiryCommitReversal(boundary)), [deployment, identity],
+            services.GetServices<IProviderConfigurationCodec>(), services.GetServices<IExternalOperationOutputContract>(), services.GetRequiredService<DurableActionAdmission>(),
+            services.GetRequiredService<DurableOperationSerialization>(), scenario.Time, configurationPreparation: ConfigurationPreparation(services).Preparation);
+        var options = new RolloutOptions(MaximumRounds: 4, PollMilliseconds: 100);
+        // This ONE call begins active, durably expires during publication, then continues with UTC reversed.
+        var result = await observer.ObserveRolloutAsync(scenario.Commit, "within-call", options, default);
+        Assert.Equal(1, boundary.Crossings); Assert.Equal(1, boundary.ExpiryInserts); Assert.Equal(1, boundary.Reversals);
+        Assert.False(result.Ready); Assert.Equal(RolloutBudget.Expired, result.Members[0].Budget);
+        Assert.True(scenario.Time.GetUtcNow() < result.Members[0].Deadline); Assert.Equal(1, deployment.ReadinessReads);
+        var replay = await observer.ObserveRolloutAsync(scenario.Commit, "within-call", options, default);
+        Assert.True(replay.Replayed); Assert.Equal(1, deployment.ReadinessReads);
+        await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
+            var expiry = Assert.Single(await verify.ObservationRecords.AsNoTracking().Where(x => x.Kind == "Expired").ToArrayAsync());
+            Assert.Equal(result.Members[0].Attempt, expiry.AttemptId); Assert.Equal(result.Members[0].Deadline, expiry.ReservedAt);
+            var reads = await verify.ObservationRecords.AsNoTracking().Where(x => x.Request == "within-call" && x.Kind == "Read").ToArrayAsync();
+            Assert.Equal(2, reads.Length); Assert.Single(reads, x => x.InputJson == "recovery");
+            Assert.Equal(1, await verify.ObservationAttempts.CountAsync());
+        }
+        var next = await observer.ObserveRolloutAsync(scenario.Commit, "later-read-once", options, default);
+        Assert.Equal(2, deployment.ReadinessReads); Assert.Equal(result.Members[0].Attempt, next.Members[0].Attempt);
+        var resumed = await observer.ResumeRolloutAsync(scenario.Commit, "resume-within-call", "operator",
+            [new(result.Members[0].Subject, result.Members[0].Attempt!.Value)], default);
+        Assert.NotEqual(result.Members[0].Attempt, resumed.Members[0].Attempt); Assert.Equal(2, deployment.ReadinessReads);
+        Assert.Equal(1, deployment.Writes);
     }
 }

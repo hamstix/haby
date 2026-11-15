@@ -41,9 +41,9 @@ Issue #223 adds 55 fast rows, 12 PostgreSQL functional rows and 11 assertion
 rows in the opt-in runnable consumer gate, with no added infrastructure-qualification
 rows. Two fast identities are explicitly replaced for the new invalid intent
 version and verified-preparation test name; the ledger records their previous
-case hashes. Issue #225 adds 65 fast identities, 17 PostgreSQL functional identities
+case hashes. Issue #225 adds 65 fast identities, 18 PostgreSQL functional identities
 and R01-R04 in the same configured gate, preserving C01-C11 and existing cleanup.
-The ledger now declares 1670 fast and 1077 PostgreSQL total (1072 functional + 5
+The ledger now declares 1670 fast and 1078 PostgreSQL total (1073 functional + 5
 qualification); final hosted discovery/execution must match every row. These are
 inventory counts, not executed success. The configured consumer retains its own
 production-projected real-cluster evidence. Both existing Native AOT jobs retain

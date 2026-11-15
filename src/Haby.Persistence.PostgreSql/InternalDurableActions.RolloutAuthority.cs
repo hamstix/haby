@@ -63,7 +63,8 @@ internal sealed partial class InternalDurableActions
             var latest = await db.ObservationAttempts.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation &&
                 x.Subject == subject).OrderByDescending(x => x.Ordinal).FirstOrDefaultAsync(token) ?? initial;
             ValidateAttempt(latest, source, candidate.OperationId, originJson, seconds);
-            var expiry = await db.ObservationRecords.AsNoTracking().SingleOrDefaultAsync(x => x.AttemptId == latest.Id && x.Kind == "Expired", token);
+            var expiry = db.ObservationRecords.Local.SingleOrDefault(x => x.AttemptId == latest.Id && x.Kind == "Expired") ??
+                await db.ObservationRecords.AsNoTracking().SingleOrDefaultAsync(x => x.AttemptId == latest.Id && x.Kind == "Expired", token);
             if (expiry is not null && (expiry.FinishedAt is null || expiry.Payload != "expired" || expiry.Subject != subject ||
                 expiry.DeploymentId != source.DeploymentId || expiry.Generation != source.Generation || expiry.ReservedAt != latest.Deadline))
                 throw new InvalidDataException("Retained observation expiry mismatch.");
