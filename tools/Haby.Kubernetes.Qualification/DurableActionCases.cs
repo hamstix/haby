@@ -458,54 +458,77 @@ internal static class DurableActionCases
                 Counter: new Counter(lostRestored) { Key = runtimeLost.Key });
             foreach (var candidate in new[] { runtimeMixed, initialPublication })
             {
-                await using var services = DurableDeploymentPlanningTests.InternalServices(candidate.Scenario.Connection, candidate.Scenario.Time);
-                var publication = new InternalRuntimePublication(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
-                    DurableDeploymentPlanningTests.ConfigurationPreparation(services).Preparation, ComposeRuntime(services, candidate.Counter), candidate.Scenario.Time);
-                var requests = await publication.PreparationRequestsAsync(candidate.Scenario.Commit, "qualifier", token);
-                if (requests.Length != 2) throw new InvalidOperationException("Exact runtime publication selection unavailable.");
-                foreach (var request in requests)
+                var services = DurableDeploymentPlanningTests.InternalServices(candidate.Scenario.Connection, candidate.Scenario.Time);
+                ServiceProvider? otherServices = null;
+                try
                 {
-                    if (await publication.AuthorizeMetadataAsync(request.Binding, request.Revision!.Value, token) is not null)
-                        throw new InvalidOperationException("Unpublished runtime artifact authorized.");
-                    var first = await publication.ApplyAsync(request, token);
-                    if (first.Receipt.Outcome != RuntimePublicationOutcome.Published ||
-                        await publication.AuthorizeMetadataAsync(request.Binding, request.Revision.Value, token) is null)
-                        throw new InvalidOperationException("Exact runtime publication unavailable.");
+                    var publication = new InternalRuntimePublication(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+                        DurableDeploymentPlanningTests.ConfigurationPreparation(services).Preparation, ComposeRuntime(services, candidate.Counter), candidate.Scenario.Time);
+                    var requests = await publication.PreparationRequestsAsync(candidate.Scenario.Commit, "qualifier", token);
+                    if (requests.Length != 2) throw new InvalidOperationException("Exact runtime publication selection unavailable.");
+                    foreach (var request in requests)
+                    {
+                        if (await publication.AuthorizeMetadataAsync(request.Binding, request.Revision!.Value, token) is not null)
+                            throw new InvalidOperationException("Unpublished runtime artifact authorized.");
+                        var first = await publication.ApplyAsync(request, token);
+                        if (first.Receipt.Outcome != RuntimePublicationOutcome.Published ||
+                            await publication.AuthorizeMetadataAsync(request.Binding, request.Revision.Value, token) is null)
+                            throw new InvalidOperationException("Exact runtime publication unavailable.");
+                    }
+                    Check(true, candidate.Scenario == runtimeMixed.Scenario ? "D33-runtime-mixed-exact-publication" : "D34-runtime-initial-exact-publication");
+                    if (candidate.Scenario != runtimeMixed.Scenario)
+                    {
+                        diagnostics.Mark(QualificationMilestone.InitialDeliveryStart);
+                        await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token, requests);
+                    }
+                    var old = (await publication.ReadAsync(requests[0].Key, token))!;
+                    var revoke = requests[0] with
+                    {
+                        Key = "qualification-revoke",
+                        Operation = RuntimePublicationOperation.RevokePermission,
+                        Origin = null,
+                        ExpectedToken = old.CurrentPermission!.Token
+                    };
+                    await publication.ApplyAsync(revoke, token);
+                    var replay = await publication.ApplyAsync(requests[0], token);
+                    if (replay.Receipt != old.Receipt || replay.CurrentPermission!.Status != "Revoked" ||
+                        await publication.AuthorizeMetadataAsync(requests[0].Binding, requests[0].Revision!.Value, token) is not null)
+                        throw new InvalidOperationException("Old runtime publication restored revoked access.");
+                    var bindingRevoke = new RuntimePublicationRequest("qualification-binding-revoke", RuntimePublicationOperation.RevokeBinding,
+                        requests[0].Binding, null, old.CurrentBinding.Token, "qualifier");
+                    var authenticationStore = new PostgreSqlRuntimeIdentityStore(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(services, candidate.Counter));
+                    otherServices = DurableDeploymentPlanningTests.InternalServices(runtimeCrash.Scenario.Connection, runtimeCrash.Scenario.Time);
+                    var otherStore = new PostgreSqlRuntimeIdentityStore(otherServices.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(otherServices, runtimeCrash.Counter));
+                    diagnostics.Mark(QualificationMilestone.RuntimeAuthStart);
+                    await RuntimeAuthenticationCases.Run(admin, services.GetRequiredService<ISecretStore>(), authenticationStore, requests[0].Binding,
+                        async () => { await publication.ApplyAsync(bindingRevoke, token); }, token, otherStore, (await RuntimeSaved(runtimeCrash.Scenario.Connection)).Binding,
+                        otherServices.GetRequiredService<ISecretStore>(), scenario: candidate.Scenario == runtimeMixed.Scenario ? "mixed" : "initial");
+                    diagnostics.Mark(QualificationMilestone.RuntimeAuthCompleted);
+                    diagnostics.Mark(QualificationMilestone.RuntimeFinalRevokeStart);
+                    var blocked = await publication.ApplyAsync(bindingRevoke, token);
+                    diagnostics.Mark(QualificationMilestone.RuntimeFinalRevokeCompleted);
+                    diagnostics.Mark(QualificationMilestone.RuntimeFinalHistoryStart);
+                    var historical = await ComposeRuntime(services, candidate.Counter).ExecuteAsync(candidate.Key, token);
+                    diagnostics.Mark(QualificationMilestone.RuntimeFinalHistoryCompleted);
+                    diagnostics.Mark(QualificationMilestone.RuntimeFinalAuthorizationStart);
+                    if (historical.Outcome != InternalActionOutcome.Confirmed || blocked.CurrentBinding.Status != "Revoked" ||
+                        await publication.AuthorizeMetadataAsync(requests[1].Binding, requests[1].Revision!.Value, token) is not null)
+                        throw new InvalidOperationException("Runtime binding revocation or retained origin invalid.");
+                    diagnostics.Mark(QualificationMilestone.RuntimeFinalAuthorizationCompleted);
                 }
-                Check(true, candidate.Scenario == runtimeMixed.Scenario ? "D33-runtime-mixed-exact-publication" : "D34-runtime-initial-exact-publication");
-                if (candidate.Scenario != runtimeMixed.Scenario)
+                finally
                 {
-                    diagnostics.Mark(QualificationMilestone.InitialDeliveryStart);
-                    await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token, requests);
+                    diagnostics.Mark(QualificationMilestone.RuntimeCandidateDisposeStart);
+                    try
+                    {
+                        // Preserve the existing reverse-order await-using disposal, including
+                        // disposal of the outer provider when the inner provider fails.
+                        try { if (otherServices is not null) await otherServices.DisposeAsync(); }
+                        finally { await services.DisposeAsync(); }
+                        diagnostics.Mark(QualificationMilestone.RuntimeCandidateDisposeCompleted);
+                    }
+                    catch { diagnostics.Mark(QualificationMilestone.RuntimeCandidateDisposeFailed); throw; }
                 }
-                var old = (await publication.ReadAsync(requests[0].Key, token))!;
-                var revoke = requests[0] with
-                {
-                    Key = "qualification-revoke",
-                    Operation = RuntimePublicationOperation.RevokePermission,
-                    Origin = null,
-                    ExpectedToken = old.CurrentPermission!.Token
-                };
-                await publication.ApplyAsync(revoke, token);
-                var replay = await publication.ApplyAsync(requests[0], token);
-                if (replay.Receipt != old.Receipt || replay.CurrentPermission!.Status != "Revoked" ||
-                    await publication.AuthorizeMetadataAsync(requests[0].Binding, requests[0].Revision!.Value, token) is not null)
-                    throw new InvalidOperationException("Old runtime publication restored revoked access.");
-                var bindingRevoke = new RuntimePublicationRequest("qualification-binding-revoke", RuntimePublicationOperation.RevokeBinding,
-                    requests[0].Binding, null, old.CurrentBinding.Token, "qualifier");
-                var authenticationStore = new PostgreSqlRuntimeIdentityStore(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(services, candidate.Counter));
-                await using var otherServices = DurableDeploymentPlanningTests.InternalServices(runtimeCrash.Scenario.Connection, runtimeCrash.Scenario.Time);
-                var otherStore = new PostgreSqlRuntimeIdentityStore(otherServices.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), ComposeRuntime(otherServices, runtimeCrash.Counter));
-                diagnostics.Mark(QualificationMilestone.RuntimeAuthStart);
-                await RuntimeAuthenticationCases.Run(admin, services.GetRequiredService<ISecretStore>(), authenticationStore, requests[0].Binding,
-                    async () => { await publication.ApplyAsync(bindingRevoke, token); }, token, otherStore, (await RuntimeSaved(runtimeCrash.Scenario.Connection)).Binding,
-                    otherServices.GetRequiredService<ISecretStore>(), scenario: candidate.Scenario == runtimeMixed.Scenario ? "mixed" : "initial");
-                diagnostics.Mark(QualificationMilestone.RuntimeAuthCompleted);
-                var blocked = await publication.ApplyAsync(bindingRevoke, token);
-                var historical = await ComposeRuntime(services, candidate.Counter).ExecuteAsync(candidate.Key, token);
-                if (historical.Outcome != InternalActionOutcome.Confirmed || blocked.CurrentBinding.Status != "Revoked" ||
-                    await publication.AuthorizeMetadataAsync(requests[1].Binding, requests[1].Revision!.Value, token) is not null)
-                    throw new InvalidOperationException("Runtime binding revocation or retained origin invalid.");
             }
             Check(true, "D35-runtime-old-receipt-does-not-restore-revoked-permission");
             Check(true, "D36-runtime-binding-revoke-preserves-confirmed-origin-without-access");
@@ -540,6 +563,7 @@ internal static class DurableActionCases
         catch (Exception error) { primary = error; throw; }
         finally
         {
+            diagnostics.Mark(QualificationMilestone.InnerCleanupStart);
             Exception? cleanupFailure = null;
             try
             {
@@ -561,7 +585,7 @@ internal static class DurableActionCases
                     diagnostics.Mark(QualificationMilestone.NamespaceAbsenceConfirmed);
                 }
             }
-            catch (Exception error) { cleanupFailure = error; }
+            catch (Exception error) { diagnostics.Mark(QualificationMilestone.NamespaceCleanupFailed); cleanupFailure = error; }
             try
             {
                 diagnostics.Mark(QualificationMilestone.CatalogDisposeStart);
@@ -569,7 +593,8 @@ internal static class DurableActionCases
                 diagnostics.Mark(QualificationMilestone.CatalogDisposeCompleted);
                 Console.WriteLine("PASS durable-owned-catalog-cleanup");
             }
-            catch (Exception error) { cleanupFailure = cleanupFailure is null ? error : new AggregateException(cleanupFailure, error); }
+            catch (Exception error) { diagnostics.Mark(QualificationMilestone.CatalogDisposeFailed); cleanupFailure = cleanupFailure is null ? error : new AggregateException(cleanupFailure, error); }
+            diagnostics.Mark(cleanupFailure is null ? QualificationMilestone.InnerCleanupCompleted : QualificationMilestone.InnerCleanupFailed);
             if (cleanupFailure is not null) throw primary is null ? cleanupFailure : new AggregateException(primary, cleanupFailure);
         }
     }

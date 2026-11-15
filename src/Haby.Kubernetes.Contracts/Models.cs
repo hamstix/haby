@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Haby.Domain;
+using Haby.Configuration.Contracts;
 
 namespace Haby.Kubernetes.Contracts;
 
@@ -40,10 +41,11 @@ public sealed class KubernetesPlacement
 {
     internal KubernetesPlacement(PlacementReference reference, string @namespace, string? registry,
         string? repositoryPrefix, ImmutableDictionary<string, string> nodeSelector,
-        ImmutableArray<string> imagePullSecrets, OperationalSettings settings)
+        ImmutableArray<string> imagePullSecrets, OperationalSettings settings, RuntimeConfiguration? runtimeConfiguration = null)
     {
         Reference = reference; Namespace = @namespace; Registry = registry; RepositoryPrefix = repositoryPrefix;
         NodeSelector = nodeSelector; ImagePullSecrets = imagePullSecrets; Settings = settings;
+        RuntimeConfiguration = runtimeConfiguration;
     }
     public PlacementReference Reference { get; }
     public string Namespace { get; }
@@ -52,6 +54,7 @@ public sealed class KubernetesPlacement
     public ImmutableDictionary<string, string> NodeSelector { get; }
     public ImmutableArray<string> ImagePullSecrets { get; }
     public OperationalSettings Settings { get; }
+    public RuntimeConfiguration? RuntimeConfiguration { get; }
 }
 
 /// <summary>A safe, value-free refusal from portable decoding or pure resolution.</summary>

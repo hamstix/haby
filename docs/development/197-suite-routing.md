@@ -37,6 +37,14 @@ not full-suite success. Invalid/empty selections and empty groups must fail.
 
 ## Dependency and isolation audit
 
+Issue #223 adds 55 fast rows, 12 PostgreSQL functional rows and 11 assertion
+rows in the opt-in runnable consumer gate, with no added infrastructure-qualification
+rows. Two fast identities are explicitly replaced for the new invalid intent
+version and verified-preparation test name; the ledger records their previous
+case hashes. Current inventories are 1601 fast and 1060 PostgreSQL total (1055
+functional + 5 qualification). These are discovery counts, not executed success;
+the configured consumer retains its own production-projected real-cluster evidence.
+
 Host-bearing classes include Configuration/Generation scenarios, Operator Host,
 checkpoint RPC, Provider preflight/access and loopback Host configuration. They
 retain real generated clients, native CLI where required, dedicated Provider-effect

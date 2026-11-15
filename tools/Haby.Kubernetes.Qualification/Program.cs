@@ -2,7 +2,13 @@ using System.Security.Cryptography.X509Certificates;
 using Haby.Kubernetes.Qualification;
 using k8s;
 
-if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] is not ("--probe-stock-tls" or "--deployment-kernel" or "--durable-actions")))
+if (args is ["--configured-setup-controls"])
+{
+    await ConfiguredSetupControls.Run();
+    return 0;
+}
+
+if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] is not ("--probe-stock-tls" or "--deployment-kernel" or "--durable-actions" or "--configured-deployment")))
 {
     Console.Error.WriteLine("Usage: qualification <explicit-https-endpoint> <private-credential-directory>");
     return 2;
@@ -12,6 +18,13 @@ try
     var endpoint = new Uri(args[0]);
     if (endpoint.Scheme != "https") return 2;
     var directory = Path.GetFullPath(args[1]);
+    if (args.Length == 3 && args[2] == "--configured-deployment")
+    {
+        using var bootstrap = ClientFactory.Create(endpoint, directory);
+        using var configuredDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
+        await ConfiguredDeploymentCases.Run(bootstrap, endpoint, directory, configuredDeadline.Token);
+        return 0;
+    }
     if (args.Length == 3 && args[2] == "--durable-actions")
     {
         var diagnostics = new QualificationDiagnosticJournal(directory);

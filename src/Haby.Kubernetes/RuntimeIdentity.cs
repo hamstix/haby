@@ -75,6 +75,7 @@ internal sealed class InternalRuntimeIdentityAction(ISecretStore secrets,
         "haby.kubernetes.runtime-account-intent/v1", "haby.kubernetes.runtime-account-receipt/v1");
     public bool ObservationRecovery => true;
     public bool RequiresPreparedConfiguration => true;
+    public bool EstablishesIdentity => true;
     public InternalManagedTarget ManagedTarget(InternalActionContext context) => RuntimeIdentityCodec.Target(InternalDeploymentAction.Resolve(context));
     public string Prepare(InternalActionContext context)
     {

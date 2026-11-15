@@ -6,7 +6,8 @@ internal sealed record InternalActionContract(string Subject, string ProviderKin
     string Implementation, string Action, string InputFormat, string OutputContract);
 internal sealed record InternalActionContext(DurableOperationKey Key, DurablePlanningInputs Inputs,
     ProviderInput Subject, ExactProviderResolution Provider, PreparedProviderConfiguration Configuration,
-    string ApplicationVersion, Guid Marker, Guid ManagedIdentity, PlacementDeclaration? Placement, Guid InstallationId = default);
+    string ApplicationVersion, Guid Marker, Guid ManagedIdentity, PlacementDeclaration? Placement, Guid InstallationId = default,
+    InternalPreparedRuntime? Runtime = null);
 internal enum InternalActionOutcome { Confirmed, Uncertain, Refused, Unavailable, NotConfirmed }
 internal sealed record InternalActionResult(InternalActionOutcome Outcome, string Code, string? Receipt = null);
 
@@ -18,6 +19,9 @@ internal interface IInternalActionHandler
     bool ObservationRecovery { get; }
     InternalManagedTarget? ManagedTarget(InternalActionContext context) => null;
     bool RequiresPreparedConfiguration => false;
+    bool EstablishesIdentity => false;
+    bool RequiresRuntimePublication => false;
+    InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt) => null;
     InternalIdentityConfirmation? IdentityConfirmation(InternalActionContext context, string payload, string receipt) => null;
     // Pure preparation admission is distinct from permission to create an executable intent.
     IReadOnlyList<ManifestLocalId> PreparationDocuments(InternalActionContext context)
@@ -56,3 +60,6 @@ internal static class InternalPlacementInput
 internal sealed record InternalManagedTarget(string Contract, int Format, string Payload);
 internal sealed record InternalIdentityConfirmation(string Role, string InventoryContract, int Format,
     string InventoryPayload, string Authenticator, string Audience, string ValidationContract, string ValidationPayload);
+internal sealed record InternalPreparedRuntime(Guid Binding, string Audience, string IdentityContract, string IdentityReceipt,
+    IReadOnlyDictionary<ManifestLocalId, ConfigurationDocumentRevisionId> Documents);
+internal sealed record InternalObjectConfirmation(string Role, string Contract, int Format, string Payload, string Identity);

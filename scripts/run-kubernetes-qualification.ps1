@@ -5,6 +5,7 @@ param(
     [switch]$ProbeStockTls,
     [switch]$DeploymentKernel,
     [switch]$DurableActions,
+    [switch]$ConfiguredDeployment,
     [ValidateRange(1,120)][int]$CommandTimeoutSeconds=20,
     [ValidateRange(1,300)][int]$ReadinessTimeoutSeconds=120,
     [scriptblock]$CommandRunner
@@ -13,6 +14,7 @@ $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
+. (Join-Path $PSScriptRoot 'runtime-consumer-image.ps1')
 Set-Location (Split-Path $PSScriptRoot -Parent)
 if(!$EvidencePath){$EvidencePath=Join-Path '.artifacts' ($EvidenceId+'.txt')}
 if(Test-Path -LiteralPath $EvidencePath){throw 'Evidence path already exists; fresh report required.'}
@@ -24,6 +26,7 @@ $listCommand=if($Runtime -eq 'docker'){'ps'}else{'list'}
 $image='rancher/k3s@sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248'
 $record=[Collections.Generic.List[string]]::new()
 $failed=$false; $launchAttempted=$false; $privateOwned=$false
+$copyOperation=$null; $copyNativeExit=$null
 $record.Add('Evidence ID: '+$EvidenceId); $record.Add('Run ID: '+$run)
 $record.Add('Source: '+(& git rev-parse HEAD))
 $record.Add('Dirty: '+[bool](& git status --porcelain))
@@ -36,8 +39,18 @@ function Call([string]$File,[string[]]$Arguments,[int]$Seconds=$CommandTimeoutSe
 }
 function RuntimeCall([string[]]$Arguments,[int]$Seconds=$CommandTimeoutSeconds) {
     $result=Call $Runtime $Arguments $Seconds
-    if($result.ExitCode -ne 0){throw 'Runtime command failed.'}
+    if($result.ExitCode -ne 0){
+        if($stage -ceq 'copy' -and $copyOperation -and $result.ExitCode -is [int]){$script:copyNativeExit=$result.ExitCode}
+        throw 'Runtime command failed.'
+    }
     return $result.Output
+}
+function Start-CopyOperation([ValidateSet('copy-server-ca','copy-admin-certificate','copy-admin-key','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address')][string]$Id) {
+    $script:copyOperation=$Id; $script:copyNativeExit=$null
+    $record.Add('Copy operation: '+$Id+'; state=start')
+}
+function Complete-CopyOperation {
+    $record.Add('Copy operation: '+$copyOperation+'; state=complete')
 }
 function Save-Evidence {
     try {
@@ -55,8 +68,21 @@ try {
     if($DurableActions){Initialize-QualificationJournal $private}
     $record.Add('Runtime version: '+(RuntimeCall @('--version')).Trim())
     $sdk=Call 'dotnet' @('--version'); if($sdk.ExitCode -ne 0){throw 'SDK unavailable.'}; $record.Add('SDK: '+$sdk.Output.Trim())
+    if($ConfiguredDeployment){
+        if($Runtime -cne 'docker' -or !$IsLinux){throw 'Configured consumer requires the existing hosted Linux Docker contour.'}
+        $inputs=Get-HabyConsumerImageInputs (Split-Path $PSScriptRoot -Parent)
+        $consumerImage=Read-HabyConsumerImageBinding $inputs (Join-Path (Split-Path $PSScriptRoot -Parent) ('tests/fixtures/runtime-consumer-images/'+$inputs.key+'.json'))
+        $record.Add('Consumer input key: '+$inputs.key)
+        $record.Add('Consumer image: '+$consumerImage)
+        [IO.File]::WriteAllText((Join-Path $private 'consumer-image'),$consumerImage)
+    }
     $stage='launch'; $record.Add('Stage: launch-start'); $launchAttempted=$true
-    $launch=Call $Runtime @('run','-d','--name',$run,'--label',"haby.qualification=$run",'-p','127.0.0.1:16443:6443',$image,'server','--disable-agent','--disable','traefik','--disable','servicelb','--disable','metrics-server','--disable','coredns','--disable','local-storage','--egress-selector-mode','disabled','--tls-san','127.0.0.1','--write-kubeconfig-mode','600') 180
+    $launchArguments=@('run','-d')
+    if($ConfiguredDeployment){$launchArguments+='--privileged'}
+    $launchArguments+=@('--name',$run,'--label',"haby.qualification=$run",'-p','127.0.0.1:16443:6443',$image,'server')
+    if(!$ConfiguredDeployment){$launchArguments+='--disable-agent'}
+    $launchArguments+=@('--disable','traefik','--disable','servicelb','--disable','metrics-server','--disable','coredns','--disable','local-storage','--egress-selector-mode','disabled','--tls-san','127.0.0.1','--write-kubeconfig-mode','600')
+    $launch=Call $Runtime $launchArguments 180
     if($launch.ExitCode -ne 0){$reason='nonzero';throw 'Launch refused.'}
     $record.Add('Stage: launch-complete'); $stage='readiness'; $record.Add('Stage: readiness-start'); $record.Add('Readiness budget seconds: '+$ReadinessTimeoutSeconds)
     $timer=[Diagnostics.Stopwatch]::StartNew(); $ready=$false
@@ -64,15 +90,39 @@ try {
         $remaining=[Math]::Max(1,[int][Math]::Ceiling($ReadinessTimeoutSeconds-$timer.Elapsed.TotalSeconds))
         $record.Add('Stage: readiness-probe')
         $probe=Call $Runtime @('exec',$run,'/bin/kubectl','--kubeconfig','/etc/rancher/k3s/k3s.yaml','--request-timeout=3s','get','--raw=/readyz') ([Math]::Min($CommandTimeoutSeconds,$remaining))
-        if($probe.ExitCode -eq 0){$ready=$true;break}
+        if($probe.ExitCode -eq 0){
+            if(!$ConfiguredDeployment){$ready=$true;break}
+            $nodes=Call $Runtime @('exec',$run,'/bin/kubectl','--kubeconfig','/etc/rancher/k3s/k3s.yaml','--request-timeout=3s','get','nodes','-o','json') ([Math]::Min($CommandTimeoutSeconds,$remaining))
+            if($nodes.ExitCode -eq 0){
+                $nodeList=$nodes.Output | ConvertFrom-Json
+                if(@($nodeList.items | Where-Object { @($_.status.conditions | Where-Object { $_.type -ceq 'Ready' -and $_.status -ceq 'True' }).Count -eq 1 }).Count -eq 1){$ready=$true;break}
+            }
+        }
         Start-Sleep -Milliseconds 200
     }
     if(!$ready){$reason='deadline';throw [TimeoutException]::new('Readiness deadline exceeded.')}
     $record.Add('Stage: readiness-complete'); $stage='copy'; $record.Add('Stage: copy-start')
-    foreach($pair in @(@('server-ca.crt','ca.crt'),@('client-admin.crt','admin.crt'),@('client-admin.key','admin.key'))){RuntimeCall @('cp',"${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])",(Join-Path $private $pair[1])) | Out-Null}
+    foreach($pair in @(@('server-ca.crt','ca.crt','copy-server-ca'),@('client-admin.crt','admin.crt','copy-admin-certificate'),@('client-admin.key','admin.key','copy-admin-key'))){
+        Start-CopyOperation $pair[2]
+        RuntimeCall @('cp',"${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])",(Join-Path $private $pair[1])) | Out-Null
+        Complete-CopyOperation
+    }
+    if($ConfiguredDeployment){
+        Start-CopyOperation 'inspect-bridge-gateway'
+        $network=(RuntimeCall @('inspect',$run) | ConvertFrom-Json)[0].NetworkSettings.Networks.bridge
+        $gateway=$network.Gateway
+        Complete-CopyOperation
+        Start-CopyOperation 'validate-bridge-gateway'
+        $parsedGateway=$null
+        if(![Net.IPAddress]::TryParse($gateway,[ref]$parsedGateway) -or [Net.IPAddress]::IsLoopback($parsedGateway)){throw 'Explicit Pod-reachable fixture gateway unavailable.'}
+        Complete-CopyOperation
+        Start-CopyOperation 'write-bridge-address'
+        [IO.File]::WriteAllText((Join-Path $private 'pod-host-address'),$gateway)
+        Complete-CopyOperation
+    }
     $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
-    if((@($ProbeStockTls,$DeploymentKernel,$DurableActions) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
-    [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}else{@()}
+    if((@($ProbeStockTls,$DeploymentKernel,$DurableActions,$ConfiguredDeployment) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
+    [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}elseif($ConfiguredDeployment){@('--configured-deployment')}else{@()}
     $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-restore','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
     foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
     if($result.ExitCode -ne 0){$reason='nonzero';throw 'Harness failed.'}
@@ -84,6 +134,11 @@ try {
     $record.Add('Harness: PASS')
 } catch {
     $failed=$true
+    # Freeze the primary copy diagnostic before cleanup can issue its own runtime calls.
+    if($stage -ceq 'copy' -and $copyOperation){
+        $record.Add('Copy failure: operation='+$copyOperation)
+        if($copyNativeExit -is [int]){$record.Add('Copy native exit: '+$copyNativeExit.ToString([Globalization.CultureInfo]::InvariantCulture))}
+    }
     $diagnostic=Get-QualificationProcessDiagnostic $_.Exception
     if($diagnostic.Kind -cne 'unknown'){$record.Add('Diagnostic process: '+$diagnostic.Kind+'; elapsed-ms='+$diagnostic.ElapsedMilliseconds)}
     else{$record.Add('Diagnostic process: unknown')}

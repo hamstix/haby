@@ -67,6 +67,9 @@
           "maxLength": 63,
           "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
         },
+        "runtimeConfiguration": {
+          "$ref": "#/$defs/runtimeConfiguration"
+        },
         "registry": {
           "type": "string",
           "minLength": 1,
@@ -120,6 +123,30 @@
   ],
   "additionalProperties": false,
   "$defs": {
+    "runtimeConfiguration": {
+      "type": "object",
+      "required": ["endpoint", "tls"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "tls": {
+          "oneOf": [
+            { "type": "object", "required": ["mode"], "additionalProperties": false, "properties": { "mode": { "const": "system" } } },
+            { "type": "object", "required": ["mode", "caPem"], "additionalProperties": false, "properties": { "mode": { "const": "custom-ca" }, "caPem": { "type": "string", "minLength": 1, "maxLength": 16384 } } }
+          ]
+        },
+        "client": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "totalTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+            "rpcTimeoutMilliseconds": { "type": "integer", "minimum": 100, "maximum": 30000 },
+            "initialBackoffMilliseconds": { "type": "integer", "minimum": 1, "maximum": 5000 },
+            "maximumBackoffMilliseconds": { "type": "integer", "minimum": 1, "maximum": 30000 },
+            "maximumAggregateBytes": { "type": "integer", "minimum": 1, "maximum": 67108864 }
+          }
+        }
+      }
+    },
     "key": {
       "type": "object",
       "properties": {

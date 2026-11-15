@@ -9,7 +9,10 @@ internal enum QualificationMilestone
     DurableEntry, CatalogInitStart, CatalogInitCompleted, NamespaceCreateStart, NamespaceCreateCompleted,
     DurableSuiteStart, RuntimeAuthStart, InitialDeliveryStart, MixedDeliveryStart,
     MixedPreparationCompleted, MixedDocumentsCompleted, MixedIdentityCompleted, MixedPublicationCompleted, MixedDeliveryCompleted,
-    NamespaceCleanupStart, NamespaceAbsenceConfirmed, CatalogDisposeStart, CatalogDisposeCompleted, RuntimeAuthCompleted
+    NamespaceCleanupStart, NamespaceAbsenceConfirmed, CatalogDisposeStart, CatalogDisposeCompleted, RuntimeAuthCompleted,
+    RuntimeFinalRevokeStart, RuntimeFinalRevokeCompleted, RuntimeFinalHistoryStart, RuntimeFinalHistoryCompleted,
+    RuntimeFinalAuthorizationStart, RuntimeFinalAuthorizationCompleted, RuntimeCandidateDisposeStart, RuntimeCandidateDisposeCompleted,
+    RuntimeCandidateDisposeFailed, InnerCleanupStart, InnerCleanupCompleted, InnerCleanupFailed, NamespaceCleanupFailed, CatalogDisposeFailed
 }
 
 // A private bounded journal records closed progress and managed elapsed time, never runtime payloads.
@@ -55,6 +58,20 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
                 QualificationMilestone.DurableSuiteStart => "durable-suite-start",
                 QualificationMilestone.RuntimeAuthStart => "runtime-auth-start",
                 QualificationMilestone.RuntimeAuthCompleted => "runtime-auth-completed",
+                QualificationMilestone.RuntimeFinalRevokeStart => "runtime-final-revoke-start",
+                QualificationMilestone.RuntimeFinalRevokeCompleted => "runtime-final-revoke-completed",
+                QualificationMilestone.RuntimeFinalHistoryStart => "runtime-final-history-start",
+                QualificationMilestone.RuntimeFinalHistoryCompleted => "runtime-final-history-completed",
+                QualificationMilestone.RuntimeFinalAuthorizationStart => "runtime-final-authorization-start",
+                QualificationMilestone.RuntimeFinalAuthorizationCompleted => "runtime-final-authorization-completed",
+                QualificationMilestone.RuntimeCandidateDisposeStart => "runtime-candidate-dispose-start",
+                QualificationMilestone.RuntimeCandidateDisposeCompleted => "runtime-candidate-dispose-completed",
+                QualificationMilestone.RuntimeCandidateDisposeFailed => "runtime-candidate-dispose-failed",
+                QualificationMilestone.InnerCleanupStart => "inner-cleanup-start",
+                QualificationMilestone.InnerCleanupCompleted => "inner-cleanup-completed",
+                QualificationMilestone.InnerCleanupFailed => "inner-cleanup-failed",
+                QualificationMilestone.NamespaceCleanupFailed => "namespace-cleanup-failed",
+                QualificationMilestone.CatalogDisposeFailed => "catalog-dispose-failed",
                 QualificationMilestone.InitialDeliveryStart => "initial-delivery-start",
                 QualificationMilestone.MixedDeliveryStart => "mixed-delivery-start",
                 QualificationMilestone.MixedPreparationCompleted => "mixed-preparation-completed",

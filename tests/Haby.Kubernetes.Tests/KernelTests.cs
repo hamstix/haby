@@ -16,7 +16,7 @@ namespace Haby.Kubernetes.Tests;
 
 public sealed class KernelTests
 {
-    internal static DeploymentIntent Intent() => new(1,
+    internal static DeploymentIntent Intent() => new(2,
         new(EnvironmentRecordId.New().ToString(), ProviderInstanceId.New().ToString(), 3, "haby.kubernetes/v1"),
         "api", "main", "standard", 1, "test", "orders-api-main", Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(),
         new("app", "registry.example/app:v1", 1, "RollingUpdate", "25%", "25%", 0, 600,
@@ -51,7 +51,7 @@ public sealed class KernelTests
     }
     [Theory]
     [InlineData("unknown", "true")]
-    [InlineData("format", "2")]
+    [InlineData("format", "1")]
     [InlineData("operation", "\"00000000-0000-0000-0000-000000000000\"")]
     [InlineData("lastConfirmed", "{}")]
     [InlineData("target", "null")]

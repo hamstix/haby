@@ -63,11 +63,12 @@ internal sealed partial class InternalDurableActions
             placement = pin.Declaration;
         }
         var manifestRow = await db.Revisions.AsNoTracking().SingleAsync(x => x.ApplicationRecordId == source.ApplicationRecordId && x.LocalRevisionNumber == source.RevisionNumber, token);
-        var installation = handler.RequiresPreparedConfiguration
+        var installation = handler.EstablishesIdentity || handler.RequiresRuntimePublication
             ? await db.InstallationIdentities.AsNoTracking().Where(x => x.Singleton == 1).Select(x => x.Id).SingleOrDefaultAsync(token) : Guid.Empty;
         // Pure pre-acceptance shape validation has no installation authority; the final acceptance replaces this placeholder.
-        return (new(key, inputs, subject, exact, prepared, manifestRow.ApplicationVersion, marker, managed, placement,
-            installation == Guid.Empty && handler.RequiresPreparedConfiguration ? managed : installation), handler);
+        var context = new InternalActionContext(key, inputs, subject, exact, prepared, manifestRow.ApplicationVersion, marker, managed, placement,
+            installation == Guid.Empty && handler.EstablishesIdentity ? managed : installation);
+        return (await RuntimeContextAsync(db, source, context, handler, token), handler);
     }
 
     private enum OriginPurpose { CompleteConfiguration, AuthenticationIdentity }

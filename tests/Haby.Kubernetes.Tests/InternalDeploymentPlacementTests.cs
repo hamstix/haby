@@ -36,12 +36,12 @@ public sealed class InternalDeploymentPlacementTests
             Assert.Equal("name.collision", Assert.Throws<WorkloadContractException>(() => handler.Prepare(context)).Code);
     }
     [Fact]
-    public void Configured_workload_is_eligible_for_documents_but_never_an_executable_intent()
+    public void Configured_workload_requires_verified_runtime_preparation_for_an_executable_intent()
     {
         var context = Contexts(false, configured: true)[0];
         IInternalActionHandler handler = new InternalDeploymentAction(new NoSecrets());
         Assert.Equal(new[] { ManifestLocalId.Create("settings") }, handler.PreparationDocuments(context));
-        Assert.Equal("unsupported-fields", Assert.Throws<WorkloadContractException>(() => handler.Prepare(context)).Code);
+        Assert.Throws<InvalidDataException>(() => handler.Prepare(context));
     }
 
     internal static InternalActionContext[] Contexts(bool distinct, bool collision = false, bool configured = false)
@@ -61,8 +61,12 @@ public sealed class InternalDeploymentPlacementTests
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
         var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select(t => new ConfigurationPlanningScope(t, null, new(t, [])));
         var configuration = ConfigurationPlanningSnapshot.Prepare(reference, manifest, scopes, []).Snapshot!;
-        PlacementDeclaration Placement(string name, string ns) => new KubernetesPlacementCodec().Decode(Encoding.UTF8.GetBytes(
-            "{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"KubernetesPlacement\",\"metadata\":{\"name\":\"" + name + "\",\"revision\":1},\"spec\":{\"namespace\":\"" + ns + "\"}}"));
+        PlacementDeclaration Placement(string name, string ns)
+        {
+            var value = JsonNode.Parse("{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"KubernetesPlacement\",\"metadata\":{\"name\":\"" + name + "\",\"revision\":1},\"spec\":{\"namespace\":\"" + ns + "\"}}")!;
+            if (configured) value["spec"]!["runtimeConfiguration"] = JsonNode.Parse("""{"endpoint":"https://configuration.example/","tls":{"mode":"system"}}"""u8);
+            return new KubernetesPlacementCodec().Decode(Encoding.UTF8.GetBytes(value.ToJsonString()));
+        }
         var standard = Placement("standard", "accepted-api"); var worker = distinct ? Placement("worker", "accepted-worker") : standard;
         var placements = new[] { standard, worker }; var placementIds = new[] { Guid.CreateVersion7(), Guid.CreateVersion7() };
         var subjects = new[] { "api", "worker" }.Select(c => new ProviderInput.Workload(ManifestLocalId.Create(c), ManifestLocalId.Create("main"))).ToArray();

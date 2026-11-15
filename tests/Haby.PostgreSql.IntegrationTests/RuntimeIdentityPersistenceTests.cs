@@ -28,6 +28,7 @@ public sealed partial class DurableDeploymentPlanningTests
         public InternalActionContract Contract => adapter.Contract;
         public bool ObservationRecovery => true;
         public bool RequiresPreparedConfiguration => true;
+        public bool EstablishesIdentity => true;
         public InternalManagedTarget ManagedTarget(InternalActionContext context) => adapter.ManagedTarget(context);
         public string Prepare(InternalActionContext context) => adapter.Prepare(context);
         public bool Validate(InternalActionContext context, string payload) => adapter.Validate(context, payload);

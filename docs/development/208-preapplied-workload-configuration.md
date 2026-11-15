@@ -23,11 +23,11 @@ ApplicationLogin outputs are supported. Profile-provided document definitions ar
 selected from the frozen expanded layout. Current assignments, aliases and Placement
 selectors are never consulted to resume preparation.
 
-Preparation admission is distinct from executable intent admission. The kernel still
-rejects any Workload with configuration selection. Action acceptance/loading validates
-that executable guard before an intent, attempt, dispatch marker, secret resolution
-or API call. An unconfigured internal CREATE retains its existing behavior. Public
-Workload planning, committing and execution remain closed.
+Preparation admission is distinct from executable intent admission. [Issue #223](223-configured-deployment-bootstrap.md)
+extends internal configured CREATE only after complete saved documents, confirmed
+identity, explicit publication and fresh current authority. Pure shape/Placement
+validation alone grants no executable intent. Unconfigured CREATE retains its
+behavior. Public Workload planning, committing and execution remain closed.
 
 ## Resource proof and document acceptance
 

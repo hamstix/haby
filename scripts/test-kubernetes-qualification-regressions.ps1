@@ -2,11 +2,13 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-evidence.ps1')
+. (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
-foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','harness-timeout','journal-invalid','journal-invalid-primary')){
-    $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@()}
+foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary')){
+    $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@();CopyCalls=0}
     $syntheticTimeout=$null
+    $copyTimeout=if($scenario -ceq 'copy-timeout'){New-QualificationProcessFailure 'command-deadline' 42L}else{$null}
     if($scenario -eq 'harness-timeout'){
         $syntheticTimeout=New-QualificationProcessFailure 'command-deadline' 180001
         $syntheticTimeoutDiagnostic=Get-QualificationProcessDiagnostic $syntheticTimeout
@@ -35,9 +37,20 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
             '--version' {$result.Output='synthetic-runtime'}
             'run' {$state.Name=$arguments[[Array]::IndexOf($arguments,'--name')+1];$state.Created=$scenario -ne 'absent-launch';if($scenario -in @('partial-launch','absent-launch')){$result.ExitCode=17}}
             'exec' {if('--request-timeout=3s' -notin $arguments){throw 'Missing kubectl timeout'};if($scenario -eq 'readiness-deadline'){if($seconds -gt 1){throw 'Unbounded command budget'};throw [TimeoutException]::new('synthetic timeout')};$result.Output='ok'}
-            'cp' {if($scenario -eq 'copy-failure'){$result.ExitCode=17;break};[IO.File]::WriteAllText($arguments[-1],'harmless sentinel')}
+            'cp' {
+                $state.CopyCalls++
+                $failAt=switch($scenario){'copy-certificate-failure'{2};'copy-key-failure'{3};default{1}}
+                if($scenario -like 'copy-*' -and $state.CopyCalls -eq $failAt){
+                    $result.Output='protected-raw-copy-sentinel';$result.Error='protected-raw-copy-sentinel'
+                    if($scenario -ceq 'copy-managed-failure'){throw [InvalidOperationException]::new('protected-raw-copy-sentinel')}
+                    if($scenario -ceq 'copy-timeout'){throw $copyTimeout}
+                    $result.ExitCode=if($scenario -ceq 'copy-invalid-exit'){'protected-raw-copy-sentinel'}elseif($scenario -ceq 'copy-primary-cleanup-failure'){23}else{17}
+                    break
+                }
+                [IO.File]::WriteAllText($arguments[-1],'harmless sentinel')
+            }
             'inspect' {if($scenario -eq 'inspect-failure' -or !$state.Created){$result.ExitCode=17}else{$label=if($scenario -eq 'foreign'){'foreign'}else{$state.Name};$result.Output=ConvertTo-Json -Depth 5 -Compress @(@{Id='owned-id';Config=@{Labels=@{'haby.qualification'=$label}};Mounts=@(@{Type='volume';Name='owned-volume';Destination='/var/lib/rancher/k3s'})})}}
-            'stop' {if($scenario -eq 'stop-failure'){$result.ExitCode=17}}
+            'stop' {if($scenario -in @('stop-failure','copy-primary-cleanup-failure')){$result.ExitCode=17}}
             'remove' {if($scenario -eq 'remove-failure'){$result.ExitCode=17}else{if('--volumes' -notin $arguments -or $arguments[-1] -ne 'owned-id'){throw 'Unsafe removal'};$state.Removed=$true;$state.Volumes=$false}}
             'list' {if($file -eq 'docker'){throw 'docker list is not a supported alias'};if($state.Created -and !$state.Removed){$result.Output='owned-id'}}
             'ps' {if($state.Created -and !$state.Removed){$result.Output='owned-id'}}
@@ -59,6 +72,22 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
             'Harness: PASS' -notin $lines -or $lines -match 'protected-raw-sentinel|3600001'){throw 'Unsafe or missing successful command timing'}
     }
     if(Test-Path -LiteralPath $state.Private){throw "Private leak: $scenario"}
+    if($scenario -like 'copy-*'){
+        $lines=@(Get-Content $evidence)
+        $ids=@('copy-server-ca','copy-admin-certificate','copy-admin-key')
+        $failedIndex=switch($scenario){'copy-certificate-failure'{1};'copy-key-failure'{2};default{0}}
+        $expected=@(foreach($index in 0..$failedIndex){'Copy operation: '+$ids[$index]+'; state=start';if($index -lt $failedIndex){'Copy operation: '+$ids[$index]+'; state=complete'}})
+        if((@($lines | Where-Object {$_ -clike 'Copy operation:*'}) -join "`n") -cne ($expected -join "`n") -or
+            ('Copy failure: operation='+$ids[$failedIndex]) -cnotin $lines -or 'Stage: harness-start' -cin $lines -or
+            !$state.Removed -or $state.Volumes -or $lines -match 'protected-raw-copy-sentinel'){throw 'Unsafe or incomplete copy failure attribution'}
+        $exitRecords=@($lines | Where-Object {$_ -clike 'Copy native exit:*'})
+        if($scenario -cin @('copy-managed-failure','copy-invalid-exit','copy-timeout')){
+            if($exitRecords.Count -ne 0){throw 'Native result invented for managed or invalid failure'}
+        }elseif($exitRecords.Count -ne 1 -or $exitRecords[0] -cne $(if($scenario -ceq 'copy-primary-cleanup-failure'){'Copy native exit: 23'}else{'Copy native exit: 17'})){throw 'Primary copy exit lost or overwritten by cleanup'}
+        if($scenario -ceq 'copy-managed-failure' -and 'Diagnostic process: unknown' -cnotin $lines){throw 'Managed failure relabeled as a native process outcome'}
+        if($scenario -ceq 'copy-timeout' -and 'Diagnostic process: command-deadline; elapsed-ms=42' -cnotin $lines){throw 'Existing process kind lost'}
+        if($scenario -ceq 'copy-primary-cleanup-failure' -and 'Container stop: FAIL' -cnotin $lines){throw 'Independent cleanup failure lost'}
+    }
     if($scenario -in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','stop-failure','evidence-failure','partial-launch','readiness-deadline') -and (!$state.Removed -or $state.Volumes)){throw "Owned storage leaked: $scenario"}
     if($scenario -eq 'foreign' -and $state.Removed){throw 'Foreign container deleted'}
     foreach($call in $state.Calls){if('foreign-volume' -in $call -and $call[0] -in @('remove','volume')){throw 'Foreign volume targeted'}}
@@ -116,6 +145,57 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     Write-Output "PASS lifecycle $runtime $scenario (synthetic)"
 }
 }
+# Keep configured bridge/certificate controls with an isolated synthetic binding;
+# the fixture copy can never become an accepted repository/public image mapping.
+if($IsLinux){
+    . (Join-Path $PSScriptRoot 'runtime-consumer-image.ps1')
+    $inputModel=Get-HabyConsumerImageInputs (Split-Path $PSScriptRoot -Parent)
+    $fixture=Join-Path (Split-Path $PSScriptRoot -Parent) ('.artifacts/haby-image-controls-'+[Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force $fixture|Out-Null
+    try{
+        foreach($entry in $inputModel.files.GetEnumerator()){$target=Join-Path $fixture $entry.Key;New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($target))|Out-Null;[IO.File]::WriteAllText($target,$entry.Value,[Text.UTF8Encoding]::new($false))}
+        foreach($name in @('run-kubernetes-qualification.ps1','kubernetes-qualification-process.ps1','kubernetes-qualification-diagnostics.ps1')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $fixture ('scripts/'+$name))}
+        $binding=Join-Path $fixture ('tests/fixtures/runtime-consumer-images/'+$inputModel.key+'.json')
+        New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($binding))|Out-Null
+        [ordered]@{format=1;package=$HabyConsumerPackage;inputKey=$inputModel.key;digest=('sha256:'+('a'*64));builtSource=('b'*40);publisherSource=('c'*40);publisherRunId=1;proofArtifactSha256=('d'*64)}|ConvertTo-Json|Set-Content -LiteralPath $binding -Encoding utf8
+        foreach($operation in @('none','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address')){
+            $state=@{Name='';Private='';Removed=$false;Volumes=$true;NetworkInspected=$false}
+            $runner={param($file,$arguments,$seconds)
+                $result=[pscustomobject]@{ExitCode=0;Output='';Error='';ElapsedMilliseconds=42L}
+                if($file -ceq 'chmod'){$state.Private=$arguments[1];return $result}
+                if($file -ceq 'dotnet'){$result.Output='synthetic-sdk/harness';return $result}
+                switch($arguments[0]){
+                    '--version' {$result.Output='synthetic-runtime'}
+                    'run' {$state.Name=$arguments[[Array]::IndexOf($arguments,'--name')+1]}
+                    'exec' {if('nodes' -cin $arguments){$result.Output='{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}'}elseif('--request-timeout=3s' -cin $arguments){$result.Output='ok'}else{throw 'Forbidden consumer archive/import call'}}
+                    'cp' {[IO.File]::WriteAllText($arguments[-1],'protected-key-sentinel')}
+                    'inspect' {
+                        $networkRead=!$state.NetworkInspected;$state.NetworkInspected=$true
+                        if($networkRead -and $operation -ceq 'inspect-bridge-gateway'){$result.ExitCode=17;break}
+                        if($networkRead -and $operation -ceq 'write-bridge-address'){New-Item -ItemType Directory (Join-Path $state.Private 'pod-host-address')|Out-Null}
+                        $gateway=if($operation -ceq 'validate-bridge-gateway'){'protected-address-sentinel'}else{'192.0.2.2'}
+                        $result.Output=ConvertTo-Json -Depth 8 -Compress @(@{Id='owned-id';Config=@{Labels=@{'haby.qualification'=$state.Name}};Mounts=@(@{Type='volume';Name='owned-volume'});NetworkSettings=@{Networks=@{bridge=@{Gateway=$gateway}}}})
+                    }
+                    'stop' {}
+                    'remove' {$state.Removed=$true;$state.Volumes=$false}
+                    'ps' {if(!$state.Removed){$result.Output='owned-id'}}
+                    'volume' {if($state.Volumes){$result.Output='owned-volume'}}
+                    default {throw 'Forbidden image build/save/publish or unexpected control command'}
+                }
+                return $result
+            }.GetNewClosure()
+            $evidence=Join-Path $fixture ($operation+'.txt');$caught=$false
+            try{& (Join-Path $fixture 'scripts/run-kubernetes-qualification.ps1') -Runtime docker -ConfiguredDeployment -CommandRunner $runner -EvidencePath $evidence|Out-Null}catch{$caught=$true}
+            $lines=@(Get-Content -LiteralPath $evidence)
+            if($caught -ne ($operation -cne 'none') -or !$state.Removed -or $state.Volumes -or (Test-Path -LiteralPath $state.Private) -or $lines -match 'protected-.*-sentinel'){throw 'Configured bridge or cleanup control failed'}
+            if($operation -cne 'none' -and ('Stage: harness-start' -cin $lines -or ('Copy failure: operation='+$operation) -cnotin $lines)){throw 'Configured primary failure lost'}
+            Write-Output ('PASS configured bridge '+$operation+' (synthetic; no registry/image operation)')
+        }
+    }finally{Set-Location (Split-Path $PSScriptRoot -Parent);Remove-Item -LiteralPath $fixture -Recurse -Force}
+}
+# The real setup path uses only a fake existing fixture lifetime; no Docker/API is opened.
+& dotnet run --project (Join-Path $PSScriptRoot '../tools/Haby.Kubernetes.Qualification') --no-restore -- --configured-setup-controls
+if($LASTEXITCODE -ne 0){throw 'Configured setup lifetime controls failed'}
 # Actual success uses the same process-start-through-output-drain clock; no timing threshold or sleep.
 $success=Invoke-QualificationProcess -File (Get-Process -Id $PID).Path -Arguments @('-NoProfile','-Command',"'harmless-owned-child'")
 if($success.ExitCode -ne 0 -or $success.Output.Trim() -cne 'harmless-owned-child' -or $success.ElapsedMilliseconds -isnot [long] -or
@@ -167,6 +247,38 @@ try{
     if($published -match '^PASS |^Harness: PASS$'){throw 'Progress became a passing gate row'}
     if('Diagnostic managed elapsed origin: journal-initialization; excludes-build-startup; clock=monotonic' -notin $published -or
         'Diagnostic inner namespace: confirmed' -notin $published -or 'Diagnostic inner catalog: confirmed' -notin $published){throw 'Managed clock origin or actual cleanup evidence missing'}
+    $entryIds=@('durable-entry','catalog-init-start','catalog-init-completed','namespace-create-start','namespace-create-completed','durable-suite-start','runtime-auth-start','runtime-auth-completed')
+    $finalIds=@('runtime-final-revoke-start','runtime-final-revoke-completed','runtime-final-history-start','runtime-final-history-completed','runtime-final-authorization-start','runtime-final-authorization-completed')
+    $disposeIds=@('runtime-candidate-dispose-start','runtime-candidate-dispose-completed')
+    $firstIds=$entryIds+$finalIds+$disposeIds
+    $secondIds=$firstIds+@('initial-delivery-start','runtime-auth-start','runtime-auth-completed')+$finalIds+$disposeIds
+    $cleanupIds=@('inner-cleanup-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-completed','inner-cleanup-completed')
+    $fullIds=$secondIds+@('mixed-delivery-start','mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed','mixed-delivery-completed')+$cleanupIds
+    if($fullIds.Count -ne 39){throw 'Closed boundary control inventory changed'}
+    foreach($case in @(
+        @{Ids=$fullIds;Status='valid';Outcome='completed'},
+        @{Ids=($entryIds+@('runtime-final-revoke-start')+$disposeIds+$cleanupIds);Status='valid';Outcome='completed'},
+        @{Ids=($entryIds[0..6]+$disposeIds+$cleanupIds);Status='valid';Outcome='completed'},
+        @{Ids=($entryIds+@('runtime-candidate-dispose-start','runtime-candidate-dispose-failed','inner-cleanup-start','namespace-cleanup-start','namespace-cleanup-failed','catalog-dispose-start','catalog-dispose-failed','inner-cleanup-failed'));Status='valid';Outcome='failed'},
+        @{Ids=($entryIds+@('runtime-final-history-start'));Status='invalid';Outcome='unknown'},
+        @{Ids=($firstIds+@('runtime-candidate-dispose-completed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+$disposeIds);Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+@('inner-cleanup-start','inner-cleanup-completed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+$cleanupIds+@('runtime-auth-start'));Status='invalid';Outcome='unknown'},
+        @{Ids=($entryIds+@('runtime-candidate-dispose-completed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($entryIds+@('runtime-candidate-dispose-start','inner-cleanup-start'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+@('inner-cleanup-start','namespace-cleanup-start','namespace-cleanup-failed','namespace-absence-confirmed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+@('inner-cleanup-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-failed','catalog-dispose-completed'));Status='invalid';Outcome='unknown'}
+    )){
+        $records=@(for($index=0;$index -lt $case.Ids.Count;$index++){($index+1).ToString()+' '+$case.Ids[$index]+' '+($index*10).ToString()})
+        [IO.File]::WriteAllText($journal,($records -join "`n")+"`n")
+        $parsed=Read-QualificationJournal $journalRoot
+        $output=@(Format-QualificationJournal $parsed)
+        if($parsed.Status -cne $case.Status -or ('Diagnostic inner cleanup outcome: '+$case.Outcome) -cnotin $output -or $output -match '^PASS |^Harness: PASS$|protected-'){
+            throw 'Closed final-boundary ordering, terminal outcome or partial cleanup control failed'
+        }
+    }
+    Write-Output 'PASS final durable boundaries, partial cancellation, disposal and cleanup outcome controls (synthetic)'
     # Incomplete auth pairs are valid progress, including failure paths that reach owned cleanup.
     foreach($text in @(
         "1 durable-entry 3600000`n2 catalog-init-start 3600000`n",

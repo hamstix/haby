@@ -444,7 +444,8 @@
       "haby.kubernetes.contracts": {
         "type": "Project",
         "dependencies": {
-          "Haby.Application": "[1.0.0, )"
+          "Haby.Application": "[1.0.0, )",
+          "Haby.Configuration.Contracts": "[1.0.0, )"
         }
       },
       "haby.manifest": {

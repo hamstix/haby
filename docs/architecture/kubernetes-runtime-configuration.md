@@ -8,7 +8,10 @@ The [issue #213 guide](../development/213-runtime-configuration-publication.md)
 describes friend-only exact publication, revocation and current-state metadata
 authorization. The [issue #215 guide](../development/215-runtime-tokenreview-authentication.md)
 describes internal exact-binding TokenReview authentication and validated Host
-admission limits. Runtime delivery remains unimplemented.
+admission limits. [Issue #219](../development/219-runtime-configuration-delivery.md)
+implements exact runtime delivery. [Issue #223](../development/223-configured-deployment-bootstrap.md)
+adds bounded internal configured Deployment submission and its explicit Placement/bootstrap
+contract. Public execution, readiness and retirement remain incomplete.
 Current static-token delivery remains documented in the
 [P2 delivery runbook](../development/148-authorized-configuration-delivery.md).
 

@@ -40,6 +40,12 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             'namespace-create-start'='catalog-init-completed';'namespace-create-completed'='namespace-create-start'
             'durable-suite-start'='namespace-create-completed';'runtime-auth-start'='durable-suite-start'
             'runtime-auth-completed'='runtime-auth-start'
+            'runtime-final-revoke-start'='runtime-auth-completed';'runtime-final-revoke-completed'='runtime-final-revoke-start'
+            'runtime-final-history-start'='runtime-final-revoke-completed';'runtime-final-history-completed'='runtime-final-history-start'
+            'runtime-final-authorization-start'='runtime-final-history-completed';'runtime-final-authorization-completed'='runtime-final-authorization-start'
+            'runtime-candidate-dispose-start'='durable-suite-start';'runtime-candidate-dispose-completed'='runtime-candidate-dispose-start';'runtime-candidate-dispose-failed'='runtime-candidate-dispose-start'
+            'inner-cleanup-start'='catalog-init-completed';'inner-cleanup-completed'='inner-cleanup-start';'inner-cleanup-failed'='inner-cleanup-start'
+            'namespace-cleanup-failed'='namespace-cleanup-start';'catalog-dispose-failed'='catalog-dispose-start'
             'initial-delivery-start'='runtime-auth-completed';'mixed-delivery-start'='durable-suite-start'
             'mixed-preparation-completed'='mixed-delivery-start';'mixed-documents-completed'='mixed-preparation-completed'
             'mixed-identity-completed'='mixed-documents-completed';'mixed-publication-completed'='mixed-identity-completed'
@@ -49,7 +55,10 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
         }
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $records=[Collections.Generic.List[string]]::new()
-        $previousElapsed=0L; $authStarts=0; $authCompleted=0; $authOpen=$false
+        $previousElapsed=0L; $authStarts=0; $authCompleted=0; $authOpen=$false; $postAuthPhase=0; $candidateDisposals=0
+        $repeat=@('runtime-auth-start','runtime-auth-completed','runtime-final-revoke-start','runtime-final-revoke-completed',
+            'runtime-final-history-start','runtime-final-history-completed','runtime-final-authorization-start','runtime-final-authorization-completed',
+            'runtime-candidate-dispose-start','runtime-candidate-dispose-completed','runtime-candidate-dispose-failed')
         for($i=0;$i -lt $lines.Length-1;$i++){
             $line=$lines[$i]
             if($line -cnotmatch '^([1-9][0-9]{0,2}) ([a-z-]+) (0|[1-9][0-9]{0,6})$' -or [int]$Matches[1] -ne $i+1){return Result 'invalid'}
@@ -58,21 +67,47 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             if($elapsed -gt 3600000 -or $elapsed -lt $previousElapsed){return Result 'invalid'}
             $previousElapsed=$elapsed
             if(!$requires.ContainsKey($id) -or ($requires[$id] -and !$seen.Contains($requires[$id])) -or
-                ($seen.Contains($id) -and $id -cnotin @('runtime-auth-start','runtime-auth-completed')) -or
+                ($seen.Contains($id) -and $id -cnotin $repeat) -or
                 ($i -eq 0 -and $id -cne 'durable-entry')){return Result 'invalid'}
             if($id -ceq 'runtime-auth-start'){
-                if($authOpen -or $authStarts -ge 2 -or ($authStarts -eq 1 -and !$seen.Contains('initial-delivery-start'))){return Result 'invalid'}
-                $authStarts++; $authOpen=$true
+                if($authOpen -or $authStarts -ge 2 -or $postAuthPhase -notin @(0,1) -or ($authStarts -eq 1 -and !$seen.Contains('initial-delivery-start'))){return Result 'invalid'}
+                $authStarts++; $authOpen=$true; $postAuthPhase=0
             }elseif($id -ceq 'runtime-auth-completed'){
                 if(!$authOpen){return Result 'invalid'}
-                $authOpen=$false; $authCompleted++
+                $authOpen=$false; $authCompleted++; $postAuthPhase=1
             }elseif(($id -ceq 'initial-delivery-start' -and $authCompleted -ne 1) -or
                 ($id -ceq 'mixed-delivery-start' -and $authCompleted -ne 2)){return Result 'invalid'}
-            if($authOpen -and $id -cnotin @('runtime-auth-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-completed')){return Result 'invalid'}
-            if(($seen.Contains('namespace-cleanup-start') -or $seen.Contains('catalog-dispose-start')) -and
-                $id -cin @('runtime-auth-start','runtime-auth-completed','initial-delivery-start','mixed-delivery-start','durable-suite-start','namespace-create-start','namespace-create-completed',
-                    'mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed','mixed-delivery-completed')){return Result 'invalid'}
-            if($seen.Contains('catalog-dispose-start') -and $id -cne 'catalog-dispose-completed'){return Result 'invalid'}
+            $phaseTransition=switch -CaseSensitive ($id){
+                'runtime-final-revoke-start'{@(1,2)};'runtime-final-revoke-completed'{@(2,3)}
+                'runtime-final-history-start'{@(3,4)};'runtime-final-history-completed'{@(4,5)}
+                'runtime-final-authorization-start'{@(5,6)};'runtime-final-authorization-completed'{@(6,7)}
+                default{$null}
+            }
+            if($null -ne $phaseTransition){
+                if($postAuthPhase -ne $phaseTransition[0]){return Result 'invalid'}
+                $postAuthPhase=$phaseTransition[1]
+            }elseif($id -ceq 'runtime-candidate-dispose-start'){
+                if($postAuthPhase -eq 8 -or $candidateDisposals -ge 2){return Result 'invalid'}
+                $candidateDisposals++;$postAuthPhase=8
+            }elseif($id -cin @('runtime-candidate-dispose-completed','runtime-candidate-dispose-failed')){
+                if($postAuthPhase -ne 8){return Result 'invalid'}
+                $postAuthPhase=0
+            }
+            $cleanupIds=@('inner-cleanup-start','inner-cleanup-completed','inner-cleanup-failed','namespace-cleanup-start','namespace-absence-confirmed',
+                'namespace-cleanup-failed','catalog-dispose-start','catalog-dispose-completed','catalog-dispose-failed')
+            if($authOpen -and $id -cnotin (@('runtime-auth-start','runtime-candidate-dispose-start','runtime-candidate-dispose-completed','runtime-candidate-dispose-failed')+$cleanupIds)){return Result 'invalid'}
+            $cleanupStarted=$seen.Contains('inner-cleanup-start') -or $seen.Contains('namespace-cleanup-start') -or $seen.Contains('catalog-dispose-start')
+            if($id -ceq 'inner-cleanup-start' -and $postAuthPhase -eq 8){return Result 'invalid'}
+            if(($cleanupStarted -or $seen.Contains('runtime-candidate-dispose-failed')) -and $id -cnotin $cleanupIds){return Result 'invalid'}
+            if($seen.Contains('catalog-dispose-start') -and $id -cnotin @('catalog-dispose-completed','catalog-dispose-failed','inner-cleanup-completed','inner-cleanup-failed')){return Result 'invalid'}
+            if(($id -ceq 'namespace-absence-confirmed' -and $seen.Contains('namespace-cleanup-failed')) -or
+                ($id -ceq 'namespace-cleanup-failed' -and $seen.Contains('namespace-absence-confirmed')) -or
+                ($id -ceq 'catalog-dispose-completed' -and $seen.Contains('catalog-dispose-failed')) -or
+                ($id -ceq 'catalog-dispose-failed' -and $seen.Contains('catalog-dispose-completed')) -or
+                ($id -ceq 'inner-cleanup-completed' -and ($seen.Contains('inner-cleanup-failed') -or !$seen.Contains('catalog-dispose-completed') -or
+                    ($seen.Contains('namespace-create-completed') -and !$seen.Contains('namespace-absence-confirmed')))) -or
+                ($id -ceq 'inner-cleanup-failed' -and ($seen.Contains('inner-cleanup-completed') -or
+                    (!$seen.Contains('namespace-cleanup-failed') -and !$seen.Contains('catalog-dispose-failed'))))){return Result 'invalid'}
             $seen.Add($id) | Out-Null; $records.Add($line)
         }
         return Result 'valid' $records.ToArray()
@@ -86,4 +121,5 @@ function Format-QualificationJournal($Journal) {
     }
     'Diagnostic inner namespace: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ namespace-absence-confirmed [0-9]{1,7}$'){'confirmed'}else{'unknown'})
     'Diagnostic inner catalog: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ catalog-dispose-completed [0-9]{1,7}$'){'confirmed'}else{'unknown'})
+    'Diagnostic inner cleanup outcome: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ inner-cleanup-completed [0-9]{1,7}$'){'completed'}elseif($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ inner-cleanup-failed [0-9]{1,7}$'){'failed'}else{'unknown'})
 }

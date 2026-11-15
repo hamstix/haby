@@ -30,6 +30,12 @@ ownership over this same generated runtime RPC. Use it before primary work when
 all explicitly selected documents are mandatory; Deployment integration remains
 separate.
 
+[Issue #223](223-configured-deployment-bootstrap.md) subsequently integrates the
+client into bounded internal configured Deployment CREATE using exact frozen
+Placement trust and saved preparation. Its runnable consumer evidence is separate
+from this guide's earlier API-only contour; neither provides readiness/Applied or
+natural token-rotation proof.
+
 The response contains complete sensitive JSON bytes, not the operator redacted
 preview. Do not print, trace, persist, hash or compare it through diagnostic
 serialization. Its revision and source fingerprint identify the saved unresolved

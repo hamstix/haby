@@ -4,6 +4,12 @@ Status: API-only qualification completed and merged in [PR #180](https://github.
 no references from Domain, Application, Manifest, Host or habyctl. No production
 capability, secret persistence, preflight or runtime identity binding is admitted.
 
+The later [#223 configured-consumer profile](223-configured-deployment-bootstrap.md)
+adds one opt-in runnable node/image-import mode to the same launcher and pinned
+k3s image. Existing API-only modes and all historical outcomes below remain
+unchanged. It has a separate bounded functional gate, not a replacement platform,
+CRL service, load rehearsal or a claim that the earlier API-only cases ran Pods.
+
 ## Evaluated candidate and binary terms
 
 The qualified candidate is KubernetesClient **19.0.2**, net10.0, source commit
