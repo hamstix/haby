@@ -40,6 +40,9 @@ function Call([string]$File,[string[]]$Arguments,[int]$Seconds=$CommandTimeoutSe
 function RuntimeCall([string[]]$Arguments,[int]$Seconds=$CommandTimeoutSeconds) {
     $result=Call $Runtime $Arguments $Seconds
     if($result.ExitCode -ne 0){
+        if($stage -ceq 'copy' -and $copyOperation -ceq 'import-consumer-image'){
+            $record.Add('Import diagnostic: '+(Get-QualificationImportDiagnostic $result))
+        }
         if($stage -ceq 'copy' -and $copyOperation -and $result.ExitCode -is [int]){$script:copyNativeExit=$result.ExitCode}
         throw 'Runtime command failed.'
     }

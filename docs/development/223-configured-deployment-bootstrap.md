@@ -164,6 +164,14 @@ Primary marker is functional evidence, not rollout readiness. Existing launcher,
 job and API budgets remain; owned namespace/catalog/container/image/private paths
 must be cleaned and failures retained separately. No unchanged green-seeking rerun.
 
+Import failure diagnostics recognize only a canonical RPC status literally present
+in bounded command output; native exit codes alone never identify a cause.
+Unrecognized, ambiguous or oversized output remains unknown, and raw output stays
+private. Final durable journal boundaries cover revoke, retained history, final
+authorization, candidate disposal and inner cleanup entry/outcome. They are progress
+evidence, never passing assertion receipts. Existing startup, command and cleanup
+budgets remain unchanged; distinct parent and managed clock origins are not mixed.
+
 The inventory adds 59 fast, 12 PostgreSQL and 11 consumer assertion rows. Four
 setup failure/cancellation controls invoke the same initialized fixture lifetime
 without opening a database or API; they separately retain primary and cleanup

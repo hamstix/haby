@@ -2,6 +2,23 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-evidence.ps1')
+. (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
+# Literal canonical RPC status is an observed diagnostic, never a native-exit cause mapping.
+foreach($case in @(
+    @{Code=3;Output='';Error='protected-native-three-sentinel';Expected='unknown'},
+    @{Code=3;Output='';Error='ctr: rpc error: code = InvalidArgument desc = protected-token-path-sentinel';Expected='observed-rpc-invalid-argument'},
+    @{Code=17;Output='rpc error: code = Unavailable desc = protected-output-sentinel';Error='';Expected='observed-rpc-unavailable'},
+    @{Code=3;Output='rpc error: code = NotFound desc = protected-sentinel';Error='rpc error: code = InvalidArgument desc = protected-sentinel';Expected='unknown'},
+    @{Code=3;Output='';Error=('x'*8193);Expected='unknown'},
+    @{Code=3;Output='';Error='rpc error: code = ProtectedSentinel desc = protected-sentinel';Expected='unknown'},
+    @{Code=3;Output='';Error='rpc error: code = invalidargument desc = protected-sentinel';Expected='unknown'},
+    @{Code=0;Output='';Error='rpc error: code = InvalidArgument desc = protected-sentinel';Expected='unknown'},
+    @{Code='protected-exit-sentinel';Output='';Error='rpc error: code = InvalidArgument desc = protected-sentinel';Expected='unknown'}
+)){
+    $observed=Get-QualificationImportDiagnostic ([pscustomobject]@{ExitCode=$case.Code;Output=$case.Output;Error=$case.Error})
+    if($observed -cne $case.Expected -or $observed -match 'protected-|token|path|sentinel'){throw 'Unsafe or incorrect import classification'}
+}
+Write-Output 'PASS closed import status classification, bounds, ambiguity and sentinel refusal (synthetic)'
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
 foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary')){
@@ -167,7 +184,7 @@ foreach($operation in @('none','inspect-bridge-gateway','validate-bridge-gateway
             'run' {$state.Name=$arguments[[Array]::IndexOf($arguments,'--name')+1]}
             'exec' {
                 if('import' -cin $arguments){
-                    if($operation -ceq 'import-consumer-image'){$result.ExitCode=17;$result.Output='protected-copy-sentinel';$result.Error='protected-copy-sentinel'}
+                    if($operation -ceq 'import-consumer-image'){$result.ExitCode=3;$result.Output='protected-copy-sentinel';$result.Error='ctr: rpc error: code = InvalidArgument desc = protected-copy-sentinel'}
                 }elseif('nodes' -cin $arguments){$result.Output='{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}'}
                 elseif('--request-timeout=3s' -cin $arguments){$result.Output='ok'}
                 else{throw 'Unexpected exec control command'}
@@ -209,7 +226,8 @@ foreach($operation in @('none','inspect-bridge-gateway','validate-bridge-gateway
         $native=@($lines | Where-Object {$_ -clike 'Copy native exit:*'})
         if($operation -cin @('validate-bridge-gateway','write-bridge-address')){
             if($native.Count -ne 0 -or 'Diagnostic process: unknown' -cnotin $lines){throw 'Managed configured failure relabeled as native'}
-        }elseif($native.Count -ne 1 -or $native[0] -cne 'Copy native exit: 17'){throw 'Configured native exit missing'}
+        }elseif($native.Count -ne 1 -or $native[0] -cne $(if($operation -ceq 'import-consumer-image'){'Copy native exit: 3'}else{'Copy native exit: 17'})){throw 'Configured native exit missing'}
+        if($operation -ceq 'import-consumer-image' -and 'Import diagnostic: observed-rpc-invalid-argument' -cnotin $lines){throw 'Actual import status was lost before result disposal'}
     }
     Write-Output ('PASS configured copy '+$operation+' (synthetic)')
 }
@@ -268,6 +286,38 @@ try{
     if($published -match '^PASS |^Harness: PASS$'){throw 'Progress became a passing gate row'}
     if('Diagnostic managed elapsed origin: journal-initialization; excludes-build-startup; clock=monotonic' -notin $published -or
         'Diagnostic inner namespace: confirmed' -notin $published -or 'Diagnostic inner catalog: confirmed' -notin $published){throw 'Managed clock origin or actual cleanup evidence missing'}
+    $entryIds=@('durable-entry','catalog-init-start','catalog-init-completed','namespace-create-start','namespace-create-completed','durable-suite-start','runtime-auth-start','runtime-auth-completed')
+    $finalIds=@('runtime-final-revoke-start','runtime-final-revoke-completed','runtime-final-history-start','runtime-final-history-completed','runtime-final-authorization-start','runtime-final-authorization-completed')
+    $disposeIds=@('runtime-candidate-dispose-start','runtime-candidate-dispose-completed')
+    $firstIds=$entryIds+$finalIds+$disposeIds
+    $secondIds=$firstIds+@('initial-delivery-start','runtime-auth-start','runtime-auth-completed')+$finalIds+$disposeIds
+    $cleanupIds=@('inner-cleanup-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-completed','inner-cleanup-completed')
+    $fullIds=$secondIds+@('mixed-delivery-start','mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed','mixed-delivery-completed')+$cleanupIds
+    if($fullIds.Count -ne 39){throw 'Closed boundary control inventory changed'}
+    foreach($case in @(
+        @{Ids=$fullIds;Status='valid';Outcome='completed'},
+        @{Ids=($entryIds+@('runtime-final-revoke-start')+$disposeIds+$cleanupIds);Status='valid';Outcome='completed'},
+        @{Ids=($entryIds[0..6]+$disposeIds+$cleanupIds);Status='valid';Outcome='completed'},
+        @{Ids=($entryIds+@('runtime-candidate-dispose-start','runtime-candidate-dispose-failed','inner-cleanup-start','namespace-cleanup-start','namespace-cleanup-failed','catalog-dispose-start','catalog-dispose-failed','inner-cleanup-failed'));Status='valid';Outcome='failed'},
+        @{Ids=($entryIds+@('runtime-final-history-start'));Status='invalid';Outcome='unknown'},
+        @{Ids=($firstIds+@('runtime-candidate-dispose-completed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+$disposeIds);Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+@('inner-cleanup-start','inner-cleanup-completed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+$cleanupIds+@('runtime-auth-start'));Status='invalid';Outcome='unknown'},
+        @{Ids=($entryIds+@('runtime-candidate-dispose-completed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($entryIds+@('runtime-candidate-dispose-start','inner-cleanup-start'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+@('inner-cleanup-start','namespace-cleanup-start','namespace-cleanup-failed','namespace-absence-confirmed'));Status='invalid';Outcome='unknown'},
+        @{Ids=($secondIds+@('inner-cleanup-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-failed','catalog-dispose-completed'));Status='invalid';Outcome='unknown'}
+    )){
+        $records=@(for($index=0;$index -lt $case.Ids.Count;$index++){($index+1).ToString()+' '+$case.Ids[$index]+' '+($index*10).ToString()})
+        [IO.File]::WriteAllText($journal,($records -join "`n")+"`n")
+        $parsed=Read-QualificationJournal $journalRoot
+        $output=@(Format-QualificationJournal $parsed)
+        if($parsed.Status -cne $case.Status -or ('Diagnostic inner cleanup outcome: '+$case.Outcome) -cnotin $output -or $output -match '^PASS |^Harness: PASS$|protected-'){
+            throw 'Closed final-boundary ordering, terminal outcome or partial cleanup control failed'
+        }
+    }
+    Write-Output 'PASS final durable boundaries, partial cancellation, disposal and cleanup outcome controls (synthetic)'
     # Incomplete auth pairs are valid progress, including failure paths that reach owned cleanup.
     foreach($text in @(
         "1 durable-entry 3600000`n2 catalog-init-start 3600000`n",

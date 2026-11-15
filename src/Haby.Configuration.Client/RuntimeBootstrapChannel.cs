@@ -18,7 +18,7 @@ public static class RuntimeBootstrapChannel
         if (configuration.Tls.Mode == "custom-ca")
         {
             var pem = configuration.Tls.CaPem!;
-            handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, errors) => ValidateCustomRoot(certificate, errors, pem);
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, peerChain, errors) => ValidateCustomRoot(certificate, errors, pem, peerChain);
         }
         try
         {
@@ -28,7 +28,7 @@ public static class RuntimeBootstrapChannel
         catch { handler.Dispose(); throw new RuntimeStartupException(RuntimeStartupFailure.InvalidBootstrap); }
     }
 
-    internal static bool ValidateCustomRoot(X509Certificate? certificate, SslPolicyErrors errors, string pem)
+    internal static bool ValidateCustomRoot(X509Certificate? certificate, SslPolicyErrors errors, string pem, X509Chain? peerChain = null)
     {
         if (certificate is not X509Certificate2 leaf ||
             (errors & (SslPolicyErrors.RemoteCertificateNameMismatch | SslPolicyErrors.RemoteCertificateNotAvailable)) != 0) return false;
@@ -39,6 +39,11 @@ public static class RuntimeBootstrapChannel
             using var chain = new X509Chain();
             chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
             chain.ChainPolicy.CustomTrustStore.AddRange(roots);
+            // Peer certificates are untrusted chain-building candidates, never trust anchors.
+            // Only the explicitly configured roots above can terminate a trusted chain.
+            if (peerChain is not null)
+                foreach (var element in peerChain.ChainElements)
+                    if (!element.Certificate.Equals(leaf)) chain.ChainPolicy.ExtraStore.Add(element.Certificate);
             chain.ChainPolicy.ApplicationPolicy.Add(new Oid("1.3.6.1.5.5.7.3.1"));
             chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
             chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
