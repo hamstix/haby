@@ -26,8 +26,15 @@ public sealed partial class CliLoopbackTests
             CreatedAtUtc = "2026-10-28T00:00:00Z",
             TechnicalActorId = "server-actor"
         };
+        private static WorkloadReview Review => new()
+        {
+            Status = "available",
+            Items = {
+            new WorkloadReviewItem { ComponentId = "api", WorkloadId = "main", Contract = "sample.workload/v1", TargetName = "orders-api-main", ImageReference = "registry.example/app:v1" } }
+        };
         private static DurablePlanSummary Plan => new()
         {
+            WorkloadDescription = Review,
             PlanId = PlanningRegistry.PlanId,
             ChangeSetId = ChangeId,
             EnvironmentRecordId = "environment-record",
@@ -84,8 +91,10 @@ public sealed partial class CliLoopbackTests
             return Task.FromResult(new CommitReply
             {
                 Status = CommitStatus.Found,
+                WorkloadStage = new() { Submission = "notSubmitted" },
                 DesiredGeneration = new DesiredGenerationSummary
                 {
+                    WorkloadDescription = Review,
                     DeploymentId = ChangeId,
                     Generation = 1,
                     DesiredPresence = "Present",
@@ -223,6 +232,9 @@ public sealed partial class CliLoopbackTests
                         foreach (var name in new[] { "plan", "desiredGeneration" })
                         {
                             if (!data.TryGetProperty(name, out var snapshot) || snapshot.ValueKind != JsonValueKind.Object) continue;
+                            Assert.Equal("available", snapshot.GetProperty("workloadDescription"u8).GetProperty("status"u8).GetString());
+                            Assert.Equal("orders-api-main", snapshot.GetProperty("workloadDescription"u8).GetProperty("items"u8)[0].GetProperty("targetName"u8).GetString());
+                            if (name == "desiredGeneration") Assert.Equal("notSubmitted", data.GetProperty("workloadStage"u8).GetProperty("submission"u8).GetString());
                             Assert.False(snapshot.TryGetProperty("providerInstanceId"u8, out _));
                             var inputs = snapshot.GetProperty("providerInputs"u8).EnumerateArray().ToArray();
                             Assert.Equal(3, inputs.Length);

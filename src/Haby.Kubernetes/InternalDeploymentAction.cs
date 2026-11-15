@@ -67,10 +67,14 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
     internal static EffectiveWorkload Resolve(InternalActionContext context)
     {
         if (context.Subject is not ProviderInput.Workload subject || context.Placement is null) throw new InvalidDataException("Deployment subject unavailable.");
-        var manifest = context.Inputs.Providers.Declaration;
+        return Resolve(context.Inputs, context.ApplicationVersion, subject);
+    }
+    internal static EffectiveWorkload Resolve(DurablePlanningInputs inputs, string applicationVersion, ProviderInput.Workload subject)
+    {
+        var manifest = inputs.Providers.Declaration;
         var revisions = new List<PlacementRevisionInput>(); var assignments = new List<PlacementAssignment>();
         var pins = new Dictionary<(EnvironmentRecordId, ProviderAlias, PlacementReference), (Guid, PlacementDeclaration)>();
-        foreach (var frozen in context.Inputs.Providers.Entries.Values.Where(x => x.Input is ProviderInput.Workload))
+        foreach (var frozen in inputs.Providers.Entries.Values.Where(x => x.Input is ProviderInput.Workload))
         {
             var input = (ProviderInput.Workload)frozen.Input;
             var savedPin = frozen.Placement is { } saved ? InternalPlacementInput.Decode(saved) : throw new InvalidDataException("Frozen Placement unavailable.");
@@ -92,8 +96,8 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         }
         // Resolve the complete frozen generation once, including cross-Workload name
         // collisions, before selecting this action's exact declared subject.
-        var effective = KubernetesWorkloadPlanner.ResolvePreparation(manifest, ApplicationVersion.Create(context.ApplicationVersion),
-            context.Inputs.Providers, new PlacementInputs(revisions, assignments), context.Inputs.Configuration
+        var effective = KubernetesWorkloadPlanner.ResolvePreparation(manifest, ApplicationVersion.Create(applicationVersion),
+            inputs.Providers, new PlacementInputs(revisions, assignments), inputs.Configuration
                 ?? throw new InvalidDataException("Frozen configuration unavailable."));
         return effective.Single(x => x.Input == subject);
     }

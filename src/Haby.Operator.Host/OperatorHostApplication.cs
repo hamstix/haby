@@ -124,6 +124,13 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<IProviderPreflightHandler, KubernetesPreflightHandler>();
         builder.Services.AddSingleton<IPlanActionDescriber, PostgreSqlPlanActionDescriber>();
         builder.Services.AddSingleton<DescribeDurablePlan>();
+        builder.Services.AddSingleton<IWorkloadPlanDescriber, KubernetesWorkloadPlanDescriber>();
+        builder.Services.AddSingleton<DescribeWorkloadPlan>();
+        builder.Services.AddSingleton<IOperatorDeploymentAdmission>(p => new PostgreSqlOperatorDeploymentAdmission(
+            p.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(),
+            (PostgreSqlDurableDesiredStateCommitter)p.GetRequiredService<IDurableDesiredStateCommitter>(),
+            p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
+            [new InternalDeploymentAction(p.GetRequiredService<ISecretStore>())]));
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
         builder.Services.AddPostgreSqlDurableDesiredStateCommitter();
         // Explicit pilot storage choice under ADR-006: database rows and backups contain recoverable secrets.

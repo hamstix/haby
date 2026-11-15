@@ -322,6 +322,11 @@ message PlannedOperationSummary {
   string action_contract = 3;
   repeated string dependencies = 4;
 }
+message WorkloadReviewItem {
+  string component_id = 1; string workload_id = 2; string contract = 3;
+  string target_name = 4; string image_reference = 5; repeated string documents = 6;
+}
+message WorkloadReview { string status = 1; repeated WorkloadReviewItem items = 2; }
 message DurablePlanSummary {
   reserved 20; // Superseded singleton input; no compatibility projection.
   string plan_id = 1;
@@ -344,6 +349,7 @@ message DurablePlanSummary {
   repeated ReusedResourceSummary reused_resources = 18;
   repeated ReusedResourceSummary retained_resources = 19;
   repeated FrozenProviderInput provider_inputs = 21;
+  WorkloadReview workload_description = 22;
 }
 message ReusedResourceSummary {
   string resource_id = 1;
@@ -417,6 +423,7 @@ message DurableCommitSummary {
 }
 // Immutable desired snapshot, never a claim about current applied/operation state.
 message DesiredGenerationSummary {
+  WorkloadReview workload_description = 20;
   reserved 18; // Superseded singleton input; no compatibility projection.
   string deployment_id = 1;
   int64 generation = 2;
@@ -454,7 +461,12 @@ message FrozenProviderInput {
   string placement_json = 13;
 }
 
+message WorkloadAcceptanceStage {
+  string submission = 1;
+  optional int64 applied_generation = 2;
+}
 message CommitReply {
+  WorkloadAcceptanceStage workload_stage = 6;
   CommitStatus status = 1;
   DurableCommitSummary commit = 2;
   DesiredGenerationSummary desired_generation = 3;

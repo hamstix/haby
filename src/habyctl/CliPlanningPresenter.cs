@@ -9,6 +9,7 @@ internal sealed record CliPlan(string PlanId, string ChangeSetId, string Environ
     CliReference Reference, CliProviderInput[] ProviderInputs, string Fingerprint, string CreatedAtUtc, string ExpiresAtUtc,
     string TechnicalActorId, string? ClosedAtUtc, string? ClosedByTechnicalActorId, CliPlanDescription IntendedWork, CliPlannedOperation[] Operations)
 {
+    public CliWorkloadReview? WorkloadDescription { get; init; }
     public CliReusedResource[] ReusedResources { get; init; } = [];
     public CliReusedResource[] RetainedResources { get; init; } = [];
 }
@@ -89,7 +90,7 @@ internal static partial class PlanningPresentation
             plan.Fingerprint, plan.CreatedAtUtc, plan.ExpiresAtUtc, plan.TechnicalActorId,
             plan.HasClosedAtUtc ? plan.ClosedAtUtc : null,
             plan.HasClosedByTechnicalActorId ? plan.ClosedByTechnicalActorId : null, Description(plan.IntendedWork), Operations(plan.Operations))
-        { ReusedResources = Reuse(plan.ReusedResources), RetainedResources = Reuse(plan.RetainedResources) })
+        { WorkloadDescription = WorkloadReview(plan.WorkloadDescription), ReusedResources = Reuse(plan.ReusedResources), RetainedResources = Reuse(plan.RetainedResources) })
     { ConfigurationErrorCodes = reply.ConfigurationErrorCodes.ToArray() };
 
     internal static CliReusedResource[] Reuse(IEnumerable<ReusedResourceSummary> reuse) =>
@@ -165,6 +166,7 @@ internal sealed partial class CliTextPresenter
                 _output.WriteLine($"Reuse Resource: {resource.ResourceId}; reintroduced: {resource.Reintroduced}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
             foreach (var resource in plan.RetainedResources)
                 _output.WriteLine($"Retain Resource: {resource.ResourceId}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}; no external deletion or drift check");
+            PrintWorkloadReview(plan.WorkloadDescription);
             foreach (var provider in plan.ProviderInputs) PrintProviderInput(provider);
             _output.WriteLine("Intended work only; no Provider preflight, proof of absence or execution guarantee. Commit validation still applies.");
             if (plan.IntendedWork.Action is { } action)

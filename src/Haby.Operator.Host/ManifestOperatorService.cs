@@ -8,7 +8,7 @@ namespace Haby.Operator.Host;
 
 public sealed partial class ManifestOperatorService(ManifestContractCatalog catalog, ImportApplicationManifest importer,
     IManifestRevisionQuery revisions, PreviewImportedDatabase preview,
-    IDurableDeploymentPlanner planner, DescribeDurablePlan descriptions, IEnvironmentQuery environments, IDurableDesiredStateCommitter committer,
+    IDurableDeploymentPlanner planner, IOperatorDeploymentAdmission deploymentAdmission, DescribeWorkloadPlan workloadDescriptions, DescribeDurablePlan descriptions, IEnvironmentQuery environments, IDurableDesiredStateCommitter committer,
     IDurableOperationExecutor executor, DurableGenerationRunner generationRunner, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
     ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess,
     ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions,

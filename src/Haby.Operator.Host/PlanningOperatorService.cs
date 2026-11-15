@@ -63,7 +63,7 @@ public sealed partial class ManifestOperatorService
         DeploymentChangeSetId id;
         try { id = DeploymentChangeSetId.Parse(request.ChangeSetId); }
         catch (ArgumentException) { return Result(PlanningStatus.InvalidRequest); }
-        var result = await planner.CreatePlanAsync(id, Actor, context.CancellationToken);
+        var result = await deploymentAdmission.CreatePlanAsync(id, Actor, context.CancellationToken);
         var reply = new PlanningReply
         {
             Status = result.Status switch
@@ -117,7 +117,7 @@ public sealed partial class ManifestOperatorService
                 DurablePlanCloseStatus.PlanNotFound => PlanningStatus.PlanNotFound,
                 _ => throw new InvalidOperationException("Unknown closure outcome.")
             }
-            : (await planner.CheckPlanAsync(id, context.CancellationToken)) switch
+            : (await deploymentAdmission.CheckPlanAsync(id, context.CancellationToken)) switch
             {
                 DurablePlanCurrentStatus.Current => PlanningStatus.Current,
                 DurablePlanCurrentStatus.PlanNotFound => PlanningStatus.PlanNotFound,
@@ -157,6 +157,7 @@ public sealed partial class ManifestOperatorService
     private async Task<DurablePlanSummary> PlanSummaryAsync(DurablePlan plan, CancellationToken cancellationToken)
     {
         var summary = Summary(plan);
+        summary.WorkloadDescription = await WorkloadSummaryAsync(plan.Inputs, cancellationToken);
         var description = await descriptions.ExecuteAsync(plan, cancellationToken);
         summary.IntendedWork = new PlanDescription
         {
