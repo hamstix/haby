@@ -26,6 +26,7 @@ $image='rancher/k3s@sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb74
 $record=[Collections.Generic.List[string]]::new()
 $failed=$false; $launchAttempted=$false; $privateOwned=$false
 $consumerImage=$null; $consumerImageId=$null
+$copyOperation=$null; $copyNativeExit=$null
 $record.Add('Evidence ID: '+$EvidenceId); $record.Add('Run ID: '+$run)
 $record.Add('Source: '+(& git rev-parse HEAD))
 $record.Add('Dirty: '+[bool](& git status --porcelain))
@@ -38,8 +39,18 @@ function Call([string]$File,[string[]]$Arguments,[int]$Seconds=$CommandTimeoutSe
 }
 function RuntimeCall([string[]]$Arguments,[int]$Seconds=$CommandTimeoutSeconds) {
     $result=Call $Runtime $Arguments $Seconds
-    if($result.ExitCode -ne 0){throw 'Runtime command failed.'}
+    if($result.ExitCode -ne 0){
+        if($stage -ceq 'copy' -and $copyOperation -and $result.ExitCode -is [int]){$script:copyNativeExit=$result.ExitCode}
+        throw 'Runtime command failed.'
+    }
     return $result.Output
+}
+function Start-CopyOperation([ValidateSet('copy-server-ca','copy-admin-certificate','copy-admin-key','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address','copy-consumer-archive','import-consumer-image')][string]$Id) {
+    $script:copyOperation=$Id; $script:copyNativeExit=$null
+    $record.Add('Copy operation: '+$Id+'; state=start')
+}
+function Complete-CopyOperation {
+    $record.Add('Copy operation: '+$copyOperation+'; state=complete')
 }
 function Save-Evidence {
     try {
@@ -96,15 +107,29 @@ try {
     }
     if(!$ready){$reason='deadline';throw [TimeoutException]::new('Readiness deadline exceeded.')}
     $record.Add('Stage: readiness-complete'); $stage='copy'; $record.Add('Stage: copy-start')
-    foreach($pair in @(@('server-ca.crt','ca.crt'),@('client-admin.crt','admin.crt'),@('client-admin.key','admin.key'))){RuntimeCall @('cp',"${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])",(Join-Path $private $pair[1])) | Out-Null}
+    foreach($pair in @(@('server-ca.crt','ca.crt','copy-server-ca'),@('client-admin.crt','admin.crt','copy-admin-certificate'),@('client-admin.key','admin.key','copy-admin-key'))){
+        Start-CopyOperation $pair[2]
+        RuntimeCall @('cp',"${run}:/var/lib/rancher/k3s/server/tls/$($pair[0])",(Join-Path $private $pair[1])) | Out-Null
+        Complete-CopyOperation
+    }
     if($ConfiguredDeployment){
+        Start-CopyOperation 'inspect-bridge-gateway'
         $network=(RuntimeCall @('inspect',$run) | ConvertFrom-Json)[0].NetworkSettings.Networks.bridge
         $gateway=$network.Gateway
+        Complete-CopyOperation
+        Start-CopyOperation 'validate-bridge-gateway'
         $parsedGateway=$null
         if(![Net.IPAddress]::TryParse($gateway,[ref]$parsedGateway) -or [Net.IPAddress]::IsLoopback($parsedGateway)){throw 'Explicit Pod-reachable fixture gateway unavailable.'}
+        Complete-CopyOperation
+        Start-CopyOperation 'write-bridge-address'
         [IO.File]::WriteAllText((Join-Path $private 'pod-host-address'),$gateway)
+        Complete-CopyOperation
+        Start-CopyOperation 'copy-consumer-archive'
         RuntimeCall @('cp',(Join-Path $private 'consumer.tar'),"${run}:/tmp/haby-consumer.tar") 60 | Out-Null
+        Complete-CopyOperation
+        Start-CopyOperation 'import-consumer-image'
         RuntimeCall @('exec',$run,'/bin/k3s','ctr','images','import','/tmp/haby-consumer.tar') 60 | Out-Null
+        Complete-CopyOperation
     }
     $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
     if((@($ProbeStockTls,$DeploymentKernel,$DurableActions,$ConfiguredDeployment) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
@@ -120,6 +145,11 @@ try {
     $record.Add('Harness: PASS')
 } catch {
     $failed=$true
+    # Freeze the primary copy diagnostic before cleanup can issue its own runtime calls.
+    if($stage -ceq 'copy' -and $copyOperation){
+        $record.Add('Copy failure: operation='+$copyOperation)
+        if($copyNativeExit -is [int]){$record.Add('Copy native exit: '+$copyNativeExit.ToString([Globalization.CultureInfo]::InvariantCulture))}
+    }
     $diagnostic=Get-QualificationProcessDiagnostic $_.Exception
     if($diagnostic.Kind -cne 'unknown'){$record.Add('Diagnostic process: '+$diagnostic.Kind+'; elapsed-ms='+$diagnostic.ElapsedMilliseconds)}
     else{$record.Add('Diagnostic process: unknown')}

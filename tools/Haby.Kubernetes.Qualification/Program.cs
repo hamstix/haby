@@ -2,6 +2,12 @@ using System.Security.Cryptography.X509Certificates;
 using Haby.Kubernetes.Qualification;
 using k8s;
 
+if (args is ["--configured-setup-controls"])
+{
+    await ConfiguredSetupControls.Run();
+    return 0;
+}
+
 if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] is not ("--probe-stock-tls" or "--deployment-kernel" or "--durable-actions" or "--configured-deployment")))
 {
     Console.Error.WriteLine("Usage: qualification <explicit-https-endpoint> <private-credential-directory>");

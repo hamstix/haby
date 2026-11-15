@@ -164,7 +164,11 @@ Primary marker is functional evidence, not rollout readiness. Existing launcher,
 job and API budgets remain; owned namespace/catalog/container/image/private paths
 must be cleaned and failures retained separately. No unchanged green-seeking rerun.
 
-The inventory adds 55 fast, 12 PostgreSQL and 11 consumer assertion rows. Two
+The inventory adds 59 fast, 12 PostgreSQL and 11 consumer assertion rows. Four
+setup failure/cancellation controls invoke the same initialized fixture lifetime
+without opening a database or API; they separately retain primary and cleanup
+failures. Fixed launcher copy-operation markers distinguish command outcomes
+without publishing private arguments, paths or process output. Two
 existing fast identities are explicitly replaced for format-2 invalid-version
 and verified-preparation naming; no coverage obligation is removed. Required
 solution, full PostgreSQL including infrastructure, qualification/kernel/durable,

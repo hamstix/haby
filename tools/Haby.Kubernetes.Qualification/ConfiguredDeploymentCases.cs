@@ -21,37 +21,37 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 internal static class ConfiguredDeploymentCases
 {
     private sealed class LostConfirmation : Exception;
-    internal static async Task Run(Kubernetes admin, Uri api, string directory, CancellationToken token)
+    internal static async Task Run(Kubernetes admin, Uri api, string directory, CancellationToken token, PostgreSqlFixture? fixture = null)
     {
         var hostAddress = IPAddress.Parse((await File.ReadAllTextAsync(Path.Combine(directory, "pod-host-address"), token)).Trim());
         var image = (await File.ReadAllTextAsync(Path.Combine(directory, "consumer-image"), token)).Trim();
         var ns = "haby223-" + Guid.NewGuid().ToString("N")[..12];
-        var postgres = new PostgreSqlFixture();
-        await postgres.InitializeAsync();
+        var postgres = fixture ?? new PostgreSqlFixture();
         V1Namespace? ownedNamespace = null;
         Exception? primary = null;
-        using var rootKey = RSA.Create(2048);
-        var rootRequest = new CertificateRequest("CN=Haby223 Disposable Root", rootKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-        rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
-        using var root = rootRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
-        using var leafKey = RSA.Create(2048);
-        var leafRequest = new CertificateRequest("CN=Haby223 Delivery", leafKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        var san = new SubjectAlternativeNameBuilder(); san.AddIpAddress(hostAddress);
-        leafRequest.CertificateExtensions.Add(san.Build());
-        leafRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
-        leafRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
-        using var publicLeaf = leafRequest.Create(root, DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(45), RandomNumberGenerator.GetBytes(16));
-        using var leaf = publicLeaf.CopyWithPrivateKey(leafKey);
-        var certificatePath = Path.Combine(directory, "delivery.pfx");
-        await File.WriteAllBytesAsync(certificatePath, leaf.Export(X509ContentType.Pfx), token);
-        var reservation = new TcpListener(IPAddress.Any, 0); reservation.Start();
-        var port = ((IPEndPoint)reservation.LocalEndpoint).Port; reservation.Stop();
-        var delivery = new RuntimeConfiguration($"https://{hostAddress}:{port}/", new("custom-ca", root.ExportCertificatePem()), new(TotalTimeoutSeconds: 30));
-        var requests = new ConcurrentQueue<Guid>(); var reviews = 0; var revokeNextRead = 0;
-        var deploymentWrites = 0; var loseConfirmation = false;
+        await ((Xunit.IAsyncLifetime)postgres).InitializeAsync();
         try
         {
+            using var rootKey = RSA.Create(2048);
+            var rootRequest = new CertificateRequest("CN=Haby223 Disposable Root", rootKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+            rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+            using var root = rootRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+            using var leafKey = RSA.Create(2048);
+            var leafRequest = new CertificateRequest("CN=Haby223 Delivery", leafKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var san = new SubjectAlternativeNameBuilder(); san.AddIpAddress(hostAddress);
+            leafRequest.CertificateExtensions.Add(san.Build());
+            leafRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+            leafRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
+            using var publicLeaf = leafRequest.Create(root, DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddMinutes(45), RandomNumberGenerator.GetBytes(16));
+            using var leaf = publicLeaf.CopyWithPrivateKey(leafKey);
+            var certificatePath = Path.Combine(directory, "delivery.pfx");
+            await File.WriteAllBytesAsync(certificatePath, leaf.Export(X509ContentType.Pfx), token);
+            using var reservation = new TcpListener(IPAddress.Any, 0); reservation.Start();
+            var port = ((IPEndPoint)reservation.LocalEndpoint).Port; reservation.Stop();
+            var delivery = new RuntimeConfiguration($"https://{hostAddress}:{port}/", new("custom-ca", root.ExportCertificatePem()), new(TotalTimeoutSeconds: 30));
+            var requests = new ConcurrentQueue<Guid>(); var reviews = 0; var revokeNextRead = 0;
+            var deploymentWrites = 0; var loseConfirmation = false;
             ownedNamespace = await admin.CoreV1.CreateNamespaceAsync(new() { Metadata = new() { Name = ns, Labels = new Dictionary<string, string> { ["haby.dev/qualification"] = ns } } }, cancellationToken: token);
             async Task<KubernetesProviderConfiguration> Configuration(ISecretStore store, EnvironmentRecordId environment)
             {
@@ -203,7 +203,7 @@ internal static class ConfiguredDeploymentCases
         catch (Exception error) { primary = error; throw; }
         finally
         {
-            Exception? cleanup = null;
+            var cleanup = new List<Exception>();
             if (ownedNamespace is not null)
             {
                 try
@@ -218,11 +218,11 @@ internal static class ConfiguredDeploymentCases
                     }
                     Console.WriteLine("PASS configured-owned-namespace-absent");
                 }
-                catch (Exception error) { cleanup = error; }
+                catch (Exception error) { cleanup.Add(error); }
             }
-            try { await postgres.DisposeAsync(); Console.WriteLine("PASS configured-owned-catalog-cleanup"); }
-            catch (Exception error) { cleanup ??= error; }
-            if (cleanup is not null) throw primary is null ? cleanup : new AggregateException(primary, cleanup);
+            try { await ((Xunit.IAsyncLifetime)postgres).DisposeAsync(); Console.WriteLine("PASS configured-owned-catalog-cleanup"); }
+            catch (Exception error) { cleanup.Add(error); }
+            if (cleanup.Count > 0) throw new AggregateException(primary is null ? cleanup : [primary, .. cleanup]);
         }
     }
     private static string ConfigurationJson(RuntimeConfiguration value)
