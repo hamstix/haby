@@ -56,8 +56,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             if (mode == DeploymentAdmissionMode.Operator)
             {
                 var original = await context.DurablePlans.AsNoTracking().SingleOrDefaultAsync(x => x.Id == prior.PlanId, cancellationToken);
-                if (accepted.ChangeSetId != changeId || accepted.PlanId != prior.PlanId || original is null || original.ChangeSetId != changeId ||
-                    original.InternalEffects != accepted.InternalEffects || accepted.ActorId != prior.ActorId || accepted.AcceptedAt != prior.CommittedAt)
+                if (!OperatorReplayMatches(change, prior, original, accepted))
                     return new DurableCommitResult.PlanInputUnavailable();
                 internalEffects = accepted.InternalEffects;
             }
@@ -323,6 +322,32 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         return new(deploymentId, generation, DesiredPresence.Present, inputs, DeploymentPlanId.Parse(row.PlanId.ToString()),
             DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()), row.AcceptedAt, row.ActorId)
         { Graph = graph };
+    }
+
+    // Pure retained-receipt policy; the transaction still owns all catalog reads and retry ordering.
+    internal static bool OperatorReplayMatches(DurableChangeSetRow change, ChangeSetCommitRow prior, DurablePlanRow? original, DeploymentGenerationRow accepted)
+    {
+        if (original is null || original.Id != prior.PlanId || original.ChangeSetId != change.Id || prior.ChangeSetId != change.Id ||
+            accepted.DeploymentId != prior.DeploymentId || accepted.Generation != prior.Generation || accepted.Presence != nameof(DesiredPresence.Present) ||
+            original.EnvironmentRecordId != change.EnvironmentRecordId || original.ApplicationRecordId != change.ApplicationRecordId || original.RevisionNumber != change.RevisionNumber ||
+            accepted.EnvironmentRecordId != change.EnvironmentRecordId || accepted.ApplicationRecordId != change.ApplicationRecordId || accepted.RevisionNumber != change.RevisionNumber ||
+            original.InternalEffects != accepted.InternalEffects || original.SnapshotFormatVersion != accepted.SnapshotFormatVersion || original.EnvironmentKey != accepted.EnvironmentKey ||
+            original.ProviderInputsJson != accepted.ProviderInputsJson || original.ConfigurationJson != accepted.ConfigurationJson) return false;
+        if (accepted.ChangeSetId == change.Id && accepted.PlanId == prior.PlanId)
+            return accepted.ActorId == prior.ActorId && accepted.AcceptedAt == prior.CommittedAt &&
+                accepted.Fingerprint == original.Fingerprint && accepted.GraphJson == original.GraphJson;
+        // A Resource-only no-op has its OWN immutable receipt and Plan, pointing to
+        // an older generation. Its actor/time must never replace that generation's creation audit.
+        // No Workload no-op authority is introduced; historical replay does not check live aliases.
+        if (accepted.InternalEffects || accepted.ChangeSetId == change.Id || accepted.PlanId == prior.PlanId ||
+            change.ExpectedAbsence || change.ExpectedGeneration != prior.Generation) return false;
+        try
+        {
+            var graph = DurableOperationGraphCodec.Decode(original.GraphJson);
+            return graph.Nodes.Count == 0 && graph.Baseline is { } baseline &&
+                baseline.Deployment.ToString() == prior.DeploymentId.ToString() && baseline.Generation == prior.Generation && baseline.Fingerprint == accepted.Fingerprint;
+        }
+        catch (InvalidDataException) { return false; }
     }
 
     private static DurableChangeSetCommit ToCommit(ChangeSetCommitRow row) => new(
