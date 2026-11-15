@@ -150,111 +150,226 @@ public sealed partial class OperatorHostIntegrationTests
     [InlineData(false)]
     public async Task Operator_admits_supported_Workload_desired_state_without_execution(bool initial)
     {
-        using var trap = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        trap.Start();
-        var contact = trap.AcceptTcpClientAsync();
-        var scenario = await new DurableDeploymentPlanningTests(fixture).InternalScenarioAsync(initialOnly: initial, suppliedConfiguration: async (secrets, environment) =>
+        var diagnostic = new WorkloadAdmissionDiagnostics(initial);
+        await diagnostic.RunAsync(async releaseRoot =>
         {
-            var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-            await secrets.CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, "operator-workload-no-effects-sentinel"u8.ToArray(), default);
-            return new Haby.Kubernetes.KubernetesProviderConfiguration(new Uri("https://127.0.0.1:" + ((System.Net.IPEndPoint)trap.LocalEndpoint).Port), null, secret, null, null);
-        }, configureManifest: e => DurableDeploymentPlanningTests.ConfiguredDocuments(e), acceptGeneration: async (services, environment, reference) =>
-        {
-            var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
-            long? baseline;
-            await using (var read = await factory.CreateDbContextAsync())
-                baseline = await read.ApplicationDeployments.Select(x => (long?)x.DesiredGeneration).SingleOrDefaultAsync();
-            string connection;
-            await using (var read = await factory.CreateDbContextAsync()) connection = read.Database.GetConnectionString()!;
-            var secretTrap = new AdmissionSecretTrap();
-            await using var host = OperatorHostApplication.Build([
-                "--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], s => s.AddSingleton<ISecretStore>(secretTrap));
-            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
-            using var channel = GrpcChannel.ForAddress(host.Urls.Single());
-            var client = OperatorTestCredentials.Client(channel);
-            var request = new CreateChangeSetRequest
+            diagnostic.At(WorkloadAdmissionCheckpoint.TrapBuild);
+            var trap = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            diagnostic.At(WorkloadAdmissionCheckpoint.TrapStart);
+            releaseRoot(() => { trap.Dispose(); return ValueTask.CompletedTask; });
+            trap.Start();
+            diagnostic.At(WorkloadAdmissionCheckpoint.TrapAccept);
+            var contact = trap.AcceptTcpClientAsync();
+            diagnostic.At(WorkloadAdmissionCheckpoint.ScenarioSetup);
+            var scenario = await new DurableDeploymentPlanningTests(fixture).InternalScenarioAsync(initialOnly: initial, suppliedConfiguration: async (secrets, environment) =>
             {
-                EnvironmentId = initial ? "initial" : "pilot",
-                Reference = new RevisionReference { ApplicationRecordId = reference.ApplicationRecordId.ToString(), RevisionNumber = reference.RevisionNumber.Value },
-                Precondition = baseline is null ? PlanningPrecondition.ExpectedAbsence : PlanningPrecondition.ExpectedGeneration
-            };
-            // Read the actual persisted Environment key rather than assume the fixture's name.
-            await using (var read = await factory.CreateDbContextAsync())
-                request.EnvironmentId = (await read.Environments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(environment.ToString()))).EnvironmentId;
-            if (baseline is { } expected) request.ExpectedGeneration = expected;
-            var anonymous = new ManifestOperator.ManifestOperatorClient(channel);
-            foreach (var headers in new[] { new Metadata(), new Metadata { { "authorization", "Bearer " + ConfigurationDeliveryCredential.Create(Guid.CreateVersion7()) } } })
-                Assert.Equal(StatusCode.Unauthenticated, (await Assert.ThrowsAsync<RpcException>(async () => await anonymous.CreateChangeSetAsync(request, headers))).StatusCode);
-            var change = (await client.CreateChangeSetAsync(request)).ChangeSet;
-            Assert.NotNull(change);
-            var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId });
-            Assert.Equal(PlanningStatus.Planned, plan.Status);
-            Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new PlanRequest { PlanId = plan.Plan.PlanId })).Status);
-            Assert.Equal("available", plan.Plan.WorkloadDescription.Status);
-            Assert.Single(plan.Plan.WorkloadDescription.Items);
-            Assert.DoesNotContain("operator-workload-no-effects-sentinel", plan.ToString());
-            var wrong = (await client.CreateChangeSetAsync(request)).ChangeSet;
-            Assert.Equal(CommitStatus.PlanDoesNotBelongToChangeSet, (await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = wrong.ChangeSetId, PlanId = plan.Plan.PlanId })).Status);
-            var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
-            if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrWhiteSpace(binary));
-            if (binary is not null)
+                var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
+                await secrets.CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, "operator-workload-no-effects-sentinel"u8.ToArray(), default);
+                return new Haby.Kubernetes.KubernetesProviderConfiguration(new Uri("https://127.0.0.1:" + ((System.Net.IPEndPoint)trap.LocalEndpoint).Port), null, secret, null, null);
+            }, configureManifest: e => DurableDeploymentPlanningTests.ConfiguredDocuments(e), acceptGeneration: async (services, environment, reference) =>
             {
-                using var created = JsonDocument.Parse(await RunNativeCommitCli(binary, host.Urls.Single(), ["changeset", "create", reference.ApplicationRecordId.ToString(), reference.RevisionNumber.Value.ToString(), .. (baseline is null ? new[] { "--expected-absence" } : new[] { "--expected-generation", baseline.Value.ToString() })], environment: request.EnvironmentId));
-                var nativeChange = created.RootElement.GetProperty("data"u8).GetProperty("changeSet"u8).GetProperty("changeSetId"u8).GetString()!;
-                using var nativePlan = JsonDocument.Parse(await RunNativeCommitCli(binary, host.Urls.Single(), ["plan", "create", nativeChange], environment: request.EnvironmentId));
-                Assert.Equal("available", nativePlan.RootElement.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("workloadDescription"u8).GetProperty("status"u8).GetString());
-                await RunNativeCommitCli(binary, host.Urls.Single(), ["plan", "check", plan.Plan.PlanId]);
-                using var committed = JsonDocument.Parse(await RunNativeCommitCli(binary, host.Urls.Single(), ["changeset", "commit", change.ChangeSetId, "--plan", plan.Plan.PlanId]));
-                Assert.Equal("notSubmitted", committed.RootElement.GetProperty("data"u8).GetProperty("workloadStage"u8).GetProperty("submission"u8).GetString());
-            }
-            var accepted = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId });
-            Assert.Equal(CommitStatus.Committed, accepted.Status);
-            Assert.Equal("notSubmitted", accepted.WorkloadStage.Submission);
-            Assert.Equal(baseline is not null, accepted.WorkloadStage.HasAppliedGeneration);
-            Assert.Equal(plan.Plan.WorkloadDescription, accepted.DesiredGeneration.WorkloadDescription);
-            Assert.Equal(OperatorCredential.Actor((await host.Services.GetRequiredService<IOperatorAccessStore>().AuthorizeAsync(OperatorTestCredentials.Credential(host.Urls.Single()), default))!.Id), accepted.Commit.TechnicalActorId);
-            Assert.Equal(change.TechnicalActorId, accepted.Commit.TechnicalActorId);
-            var generationRequest = new GenerationRequest { DeploymentId = accepted.Commit.DeploymentId, Generation = accepted.Commit.Generation };
-            Assert.NotEqual(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(generationRequest)).Status);
-            Assert.Null((await client.GetGenerationAsync(generationRequest)).Progress);
-            await host.StopAsync();
-            await using var restarted = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], s => s.AddSingleton<ISecretStore>(secretTrap));
-            await OperatorTestCredentials.StartWithIssuedOperatorAsync(restarted);
-            using var freshChannel = GrpcChannel.ForAddress(restarted.Urls.Single());
-            client = OperatorTestCredentials.Client(freshChannel);
-            var readBack = await client.GetGenerationAsync(generationRequest);
-            Assert.Equal(accepted.DesiredGeneration, readBack.DesiredGeneration);
-            Assert.Equal(plan.Plan, (await client.GetPlanAsync(new PlanRequest { PlanId = plan.Plan.PlanId })).Plan);
-            if (binary is not null)
-            {
-                var text = await RunNativeCommitCli(binary, restarted.Urls.Single(), ["deployment", "generation", "get", generationRequest.DeploymentId, generationRequest.Generation.ToString()], format: "text");
-                Assert.Contains("notSubmitted", text); Assert.Contains("Readiness is not established", text);
-            }
-            var retry = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = Guid.CreateVersion7().ToString() });
-            Assert.Equal(accepted, retry);
-            var saved = await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(DeploymentChangeSetId.Parse(change.ChangeSetId), default);
-            Assert.NotNull(saved);
-            Assert.Equal(0, secretTrap.Reads);
-            return saved;
+                diagnostic.At(WorkloadAdmissionCheckpoint.AdmissionServices);
+                DurableChangeSetCommit? saved = null;
+                await diagnostic.RunAsync(async releaseAdmission =>
+                {
+                    var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+                    long? baseline = null;
+                    diagnostic.At(WorkloadAdmissionCheckpoint.BaselineRead);
+                    await diagnostic.RunAsync(async releaseBaseline =>
+                {
+                    var read = await factory.CreateDbContextAsync();
+                    releaseBaseline(read.DisposeAsync);
+                    baseline = await read.ApplicationDeployments.Select(x => (long?)x.DesiredGeneration).SingleOrDefaultAsync();
+                });
+                    string connection = null!;
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ConnectionRead);
+                    await diagnostic.RunAsync(async releaseConnection =>
+                {
+                    var read = await factory.CreateDbContextAsync();
+                    releaseConnection(read.DisposeAsync);
+                    connection = read.Database.GetConnectionString()!;
+                });
+                    var secretTrap = new AdmissionSecretTrap();
+                    diagnostic.At(WorkloadAdmissionCheckpoint.HostBuild);
+                    var host = OperatorHostApplication.Build([
+                    "--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], s => s.AddSingleton<ISecretStore>(secretTrap));
+                    releaseAdmission(host.DisposeAsync);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.HostStart);
+                    await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.Channel);
+                    var channel = GrpcChannel.ForAddress(host.Urls.Single());
+                    releaseAdmission(() => { channel.Dispose(); return ValueTask.CompletedTask; });
+                    var client = OperatorTestCredentials.Client(channel);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.RequestBuild);
+                    var request = new CreateChangeSetRequest
+                    {
+                        EnvironmentId = initial ? "initial" : "pilot",
+                        Reference = new RevisionReference { ApplicationRecordId = reference.ApplicationRecordId.ToString(), RevisionNumber = reference.RevisionNumber.Value },
+                        Precondition = baseline is null ? PlanningPrecondition.ExpectedAbsence : PlanningPrecondition.ExpectedGeneration
+                    };
+                    // Read the actual persisted Environment key rather than assume the fixture's name.
+                    diagnostic.At(WorkloadAdmissionCheckpoint.EnvironmentRead);
+                    await diagnostic.RunAsync(async releaseEnvironment =>
+                {
+                    var read = await factory.CreateDbContextAsync();
+                    releaseEnvironment(read.DisposeAsync);
+                    request.EnvironmentId = (await read.Environments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(environment.ToString()))).EnvironmentId;
+                });
+                    if (baseline is { } expected) request.ExpectedGeneration = expected;
+                    diagnostic.At(WorkloadAdmissionCheckpoint.AnonymousClient);
+                    var anonymous = new ManifestOperator.ManifestOperatorClient(channel);
+                    foreach (var headers in new[] { new Metadata(), new Metadata { { "authorization", "Bearer " + ConfigurationDeliveryCredential.Create(Guid.CreateVersion7()) } } })
+                    {
+                        diagnostic.At(WorkloadAdmissionCheckpoint.AnonymousDenied);
+                        Assert.Equal(StatusCode.Unauthenticated, (await Assert.ThrowsAsync<RpcException>(async () => await anonymous.CreateChangeSetAsync(request, headers))).StatusCode);
+                    }
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ChangeSetCreate);
+                    var change = (await client.CreateChangeSetAsync(request)).ChangeSet;
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ChangeSetPresent);
+                    Assert.NotNull(change);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.PlanCreate);
+                    var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId });
+                    diagnostic.At(WorkloadAdmissionCheckpoint.PlanStatus);
+                    Assert.Equal(PlanningStatus.Planned, plan.Status);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.PlanCurrent);
+                    Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new PlanRequest { PlanId = plan.Plan.PlanId })).Status);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.DescriptionStatus);
+                    Assert.Equal("available", plan.Plan.WorkloadDescription.Status);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.DescriptionItems);
+                    Assert.Single(plan.Plan.WorkloadDescription.Items);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.DescriptionRedaction);
+                    Assert.DoesNotContain("operator-workload-no-effects-sentinel", plan.ToString());
+                    diagnostic.At(WorkloadAdmissionCheckpoint.OtherChangeSetCreate);
+                    var wrong = (await client.CreateChangeSetAsync(request)).ChangeSet;
+                    diagnostic.At(WorkloadAdmissionCheckpoint.PlanMembership);
+                    Assert.Equal(CommitStatus.PlanDoesNotBelongToChangeSet, (await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = wrong.ChangeSetId, PlanId = plan.Plan.PlanId })).Status);
+                    var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+                    diagnostic.At(WorkloadAdmissionCheckpoint.NativeRequired);
+                    if (Environment.GetEnvironmentVariable("HABY_AOT_CLI_REQUIRED") == "1") Assert.False(string.IsNullOrWhiteSpace(binary));
+                    if (binary is not null)
+                    {
+                        await diagnostic.RunAsync(async releaseNative =>
+                    {
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeChangeSet);
+                        var created = JsonDocument.Parse(await RunNativeCommitCli(binary, host.Urls.Single(), ["changeset", "create", reference.ApplicationRecordId.ToString(), reference.RevisionNumber.Value.ToString(), .. (baseline is null ? new[] { "--expected-absence" } : new[] { "--expected-generation", baseline.Value.ToString() })], environment: request.EnvironmentId));
+                        releaseNative(() => { created.Dispose(); return ValueTask.CompletedTask; });
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeChangeSetRead);
+                        var nativeChange = created.RootElement.GetProperty("data"u8).GetProperty("changeSet"u8).GetProperty("changeSetId"u8).GetString()!;
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativePlan);
+                        var nativePlan = JsonDocument.Parse(await RunNativeCommitCli(binary, host.Urls.Single(), ["plan", "create", nativeChange], environment: request.EnvironmentId));
+                        releaseNative(() => { nativePlan.Dispose(); return ValueTask.CompletedTask; });
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeDescription);
+                        Assert.Equal("available", nativePlan.RootElement.GetProperty("data"u8).GetProperty("plan"u8).GetProperty("workloadDescription"u8).GetProperty("status"u8).GetString());
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeCheck);
+                        await RunNativeCommitCli(binary, host.Urls.Single(), ["plan", "check", plan.Plan.PlanId]);
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeCommit);
+                        var committed = JsonDocument.Parse(await RunNativeCommitCli(binary, host.Urls.Single(), ["changeset", "commit", change.ChangeSetId, "--plan", plan.Plan.PlanId]));
+                        releaseNative(() => { committed.Dispose(); return ValueTask.CompletedTask; });
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeSubmission);
+                        Assert.Equal("notSubmitted", committed.RootElement.GetProperty("data"u8).GetProperty("workloadStage"u8).GetProperty("submission"u8).GetString());
+                    });
+                    }
+                    diagnostic.At(WorkloadAdmissionCheckpoint.Commit);
+                    var accepted = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId });
+                    diagnostic.At(WorkloadAdmissionCheckpoint.CommitStatus);
+                    Assert.Equal(CommitStatus.Committed, accepted.Status);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.Submission);
+                    Assert.Equal("notSubmitted", accepted.WorkloadStage.Submission);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.AppliedFlag);
+                    Assert.Equal(baseline is not null, accepted.WorkloadStage.HasAppliedGeneration);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.FrozenDescription);
+                    Assert.Equal(plan.Plan.WorkloadDescription, accepted.DesiredGeneration.WorkloadDescription);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ActorAuthorization);
+                    Assert.Equal(OperatorCredential.Actor((await host.Services.GetRequiredService<IOperatorAccessStore>().AuthorizeAsync(OperatorTestCredentials.Credential(host.Urls.Single()), default))!.Id), accepted.Commit.TechnicalActorId);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ActorIdentity);
+                    Assert.Equal(change.TechnicalActorId, accepted.Commit.TechnicalActorId);
+                    var generationRequest = new GenerationRequest { DeploymentId = accepted.Commit.DeploymentId, Generation = accepted.Commit.Generation };
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ExecutionGuard);
+                    Assert.NotEqual(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(generationRequest)).Status);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.NoProgress);
+                    Assert.Null((await client.GetGenerationAsync(generationRequest)).Progress);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.HostStop);
+                    await host.StopAsync();
+                    diagnostic.At(WorkloadAdmissionCheckpoint.RestartBuild);
+                    var restarted = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], s => s.AddSingleton<ISecretStore>(secretTrap));
+                    releaseAdmission(restarted.DisposeAsync);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.RestartStart);
+                    await OperatorTestCredentials.StartWithIssuedOperatorAsync(restarted);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.RestartChannel);
+                    var freshChannel = GrpcChannel.ForAddress(restarted.Urls.Single());
+                    releaseAdmission(() => { freshChannel.Dispose(); return ValueTask.CompletedTask; });
+                    client = OperatorTestCredentials.Client(freshChannel);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.GenerationRead);
+                    var readBack = await client.GetGenerationAsync(generationRequest);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.GenerationIdentity);
+                    Assert.Equal(accepted.DesiredGeneration, readBack.DesiredGeneration);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.PlanIdentity);
+                    Assert.Equal(plan.Plan, (await client.GetPlanAsync(new PlanRequest { PlanId = plan.Plan.PlanId })).Plan);
+                    if (binary is not null)
+                    {
+                        await diagnostic.RunAsync(async releaseNative =>
+                    {
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeRead);
+                        var text = await RunNativeCommitCli(binary, restarted.Urls.Single(), ["deployment", "generation", "get", generationRequest.DeploymentId, generationRequest.Generation.ToString()], format: "text");
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeReadText);
+                        Assert.Contains("notSubmitted", text);
+                        diagnostic.At(WorkloadAdmissionCheckpoint.NativeReadinessText);
+                        Assert.Contains("Readiness is not established", text);
+                    });
+                    }
+                    diagnostic.At(WorkloadAdmissionCheckpoint.Replay);
+                    var retry = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = Guid.CreateVersion7().ToString() });
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ReplayIdentity);
+                    Assert.Equal(accepted, retry);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ReceiptRead);
+                    saved = await services.GetRequiredService<IDurableDesiredStateCommitter>().FindCommitAsync(DeploymentChangeSetId.Parse(change.ChangeSetId), default);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.ReceiptPresent);
+                    Assert.NotNull(saved);
+                    diagnostic.At(WorkloadAdmissionCheckpoint.SecretReads);
+                    Assert.Equal(0, secretTrap.Reads);
+                });
+                diagnostic.At(WorkloadAdmissionCheckpoint.ScenarioSetup);
+                return saved!;
+            });
+            diagnostic.At(WorkloadAdmissionCheckpoint.PublicConfigurationGuard);
+            await DurableDeploymentPlanningTests.PublicConfigurationRefusesAsync(scenario);
+            diagnostic.At(WorkloadAdmissionCheckpoint.VerificationServices);
+            var verifyServices = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
+            releaseRoot(verifyServices.DisposeAsync);
+            diagnostic.At(WorkloadAdmissionCheckpoint.VerificationContext);
+            var verify = await verifyServices.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+            releaseRoot(verify.DisposeAsync);
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoProviderContact);
+            Assert.False(contact.IsCompleted, "Plan/Commit/Get contacted the Kubernetes boundary.");
+            diagnostic.At(WorkloadAdmissionCheckpoint.DeploymentRead);
+            var owner = await verify.ApplicationDeployments.AsNoTracking().SingleAsync();
+            diagnostic.At(WorkloadAdmissionCheckpoint.DesiredGeneration);
+            Assert.Equal(initial ? 1 : 2, owner.DesiredGeneration);
+            diagnostic.At(WorkloadAdmissionCheckpoint.AppliedGeneration);
+            Assert.Equal(initial ? (long?)null : 1, owner.AppliedGeneration);
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoActionIntents);
+            Assert.Empty(await verify.ActionIntents.AsNoTracking().ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoRecipients);
+            Assert.Empty(await verify.WorkloadConfigurationRecipients.AsNoTracking().ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoDocuments);
+            Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoIdentities);
+            Assert.Empty(await verify.RuntimeIdentityBindings.AsNoTracking().ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoPermissions);
+            Assert.Empty(await verify.RuntimeConfigurationPermissions.AsNoTracking().ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoManagedWorkloads);
+            Assert.Empty(await verify.ManagedWorkloads.AsNoTracking().ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.TargetIdentity);
+            var target = Guid.Parse(scenario.Commit.DeploymentId.ToString());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoOperations);
+            Assert.Empty(await verify.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == target && x.Generation == scenario.Commit.Generation.Value).ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoCheckpoints);
+            Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == target && x.Generation == scenario.Commit.Generation.Value).ToArrayAsync());
+            diagnostic.At(WorkloadAdmissionCheckpoint.NoJournalProgress);
+            Assert.Null(await verifyServices.GetRequiredService<IDurableOperationJournal>().ProgressAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default));
         });
-        await DurableDeploymentPlanningTests.PublicConfigurationRefusesAsync(scenario);
-        await using var verifyServices = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
-        await using var verify = await verifyServices.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-        Assert.False(contact.IsCompleted, "Plan/Commit/Get contacted the Kubernetes boundary.");
-        var owner = await verify.ApplicationDeployments.AsNoTracking().SingleAsync();
-        Assert.Equal(initial ? 1 : 2, owner.DesiredGeneration);
-        Assert.Equal(initial ? (long?)null : 1, owner.AppliedGeneration);
-        Assert.Empty(await verify.ActionIntents.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.WorkloadConfigurationRecipients.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.RuntimeIdentityBindings.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.RuntimeConfigurationPermissions.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.ManagedWorkloads.AsNoTracking().ToArrayAsync());
-        var target = Guid.Parse(scenario.Commit.DeploymentId.ToString());
-        Assert.Empty(await verify.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == target && x.Generation == scenario.Commit.Generation.Value).ToArrayAsync());
-        Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == target && x.Generation == scenario.Commit.Generation.Value).ToArrayAsync());
-        Assert.Null(await verifyServices.GetRequiredService<IDurableOperationJournal>().ProgressAsync(scenario.Commit.DeploymentId, scenario.Commit.Generation, default));
     }
+
     private sealed class AdmissionSecretTrap : ISecretStore
     {
         internal int Reads;

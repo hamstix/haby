@@ -88,6 +88,25 @@ internal static class HostFailureDiagnostics
         }
     }
 
+    internal static void RecordWorkload(bool initial, WorkloadAdmissionCheckpoint checkpoint, Exception error, StatusCode? observed)
+    {
+        var directory = Environment.GetEnvironmentVariable("HABY_TEST_TIMING_DIRECTORY");
+        if (directory is null) return;
+        try
+        {
+            lock (Gate)
+            {
+                Directory.CreateDirectory(directory);
+                File.AppendAllText(Path.Combine(directory, "host-diagnostics.csv"),
+                    WorkloadAdmissionDiagnostics.Render(initial, checkpoint, error, observed) + Environment.NewLine);
+            }
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine("Allowlisted Workload diagnostic unavailable; primary failure preserved.");
+        }
+    }
+
     internal static void RecordProtected(bool enabled, HostFailurePhase phase, Exception error, StatusCode? observed,
         ReflectionRouteKind route, ReflectionCredentialPurpose purpose)
     {
@@ -214,5 +233,136 @@ internal sealed class ProtectedReflectionDiagnostics(bool enabled, Action<string
             _ => "other"
         };
         return Method + "," + (enabled ? "enabled-true" : "enabled-false") + "," + stage + "," + routeKind + "," + credentialPurpose + "," + status + "," + category;
+    }
+}
+
+internal enum WorkloadAdmissionCheckpoint
+{
+    TrapBuild, TrapStart, TrapAccept, ScenarioSetup, AdmissionServices, BaselineRead, ConnectionRead, HostBuild, HostStart, Channel, RequestBuild, EnvironmentRead, AnonymousClient, AnonymousDenied, ChangeSetCreate, ChangeSetPresent, PlanCreate, PlanStatus, PlanCurrent, DescriptionStatus, DescriptionItems, DescriptionRedaction, OtherChangeSetCreate, PlanMembership, NativeRequired, NativeChangeSet, NativeChangeSetRead, NativePlan, NativeDescription, NativeCheck, NativeCommit, NativeSubmission, Commit, CommitStatus, Submission, AppliedFlag, FrozenDescription, ActorAuthorization, ActorIdentity, ExecutionGuard, NoProgress, HostStop, RestartBuild, RestartStart, RestartChannel, GenerationRead, GenerationIdentity, PlanIdentity, NativeRead, NativeReadText, NativeReadinessText, Replay, ReplayIdentity, ReceiptRead, ReceiptPresent, SecretReads, PublicConfigurationGuard, VerificationServices, VerificationContext, NoProviderContact, DeploymentRead, DesiredGeneration, AppliedGeneration, NoActionIntents, NoRecipients, NoDocuments, NoIdentities, NoPermissions, NoManagedWorkloads, TargetIdentity, NoOperations, NoCheckpoints, NoJournalProgress, Cleanup
+}
+
+// Only the two Workload admission theory rows use this explicit recorder.
+internal sealed class WorkloadAdmissionDiagnostics(bool initial, Action<string>? capture = null)
+{
+    internal const string Method = "Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests.Operator_admits_supported_Workload_desired_state_without_execution";
+    private readonly HashSet<Exception> recorded = new(ReferenceEqualityComparer.Instance);
+    private WorkloadAdmissionCheckpoint checkpoint = WorkloadAdmissionCheckpoint.TrapBuild;
+
+    internal void At(WorkloadAdmissionCheckpoint value) => checkpoint = value;
+
+    internal Task RunAsync(Func<Action<Func<ValueTask>>, Task> body) =>
+        HostFailureDiagnostics.RunAsync(body, () => HostFailurePhase.Catalog, () => null, Record);
+
+    private void Record(HostFailurePhase phase, Exception error, StatusCode? observed)
+    {
+        var first = recorded.Add(error);
+        if (phase != HostFailurePhase.Cleanup && !first) return;
+        var stage = phase == HostFailurePhase.Cleanup ? WorkloadAdmissionCheckpoint.Cleanup : checkpoint;
+        if (capture is null) HostFailureDiagnostics.RecordWorkload(initial, stage, error, observed);
+        else capture(Render(initial, stage, error, observed));
+    }
+
+    internal static string Render(bool initial, WorkloadAdmissionCheckpoint checkpoint, Exception error, StatusCode? observed)
+    {
+        var stage = checkpoint switch
+        {
+            WorkloadAdmissionCheckpoint.TrapBuild => "trap-build",
+            WorkloadAdmissionCheckpoint.TrapStart => "trap-start",
+            WorkloadAdmissionCheckpoint.TrapAccept => "trap-accept",
+            WorkloadAdmissionCheckpoint.ScenarioSetup => "scenario-setup",
+            WorkloadAdmissionCheckpoint.AdmissionServices => "admission-services",
+            WorkloadAdmissionCheckpoint.BaselineRead => "baseline-read",
+            WorkloadAdmissionCheckpoint.ConnectionRead => "connection-read",
+            WorkloadAdmissionCheckpoint.HostBuild => "host-build",
+            WorkloadAdmissionCheckpoint.HostStart => "host-start",
+            WorkloadAdmissionCheckpoint.Channel => "channel",
+            WorkloadAdmissionCheckpoint.RequestBuild => "request-build",
+            WorkloadAdmissionCheckpoint.EnvironmentRead => "environment-read",
+            WorkloadAdmissionCheckpoint.AnonymousClient => "anonymous-client",
+            WorkloadAdmissionCheckpoint.AnonymousDenied => "anonymous-denied",
+            WorkloadAdmissionCheckpoint.ChangeSetCreate => "change-set-create",
+            WorkloadAdmissionCheckpoint.ChangeSetPresent => "change-set-present",
+            WorkloadAdmissionCheckpoint.PlanCreate => "plan-create",
+            WorkloadAdmissionCheckpoint.PlanStatus => "plan-status",
+            WorkloadAdmissionCheckpoint.PlanCurrent => "plan-current",
+            WorkloadAdmissionCheckpoint.DescriptionStatus => "description-status",
+            WorkloadAdmissionCheckpoint.DescriptionItems => "description-items",
+            WorkloadAdmissionCheckpoint.DescriptionRedaction => "description-redaction",
+            WorkloadAdmissionCheckpoint.OtherChangeSetCreate => "other-change-set-create",
+            WorkloadAdmissionCheckpoint.PlanMembership => "plan-membership",
+            WorkloadAdmissionCheckpoint.NativeRequired => "native-required",
+            WorkloadAdmissionCheckpoint.NativeChangeSet => "native-change-set",
+            WorkloadAdmissionCheckpoint.NativeChangeSetRead => "native-change-set-read",
+            WorkloadAdmissionCheckpoint.NativePlan => "native-plan",
+            WorkloadAdmissionCheckpoint.NativeDescription => "native-description",
+            WorkloadAdmissionCheckpoint.NativeCheck => "native-check",
+            WorkloadAdmissionCheckpoint.NativeCommit => "native-commit",
+            WorkloadAdmissionCheckpoint.NativeSubmission => "native-submission",
+            WorkloadAdmissionCheckpoint.Commit => "commit",
+            WorkloadAdmissionCheckpoint.CommitStatus => "commit-status",
+            WorkloadAdmissionCheckpoint.Submission => "submission",
+            WorkloadAdmissionCheckpoint.AppliedFlag => "applied-flag",
+            WorkloadAdmissionCheckpoint.FrozenDescription => "frozen-description",
+            WorkloadAdmissionCheckpoint.ActorAuthorization => "actor-authorization",
+            WorkloadAdmissionCheckpoint.ActorIdentity => "actor-identity",
+            WorkloadAdmissionCheckpoint.ExecutionGuard => "execution-guard",
+            WorkloadAdmissionCheckpoint.NoProgress => "no-progress",
+            WorkloadAdmissionCheckpoint.HostStop => "host-stop",
+            WorkloadAdmissionCheckpoint.RestartBuild => "restart-build",
+            WorkloadAdmissionCheckpoint.RestartStart => "restart-start",
+            WorkloadAdmissionCheckpoint.RestartChannel => "restart-channel",
+            WorkloadAdmissionCheckpoint.GenerationRead => "generation-read",
+            WorkloadAdmissionCheckpoint.GenerationIdentity => "generation-identity",
+            WorkloadAdmissionCheckpoint.PlanIdentity => "plan-identity",
+            WorkloadAdmissionCheckpoint.NativeRead => "native-read",
+            WorkloadAdmissionCheckpoint.NativeReadText => "native-read-text",
+            WorkloadAdmissionCheckpoint.NativeReadinessText => "native-readiness-text",
+            WorkloadAdmissionCheckpoint.Replay => "replay",
+            WorkloadAdmissionCheckpoint.ReplayIdentity => "replay-identity",
+            WorkloadAdmissionCheckpoint.ReceiptRead => "receipt-read",
+            WorkloadAdmissionCheckpoint.ReceiptPresent => "receipt-present",
+            WorkloadAdmissionCheckpoint.SecretReads => "secret-reads",
+            WorkloadAdmissionCheckpoint.PublicConfigurationGuard => "public-configuration-guard",
+            WorkloadAdmissionCheckpoint.VerificationServices => "verification-services",
+            WorkloadAdmissionCheckpoint.VerificationContext => "verification-context",
+            WorkloadAdmissionCheckpoint.NoProviderContact => "no-provider-contact",
+            WorkloadAdmissionCheckpoint.DeploymentRead => "deployment-read",
+            WorkloadAdmissionCheckpoint.DesiredGeneration => "desired-generation",
+            WorkloadAdmissionCheckpoint.AppliedGeneration => "applied-generation",
+            WorkloadAdmissionCheckpoint.NoActionIntents => "no-action-intents",
+            WorkloadAdmissionCheckpoint.NoRecipients => "no-recipients",
+            WorkloadAdmissionCheckpoint.NoDocuments => "no-documents",
+            WorkloadAdmissionCheckpoint.NoIdentities => "no-identities",
+            WorkloadAdmissionCheckpoint.NoPermissions => "no-permissions",
+            WorkloadAdmissionCheckpoint.NoManagedWorkloads => "no-managed-workloads",
+            WorkloadAdmissionCheckpoint.TargetIdentity => "target-identity",
+            WorkloadAdmissionCheckpoint.NoOperations => "no-operations",
+            WorkloadAdmissionCheckpoint.NoCheckpoints => "no-checkpoints",
+            WorkloadAdmissionCheckpoint.NoJournalProgress => "no-journal-progress",
+            WorkloadAdmissionCheckpoint.Cleanup => "cleanup",
+            _ => "unknown"
+        };
+        var status = ((error as RpcException)?.StatusCode ?? observed) switch
+        {
+            StatusCode.OK => "ok",
+            StatusCode.Unauthenticated => "unauthenticated",
+            StatusCode.InvalidArgument => "invalid-argument",
+            StatusCode.FailedPrecondition => "failed-precondition",
+            StatusCode.Internal => "internal",
+            StatusCode.Unavailable => "unavailable",
+            StatusCode.DeadlineExceeded => "deadline-exceeded",
+            StatusCode.Cancelled => "cancelled",
+            null => "unavailable-evidence",
+            _ => "other"
+        };
+        var category = error switch
+        {
+            RpcException => "rpc",
+            Xunit.Sdk.XunitException => "assertion",
+            OperationCanceledException => "cancelled",
+            IOException => "io",
+            _ => "unknown"
+        };
+        return Method + "," + (initial ? "initial" : "mixed") + "," + stage + "," + category + "," + status;
     }
 }

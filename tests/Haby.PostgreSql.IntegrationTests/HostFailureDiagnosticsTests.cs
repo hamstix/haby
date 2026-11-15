@@ -100,6 +100,34 @@ public sealed class HostFailureDiagnosticsTests
         Assert.Equal(4, evidence.Count);
         Assert.Equal(HostFailureDiagnostics.Render(phase, primary, null), evidence[0]);
         Assert.All(evidence.Skip(1), line => Assert.Equal("cleanup,internal", line));
+        foreach (var initial in new[] { true, false })
+        {
+            var workloadEvidence = new List<string>();
+            var workloadDisposed = new List<int>();
+            var workload = new WorkloadAdmissionDiagnostics(initial, line =>
+            {
+                if (workloadEvidence.Count == 0) Assert.Empty(workloadDisposed);
+                workloadEvidence.Add(line);
+            });
+            var workloadError = await Record.ExceptionAsync(() => workload.RunAsync(async defer =>
+            {
+                defer(() => { workloadDisposed.Add(1); throw cleanup; });
+                await workload.RunAsync(release =>
+                {
+                    release(() => { workloadDisposed.Add(2); throw cleanup; });
+                    workload.At(WorkloadAdmissionCheckpoint.CommitStatus);
+                    throw primary;
+                });
+            }));
+            Assert.Same(primary, workloadError);
+            Assert.Equal([2, 1], workloadDisposed);
+            Assert.Equal([
+                WorkloadAdmissionDiagnostics.Render(initial, WorkloadAdmissionCheckpoint.CommitStatus, primary, null),
+                WorkloadAdmissionDiagnostics.Render(initial, WorkloadAdmissionCheckpoint.Cleanup, cleanup, null),
+                WorkloadAdmissionDiagnostics.Render(initial, WorkloadAdmissionCheckpoint.Cleanup, cleanup, null)
+            ], workloadEvidence);
+            Assert.All(workloadEvidence, line => Assert.StartsWith(WorkloadAdmissionDiagnostics.Method + ",", line));
+        }
     }
 
     [Fact]
@@ -115,6 +143,23 @@ public sealed class HostFailureDiagnosticsTests
             (stage, failure, observed) => evidence.Add(HostFailureDiagnostics.Render(stage, failure, observed))));
         Assert.Same(cleanup, error);
         Assert.Equal(["cleanup,unavailable-evidence"], evidence);
+        var workloadEvidence = new List<string>();
+        var workload = new WorkloadAdmissionDiagnostics(false, workloadEvidence.Add);
+        var workloadError = await Record.ExceptionAsync(() => workload.RunAsync(async _ =>
+        {
+            workload.At(WorkloadAdmissionCheckpoint.CommitStatus);
+            await workload.RunAsync(release =>
+            {
+                release(() => throw cleanup);
+                return Task.CompletedTask;
+            });
+        }));
+        Assert.Same(cleanup, workloadError);
+        Assert.Equal([WorkloadAdmissionDiagnostics.Method + ",mixed,cleanup,unknown,unavailable-evidence"], workloadEvidence);
+        var cancelled = new OperationCanceledException("PROTECTED-cancellation");
+        var cancelledError = await Record.ExceptionAsync(() => workload.RunAsync(_ => throw cancelled));
+        Assert.Same(cancelled, cancelledError);
+        Assert.EndsWith(",cancelled,unavailable-evidence", workloadEvidence[^1]);
     }
 
     [Theory]
@@ -127,6 +172,10 @@ public sealed class HostFailureDiagnosticsTests
         var line = HostFailureDiagnostics.Render(HostFailurePhase.ReflectionWrite, error, null);
         Assert.Equal("reflection-write," + expected, line);
         Assert.DoesNotContain(secret, line);
+        var workloadLine = WorkloadAdmissionDiagnostics.Render(true, WorkloadAdmissionCheckpoint.PlanStatus, error, null);
+        Assert.Equal(WorkloadAdmissionDiagnostics.Method + ",initial,plan-status,rpc," + expected, workloadLine);
+        Assert.DoesNotContain(secret, workloadLine);
+        Assert.NotEqual(HostFailureDiagnostics.Method, WorkloadAdmissionDiagnostics.Method);
     }
 
     [Fact]
@@ -135,6 +184,22 @@ public sealed class HostFailureDiagnosticsTests
         var line = HostFailureDiagnostics.Render(HostFailurePhase.StatusAssertion,
             new InvalidOperationException("PROTECTED-assertion-payload"), StatusCode.Unavailable);
         Assert.Equal("status-assertion,unavailable", line);
+        const string secret = "PROTECTED,\r\nBearer secret /private/path";
+        var assertion = new Xunit.Sdk.XunitException(secret);
+        assertion.Data[secret] = secret;
+        foreach (var checkpoint in Enum.GetValues<WorkloadAdmissionCheckpoint>())
+        {
+            var rendered = WorkloadAdmissionDiagnostics.Render(false, checkpoint, assertion, null);
+            Assert.StartsWith(WorkloadAdmissionDiagnostics.Method + ",mixed,", rendered);
+            Assert.DoesNotContain(",unknown,", rendered);
+            Assert.EndsWith(",assertion,unavailable-evidence", rendered);
+            Assert.Equal(5, rendered.Split(',').Length);
+            Assert.DoesNotContain(secret, rendered);
+            Assert.DoesNotContain('\r', rendered); Assert.DoesNotContain('\n', rendered);
+        }
+        var hostile = new RpcException(new Status((StatusCode)999, secret), new Metadata { { "private", secret } });
+        Assert.Equal(WorkloadAdmissionDiagnostics.Method + ",initial,unknown,rpc,other",
+            WorkloadAdmissionDiagnostics.Render(true, (WorkloadAdmissionCheckpoint)999, hostile, null));
     }
 
     [Fact]
