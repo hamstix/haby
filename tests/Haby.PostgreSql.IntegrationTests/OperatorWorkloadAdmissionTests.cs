@@ -161,11 +161,38 @@ public sealed partial class OperatorHostIntegrationTests
             diagnostic.At(WorkloadAdmissionCheckpoint.TrapAccept);
             var contact = trap.AcceptTcpClientAsync();
             diagnostic.At(WorkloadAdmissionCheckpoint.ScenarioSetup);
+            EnvironmentRecordId? fixtureEnvironment = null;
+            Haby.Kubernetes.KubernetesProviderConfiguration? fixtureConfiguration = null;
             var scenario = await new DurableDeploymentPlanningTests(fixture).InternalScenarioAsync(initialOnly: initial, suppliedConfiguration: async (secrets, environment) =>
             {
                 var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
                 await secrets.CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, "operator-workload-no-effects-sentinel"u8.ToArray(), default);
-                return new Haby.Kubernetes.KubernetesProviderConfiguration(new Uri("https://127.0.0.1:" + ((System.Net.IPEndPoint)trap.LocalEndpoint).Port), null, secret, null, null);
+                fixtureEnvironment = environment;
+                fixtureConfiguration = new Haby.Kubernetes.KubernetesProviderConfiguration(new Uri("https://127.0.0.1:" + ((System.Net.IPEndPoint)trap.LocalEndpoint).Port), null, secret, null, null);
+                return fixtureConfiguration;
+            }, actualKubernetesProbe: async (secrets, environment, _, configuration, token) =>
+            {
+                // Setup-only deterministic double for this invocation, not production preflight evidence.
+                token.ThrowIfCancellationRequested();
+                var expectedEnvironment = fixtureEnvironment;
+                var expectedConfiguration = fixtureConfiguration;
+                if (expectedEnvironment is null || environment != expectedEnvironment || expectedConfiguration is null ||
+                    configuration != expectedConfiguration ||
+                    !string.Equals(configuration.Endpoint.AbsoluteUri, expectedConfiguration.Endpoint.AbsoluteUri, StringComparison.Ordinal) ||
+                    expectedConfiguration.BearerToken is not { } secret)
+                    return new(ProviderPreflightOutcome.ConfigurationUnavailable);
+                using var material = await secrets.ResolveBoundedAsync(
+                    new(new SecretOwner.Environment(expectedEnvironment), SecretPurpose.ProviderAdministrator), secret, 64, token);
+                token.ThrowIfCancellationRequested();
+                if (material is null) return new(ProviderPreflightOutcome.SecretUnavailable);
+                var bytes = material.CopyBytes();
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    return new(bytes.AsSpan().SequenceEqual("operator-workload-no-effects-sentinel"u8)
+                        ? ProviderPreflightOutcome.Ready : ProviderPreflightOutcome.AuthenticationFailed);
+                }
+                finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes); }
             }, configureManifest: e => DurableDeploymentPlanningTests.ConfiguredDocuments(e), acceptGeneration: async (services, environment, reference) =>
             {
                 diagnostic.At(WorkloadAdmissionCheckpoint.AdmissionServices);
