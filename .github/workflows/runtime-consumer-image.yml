@@ -49,7 +49,10 @@ jobs:
               packageFound = true;
             } catch (error) {
               if (error.status === 404 && policy.confirmed && !input.acceptedImage) state='package-not-found';
-              else throw new Error('Package observation failed or ambiguous; no build/push authorized');
+              else {
+                const status = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? error.status : 'transport-unknown';
+                throw new Error(`Package observation stopped: operation=package-lookup; status=${status}; no build/push authorized`);
+              }
             }
             if (packageFound) {
               try {
@@ -59,7 +62,10 @@ jobs:
               if (matches.length > 1) throw new Error('Inconsistent package alias');
               state = matches.length ? 'present' : 'absent';
               if (matches.length) {digest=matches[0].name; if (!/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('Malformed package digest');}
-              } catch {throw new Error('Package version/proof observation failed; never an absence');}
+              } catch (error) {
+                const status = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? error.status : 'transport-unknown';
+                throw new Error(`Package observation stopped: operation=package-versions; status=${status}; no build/push authorized`);
+              }
             }
             if ((state === 'present') !== Boolean(input.acceptedImage)) throw new Error('Alias/accepted-proof inconsistency; no rebuild');
             if (input.acceptedImage && input.acceptedImage !== 'ghcr.io/hamstix/haby-runtime-consumer@'+digest) throw new Error('Accepted digest mismatch');

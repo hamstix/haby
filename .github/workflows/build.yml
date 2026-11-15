@@ -65,7 +65,10 @@ jobs:
 
       - name: Verify fixed consumer image identity and publication controls
         shell: pwsh
-        run: ./scripts/test-runtime-consumer-image.ps1
+        run: |
+          ./scripts/test-runtime-consumer-image.ps1
+          node ./scripts/test-runtime-consumer-registry.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Registry adapter controls failed.' }
 
       - name: Verify hosted entrypoint ownership, coverage and failure propagation
         shell: pwsh
