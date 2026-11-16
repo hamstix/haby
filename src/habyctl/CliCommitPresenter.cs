@@ -8,11 +8,14 @@ internal sealed record CliDesiredGeneration(string DeploymentId, long Generation
     string ChangeSetId, string PlanId, string AcceptedAtUtc, string TechnicalActorId,
     string EnvironmentRecordId, string EnvironmentId, CliReference Reference, CliProviderInput[] ProviderInputs, CliPlannedOperation[] Operations)
 {
+    public CliWorkloadReview? WorkloadDescription { get; init; }
     public CliReusedResource[] ReusedResources { get; init; } = [];
     public CliReusedResource[] RetainedResources { get; init; } = [];
 }
 internal sealed record CliCommitData(string StateMeaning, CliCommit? Commit,
-    CliDesiredGeneration? DesiredGeneration, long? ActualGeneration, CliGenerationProgress? Progress);
+    CliDesiredGeneration? DesiredGeneration, long? ActualGeneration, CliGenerationProgress? Progress)
+{ public CliWorkloadStage? WorkloadStage { get; init; } }
+internal sealed record CliWorkloadStage(string Submission, long? AppliedGeneration);
 
 internal static class CommitPresentation
 {
@@ -53,8 +56,9 @@ internal static class CommitPresentation
             g.ChangeSetId, g.PlanId, g.AcceptedAtUtc, g.TechnicalActorId, g.EnvironmentRecordId, g.EnvironmentId,
             g.Reference is { } r ? new(r.ApplicationRecordId, r.RevisionNumber) : throw new InvalidDataException("Missing revision."),
             PlanningPresentation.ProviderInputs(g.ProviderInputs), PlanningPresentation.Operations(g.Operations))
-        { ReusedResources = PlanningPresentation.Reuse(g.ReusedResources), RetainedResources = PlanningPresentation.Reuse(g.RetainedResources) },
-        reply.HasActualGeneration ? reply.ActualGeneration : null, GenerationPresentation.Progress(reply.Progress));
+        { WorkloadDescription = PlanningPresentation.WorkloadReview(g.WorkloadDescription), ReusedResources = PlanningPresentation.Reuse(g.ReusedResources), RetainedResources = PlanningPresentation.Reuse(g.RetainedResources) },
+        reply.HasActualGeneration ? reply.ActualGeneration : null, GenerationPresentation.Progress(reply.Progress))
+    { WorkloadStage = reply.WorkloadStage is { } stage ? new(stage.Submission, stage.HasAppliedGeneration ? stage.AppliedGeneration : null) : null };
 }
 
 internal sealed partial class CliJsonPresenter
@@ -94,10 +98,13 @@ internal sealed partial class CliTextPresenter
                 _output.WriteLine($"Reuse Resource: {resource.ResourceId}; reintroduced: {resource.Reintroduced}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}");
             foreach (var resource in g.RetainedResources)
                 _output.WriteLine($"Retain Resource: {resource.ResourceId}; management: {resource.ManagementId}; original generation: {resource.SourceGeneration}; no external deletion or drift check");
+            PrintWorkloadReview(g.WorkloadDescription);
             foreach (var provider in g.ProviderInputs) PrintProviderInput(provider);
             _output.WriteLine($"Accepted UTC: {g.AcceptedAtUtc}; technical actor: {g.TechnicalActorId}");
             _output.WriteLine("This immutable desired snapshot does not confirm applied infrastructure.");
         }
+        if (data.WorkloadStage is { } stage)
+            _output.WriteLine($"Workload submission: {stage.Submission}; AppliedGeneration: {stage.AppliedGeneration?.ToString() ?? "none"}. Readiness is not established by this snapshot; public Workload execution is unavailable.");
         PrintProgress(data.Progress);
         if (data.ActualGeneration is { } actual) _output.WriteLine($"Actual desired generation: {actual}");
         return exit;

@@ -63,13 +63,13 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
     }
 
     public ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId,
-        string actorId, CancellationToken cancellationToken) => CreatePlanCoreAsync(changeSetId, actorId, false, cancellationToken);
+        string actorId, CancellationToken cancellationToken) => CreatePlanCoreAsync(changeSetId, actorId, DeploymentAdmissionMode.ResourceOnly, cancellationToken);
 
     internal ValueTask<DurablePlanResult> CreateInternalPlanAsync(DeploymentChangeSetId id, string actor, CancellationToken token, IReadOnlyList<IInternalActionHandler>? handlers = null) =>
-        CreatePlanCoreAsync(id, actor, true, token, handlers);
+        CreatePlanCoreAsync(id, actor, DeploymentAdmissionMode.Internal, token, handlers);
 
     private async ValueTask<DurablePlanResult> CreatePlanCoreAsync(DeploymentChangeSetId changeSetId, string actorId,
-        bool internalEffects, CancellationToken cancellationToken, IReadOnlyList<IInternalActionHandler>? handlers = null)
+        DeploymentAdmissionMode mode, CancellationToken cancellationToken, IReadOnlyList<IInternalActionHandler>? handlers = null)
     {
         ArgumentNullException.ThrowIfNull(changeSetId);
         ValidateActor(actorId);
@@ -102,6 +102,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
+        var internalEffects = mode == DeploymentAdmissionMode.Internal || mode == DeploymentAdmissionMode.Operator && spec.Components.Values.Any(x => x.Workloads.Count > 0);
         if (!internalEffects && !DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
         if (internalEffects && (!spec.Components.Values.Any(x => x.Workloads.Count > 0) ||
             baseline is null && (!row.ExpectedAbsence || spec.Resources.Count != 0) || baseline is not null && spec.Resources.Count == 0))
@@ -181,6 +182,9 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         if (internalEffects && (graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
             graph.ReusedResources.Count != spec.Resources.Count)) return new(DurablePlanStatus.UnsupportedShape);
+        if (mode == DeploymentAdmissionMode.Operator && internalEffects &&
+            !await OperatorWorkloadShapeAsync(context, row, baseline, inputs, graph, cancellationToken))
+            return new(DurablePlanStatus.UnsupportedShape);
         var id = DeploymentPlanId.New();
         var createdAt = clock.GetUtcNow();
         var planRow = new DurablePlanRow

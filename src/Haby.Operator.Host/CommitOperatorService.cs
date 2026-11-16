@@ -19,7 +19,7 @@ public sealed partial class ManifestOperatorService
         }
         catch (ArgumentException) { return CommitResult(CommitStatus.InvalidRequest); }
         // The committer alone owns retry ordering, pinned inputs, locks and the transaction.
-        var result = await committer.CommitAsync(change, plan, Actor,
+        var result = await deploymentAdmission.CommitAsync(change, plan, Actor,
             context.CancellationToken);
         if (result is DurableCommitResult.Committed)
         {
@@ -64,7 +64,7 @@ public sealed partial class ManifestOperatorService
         // Project the exact accepted graph, never current aliases or a newly calculated Plan.
         var generation = await committer.FindGenerationAsync(saved.DeploymentId, saved.Generation, cancellationToken)
             ?? throw new InvalidOperationException("Committed desired generation was not found.");
-        return new CommitReply { Status = status, Commit = Summary(saved), DesiredGeneration = Summary(generation) };
+        return new CommitReply { Status = status, Commit = Summary(saved), DesiredGeneration = await GenerationSummaryAsync(generation, cancellationToken), WorkloadStage = await StageSummaryAsync(generation, cancellationToken) };
     }
 
     public override async Task<CommitReply> GetGeneration(GenerationRequest request, ServerCallContext context)
@@ -83,7 +83,8 @@ public sealed partial class ManifestOperatorService
             : new CommitReply
             {
                 Status = CommitStatus.Found,
-                DesiredGeneration = Summary(saved),
+                DesiredGeneration = await GenerationSummaryAsync(saved, context.CancellationToken),
+                WorkloadStage = await StageSummaryAsync(saved, context.CancellationToken),
                 Progress = await OperationCall(async () =>
                 {
                     var progress = await generationRunner.ProgressAsync(id, generation, context.CancellationToken);
@@ -104,7 +105,25 @@ public sealed partial class ManifestOperatorService
         TechnicalActorId = value.ActorId
     };
 
-    private DesiredGenerationSummary Summary(DurableDesiredGeneration value)
+    private async Task<WorkloadAcceptanceStage?> StageSummaryAsync(DurableDesiredGeneration value, CancellationToken token)
+    {
+        var stage = value.Inputs.Providers.Entries.Keys.Any(x => x is ProviderInput.Workload)
+            ? await deploymentAdmission.ReadStageAsync(value.DeploymentId, value.Generation, token) : null;
+        if (stage is null) return null;
+        var result = new WorkloadAcceptanceStage
+        {
+            Submission = stage.Submission switch
+            {
+                OperatorWorkloadSubmission.NotSubmitted => "notSubmitted",
+                OperatorWorkloadSubmission.Unknown => "unknown",
+                _ => throw new InvalidDataException("Unsupported submission summary.")
+            }
+        };
+        if (stage.AppliedGeneration is { } applied) result.AppliedGeneration = applied;
+        return result;
+    }
+
+    private async Task<DesiredGenerationSummary> GenerationSummaryAsync(DurableDesiredGeneration value, CancellationToken token)
     {
         var summary = new DesiredGenerationSummary
         {
@@ -119,6 +138,7 @@ public sealed partial class ManifestOperatorService
             EnvironmentId = value.Inputs.EnvironmentKey.Value,
             Reference = Reference(value.Inputs.Revision),
         };
+        summary.WorkloadDescription = await WorkloadSummaryAsync(value.Inputs, token);
         summary.ProviderInputs.AddRange(ProviderInputSummaries(value.Inputs));
         summary.Operations.AddRange(OperationSummaries(value.Graph));
         var names = descriptions.Targets(value.Inputs, value.Graph);

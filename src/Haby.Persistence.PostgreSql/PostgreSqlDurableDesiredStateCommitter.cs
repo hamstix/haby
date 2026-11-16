@@ -14,13 +14,16 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
     TimeProvider clock) : IDurableDesiredStateCommitter
 {
     public ValueTask<DurableCommitResult> CommitAsync(DeploymentChangeSetId changeSetId,
-        DeploymentPlanId planId, string actorId, CancellationToken cancellationToken) => CommitCoreAsync(changeSetId, planId, actorId, false, cancellationToken);
+        DeploymentPlanId planId, string actorId, CancellationToken cancellationToken) => CommitCoreAsync(changeSetId, planId, actorId, DeploymentAdmissionMode.ResourceOnly, cancellationToken);
 
     internal ValueTask<DurableCommitResult> CommitInternalAsync(DeploymentChangeSetId change, DeploymentPlanId plan, string actor, CancellationToken token, IReadOnlyList<IInternalActionHandler>? handlers = null) =>
-        CommitCoreAsync(change, plan, actor, true, token, handlers);
+        CommitCoreAsync(change, plan, actor, DeploymentAdmissionMode.Internal, token, handlers);
+
+    internal ValueTask<DurableCommitResult> CommitOperatorAsync(DeploymentChangeSetId change, DeploymentPlanId plan, string actor, CancellationToken token, IReadOnlyList<IInternalActionHandler> handlers) =>
+        CommitCoreAsync(change, plan, actor, DeploymentAdmissionMode.Operator, token, handlers);
 
     private async ValueTask<DurableCommitResult> CommitCoreAsync(DeploymentChangeSetId changeSetId,
-        DeploymentPlanId planId, string actorId, bool internalEffects, CancellationToken cancellationToken, IReadOnlyList<IInternalActionHandler>? handlers = null)
+        DeploymentPlanId planId, string actorId, DeploymentAdmissionMode mode, CancellationToken cancellationToken, IReadOnlyList<IInternalActionHandler>? handlers = null)
     {
         ArgumentNullException.ThrowIfNull(changeSetId);
         ArgumentNullException.ThrowIfNull(planId);
@@ -44,17 +47,26 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         await context.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", cancellationToken);
 
+        var internalEffects = mode == DeploymentAdmissionMode.Internal;
         var prior = await context.ChangeSetCommits.AsNoTracking()
             .SingleOrDefaultAsync(row => row.ChangeSetId == changeId, cancellationToken);
         if (prior is not null)
         {
             var accepted = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == prior.DeploymentId && x.Generation == prior.Generation, cancellationToken);
+            if (mode == DeploymentAdmissionMode.Operator)
+            {
+                var original = await context.DurablePlans.AsNoTracking().SingleOrDefaultAsync(x => x.Id == prior.PlanId, cancellationToken);
+                if (!OperatorReplayMatches(change, prior, original, accepted))
+                    return new DurableCommitResult.PlanInputUnavailable();
+                internalEffects = accepted.InternalEffects;
+            }
             return accepted.InternalEffects == internalEffects ? new DurableCommitResult.Committed(ToCommit(prior)) : new DurableCommitResult.UnsupportedShape();
         }
 
         var plan = await context.DurablePlans.AsNoTracking()
             .SingleOrDefaultAsync(row => row.Id == requestedPlanId, cancellationToken);
         if (plan is null) return new DurableCommitResult.PlanNotFound();
+        if (mode == DeploymentAdmissionMode.Operator) internalEffects = plan.InternalEffects;
         if (plan.InternalEffects != internalEffects) return new DurableCommitResult.UnsupportedShape();
         if (plan.ChangeSetId != changeId) return new DurableCommitResult.PlanDoesNotBelongToChangeSet();
         // The closure insert takes a foreign-key KEY SHARE lock on this Plan;
@@ -189,6 +201,11 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
 
+        if (mode == DeploymentAdmissionMode.Operator && internalEffects &&
+            (!await planner.OperatorWorkloadShapeAsync(context, change, actual, inputs, graph, cancellationToken) ||
+            !await PostgreSqlDurableDeploymentPlanner.ValidateOperatorPinsAsync(context, plan.Id, inputs, cancellationToken)))
+            return new DurableCommitResult.UnsupportedShape();
+
         cancellationToken.ThrowIfCancellationRequested();
         var deploymentId = actual is null ? ApplicationDeploymentId.New() : ApplicationDeploymentId.Parse(actual.Id.ToString());
         var deploymentGuid = Guid.Parse(deploymentId.ToString());
@@ -305,6 +322,32 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         return new(deploymentId, generation, DesiredPresence.Present, inputs, DeploymentPlanId.Parse(row.PlanId.ToString()),
             DeploymentChangeSetId.Parse(row.ChangeSetId.ToString()), row.AcceptedAt, row.ActorId)
         { Graph = graph };
+    }
+
+    // Pure retained-receipt policy; the transaction still owns all catalog reads and retry ordering.
+    internal static bool OperatorReplayMatches(DurableChangeSetRow change, ChangeSetCommitRow prior, DurablePlanRow? original, DeploymentGenerationRow accepted)
+    {
+        if (original is null || original.Id != prior.PlanId || original.ChangeSetId != change.Id || prior.ChangeSetId != change.Id ||
+            accepted.DeploymentId != prior.DeploymentId || accepted.Generation != prior.Generation || accepted.Presence != nameof(DesiredPresence.Present) ||
+            original.EnvironmentRecordId != change.EnvironmentRecordId || original.ApplicationRecordId != change.ApplicationRecordId || original.RevisionNumber != change.RevisionNumber ||
+            accepted.EnvironmentRecordId != change.EnvironmentRecordId || accepted.ApplicationRecordId != change.ApplicationRecordId || accepted.RevisionNumber != change.RevisionNumber ||
+            original.InternalEffects != accepted.InternalEffects || original.SnapshotFormatVersion != accepted.SnapshotFormatVersion || original.EnvironmentKey != accepted.EnvironmentKey ||
+            original.ProviderInputsJson != accepted.ProviderInputsJson || original.ConfigurationJson != accepted.ConfigurationJson) return false;
+        if (accepted.ChangeSetId == change.Id && accepted.PlanId == prior.PlanId)
+            return accepted.ActorId == prior.ActorId && accepted.AcceptedAt == prior.CommittedAt &&
+                accepted.Fingerprint == original.Fingerprint && accepted.GraphJson == original.GraphJson;
+        // A Resource-only no-op has its OWN immutable receipt and Plan, pointing to
+        // an older generation. Its actor/time must never replace that generation's creation audit.
+        // No Workload no-op authority is introduced; historical replay does not check live aliases.
+        if (accepted.InternalEffects || accepted.ChangeSetId == change.Id || accepted.PlanId == prior.PlanId ||
+            change.ExpectedAbsence || change.ExpectedGeneration != prior.Generation) return false;
+        try
+        {
+            var graph = DurableOperationGraphCodec.Decode(original.GraphJson);
+            return graph.Nodes.Count == 0 && graph.Baseline is { } baseline &&
+                baseline.Deployment.ToString() == prior.DeploymentId.ToString() && baseline.Generation == prior.Generation && baseline.Fingerprint == accepted.Fingerprint;
+        }
+        catch (InvalidDataException) { return false; }
     }
 
     private static DurableChangeSetCommit ToCommit(ChangeSetCommitRow row) => new(

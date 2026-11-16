@@ -39,6 +39,12 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             'durable-entry'='';'catalog-init-start'='durable-entry';'catalog-init-completed'='catalog-init-start'
             'namespace-create-start'='catalog-init-completed';'namespace-create-completed'='namespace-create-start'
             'durable-suite-start'='namespace-create-completed';'runtime-auth-start'='durable-suite-start'
+            'workload-actions-start'='durable-suite-start';'workload-actions-completed'='workload-actions-start'
+            'accepted-setup-start'='workload-actions-start';'accepted-setup-completed'='accepted-setup-start'
+            'restore-start'='durable-suite-start';'restore-completed'='restore-start'
+            'identity-actions-start'='workload-actions-completed';'identity-actions-completed'='identity-actions-start'
+            'runtime-setup-start'='identity-actions-start';'runtime-setup-completed'='runtime-setup-start'
+            'mixed-baseline-prepared'='mixed-delivery-start'
             'runtime-auth-completed'='runtime-auth-start'
             'runtime-final-revoke-start'='runtime-auth-completed';'runtime-final-revoke-completed'='runtime-final-revoke-start'
             'runtime-final-history-start'='runtime-final-revoke-completed';'runtime-final-history-completed'='runtime-final-history-start'
@@ -56,7 +62,9 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $records=[Collections.Generic.List[string]]::new()
         $previousElapsed=0L; $authStarts=0; $authCompleted=0; $authOpen=$false; $postAuthPhase=0; $candidateDisposals=0
-        $repeat=@('runtime-auth-start','runtime-auth-completed','runtime-final-revoke-start','runtime-final-revoke-completed',
+        $setupOpen=@{'accepted-setup'=$false;'restore'=$false;'runtime-setup'=$false}
+        $setupCounts=@{'accepted-setup'=0;'restore'=0;'runtime-setup'=0}
+        $repeat=@('accepted-setup-start','accepted-setup-completed','restore-start','restore-completed','runtime-setup-start','runtime-setup-completed','runtime-auth-start','runtime-auth-completed','runtime-final-revoke-start','runtime-final-revoke-completed',
             'runtime-final-history-start','runtime-final-history-completed','runtime-final-authorization-start','runtime-final-authorization-completed',
             'runtime-candidate-dispose-start','runtime-candidate-dispose-completed','runtime-candidate-dispose-failed')
         for($i=0;$i -lt $lines.Length-1;$i++){
@@ -69,6 +77,26 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             if(!$requires.ContainsKey($id) -or ($requires[$id] -and !$seen.Contains($requires[$id])) -or
                 ($seen.Contains($id) -and $id -cnotin $repeat) -or
                 ($i -eq 0 -and $id -cne 'durable-entry')){return Result 'invalid'}
+            if(($id -ceq 'workload-actions-start' -and $seen.Contains('runtime-auth-start')) -or
+                ($id -ceq 'mixed-baseline-prepared' -and $seen.Contains('mixed-preparation-completed'))){return Result 'invalid'}
+            foreach($boundary in @('accepted-setup','restore','runtime-setup')){
+                if($id -ceq ($boundary+'-start')){
+                    if($setupOpen.Values -contains $true -or $setupCounts[$boundary] -ge 16){return Result 'invalid'}
+                    if(($boundary -ceq 'accepted-setup' -and $seen.Contains('workload-actions-completed')) -or
+                        ($boundary -ceq 'runtime-setup' -and $seen.Contains('identity-actions-completed')) -or
+                        ($boundary -ceq 'restore' -and $seen.Contains('identity-actions-completed'))){return Result 'invalid'}
+                    if($boundary -ceq 'restore' -and
+                        !(($seen.Contains('workload-actions-start') -and !$seen.Contains('workload-actions-completed')) -or
+                          ($seen.Contains('identity-actions-start') -and !$seen.Contains('identity-actions-completed')))){return Result 'invalid'}
+                    $setupOpen[$boundary]=$true; $setupCounts[$boundary]++
+                }elseif($id -ceq ($boundary+'-completed')){
+                    if(!$setupOpen[$boundary]){return Result 'invalid'}
+                    $setupOpen[$boundary]=$false
+                }
+            }
+            if($id -cin @('workload-actions-completed','identity-actions-start','identity-actions-completed','runtime-auth-start') -and
+                $setupOpen.Values -contains $true){return Result 'invalid'}
+            if($id -ceq 'runtime-auth-start' -and $seen.Contains('workload-actions-start') -and !$seen.Contains('identity-actions-completed')){return Result 'invalid'}
             if($id -ceq 'runtime-auth-start'){
                 if($authOpen -or $authStarts -ge 2 -or $postAuthPhase -notin @(0,1) -or ($authStarts -eq 1 -and !$seen.Contains('initial-delivery-start'))){return Result 'invalid'}
                 $authStarts++; $authOpen=$true; $postAuthPhase=0
