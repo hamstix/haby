@@ -6,6 +6,13 @@ namespace Haby.Persistence.PostgreSql;
 
 internal sealed partial class InternalDurableActions
 {
+    internal async Task RequireConfirmedSubmissionAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token)
+    {
+        var loaded = await LoadAsync(db, key, token);
+        if (loaded.Operation.State != nameof(DurableOperationState.Succeeded)) throw new InvalidDataException("Confirmed submission required.");
+        _ = await TerminalAsync(db, loaded, token); // Immutable catalog-only confirmation, never current rights or live API.
+    }
+
     internal async Task RequireSubmissionSupportAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
         IReadOnlyDictionary<ProviderInput.Workload, IReadOnlyList<ManifestLocalId>> selection, string deploymentAction, string identityAction, CancellationToken token)
     {

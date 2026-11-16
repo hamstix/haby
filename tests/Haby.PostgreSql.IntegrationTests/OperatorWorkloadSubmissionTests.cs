@@ -23,8 +23,18 @@ public sealed partial class DurableDeploymentPlanningTests
     {
         var deployment = new ConfiguredSubmissionFixture { LoseResponse = lost };
         var identity = new IdentityFixture();
+        var mixedRecipients = initial && configured && !lost && !concurrent;
         var scenario = await InternalScenarioAsync(initialOnly: initial,
-            configureManifest: configured ? e => ConfiguredDocuments(e, secondDocument: true) : null,
+            configureManifest: configured ? e =>
+            {
+                ConfiguredDocuments(e, secondDocument: true);
+                if (mixedRecipients)
+                {
+                    var workloads = e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!;
+                    workloads["z-plain"] = workloads["main"]!.DeepClone();
+                    workloads["z-plain"]!["properties"]!.AsObject().Remove("configuration");
+                }
+            } : null,
             acceptGeneration: async (services, environment, reference) =>
             {
                 var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
@@ -100,8 +110,14 @@ public sealed partial class DurableDeploymentPlanningTests
                         ["deployment", "generation", "submit", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)]));
                     Assert.Equal("submitted", native.RootElement.GetProperty("outcome"u8).GetString());
                 }
-                Assert.Equal(lost ? "revoked" : configured ? "available" : "notApplicable", Assert.Single(replay.Progress.Members).RuntimeAuthority);
-                Assert.Equal(1, deployment.Writes); Assert.Equal(configured ? 1 : 0, identity.Writes);
+                Assert.Equal(lost ? "revoked" : configured ? "available" : "notApplicable", replay.Progress.Members.Single(x => x.Workload == "main").RuntimeAuthority);
+                Assert.Equal(mixedRecipients ? 2 : 1, deployment.Writes); Assert.Equal(configured ? 1 : 0, identity.Writes);
+                if (mixedRecipients)
+                {
+                    var plain = replay.Progress.Members.Single(x => x.Workload == "z-plain");
+                    Assert.Equal("notApplicable", plain.Documents); Assert.Equal("notApplicable", plain.Identity);
+                    Assert.Equal("notApplicable", plain.Publication); Assert.Equal("notApplicable", plain.RuntimeAuthority);
+                }
                 Assert.Equal(0, deployment.ReadinessReads);
                 var get = await freshClient.GetGenerationAsync(request);
                 Assert.Equal(replay.Progress, get.WorkloadSubmission);
@@ -123,4 +139,117 @@ public sealed partial class DurableDeploymentPlanningTests
             });
         Assert.NotNull(scenario.Commit);
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Operator_submit_refuses_missing_or_corrupt_first_receipt_without_accepting_or_dispatching_second(bool corrupt)
+    {
+        var deployment = new ConfiguredSubmissionFixture();
+        var identity = new IdentityFixture();
+        var interrupt = true;
+        await InternalScenarioAsync(initialOnly: true, configureManifest: envelope =>
+        {
+            var workloads = envelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!;
+            workloads["z-last"] = workloads["main"]!.DeepClone();
+        }, acceptGeneration: async (services, environment, reference) =>
+        {
+            var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+            string connection, environmentKey;
+            await using (var read = await factory.CreateDbContextAsync())
+            {
+                connection = read.Database.GetConnectionString()!;
+                environmentKey = (await read.Environments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(environment.ToString()))).EnvironmentId;
+            }
+            await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"],
+                collection => collection.AddSingleton<InternalDurableActions>(p => new(p.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+                    [deployment, identity], p.GetServices<IProviderConfigurationCodec>(), p.GetServices<IExternalOperationOutputContract>(),
+                    p.GetRequiredService<DurableActionAdmission>(), p.GetRequiredService<DurableOperationSerialization>(), p.GetRequiredService<TimeProvider>(),
+                    fault: point => { if (point == InternalActionFault.AfterCompletionCommit && interrupt) { interrupt = false; throw new IOException("Controlled confirmed-prefix interruption."); } },
+                    configurationPreparation: p.GetRequiredService<InternalWorkloadConfiguration>())));
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+            using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+            var client = OperatorTestCredentials.Client(channel);
+            var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest { EnvironmentId = environmentKey,
+                Reference = new() { ApplicationRecordId = reference.ApplicationRecordId.ToString(), RevisionNumber = reference.RevisionNumber.Value },
+                Precondition = PlanningPrecondition.ExpectedAbsence })).ChangeSet;
+            var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId });
+            var commit = await client.CommitDesiredStateAsync(new() { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId });
+            Assert.Equal(CommitStatus.Committed, commit.Status);
+            var request = new GenerationRequest { DeploymentId = commit.Commit.DeploymentId, Generation = commit.Commit.Generation };
+            var partial = await client.SubmitGenerationAsync(request);
+            Assert.Equal("unavailable", partial.Outcome);
+            Assert.Equal("confirmed", partial.Progress.Members.Single(x => x.Workload == "main").Submission);
+            Assert.Equal("notAttempted", partial.Progress.Members.Single(x => x.Workload == "z-last").Submission);
+            Assert.Equal(1, deployment.Writes);
+            await using (var arrange = await factory.CreateDbContextAsync())
+            {
+                var first = await arrange.ActionIntents.AsNoTracking().SingleAsync(x => x.LocalId == "main");
+                var output = arrange.OperationOutputs.Where(x => x.DeploymentId == first.DeploymentId && x.Generation == first.Generation && x.OperationId == first.OperationId);
+                if (corrupt) Assert.Equal(1, await output.ExecuteUpdateAsync(x => x.SetProperty(row => row.Payload, "corrupt-confirmation")));
+                else Assert.Equal(1, await output.ExecuteDeleteAsync());
+            }
+            async Task<string[]> Snapshot()
+            {
+                await using var read = await factory.CreateDbContextAsync();
+                var intents = await read.ActionIntents.AsNoTracking().ToArrayAsync();
+                var operations = await read.DurableOperations.AsNoTracking().ToArrayAsync();
+                var attempts = await read.DurableOperationAttempts.AsNoTracking().ToArrayAsync();
+                var observations = await read.ActionObservations.AsNoTracking().ToArrayAsync();
+                var outputs = await read.OperationOutputs.AsNoTracking().ToArrayAsync();
+                return [.. intents.Select(x => $"intent:{x.OperationId}:{x.Marker}:{x.Actor}"),
+                    .. operations.Select(x => $"operation:{x.OperationId}:{x.State}:{x.CurrentAttemptId}:{x.AttemptNumber}:{x.DispatchedAt}:{x.FinalizedAt}"),
+                    .. attempts.Select(x => $"attempt:{x.AttemptId}:{x.Outcome}:{x.Actor}:{x.DispatchedAt}"),
+                    .. observations.Select(x => $"observation:{x.Id}:{x.Ordinal}:{x.Confirmed}:{x.Actor}"),
+                    .. outputs.Select(x => $"output:{x.OperationId}:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(x.Payload)))}")];
+            }
+            var damaged = await Snapshot();
+            Assert.Equal("unknown", (await client.GetGenerationAsync(request)).WorkloadSubmission.Submission);
+            var refused = await client.SubmitGenerationAsync(request);
+            Assert.Equal("stopped", refused.Outcome); Assert.True(refused.RequiresInspection);
+            Assert.Equal("unknown", refused.Progress.Submission);
+            Assert.Equal(1, deployment.Writes); Assert.Equal(0, deployment.ReadinessReads);
+            Assert.Equal(damaged.Order(StringComparer.Ordinal), (await Snapshot()).Order(StringComparer.Ordinal));
+            await using (var verify = await factory.CreateDbContextAsync())
+            {
+                Assert.Single(await verify.ActionIntents.AsNoTracking().ToArrayAsync());
+                Assert.Single(await verify.ManagedWorkloads.AsNoTracking().ToArrayAsync());
+                Assert.Empty(await verify.ActionIntents.AsNoTracking().Where(x => x.LocalId == "z-last").ToArrayAsync());
+                Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().Where(x => x.Stage == "WorkloadsSubmitted").ToArrayAsync());
+                Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            }
+            return new(DeploymentChangeSetId.Parse(commit.Commit.ChangeSetId), DeploymentPlanId.Parse(commit.Commit.PlanId), ApplicationDeploymentId.Parse(request.DeploymentId),
+                DeploymentGeneration.Create(request.Generation), DateTimeOffset.Parse(commit.Commit.CommittedAtUtc), commit.Commit.TechnicalActorId);
+        });
+    }
+
+    [Fact]
+    public async Task Operator_submit_request_budget_expires_while_waiting_for_generation_gate_without_starting_work()
+    {
+        var scenario = await InternalScenarioAsync(initialOnly: true);
+        await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
+            "--Haby:Tls:Enabled=false", "--Haby:Port=0", "--Haby:WorkloadSubmission:RequestMilliseconds=10"]);
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = host.Services.GetRequiredService<DurableOperationSerialization>();
+        var held = gate.RunAsync(new(scenario.Commit.DeploymentId, scenario.Commit.Generation, OperationId.Create("budget-test")), async () =>
+        { entered.TrySetResult(); await release.Task; return true; }, default).AsTask();
+        try
+        {
+            await entered.Task;
+            using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+            var reply = await OperatorTestCredentials.Client(channel).SubmitGenerationAsync(new GenerationRequest
+            { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = scenario.Commit.Generation.Value }, deadline: DateTime.UtcNow.AddSeconds(30));
+            Assert.Equal("cancelled", reply.Outcome); Assert.True(reply.RequiresInspection);
+            var factory = host.Services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+            await using var verify = await factory.CreateDbContextAsync();
+            Assert.Empty(await verify.ActionIntents.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await verify.DurableOperationAttempts.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().ToArrayAsync());
+            Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        }
+        finally { release.TrySetResult(); await held; await host.StopAsync(); }
+    }
+
 }

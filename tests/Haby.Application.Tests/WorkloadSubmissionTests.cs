@@ -41,7 +41,17 @@ public sealed class WorkloadSubmissionTests
         Assert.True(result.RequiresInspection);
         Assert.Equal("Documents", steps.Calls.Last());
     }
-    private sealed class Steps(string? failure, bool complete = false, CancellationTokenSource? cancel = null) : IWorkloadSubmissionSteps
+    [Fact]
+    public async Task Unknown_saved_proof_stops_before_any_new_preparation_after_dispatched_recovery()
+    {
+        var steps = new Steps(null, submission: "unknown");
+        var result = await new SubmitWorkloadGeneration(steps).ExecuteAsync(default);
+        Assert.Equal(new[] { "Inspection", "Recovery" }, steps.Calls);
+        Assert.Equal("stopped", result.Outcome);
+        Assert.Equal("unknown", result.Progress!.Submission);
+        Assert.True(result.RequiresInspection);
+    }
+    private sealed class Steps(string? failure, bool complete = false, CancellationTokenSource? cancel = null, string? submission = null) : IWorkloadSubmissionSteps
     {
         public List<string> Calls { get; } = [];
         private ValueTask<WorkloadSubmissionStep> Call(string stage)
@@ -54,7 +64,7 @@ public sealed class WorkloadSubmissionTests
         public ValueTask<WorkloadSubmissionStep> RecoverAsync(CancellationToken token) => Call("Recovery");
         public ValueTask<WorkloadSubmissionStep> PrepareAsync(WorkloadSubmissionStage stage, CancellationToken token) => Call(stage.ToString());
         public ValueTask<WorkloadSubmissionProgress> ReadAsync(CancellationToken token) => ValueTask.FromResult(new WorkloadSubmissionProgress(
-            Guid.NewGuid().ToString(), 1, 1, null, complete ? "submitted" : "partial", null, complete ? Guid.NewGuid() : null,
+            Guid.NewGuid().ToString(), 1, 1, null, submission ?? (complete ? "submitted" : "partial"), null, complete ? Guid.NewGuid() : null,
             [new("api", "main", "prepared", "confirmed", "published", complete ? "confirmed" : "notAttempted", "revoked")]));
     }
 }

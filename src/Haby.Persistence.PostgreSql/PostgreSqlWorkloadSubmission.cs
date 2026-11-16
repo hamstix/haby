@@ -149,7 +149,11 @@ internal sealed class PostgreSqlWorkloadSubmission(IDbContextFactory<ManifestCat
                             if (existing is not null)
                             {
                                 var state = await db.DurableOperations.AsNoTracking().SingleAsync(x => x.DeploymentId == existing.DeploymentId && x.Generation == existing.Generation && x.OperationId == existing.OperationId, token);
-                                if (state.State == "Succeeded") continue; // Validated by catalog-only whole-set projection.
+                                if (state.State == "Succeeded")
+                                {
+                                    await owner.Actions.RequireConfirmedSubmissionAsync(db, Key(existing.OperationId), token);
+                                    continue;
+                                }
                             }
                             request = existing?.RequestId ?? "submit-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("v1|" + subject.Component.Value + "|" + subject.Id.Value)));
                         }

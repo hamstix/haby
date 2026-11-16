@@ -37,7 +37,10 @@ operation identifiers and current runtime authority. Unvisited work is notAttemp
 pending or uncertain effects are distinct from confirmed historical results.
 Complete submitted requires the saved evidence-bearing WorkloadsSubmitted checkpoint
 and validated confirmation for the complete accepted target set. It never means a
-successful prefix, Kubernetes readiness or business health. AppliedGeneration stays
+successful prefix, Kubernetes readiness or business health. Unknown/invalid saved
+confirmation proof stops mutation before any new preparation or effect; GET may
+still return a safe unknown projection. Skipping confirmed work validates its
+original immutable receipt rather than trusting a Succeeded state label. AppliedGeneration stays
 null or at its previous value. Public wait/resume, retirement and batch observation
 are separate future slices; no background worker continues this request.
 

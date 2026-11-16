@@ -19,6 +19,7 @@ using k8s.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 internal static class ConfiguredDeploymentCases
 {
@@ -97,9 +98,12 @@ internal static class ConfiguredDeploymentCases
                     await OperatorTestCredentials.StartWithIssuedOperatorAsync(admission);
                     using var channel = GrpcChannel.ForAddress(admission.Urls.Single());
                     var client = OperatorTestCredentials.Client(channel);
-                    var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest { EnvironmentId = key,
+                    var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest
+                    {
+                        EnvironmentId = key,
                         Reference = new() { ApplicationRecordId = reference.ApplicationRecordId.ToString(), RevisionNumber = reference.RevisionNumber.Value },
-                        Precondition = PlanningPrecondition.ExpectedAbsence }, cancellationToken: token)).ChangeSet;
+                        Precondition = PlanningPrecondition.ExpectedAbsence
+                    }, cancellationToken: token)).ChangeSet;
                     var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId }, cancellationToken: token);
                     var committed = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId }, cancellationToken: token);
                     if (committed.Status != CommitStatus.Committed) throw new InvalidOperationException("Operator qualification acceptance refused.");
@@ -149,11 +153,13 @@ internal static class ConfiguredDeploymentCases
                 }, token);
             }
             Microsoft.AspNetCore.Builder.WebApplication? activeHost = null;
+            using var firstSubmissionAudit = new SubmissionAuditProbe();
             async Task WithHost(Func<Task> work)
             {
                 await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
                     "--Haby:ListenAddress=0.0.0.0", "--Haby:Port=" + port, "--Haby:Tls:CertificatePath=" + certificatePath], collection =>
                 {
+                    collection.AddSingleton<ILoggerProvider>(firstSubmissionAudit);
                     collection.AddSingleton<InternalDurableActions>(_ => actions);
                     collection.RemoveAll<IRuntimeAuthenticator>();
                     collection.AddSingleton<IRuntimeAuthenticator>(p => new KubernetesRuntimeAuthenticator(p.GetRequiredService<ISecretStore>(), (connection, handlers, ct) =>
@@ -198,7 +204,25 @@ internal static class ConfiguredDeploymentCases
                 var client = OperatorTestCredentials.Client(channel);
                 var request = new GenerationRequest { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = scenario.Commit.Generation.Value };
                 loseIdentityConfirmation = true;
-                var partial = await client.SubmitGenerationAsync(request, cancellationToken: token);
+                WorkloadSubmissionReply partial;
+                var firstStatus = Grpc.Core.StatusCode.Unknown;
+                firstSubmissionAudit.Begin();
+                try
+                {
+                    partial = await client.SubmitGenerationAsync(request, cancellationToken: token);
+                    firstStatus = Grpc.Core.StatusCode.OK;
+                }
+                catch (Grpc.Core.RpcException failure)
+                {
+                    firstStatus = Enum.IsDefined(failure.StatusCode) ? failure.StatusCode : Grpc.Core.StatusCode.Unknown;
+                    throw;
+                }
+                finally
+                {
+                    firstSubmissionAudit.End();
+                    Console.WriteLine("Diagnostic configured first-submit-status: " + firstStatus);
+                    Console.WriteLine("Diagnostic configured first-submit-audit-started: " + (firstSubmissionAudit.Started ? "true" : "false"));
+                }
                 Check(partial.Outcome == "unavailable" && partial.Progress.Members.Single().Documents == "prepared", "C01-exact-two-documents-prepared");
                 Check(partial.Progress.Members.Single().Identity == "confirmed", "C02-confirmed-stable-identity");
                 await AdmissionRefuses("missing-publication");
@@ -301,6 +325,25 @@ internal static class ConfiguredDeploymentCases
             if (cleanup.Count > 0) throw new AggregateException(primary is null ? cleanup : [primary, .. cleanup]);
         }
     }
+    // Attached only to the submission Host; active only around its exact first SubmitGeneration call.
+    // State, formatted messages, exception details, headers and credentials are never inspected.
+    private sealed class SubmissionAuditProbe : ILoggerProvider, ILogger
+    {
+        private int active, started;
+        internal bool Started => Volatile.Read(ref started) != 0;
+        internal void Begin() { Volatile.Write(ref started, 0); Volatile.Write(ref active, 1); }
+        internal void End() => Volatile.Write(ref active, 0);
+        public ILogger CreateLogger(string categoryName) => categoryName == "Haby.Operator.Host.ManifestOperatorService"
+            ? this : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (eventId.Id == 2290 && Volatile.Read(ref active) != 0) Interlocked.Exchange(ref started, 1);
+        }
+        public void Dispose() { }
+    }
+
     private static string ConfigurationJson(RuntimeConfiguration value)
     {
         // Reuse the canonical neutral bootstrap writer to obtain the same closed configuration fields.

@@ -46,6 +46,9 @@ internal sealed class SubmitWorkloadGeneration(IWorkloadSubmissionSteps steps)
             if (result.Reason is not null) return await Stop(result);
             var saved = await steps.ReadAsync(token);
             if (saved.Submission == "submitted") return new("submitted", saved);
+            // Safe read projection is not mutation authority. Unknown proof blocks all NEW stages.
+            if (saved.Submission is not ("partial" or "notSubmitted"))
+                return new("stopped", saved, stage, Reason: "submission-proof-unavailable", RequiresInspection: true);
             foreach (var next in Enum.GetValues<WorkloadSubmissionStage>())
             {
                 stage = next.ToString(); token.ThrowIfCancellationRequested();

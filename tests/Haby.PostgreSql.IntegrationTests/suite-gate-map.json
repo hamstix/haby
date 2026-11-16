@@ -4,8 +4,8 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 78,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1093,
-  "currentFast": 1694,
+  "currentPostgresql": 1096,
+  "currentFast": 1695,
   "currentKubernetesApiObjects": 24,
   "currentKubernetesDurableActions": 36,
   "currentKubernetesProviderAccess": 10,
@@ -3089,6 +3089,10 @@
     {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_uses_real_acceptance_durable_pipeline_and_independent_Hosts","case":"ffeb6378e72051b8aa16c1ccb3a8f645aa8f84fd13dadb5881a245e6fb16cdf4","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229":true},
     {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_uses_real_acceptance_durable_pipeline_and_independent_Hosts","case":"48574e77e3605ee2f6695a30f8f28ab037b8676defee9cf33bb9e5ac4196497d","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229":true},
     {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_uses_real_acceptance_durable_pipeline_and_independent_Hosts","case":"5ae9018a346ae2321ee245995d9f7f333ee2fc5bb16da2c9a7383eee0d910fa9","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229":true},
-    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_uses_real_acceptance_durable_pipeline_and_independent_Hosts","case":"cfde393f1ba600556597432eb246a252b9642b68a356540659823c8ae3bcc14b","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229":true}
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_uses_real_acceptance_durable_pipeline_and_independent_Hosts","case":"cfde393f1ba600556597432eb246a252b9642b68a356540659823c8ae3bcc14b","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229":true},
+    {"method":"Haby.Application.Tests.WorkloadSubmissionTests.Unknown_saved_proof_stops_before_any_new_preparation_after_dispatched_recovery","case":"ccea3733e18a1ee879e69f1ae3c50f2ab1e3e6b1b9043c329a59fe14f602f0a6","suite":"fast","gate":"validate","trigger":"every-change","addedFor229R1":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_refuses_missing_or_corrupt_first_receipt_without_accepting_or_dispatching_second","case":"7e24b0f2650225a63b76871d4d34b961deb675b33374744f7a5b2ac91f6091bc","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229R1":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_refuses_missing_or_corrupt_first_receipt_without_accepting_or_dispatching_second","case":"d333829454073a5f7709da70e998a225b80fb3885106bdea7611e68e329d8d64","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229R1":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_request_budget_expires_while_waiting_for_generation_gate_without_starting_work","case":"ee33060b90eb0e17bdccd84dfc5b1dfa8744f218d1e9820fedbdd77b13307251","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229R1":true}
   ]
 }

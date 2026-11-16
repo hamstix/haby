@@ -56,17 +56,28 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             'mixed-preparation-completed'='mixed-delivery-start';'mixed-documents-completed'='mixed-preparation-completed'
             'mixed-identity-completed'='mixed-documents-completed';'mixed-publication-completed'='mixed-identity-completed'
             'mixed-delivery-completed'='mixed-publication-completed'
+            'delivery-provenance-start'='durable-suite-start';'delivery-provenance-completed'='delivery-provenance-start'
+            'delivery-pod-start'='delivery-provenance-completed';'delivery-pod-completed'='delivery-pod-start'
+            'delivery-token-start'='delivery-pod-completed';'delivery-token-completed'='delivery-token-start'
+            'delivery-host-first-start'='delivery-token-completed';'delivery-host-first-started'='delivery-host-first-start'
+            'delivery-host-first-dispose-start'='delivery-host-first-start';'delivery-host-first-dispose-completed'='delivery-host-first-dispose-start'
+            'delivery-host-restart-start'='delivery-host-first-dispose-completed';'delivery-host-restart-started'='delivery-host-restart-start'
+            'delivery-host-restart-dispose-start'='delivery-host-restart-start';'delivery-host-restart-dispose-completed'='delivery-host-restart-dispose-start'
+            'delivery-first-request-start'='delivery-token-completed';'delivery-first-request-completed'='delivery-first-request-start'
+            'delivery-pod-cleanup-start'='delivery-pod-completed';'delivery-pod-cleanup-completed'='delivery-pod-cleanup-start';'delivery-pod-cleanup-failed'='delivery-pod-cleanup-start'
             'namespace-cleanup-start'='namespace-create-completed';'namespace-absence-confirmed'='namespace-cleanup-start'
             'catalog-dispose-start'='catalog-init-completed';'catalog-dispose-completed'='catalog-dispose-start'
         }
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $records=[Collections.Generic.List[string]]::new()
         $previousElapsed=0L; $authStarts=0; $authCompleted=0; $authOpen=$false; $postAuthPhase=0; $candidateDisposals=0
+        $deliveryContext=0; $deliveryPhase=0
         $setupOpen=@{'accepted-setup'=$false;'restore'=$false;'runtime-setup'=$false}
         $setupCounts=@{'accepted-setup'=0;'restore'=0;'runtime-setup'=0}
         $repeat=@('accepted-setup-start','accepted-setup-completed','restore-start','restore-completed','runtime-setup-start','runtime-setup-completed','runtime-auth-start','runtime-auth-completed','runtime-final-revoke-start','runtime-final-revoke-completed',
             'runtime-final-history-start','runtime-final-history-completed','runtime-final-authorization-start','runtime-final-authorization-completed',
             'runtime-candidate-dispose-start','runtime-candidate-dispose-completed','runtime-candidate-dispose-failed')
+        $repeat+=@($requires.Keys | Where-Object { $_.StartsWith('delivery-', [StringComparison]::Ordinal) })
         for($i=0;$i -lt $lines.Length-1;$i++){
             $line=$lines[$i]
             if($line -cnotmatch '^([1-9][0-9]{0,2}) ([a-z-]+) (0|[1-9][0-9]{0,6})$' -or [int]$Matches[1] -ne $i+1){return Result 'invalid'}
@@ -105,6 +116,38 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
                 $authOpen=$false; $authCompleted++; $postAuthPhase=1
             }elseif(($id -ceq 'initial-delivery-start' -and $authCompleted -ne 1) -or
                 ($id -ceq 'mixed-delivery-start' -and $authCompleted -ne 2)){return Result 'invalid'}
+            # Static nested delivery boundaries: two outer scenarios, first/restarted Host, no arbitrary IDs or unbounded repeats.
+            if($id -cin @('initial-delivery-start','mixed-delivery-start')){
+                if($deliveryPhase -notin @(0,20)){return Result 'invalid'}
+                $deliveryContext=if($id -ceq 'initial-delivery-start'){1}else{2}; $deliveryPhase=0
+            }
+            if($id.StartsWith('delivery-', [StringComparison]::Ordinal)){
+                if($deliveryContext -eq 0){return Result 'invalid'}
+                $nextDelivery=switch -CaseSensitive ($id){
+                    'delivery-provenance-start'{if($deliveryPhase -eq 0){1}else{-1}}
+                    'delivery-provenance-completed'{if($deliveryPhase -eq 1){2}else{-1}}
+                    'delivery-pod-start'{if($deliveryPhase -eq 2){3}else{-1}}
+                    'delivery-pod-completed'{if($deliveryPhase -eq 3){4}else{-1}}
+                    'delivery-token-start'{if($deliveryPhase -eq 4){5}else{-1}}
+                    'delivery-token-completed'{if($deliveryPhase -eq 5){6}else{-1}}
+                    'delivery-host-first-start'{if($deliveryPhase -eq 6){7}else{-1}}
+                    'delivery-host-first-started'{if($deliveryPhase -eq 7){8}else{-1}}
+                    'delivery-first-request-start'{if($deliveryPhase -eq 8){9}elseif($deliveryPhase -eq 14){15}else{-1}}
+                    'delivery-first-request-completed'{if($deliveryPhase -eq 9){10}elseif($deliveryPhase -eq 15){16}else{-1}}
+                    'delivery-host-first-dispose-start'{if($deliveryPhase -in @(7,8,9,10)){11}else{-1}}
+                    'delivery-host-first-dispose-completed'{if($deliveryPhase -eq 11){12}else{-1}}
+                    'delivery-host-restart-start'{if($deliveryPhase -eq 12){13}else{-1}}
+                    'delivery-host-restart-started'{if($deliveryPhase -eq 13){14}else{-1}}
+                    'delivery-host-restart-dispose-start'{if($deliveryPhase -in @(13,14,15,16)){17}else{-1}}
+                    'delivery-host-restart-dispose-completed'{if($deliveryPhase -eq 17){18}else{-1}}
+                    'delivery-pod-cleanup-start'{if($deliveryPhase -ge 4 -and $deliveryPhase -le 18){19}else{-1}}
+                    'delivery-pod-cleanup-completed'{if($deliveryPhase -eq 19){20}else{-1}}
+                    'delivery-pod-cleanup-failed'{if($deliveryPhase -eq 19){21}else{-1}}
+                    default{-1}
+                }
+                if($nextDelivery -lt 0){return Result 'invalid'}
+                $deliveryPhase=$nextDelivery
+            }
             $phaseTransition=switch -CaseSensitive ($id){
                 'runtime-final-revoke-start'{@(1,2)};'runtime-final-revoke-completed'{@(2,3)}
                 'runtime-final-history-start'{@(3,4)};'runtime-final-history-completed'{@(4,5)}

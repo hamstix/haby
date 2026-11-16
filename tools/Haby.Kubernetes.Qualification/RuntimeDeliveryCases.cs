@@ -8,6 +8,7 @@ using Haby.Configuration.Contracts;
 using Haby.Configuration.Client;
 using Haby.Domain;
 using Haby.Kubernetes;
+using Haby.Kubernetes.Qualification;
 using Haby.Operator.Host;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
@@ -23,8 +24,9 @@ internal static class RuntimeDeliveryCases
 {
     internal static async Task Run(Kubernetes admin, DurableDeploymentPlanningTests.InternalScenario scenario,
         ServiceProvider services, InternalRuntimePublication publication, RuntimePublicationRequest request, bool login, CancellationToken token,
-        IReadOnlyList<RuntimePublicationRequest>? mandatory = null)
+        IReadOnlyList<RuntimePublicationRequest>? mandatory = null, QualificationDiagnosticJournal? diagnostics = null)
     {
+        diagnostics?.Mark(QualificationMilestone.DeliveryProvenanceStart);
         var label = login ? "login" : "initial";
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         RuntimeIdentityBindingRow binding;
@@ -45,6 +47,7 @@ internal static class RuntimeDeliveryCases
         }
         var receipt = RuntimeIdentityCodec.Receipt(inventory);
         var ns = receipt.Intent.Namespace;
+        diagnostics?.Mark(QualificationMilestone.DeliveryProvenanceCompleted);
         var podName = "delivery-" + Guid.NewGuid().ToString("N")[..12];
         V1Pod? pod = null;
         Func<Task>? afterReview = null, afterAuthority = null;
@@ -80,24 +83,29 @@ internal static class RuntimeDeliveryCases
         Exception? primary = null;
         try
         {
+            diagnostics?.Mark(QualificationMilestone.DeliveryPodStart);
             pod = await admin.CoreV1.CreateNamespacedPodAsync(new V1Pod
             {
                 Metadata = new() { Name = podName },
                 Spec = new()
                 { ServiceAccountName = receipt.Intent.Name, AutomountServiceAccountToken = false, Containers = [new() { Name = "app", Image = "registry.k8s.io/pause:3.10" }] }
             }, ns, cancellationToken: token);
+            diagnostics?.Mark(QualificationMilestone.DeliveryPodCompleted);
+            diagnostics?.Mark(QualificationMilestone.DeliveryTokenStart);
             var issued = await admin.CoreV1.CreateNamespacedServiceAccountTokenAsync(new Authenticationv1TokenRequest
             {
                 Spec = new()
                 { Audiences = [binding.Audience], ExpirationSeconds = 600, BoundObjectRef = new() { ApiVersion = "v1", Kind = "Pod", Name = podName, Uid = pod.Metadata.Uid } }
             },
                 receipt.Intent.Name, ns, cancellationToken: token);
+            diagnostics?.Mark(QualificationMilestone.DeliveryTokenCompleted);
             var bytes = Encoding.ASCII.GetBytes(issued.Status.Token);
             try
             {
                 async Task DeliveryHost(bool first)
                 {
-                    await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Port=0", "--Haby:Tls:Enabled=false"], collection =>
+                    diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstStart : QualificationMilestone.DeliveryHostRestartStart);
+                    var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection, "--Haby:Port=0", "--Haby:Tls:Enabled=false"], collection =>
                     {
                         // Only the existing private-CA transport seam differs; real TokenReview and runtime policy execute.
                         collection.RemoveAll<IRuntimeAuthenticator>();
@@ -107,51 +115,66 @@ internal static class RuntimeDeliveryCases
                         collection.AddSingleton<IRuntimeConfigurationStore>(p => new ReadBoundary(new PostgreSqlRuntimeConfigurationStore(
                             p.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()), async () => { if (afterAuthority is { } hook) { afterAuthority = null; await hook(); } }));
                     });
-                    await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
-                    using var channel = GrpcChannel.ForAddress(host.Urls.Single(), new GrpcChannelOptions { MaxReceiveMessageSize = 8 * 1024 * 1024 });
-                    var client = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
-                    var headers = new Metadata { { "authorization", "Bearer " + Encoding.ASCII.GetString(bytes) } };
-                    var call = new DeliverRuntimeConfigurationRequest { BindingId = request.Binding.ToString(), RevisionId = request.Revision!.Value.ToString() };
-                    var before = reviews;
-                    var beforeState = await State(contexts, token);
-                    var reply = await client.DeliverRuntimeAsync(call, headers, deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: token);
-                    var afterState = await State(contexts, token);
-                    Check(reply.RevisionId == call.RevisionId && reply.SourceFingerprint == fingerprint && reviews == before + 1 && beforeState.SequenceEqual(afterState),
-                        first ? "T01-generated-Host-real-Pod-TokenReview-exact-revision" : "T06-restarted-Host-fresh-TokenReview-exact-authority");
-                    using var json = JsonDocument.Parse(reply.Json.Memory);
-                    if (login)
+                    var disposalStarted = false;
+                    try
                     {
-                        var connectionString = json.RootElement.GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8).GetString()!;
-                        var expected = new NpgsqlConnectionStringBuilder(connectionString);
-                        var confirmed = expectedConnection ?? throw new InvalidOperationException("Confirmed login output unavailable.");
-                        Check(!string.IsNullOrEmpty(expected.Password) && expected.Username == confirmed.UserName && expected.Host == confirmed.Host &&
-                            // PrepareMixedAsync uses UpdateEnvelope's independently declared default timeout of 210.
-                            expected.Port == confirmed.Port && expected.Database == confirmed.DatabaseName && expected.Timeout == 210,
-                            first ? "T02-exact-application-connection-fields" : "T08-restarted-exact-application-connection-fields");
-                        await using var application = new NpgsqlConnection(connectionString);
-                        await application.OpenAsync(token);
-                        await using var transaction = await application.BeginTransactionAsync(token);
-                        await new NpgsqlCommand("CREATE TEMP TABLE haby_runtime_delivery_probe (value integer); INSERT INTO haby_runtime_delivery_probe VALUES (219)", application, transaction).ExecuteNonQueryAsync(token);
-                        Check((int)(await new NpgsqlCommand("SELECT value FROM haby_runtime_delivery_probe", application, transaction).ExecuteScalarAsync(token))! == 219,
-                            first ? "T03-real-application-credential-DDL-DML" : "T09-restarted-real-application-credential-DDL-DML");
-                        await transaction.RollbackAsync(token);
+                        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+                        diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstStarted : QualificationMilestone.DeliveryHostRestartStarted);
+                        using var channel = GrpcChannel.ForAddress(host.Urls.Single(), new GrpcChannelOptions { MaxReceiveMessageSize = 8 * 1024 * 1024 });
+                        var client = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+                        var headers = new Metadata { { "authorization", "Bearer " + Encoding.ASCII.GetString(bytes) } };
+                        var call = new DeliverRuntimeConfigurationRequest { BindingId = request.Binding.ToString(), RevisionId = request.Revision!.Value.ToString() };
+                        var before = reviews;
+                        var beforeState = await State(contexts, token);
+                        diagnostics?.Mark(QualificationMilestone.DeliveryFirstRequestStart);
+                        var reply = await client.DeliverRuntimeAsync(call, headers, deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: token);
+                        diagnostics?.Mark(QualificationMilestone.DeliveryFirstRequestCompleted);
+                        var afterState = await State(contexts, token);
+                        Check(reply.RevisionId == call.RevisionId && reply.SourceFingerprint == fingerprint && reviews == before + 1 && beforeState.SequenceEqual(afterState),
+                            first ? "T01-generated-Host-real-Pod-TokenReview-exact-revision" : "T06-restarted-Host-fresh-TokenReview-exact-authority");
+                        using var json = JsonDocument.Parse(reply.Json.Memory);
+                        if (login)
+                        {
+                            var connectionString = json.RootElement.GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8).GetString()!;
+                            var expected = new NpgsqlConnectionStringBuilder(connectionString);
+                            var confirmed = expectedConnection ?? throw new InvalidOperationException("Confirmed login output unavailable.");
+                            Check(!string.IsNullOrEmpty(expected.Password) && expected.Username == confirmed.UserName && expected.Host == confirmed.Host &&
+                                // PrepareMixedAsync uses UpdateEnvelope's independently declared default timeout of 210.
+                                expected.Port == confirmed.Port && expected.Database == confirmed.DatabaseName && expected.Timeout == 210,
+                                first ? "T02-exact-application-connection-fields" : "T08-restarted-exact-application-connection-fields");
+                            await using var application = new NpgsqlConnection(connectionString);
+                            await application.OpenAsync(token);
+                            await using var transaction = await application.BeginTransactionAsync(token);
+                            await new NpgsqlCommand("CREATE TEMP TABLE haby_runtime_delivery_probe (value integer); INSERT INTO haby_runtime_delivery_probe VALUES (219)", application, transaction).ExecuteNonQueryAsync(token);
+                            Check((int)(await new NpgsqlCommand("SELECT value FROM haby_runtime_delivery_probe", application, transaction).ExecuteScalarAsync(token))! == 219,
+                                first ? "T03-real-application-credential-DDL-DML" : "T09-restarted-real-application-credential-DDL-DML");
+                            await transaction.RollbackAsync(token);
+                        }
+                        else Check(Encoding.UTF8.GetString(reply.Json.Span) == "{\"Mode\":\"frozen\"}",
+                            first ? "T02-exact-complete-static-JSON" : "T08-restarted-exact-complete-static-JSON");
+                        if (first)
+                        {
+                            afterReview = Revoke;
+                            var refusal = await Refused(client, call, headers, token);
+                            Check(refusal == StatusCode.PermissionDenied, "T04-permission-revoked-during-real-TokenReview-denies");
+                            await Republish();
+                            afterAuthority = Revoke;
+                            var inflight = await client.DeliverRuntimeAsync(call, headers, cancellationToken: token);
+                            Check(inflight.RevisionId == call.RevisionId && await Refused(client, call, headers, token) == StatusCode.PermissionDenied,
+                                "T05-revoke-after-authority-inflight-only-next-request-denied");
+                            await Republish();
+                        }
+                        if (first && mandatory is not null) await Startup(client, mandatory);
+                        diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstDisposeStart : QualificationMilestone.DeliveryHostRestartDisposeStart);
+                        disposalStarted = true;
+                        await host.StopAsync(token);
                     }
-                    else Check(Encoding.UTF8.GetString(reply.Json.Span) == "{\"Mode\":\"frozen\"}",
-                        first ? "T02-exact-complete-static-JSON" : "T08-restarted-exact-complete-static-JSON");
-                    if (first)
+                    finally
                     {
-                        afterReview = Revoke;
-                        var refusal = await Refused(client, call, headers, token);
-                        Check(refusal == StatusCode.PermissionDenied, "T04-permission-revoked-during-real-TokenReview-denies");
-                        await Republish();
-                        afterAuthority = Revoke;
-                        var inflight = await client.DeliverRuntimeAsync(call, headers, cancellationToken: token);
-                        Check(inflight.RevisionId == call.RevisionId && await Refused(client, call, headers, token) == StatusCode.PermissionDenied,
-                            "T05-revoke-after-authority-inflight-only-next-request-denied");
-                        await Republish();
+                        if (!disposalStarted) diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstDisposeStart : QualificationMilestone.DeliveryHostRestartDisposeStart);
+                        await host.DisposeAsync();
+                        diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstDisposeCompleted : QualificationMilestone.DeliveryHostRestartDisposeCompleted);
                     }
-                    if (first && mandatory is not null) await Startup(client, mandatory);
-                    await host.StopAsync(token);
                 }
 
                 async Task Startup(ConfigurationDelivery.ConfigurationDeliveryClient client, IReadOnlyList<RuntimePublicationRequest> selection)
@@ -280,8 +303,18 @@ internal static class RuntimeDeliveryCases
         {
             if (pod is not null)
             {
-                try { await admin.CoreV1.DeleteNamespacedPodAsync(podName, ns, new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = pod.Metadata.Uid }, GracePeriodSeconds = 0 }, cancellationToken: CancellationToken.None); }
-                catch when (primary is not null) { Console.Error.WriteLine("Runtime delivery owned Pod cleanup failed; primary failure retained."); }
+                diagnostics?.Mark(QualificationMilestone.DeliveryPodCleanupStart);
+                try
+                {
+                    await admin.CoreV1.DeleteNamespacedPodAsync(podName, ns, new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = pod.Metadata.Uid }, GracePeriodSeconds = 0 }, cancellationToken: CancellationToken.None);
+                    diagnostics?.Mark(QualificationMilestone.DeliveryPodCleanupCompleted);
+                }
+                catch
+                {
+                    diagnostics?.Mark(QualificationMilestone.DeliveryPodCleanupFailed);
+                    if (primary is null) throw;
+                    Console.Error.WriteLine("Runtime delivery owned Pod cleanup failed; primary failure retained.");
+                }
             }
         }
     }
