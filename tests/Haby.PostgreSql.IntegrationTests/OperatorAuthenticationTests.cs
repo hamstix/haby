@@ -26,11 +26,12 @@ public sealed partial class OperatorHostIntegrationTests
     private static string[] AuthArguments(string connection, bool reflection = true) =>
         ["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0", "--Haby:Reflection:Enabled=" + reflection];
     private static Metadata OperatorHeaders(string credential) => new() { { "authorization", "Bearer " + credential } };
-    private static async Task<Grpc.Core.RpcException> AuthDenied(Func<Task> action, Action<StatusCode>? observe = null)
+    internal static async Task<Grpc.Core.RpcException> AuthDenied(Func<Task> action, Action<StatusCode>? observe = null,
+        StatusCode expected = StatusCode.Unauthenticated)
     {
         var error = await Assert.ThrowsAsync<RpcException>(action);
         observe?.Invoke(error.StatusCode);
-        Assert.Equal(StatusCode.Unauthenticated, error.StatusCode);
+        Assert.Equal(expected, error.StatusCode);
         Assert.DoesNotContain("haby_operator_v1.", error.Message);
         Assert.DoesNotContain("haby_delivery_v1.", error.Message);
         return error;
@@ -266,17 +267,18 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Empty(routes);
                 await HostFailureDiagnostics.RunAsync(async release =>
                 {
-                    diagnostic.At(HostFailurePhase.ReflectionCall, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
-                    var call = new ServerReflection.ServerReflectionClient(channel).ServerReflectionInfo(OperatorHeaders(issued.Credential));
-                    release(() => { call.Dispose(); return ValueTask.CompletedTask; });
-                    diagnostic.At(HostFailurePhase.ReflectionWrite, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
-                    await call.RequestStream.WriteAsync(new() { ListServices = "" });
-                    diagnostic.At(HostFailurePhase.ReflectionComplete, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
-                    await call.RequestStream.CompleteAsync();
-                    diagnostic.At(HostFailurePhase.ReflectionRead, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
-                    var denial = await Assert.ThrowsAsync<RpcException>(async () => await call.ResponseStream.MoveNext());
-                    diagnostic.Observe(denial.StatusCode);
-                    Assert.Equal(StatusCode.Unimplemented, denial.StatusCode);
+                    await AuthDenied(async () =>
+                    {
+                        diagnostic.At(HostFailurePhase.ReflectionCall, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                        var call = new ServerReflection.ServerReflectionClient(channel).ServerReflectionInfo(OperatorHeaders(issued.Credential));
+                        release(() => { call.Dispose(); return ValueTask.CompletedTask; });
+                        diagnostic.At(HostFailurePhase.ReflectionWrite, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                        await call.RequestStream.WriteAsync(new() { ListServices = "" });
+                        diagnostic.At(HostFailurePhase.ReflectionComplete, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                        await call.RequestStream.CompleteAsync();
+                        diagnostic.At(HostFailurePhase.ReflectionRead, ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin);
+                        await call.ResponseStream.MoveNext();
+                    }, diagnostic.Observe, StatusCode.Unimplemented);
                 }, () => diagnostic.Phase, () => diagnostic.Observed,
                     diagnostic.Recorder(ReflectionRouteKind.V1Alpha, ReflectionCredentialPurpose.OperatorAdmin));
                 return;
@@ -300,15 +302,18 @@ public sealed partial class OperatorHostIntegrationTests
                     var purpose = credential is null ? ReflectionCredentialPurpose.Anonymous : ReflectionCredentialPurpose.StaticDelivery;
                     await HostFailureDiagnostics.RunAsync(async release =>
                     {
-                        diagnostic.At(HostFailurePhase.ReflectionCall, routeKind, purpose);
-                        var denied = channel.CreateCallInvoker().AsyncDuplexStreamingCall(method, null, new CallOptions(credential is null ? null : OperatorHeaders(credential)));
-                        release(() => { denied.Dispose(); return ValueTask.CompletedTask; });
-                        diagnostic.At(HostFailurePhase.ReflectionWrite, routeKind, purpose);
-                        await denied.RequestStream.WriteAsync(new() { ListServices = "" });
-                        diagnostic.At(HostFailurePhase.ReflectionComplete, routeKind, purpose);
-                        await denied.RequestStream.CompleteAsync();
-                        diagnostic.At(HostFailurePhase.ReflectionRead, routeKind, purpose);
-                        await AuthDenied(async () => await denied.ResponseStream.MoveNext(), diagnostic.Observe);
+                        await AuthDenied(async () =>
+                        {
+                            diagnostic.At(HostFailurePhase.ReflectionCall, routeKind, purpose);
+                            var denied = channel.CreateCallInvoker().AsyncDuplexStreamingCall(method, null, new CallOptions(credential is null ? null : OperatorHeaders(credential)));
+                            release(() => { denied.Dispose(); return ValueTask.CompletedTask; });
+                            diagnostic.At(HostFailurePhase.ReflectionWrite, routeKind, purpose);
+                            await denied.RequestStream.WriteAsync(new() { ListServices = "" });
+                            diagnostic.At(HostFailurePhase.ReflectionComplete, routeKind, purpose);
+                            await denied.RequestStream.CompleteAsync();
+                            diagnostic.At(HostFailurePhase.ReflectionRead, routeKind, purpose);
+                            await denied.ResponseStream.MoveNext();
+                        }, diagnostic.Observe);
                     }, () => diagnostic.Phase, () => diagnostic.Observed, diagnostic.Recorder(routeKind, purpose));
                 }
                 await HostFailureDiagnostics.RunAsync(async release =>

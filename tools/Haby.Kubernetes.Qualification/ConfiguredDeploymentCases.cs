@@ -153,13 +153,13 @@ internal static class ConfiguredDeploymentCases
                 }, token);
             }
             Microsoft.AspNetCore.Builder.WebApplication? activeHost = null;
-            using var firstSubmissionAudit = new SubmissionAuditProbe();
+            using var firstSubmissionAudit = new ConfiguredSubmissionProbe();
             async Task WithHost(Func<Task> work)
             {
                 await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
                     "--Haby:ListenAddress=0.0.0.0", "--Haby:Port=" + port, "--Haby:Tls:CertificatePath=" + certificatePath], collection =>
                 {
-                    collection.AddSingleton<ILoggerProvider>(firstSubmissionAudit);
+                    firstSubmissionAudit.Register(collection);
                     collection.AddSingleton<InternalDurableActions>(_ => actions);
                     collection.RemoveAll<IRuntimeAuthenticator>();
                     collection.AddSingleton<IRuntimeAuthenticator>(p => new KubernetesRuntimeAuthenticator(p.GetRequiredService<ISecretStore>(), (connection, handlers, ct) =>
@@ -206,7 +206,7 @@ internal static class ConfiguredDeploymentCases
                 loseIdentityConfirmation = true;
                 WorkloadSubmissionReply partial;
                 var firstStatus = Grpc.Core.StatusCode.Unknown;
-                firstSubmissionAudit.Begin();
+                firstSubmissionAudit.Begin(activeHost.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LoggerFilterOptions>>());
                 try
                 {
                     partial = await client.SubmitGenerationAsync(request, cancellationToken: token);
@@ -214,6 +214,7 @@ internal static class ConfiguredDeploymentCases
                 }
                 catch (Grpc.Core.RpcException failure)
                 {
+                    firstSubmissionAudit.ClientFailure(failure);
                     firstStatus = Enum.IsDefined(failure.StatusCode) ? failure.StatusCode : Grpc.Core.StatusCode.Unknown;
                     throw;
                 }
@@ -222,6 +223,7 @@ internal static class ConfiguredDeploymentCases
                     firstSubmissionAudit.End();
                     Console.WriteLine("Diagnostic configured first-submit-status: " + firstStatus);
                     Console.WriteLine("Diagnostic configured first-submit-audit-started: " + (firstSubmissionAudit.Started ? "true" : "false"));
+                    firstSubmissionAudit.Write(Console.Out);
                 }
                 Check(partial.Outcome == "unavailable" && partial.Progress.Members.Single().Documents == "prepared", "C01-exact-two-documents-prepared");
                 Check(partial.Progress.Members.Single().Identity == "confirmed", "C02-confirmed-stable-identity");
@@ -325,25 +327,6 @@ internal static class ConfiguredDeploymentCases
             if (cleanup.Count > 0) throw new AggregateException(primary is null ? cleanup : [primary, .. cleanup]);
         }
     }
-    // Attached only to the submission Host; active only around its exact first SubmitGeneration call.
-    // State, formatted messages, exception details, headers and credentials are never inspected.
-    private sealed class SubmissionAuditProbe : ILoggerProvider, ILogger
-    {
-        private int active, started;
-        internal bool Started => Volatile.Read(ref started) != 0;
-        internal void Begin() { Volatile.Write(ref started, 0); Volatile.Write(ref active, 1); }
-        internal void End() => Volatile.Write(ref active, 0);
-        public ILogger CreateLogger(string categoryName) => categoryName == "Haby.Operator.Host.ManifestOperatorService"
-            ? this : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (eventId.Id == 2290 && Volatile.Read(ref active) != 0) Interlocked.Exchange(ref started, 1);
-        }
-        public void Dispose() { }
-    }
-
     private static string ConfigurationJson(RuntimeConfiguration value)
     {
         // Reuse the canonical neutral bootstrap writer to obtain the same closed configuration fields.

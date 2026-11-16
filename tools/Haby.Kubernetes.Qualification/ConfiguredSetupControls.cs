@@ -23,6 +23,7 @@ internal static class ConfiguredSetupControls
 
     internal static async Task Run()
     {
+        await ConfiguredSubmissionProbeControls.Run();
         var failures = 0;
         foreach (var cancel in new[] { false, true })
         foreach (var cleanupFailure in new[] { false, true })

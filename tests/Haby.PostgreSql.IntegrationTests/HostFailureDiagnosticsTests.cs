@@ -5,6 +5,46 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class HostFailureDiagnosticsTests
 {
+    [Fact]
+    public async Task Protected_reflection_denial_accepts_exact_status_at_creation_write_completion_or_read()
+    {
+        var phases = new[] { HostFailurePhase.ReflectionCall, HostFailurePhase.ReflectionWrite, HostFailurePhase.ReflectionComplete, HostFailurePhase.ReflectionRead };
+        foreach (var expected in new[] { StatusCode.Unauthenticated, StatusCode.Unimplemented })
+            foreach (var failurePhase in phases)
+            {
+                var reached = new List<HostFailurePhase>();
+                StatusCode? observed = null;
+                var denial = new RpcException(new Status(expected, string.Empty));
+                var actual = await OperatorHostIntegrationTests.AuthDenied(async () =>
+                {
+                    foreach (var phase in phases)
+                    {
+                        reached.Add(phase);
+                        if (phase != failurePhase) continue;
+                        if (phase == HostFailurePhase.ReflectionCall) throw denial;
+                        await Task.FromException(denial);
+                    }
+                }, value => observed = value, expected);
+                Assert.Same(denial, actual);
+                Assert.Equal(expected, observed);
+                Assert.Equal(phases.Take(Array.IndexOf(phases, failurePhase) + 1), reached);
+            }
+    }
+
+    [Fact]
+    public async Task Protected_reflection_denial_refuses_success_wrong_status_and_unrelated_error()
+    {
+        foreach (var expected in new[] { StatusCode.Unauthenticated, StatusCode.Unimplemented })
+            foreach (var error in new Exception?[] { null, new RpcException(new Status(StatusCode.PermissionDenied, string.Empty)), new InvalidOperationException() })
+            {
+                StatusCode? observed = null;
+                var failure = await Record.ExceptionAsync(() => OperatorHostIntegrationTests.AuthDenied(
+                    () => error is null ? Task.CompletedTask : Task.FromException(error), value => observed = value, expected));
+                Assert.NotNull(failure);
+                Assert.Equal(error is RpcException ? StatusCode.PermissionDenied : null, observed);
+            }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
