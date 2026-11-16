@@ -113,12 +113,15 @@ read authority. Preparation, submission, renewal, materialization and publicatio
 retain pre-completion guards. Runtime identity validation remains separate from
 current document materializability. Runtime delivery still requires current exact
 publication rights; a historical completion receipt cannot restore revoked access.
+The proof validates exact configured target/document publication coverage and hashes
+the canonical publication references with the retained catalog evidence. This is
+proof-contract validation; current delivery authorization remains a separate check.
 
 The ordinary fully-applied configuration document selector retains its existing
 InternalEffects exclusion and Resource-only eligibility. Workload runtime retrieval
 continues through explicit runtime publication/recipient authority after Applied.
 
-The ledger adds 9 fast cases, 16 functional PostgreSQL cases and 2 published-native
+The ledger adds 17 fast cases, 27 functional PostgreSQL cases and 10 published-native
 cases per platform. The configured consumer retains its existing image inputs
 and adds A01-A03 for exact completion, retrieval after Applied/restart and retained
 completion after revoke. Its renewal cases run before Applied. These are declared

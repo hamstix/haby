@@ -1,8 +1,8 @@
 # Functional suites and infrastructure qualification
 
-Issue #237 declares 1751 fast, 1137 PostgreSQL total, 96 native cases per platform
-and 24 configured-consumer assertions. Its additions are 9 fast, 16 functional,
-2 native per platform and A01-A03 in the existing configured gate. The configured
+Issue #237 declares 1759 fast, 1148 PostgreSQL total, 104 native cases per platform
+and 24 configured-consumer assertions. Its additions are 17 fast, 27 functional,
+10 native per platform and A01-A03 in the existing configured gate. The configured
 renewal assertions run before Applied and C11 now verifies retained completion,
 publications and identities. These inventories are not executed passing evidence;
 see the [initial completion guide](237-initial-retirement-applied.md).

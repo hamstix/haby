@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Haby.Application;
 using Haby.Persistence.PostgreSql;
 using Microsoft.EntityFrameworkCore;
@@ -124,6 +125,73 @@ public sealed partial class DurableDeploymentPlanningTests
             scenario.Commit.Generation, "runtime-complete", "operator", new(MaximumRounds: 1), null, default);
         Assert.True(replay.Replayed); Assert.True(replay.OriginalRequestApplied); Assert.False(replay.CurrentApplied);
         Assert.Equal(1, deployment.Writes); Assert.Equal(1, identity.Writes);
+    }
+
+    [Theory]
+    [InlineData("omitted-all")]
+    [InlineData("omitted-one")]
+    [InlineData("duplicate")]
+    [InlineData("extra")]
+    [InlineData("mismatched-binding")]
+    [InlineData("mismatched-receipt")]
+    [InlineData("mismatched-token")]
+    [InlineData("canonical-reference")]
+    public async Task Completed_proof_requires_exact_configured_publications_and_canonical_evidence(string fault)
+    {
+        var scenario = await RolloutScenario(shared: true); var deployment = new ConfiguredSubmissionFixture(); var identity = new IdentityFixture();
+        await using var services = InternalServices(scenario.Connection, scenario.Time);
+        var actions = await PrepareRollout(services, scenario, deployment, identity);
+        await SubmitRollout(actions, scenario, deployment); await SubmitRollout(actions, scenario, deployment, "second");
+        Assert.True((await BatchFacade(services, scenario, actions, deployment, identity).WaitAsync(scenario.Commit.DeploymentId,
+            scenario.Commit.Generation, "publication-proof", "operator", new(MaximumRounds: 1), null, default)).CurrentApplied);
+        var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+        await using (var corrupt = await contexts.CreateDbContextAsync())
+        {
+            var source = await corrupt.DeploymentGenerations.AsNoTracking().SingleAsync();
+            var proof = await InitialRetirementCompletion.RequireProofAsync(corrupt, source, default);
+            Assert.Equal(2, proof.Publications.Length);
+            var first = proof.Publications[0]; var second = proof.Publications[1];
+            var replacement = first;
+            if (fault == "canonical-reference")
+            {
+                var original = InternalRuntimePublication.ReadReceipt(await corrupt.RuntimePublicationReceipts.AsNoTracking().SingleAsync(x => x.Id == first.Receipt));
+                var key = "alternate-" + Guid.NewGuid().ToString("N"); var id = Guid.NewGuid();
+                var alternate = original with { Id = id, Request = original.Request with { Key = key }, After = original.After! with { LastRequest = key } };
+                var payload = RuntimePublicationCodec.Encode(alternate);
+                // A structurally valid alternative reference must still be bound by the saved catalog hash.
+                corrupt.RuntimePublicationReceipts.Add(new() { Id = id, RequestKey = key, BindingId = first.Binding, RevisionId = first.Revision, Payload = payload });
+                await corrupt.SaveChangesAsync();
+                replacement = first with { Request = key, Receipt = id, ReceiptHash = ResourcesReadyCheckpointCodec.Hash(payload) };
+            }
+            CompletionPublication[] changed = fault switch
+            {
+                "omitted-all" => [],
+                "omitted-one" => [first],
+                "duplicate" => [first, first],
+                "extra" => [first, second, first with { Permission = Guid.NewGuid() }],
+                "mismatched-binding" => [first with { Binding = second.Binding }, second],
+                "mismatched-receipt" => [first with { Receipt = second.Receipt }, second],
+                "mismatched-token" => [first with { PermissionToken = Guid.NewGuid() }, second],
+                "canonical-reference" => [replacement, second],
+                _ => throw new InvalidOperationException()
+            };
+            Assert.Equal(proof.CatalogHash, await InitialRetirementCompletion.CatalogHashAsync(corrupt, source, proof.Publications.Reverse().ToArray(), default));
+            if (fault == "canonical-reference")
+                Assert.NotEqual(proof.CatalogHash, await InitialRetirementCompletion.CatalogHashAsync(corrupt, source, changed, default));
+            var row = await corrupt.GenerationStageCheckpoints.SingleAsync(x => x.Stage == "RetirementCompleted");
+            row.EvidenceJson = JsonSerializer.Serialize(proof with { Publications = changed }, InitialCompletionMetadata.Default.InitialCompletionProof);
+            row.EvidenceFingerprint = ResourcesReadyCheckpointCodec.Hash(row.EvidenceJson);
+            await corrupt.Database.OpenConnectionAsync();
+            await corrupt.Database.ExecuteSqlRawAsync("SET session_replication_role = replica");
+            await corrupt.GenerationStageCheckpoints.Where(x => x.Id == row.Id).ExecuteUpdateAsync(set =>
+                set.SetProperty(x => x.EvidenceJson, row.EvidenceJson).SetProperty(x => x.EvidenceFingerprint, row.EvidenceFingerprint));
+        }
+        await using (var verify = await contexts.CreateDbContextAsync())
+        {
+            var source = await verify.DeploymentGenerations.AsNoTracking().SingleAsync();
+            await Assert.ThrowsAsync<InvalidDataException>(() => InitialRetirementCompletion.RequireProofAsync(verify, source, default));
+        }
+        Assert.Equal(2, deployment.Writes); Assert.Equal(2, identity.Writes);
     }
 
     [Theory]

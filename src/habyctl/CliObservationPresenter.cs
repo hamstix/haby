@@ -13,7 +13,7 @@ internal static class ObservationPresentation
         if (value.RetirementCompleted != value.HasRetirementId) throw new InvalidDataException("Invalid retirement result.");
         GenerationCompletionWire.Validate(value.CurrentReady, value.Replayed, value.CurrentApplied, value.OriginalRequestApplied,
             value.HasRetirementId ? value.RetirementId : null, value.HasAppliedGeneration ? value.AppliedGeneration : null, value.CompletionReason);
-        if (value.CurrentApplied && value.Outcome != "observed" ||
+        if (value.CurrentApplied && value.Outcome != "observed" || value.CurrentReady && value.Stop != "Complete" ||
             value.HasSubmittedId && (!Guid.TryParseExact(value.SubmittedId, "D", out var submitted) || submitted == Guid.Empty) ||
             value.HasSavedReadyId && (!Guid.TryParseExact(value.SavedReadyId, "D", out var saved) || saved == Guid.Empty) || value.CalculateSize() > 2097152 || value.Members.Count > 512 || value.Total != value.Members.Count ||
             value.Members.Select(x => x.Subject).Distinct(StringComparer.Ordinal).Count() != value.Members.Count ||

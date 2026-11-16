@@ -43,9 +43,9 @@ public sealed partial class CliLoopbackTests
                 Replayed = replay,
                 CurrentReady = ready && !replay,
                 OriginalRequestReady = ready,
-                CurrentApplied = ready && !replay && Mode != "readyOnly",
-                OriginalRequestApplied = ready && Mode != "readyOnly",
-                CompletionReason = ready ? Mode == "readyOnly" ? "prerequisite-incomplete" : "applied" : "not-ready",
+                CurrentApplied = ready && !replay && !Mode.StartsWith("ready", StringComparison.Ordinal),
+                OriginalRequestApplied = ready && !Mode.StartsWith("ready", StringComparison.Ordinal),
+                CompletionReason = ready ? Mode.StartsWith("ready", StringComparison.Ordinal) ? "prerequisite-incomplete" : "applied" : "not-ready",
                 SubmittedId = Guid.NewGuid().ToString(),
                 SavedReadyId = Guid.NewGuid().ToString(),
                 Stop = Mode == "deadline" ? "RequestDeadline" : "Complete",
@@ -61,7 +61,11 @@ public sealed partial class CliLoopbackTests
                 Code = Mode == "apiUnavailable" ? "observation-unavailable" : ready ? "ready" : "rollout-pending",
                 Temporary = Mode == "apiUnavailable"
             });
-            if (ready && Mode != "readyOnly") { value.RetirementId = Guid.NewGuid().ToString("D"); value.RetirementCompleted = true; value.AppliedGeneration = 7; }
+            if (ready && !Mode.StartsWith("ready", StringComparison.Ordinal)) { value.RetirementId = Guid.NewGuid().ToString("D"); value.RetirementCompleted = true; value.AppliedGeneration = 7; }
+            if (Mode.EndsWith("Canceled", StringComparison.Ordinal)) value.Stop = "Canceled";
+            if (Mode.EndsWith("Deadline", StringComparison.Ordinal)) value.Stop = "RequestDeadline";
+            if (Mode.EndsWith("Missing", StringComparison.Ordinal)) value.ClearStop();
+            if (Mode.EndsWith("Unknown", StringComparison.Ordinal)) value.Stop = "future-stop";
             return value;
         }
         public override Task<WorkloadSubmissionReply> SubmitGeneration(GenerationRequest request, ServerCallContext context) =>
@@ -70,6 +74,14 @@ public sealed partial class CliLoopbackTests
     [Theory]
     [InlineData(false, "fresh", 0)]
     [InlineData(false, "readyOnly", 1)]
+    [InlineData(false, "appliedCanceled", 2)]
+    [InlineData(false, "appliedDeadline", 2)]
+    [InlineData(false, "appliedMissing", 2)]
+    [InlineData(false, "appliedUnknown", 2)]
+    [InlineData(false, "readyCanceled", 2)]
+    [InlineData(false, "readyDeadline", 2)]
+    [InlineData(false, "readyMissing", 2)]
+    [InlineData(false, "readyUnknown", 2)]
     [InlineData(false, "replay", 1)]
     [InlineData(false, "pending", 1)]
     [InlineData(false, "deadline", 3)]
@@ -113,7 +125,7 @@ public sealed partial class CliLoopbackTests
         finally { File.Delete(config); await host.StopAsync(); }
         void CheckOutput(string stdout, string stderr)
         {
-            if (mode == "unavailable")
+            if (mode == "unavailable" || mode.StartsWith("applied", StringComparison.Ordinal) || mode.StartsWith("ready", StringComparison.Ordinal) && mode != "readyOnly")
             {
                 Assert.Contains(ObservationRegistry.LastRequest, stderr); Assert.Contains("identical inputs", stderr);
                 Assert.DoesNotContain("private-transport-detail-sentinel", stderr); Assert.Equal("", stdout);

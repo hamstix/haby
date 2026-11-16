@@ -169,19 +169,43 @@ internal static class InitialRetirementCompletion
             .Select(x => new CompletedBindingEvidence(x.Id, x.InstallationId, x.EnvironmentId, x.ManagedWorkloadId, x.ProviderId, x.ConfigurationRevision,
                 x.Authenticator, x.Audience, x.Role, x.Contract, x.Format, x.ValidationPayload)).Take(513).ToArrayAsync(token);
         if (bindings.Length > 512) throw new InvalidDataException("Binding bound exceeded.");
+        var targets = DurableOperationGraphCodec.Decode(source.GraphJson).Retirement!.Document.Targets;
+        var required = targets.SelectMany(x => x.Documents.Select(document => (x.Subject, Document: document))).ToHashSet();
+        if (publications.Length != required.Count || publications.Select(x => x.Permission).Distinct().Count() != publications.Length ||
+            publications.Select(x => (x.Binding, x.Revision)).Distinct().Count() != publications.Length ||
+            publications.Select(x => x.Receipt).Distinct().Count() != publications.Length ||
+            publications.Select(x => x.Request).Distinct(StringComparer.Ordinal).Count() != publications.Length)
+            throw new InvalidDataException("Completion publication coverage mismatch.");
         foreach (var publication in publications)
         {
             var permission = await db.RuntimeConfigurationPermissions.AsNoTracking().SingleAsync(x => x.Id == publication.Permission, token);
             var row = await db.RuntimePublicationReceipts.AsNoTracking().SingleAsync(x => x.RequestKey == publication.Request, token);
             var receipt = InternalRuntimePublication.ReadReceipt(row);
-            if (row.Id != publication.Receipt || ResourcesReadyCheckpointCodec.Hash(row.Payload) != publication.ReceiptHash ||
+            var origin = receipt.Request.Origin ?? throw new InvalidDataException("Publication origin required.");
+            var subject = "Workload/" + origin.Component + "/" + origin.Workload;
+            var target = targets.SingleOrDefault(x => x.Subject == subject);
+            var binding = bindings.SingleOrDefault(x => x.Id == publication.Binding);
+            var workload = binding is null ? null : managed.SingleOrDefault(x => x.Id == binding.Managed);
+            var recipient = recipients.SingleOrDefault(x => x.Component == origin.Component && x.Workload == origin.Workload && x.Document == origin.Document);
+            if (!required.Remove((subject, origin.Document)) || target is null || binding is null || workload is null || recipient is null ||
+                !target.RuntimeIdentity || target.Provider != binding.Provider || target.Configuration != binding.Configuration ||
+                workload.Component != origin.Component || workload.Workload != origin.Workload || workload.Id != origin.ManagedWorkload ||
+                origin.Deployment != source.DeploymentId || origin.Generation != source.Generation || origin.Plan != source.PlanId ||
+                origin.ChangeSet != source.ChangeSetId || origin.Fingerprint != source.Fingerprint || origin.Environment != source.EnvironmentRecordId ||
+                origin.Application != source.ApplicationRecordId || origin.CommittedAt != source.AcceptedAt || origin.CommitActor != source.ActorId ||
+                recipient.RevisionId != publication.Revision || recipient.CheckpointId != origin.Checkpoint || recipient.InputFingerprint != source.Fingerprint ||
+                receipt.Outcome != RuntimePublicationOutcome.Published || receipt.Request.Operation != RuntimePublicationOperation.PublishPermission ||
+                receipt.After?.Id != publication.Permission || receipt.After.Binding != publication.Binding || receipt.After.Revision != publication.Revision ||
+                receipt.After.Status != "Published" || receipt.After.LastRequest != publication.Request || receipt.Binding.Id != publication.Binding || receipt.Binding.Status != "Prepared" ||
+                row.Id != publication.Receipt || ResourcesReadyCheckpointCodec.Hash(row.Payload) != publication.ReceiptHash ||
                 permission.BindingId != publication.Binding || permission.RevisionId != publication.Revision || receipt.Request.Binding != publication.Binding ||
                 receipt.Request.Revision != publication.Revision || receipt.After?.Token != publication.PermissionToken || receipt.Binding.Token != publication.BindingToken ||
                 receipt.Request.Origin != RuntimePublicationCodec.Origin(permission.OriginPayload))
                 throw new InvalidDataException("Retained publication evidence mismatch.");
         }
+        if (required.Count != 0) throw new InvalidDataException("Completion publication coverage mismatch.");
         var evidence = new CompletedCatalogEvidence(actions.ToArray(), managed, owned, bindings, recipients,
-            documents);
+            documents, publications.OrderBy(x => x.Permission).ToArray());
         var json = JsonSerializer.Serialize(evidence, InitialCompletionMetadata.Default.CompletedCatalogEvidence);
         if (Encoding.UTF8.GetByteCount(json) > 16777216) throw new InvalidDataException("Completion evidence exceeds bound.");
         return ResourcesReadyCheckpointCodec.Hash(json);
@@ -194,7 +218,7 @@ internal sealed record CompletedActionEvidence(DurableActionIntentRow Intent, Du
 internal sealed record CompletedBindingEvidence(Guid Id, Guid Installation, Guid Environment, Guid Managed, Guid Provider,
     long Configuration, string Authenticator, string Audience, string Role, string Contract, int Format, string Payload);
 internal sealed record CompletedCatalogEvidence(CompletedActionEvidence[] Actions, ManagedWorkloadRow[] Managed,
-    OwnedObjectRow[] Objects, CompletedBindingEvidence[] Bindings, WorkloadConfigurationRecipientRow[] Recipients, CompletedDocumentEvidence[] Documents);
+    OwnedObjectRow[] Objects, CompletedBindingEvidence[] Bindings, WorkloadConfigurationRecipientRow[] Recipients, CompletedDocumentEvidence[] Documents, CompletionPublication[] Publications);
 internal sealed record CompletedDocumentEvidence(Guid Id, Guid Deployment, long Generation, string Component, string Document, string Fingerprint);
 
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
