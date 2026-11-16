@@ -37,8 +37,10 @@ public sealed class ConfigurationSecretProjectionTests
         public ValueTask<SecretMaterial?> ResolveAsync(SecretDefinition definition, SecretRef reference, CancellationToken token) => throw new NotSupportedException();
     }
 
-    [Fact]
-    public async Task Frozen_array_projection_previews_whole_node_and_delivers_only_after_exact_authorization()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Frozen_array_projection_previews_whole_node_and_delivers_only_after_exact_authorization(bool firstJson)
     {
         var manifestText = """
             {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{
@@ -51,8 +53,16 @@ public sealed class ConfigurationSecretProjectionTests
               "documents":{"settings":{"fileName":"settings.json","format":"json","template":{}}},
               "staticContributions":{"logging":{"documentRef":"settings","path":"/Serilog","value":{"WriteTo":[{"Args":{}}]},
                 "secretProjections":[{"path":"/WriteTo/0/Args/password","format":"json","secretRef":{"name":"logging-password","version":1}},
-                  {"path":"/Literal","format":"string","secretRef":{"name":"logging-password","version":1}}]}}}}
+                  {"path":"/Literal","format":"string","secretRef":{"name":"logging-password","version":1}},
+                  {"path":"/Again","format":"json","secretRef":{"name":"logging-password","version":1}}]}}}}
             """;
+        if (!firstJson)
+        {
+            var at = profileText.IndexOf("\"secretProjections\"", StringComparison.Ordinal);
+            profileText = profileText[..at] + profileText[at..].Replace("\"format\":\"json\"", "\"format\":\"swap\"", StringComparison.Ordinal)
+                .Replace("\"format\":\"string\"", "\"format\":\"json\"", StringComparison.Ordinal)
+                .Replace("\"format\":\"swap\"", "\"format\":\"string\"", StringComparison.Ordinal);
+        }
         var profile = ProfilePayloadParser.ParseProfile(Encoding.UTF8.GetBytes(profileText)).Declaration!;
         Assert.NotNull(profile);
         var revision = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
@@ -73,7 +83,7 @@ public sealed class ConfigurationSecretProjectionTests
         var composed = await composer.ExecuteAsync(restarted, target, EnvironmentRecordId.New(), default);
         Assert.NotNull(composed);
         var preview = ConfigurationJson.Preview(composed.Tree);
-        Assert.Equal(["/Serilog/Literal", "/Serilog/WriteTo/0/Args/password"], preview.RedactedPaths);
+        Assert.Equal(["/Serilog/Again", "/Serilog/Literal", "/Serilog/WriteTo/0/Args/password"], preview.RedactedPaths);
         Assert.DoesNotContain("1e999", preview.Json);
         var metadata = new ConfigurationDocumentMetadata(ConfigurationDocumentRevisionId.New(), target,
             EnvironmentId.Create("pilot"), manifest.ApplicationId, revision, DeploymentPlanId.New(), "settings.json", "json",
@@ -90,9 +100,15 @@ public sealed class ConfigurationSecretProjectionTests
         Assert.Equal(1, ports.Reads);
         using var json = JsonDocument.Parse(accepted.Json);
         var node = json.RootElement.GetProperty("Serilog"u8).GetProperty("WriteTo"u8)[0].GetProperty("Args"u8).GetProperty("password"u8);
-        Assert.Equal("1e999", node.GetProperty("number"u8).GetRawText());
-        Assert.True(node.GetProperty("enabled"u8).GetBoolean());
-        Assert.Equal(Encoding.UTF8.GetString(ports.Material), json.RootElement.GetProperty("Serilog"u8).GetProperty("Literal"u8).GetString());
+        var middle = json.RootElement.GetProperty("Serilog"u8).GetProperty("Literal"u8);
+        var again = json.RootElement.GetProperty("Serilog"u8).GetProperty("Again"u8);
+        foreach (var value in new[] { node, middle, again }.Where((_, index) => (index != 1) == firstJson))
+        {
+            Assert.Equal("1e999", value.GetProperty("number"u8).GetRawText());
+            Assert.True(value.GetProperty("enabled"u8).GetBoolean());
+        }
+        foreach (var value in new[] { node, middle, again }.Where((_, index) => (index != 1) != firstJson))
+            Assert.Equal(Encoding.UTF8.GetString(ports.Material), value.GetString());
         foreach (var invalid in new[]
         {
             new byte[] { 0xff, 0xfe }, Encoding.UTF8.GetBytes("{\"a\":1,\"a\":2}"),
@@ -105,6 +121,31 @@ public sealed class ConfigurationSecretProjectionTests
             Assert.Equal(ConfigurationDeliveryStatus.InputUnavailable, failed.Status);
             Assert.True(failed.Json.IsEmpty);
             Assert.DoesNotContain("private", failed.ToString());
+        }
+        foreach (var root in new[] { "null", "true", "123", "\"text\"", "[1,2]", "{}" })
+        {
+            ports.Material = Encoding.UTF8.GetBytes(root);
+            using var deliveredRoot = await delivery.ExecuteAsync("credential", metadata.Id, default);
+            Assert.Equal(ConfigurationDeliveryStatus.Delivered, deliveredRoot.Status);
+            using var parsed = JsonDocument.Parse(deliveredRoot.Json);
+            var serilog = parsed.RootElement.GetProperty("Serilog"u8);
+            var jsonNode = firstJson ? serilog.GetProperty("WriteTo"u8)[0].GetProperty("Args"u8).GetProperty("password"u8)
+                : serilog.GetProperty("Literal"u8);
+            Assert.Equal(root switch { "123" => "123e0", "[1,2]" => "[1e0,2e0]", _ => root }, jsonNode.GetRawText());
+        }
+        ports.Material = Encoding.UTF8.GetBytes("\"" + new string('x', 65_534) + "\"");
+        using (var exactMaximum = await delivery.ExecuteAsync("credential", metadata.Id, default))
+            Assert.Equal(ConfigurationDeliveryStatus.Delivered, exactMaximum.Status);
+        if (firstJson)
+        {
+            foreach (var (levels, status) in new[] { (59, ConfigurationDeliveryStatus.Delivered),
+                (60, ConfigurationDeliveryStatus.LimitExceeded) })
+            {
+                ports.Material = Encoding.UTF8.GetBytes(new string('[', levels) + "0" + new string(']', levels));
+                using var nested = await delivery.ExecuteAsync("credential", metadata.Id, default);
+                Assert.Equal(status, nested.Status);
+                if (status != ConfigurationDeliveryStatus.Delivered) Assert.True(nested.Json.IsEmpty);
+            }
         }
         ports.Material = new byte[65_537];
         using var oversized = await delivery.ExecuteAsync("credential", metadata.Id, default);
@@ -148,6 +189,145 @@ public sealed class ConfigurationSecretProjectionTests
         Assert.Throws<ArgumentException>(() => new ProfileStaticContribution(ManifestLocalId.Create("telemetry"),
             ManifestLocalId.Create("settings"), "/OpenTelemetry", new ConfigurationObject([]),
             [projection, new ProfileSecretProjection("/Otlp", ProfileSecretFormat.Json, named)]));
+    }
+
+    [Fact]
+    public void Secret_insertion_refuses_excessive_combined_depth_before_constructing_missing_parents()
+    {
+        var named = new ProfileNamedSecretRef("logging-password", 1);
+        var deep = "/" + string.Join('/', Enumerable.Repeat("a", 70));
+        var contribution = new ProfileStaticContribution(ManifestLocalId.Create("logging"),
+            ManifestLocalId.Create("settings"), "/Serilog", new ConfigurationObject([]),
+            [new ProfileSecretProjection(deep, ProfileSecretFormat.String, named)]);
+        Assert.Throws<ConfigurationDocumentLimitException>(() => ProfileSecretInsertion.Apply(
+            contribution.Value, contribution.SecretProjections,
+            new Dictionary<ProfileNamedSecretRef, SecretRef> { [named] = new(SecretId.New(), SecretVersionId.New()) },
+            contribution.Path));
+        var huge = new ProfileSecretProjection("/" + string.Join('/', Enumerable.Repeat("a", 10_000)),
+            ProfileSecretFormat.String, named);
+        Assert.Throws<ConfigurationDocumentLimitException>(() => ProfileSecretInsertion.Apply(
+            new ConfigurationObject([]), [huge],
+            new Dictionary<ProfileNamedSecretRef, SecretRef> { [named] = new(SecretId.New(), SecretVersionId.New()) },
+            contribution.Path));
+        var exact = new Dictionary<ProfileNamedSecretRef, SecretRef> { [named] = new(SecretId.New(), SecretVersionId.New()) };
+        var accepted = new ProfileSecretProjection("/" + string.Join('/', Enumerable.Repeat("a", 63)),
+            ProfileSecretFormat.String, named);
+        Assert.NotNull(ProfileSecretInsertion.Apply(new ConfigurationObject([]), [accepted], exact, contribution.Path));
+        var rejected = new ProfileSecretProjection("/" + string.Join('/', Enumerable.Repeat("a", 64)),
+            ProfileSecretFormat.String, named);
+        Assert.Throws<ConfigurationDocumentLimitException>(() => ProfileSecretInsertion.Apply(
+            new ConfigurationObject([]), [rejected], exact, contribution.Path));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Projected_material_stops_reading_when_shared_escaped_budget_is_exhausted(bool distinct)
+    {
+        const int count = 70;
+        var projections = string.Join(',', Enumerable.Range(0, count).Select(i =>
+            $"{{\"path\":\"/Value{i}\",\"format\":\"string\",\"secretRef\":{{\"name\":\"secret-{(distinct ? i : 0)}\",\"version\":1}}}}"));
+        var profileText = """
+            {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"logging","revision":1},"spec":{
+              "documents":{"settings":{"fileName":"settings.json","format":"json","template":{}}},
+              "staticContributions":{"logging":{"documentRef":"settings","path":"/Serilog","value":{},
+                "secretProjections":[]}}}}
+            """.Replace("\"secretProjections\":[]", "\"secretProjections\":[" + projections + "]", StringComparison.Ordinal);
+        var profile = ProfilePayloadParser.ParseProfile(Encoding.UTF8.GetBytes(profileText)).Declaration!;
+        Assert.NotNull(profile);
+        var manifest = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(
+            """{"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{"components":{"api":{}}}}}"""u8.ToArray(),
+            new([], [], [], []))).Candidate.Declaration;
+        var revision = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
+        var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((target, i) => new ConfigurationPlanningScope(target,
+            i == 0 ? AssignmentToken.New() : null, new(target,
+                i == 0 ? [new ProfileDecision.Use(profile.Reference)] : []))).ToArray();
+        var exact = Enumerable.Range(0, distinct ? count : 1).ToDictionary(i => new ProfileNamedSecretRef($"secret-{i}", 1),
+            _ => new SecretRef(SecretId.New(), SecretVersionId.New()));
+        var frozen = ConfigurationPlanningSnapshot.PrepareCore(revision, manifest, scopes, [profile], frozenSecrets: exact).Snapshot!;
+        Assert.NotNull(frozen);
+        var target = new ConfigurationDocumentTarget(ApplicationDeploymentId.New(), DeploymentGeneration.Create(1),
+            ManifestLocalId.Create("api"), ManifestLocalId.Create("settings"));
+        var composed = (await new ComposeConfigurationDocument(ConfigurationRenderingCatalog.Empty, new([], []), new NoEvidence())
+            .ExecuteAsync(frozen, target, EnvironmentRecordId.New(), default))!;
+        Assert.NotNull(composed);
+        var metadata = new ConfigurationDocumentMetadata(ConfigurationDocumentRevisionId.New(), target,
+            EnvironmentId.Create("pilot"), manifest.ApplicationId, revision, DeploymentPlanId.New(), "settings.json", "json",
+            ConfigurationJson.Profile, "fingerprint", "inputs", "actor", DateTimeOffset.UtcNow);
+        var ports = new Ports
+        {
+            Artifact = new(new(metadata, ConfigurationPlanningSnapshotCodec.Encode(frozen), "[]", composed.Tree), EnvironmentRecordId.New()),
+            Material = Encoding.UTF8.GetBytes(new string(distinct ? '"' : 'x', 65_536))
+        };
+        ports.Grant = new(Guid.NewGuid(), metadata, "actor", DateTimeOffset.UtcNow, null, null, null);
+        using var result = await new DeliverConfiguration(ports, ports, ports, ConfigurationRenderingCatalog.Empty, [])
+            .ExecuteAsync("credential", metadata.Id, default);
+        Assert.Equal(ConfigurationDeliveryStatus.LimitExceeded, result.Status);
+        Assert.True(result.Json.IsEmpty);
+        if (distinct) Assert.InRange(ports.Reads, 1, 40);
+        else Assert.Equal(1, ports.Reads);
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    public async Task Projected_occurrences_and_ordinary_content_have_an_exact_escaped_four_MiB_boundary(int over, bool allowed)
+    {
+        const int occurrences = 10;
+        const int sourceBytes = 65_536;
+        var projectionNames = Enumerable.Range(0, occurrences).Select(i => $"Value{i}").ToArray();
+        var emptyDocument = "{\"Padding\":\"\",\"Serilog\":{" +
+            string.Join(',', projectionNames.Select(name => $"\"{name}\":\"\"")) + "}}";
+        var padding = ConfigurationDocumentCodec.MaxBytes - Encoding.UTF8.GetByteCount(emptyDocument) -
+            occurrences * sourceBytes * 6 + over; // '<' is encoded as six ASCII bytes: \\u003C.
+        Assert.InRange(padding, 1, 1_000_000);
+        var projections = string.Join(',', projectionNames.Select(name =>
+            $"{{\"path\":\"/{name}\",\"format\":\"string\",\"secretRef\":{{\"name\":\"shared\",\"version\":1}}}}"));
+        var profileText = """
+            {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"logging","revision":1},"spec":{
+              "documents":{"settings":{"fileName":"settings.json","format":"json","template":{}}},
+              "staticContributions":{"logging":{"documentRef":"settings","path":"/Serilog","value":{},
+                "secretProjections":[]}}}}
+            """.Replace("\"template\":{}", "\"template\":{\"Padding\":\"" + new string('a', padding) + "\"}", StringComparison.Ordinal)
+            .Replace("\"secretProjections\":[]", "\"secretProjections\":[" + projections + "]", StringComparison.Ordinal);
+        var profile = ProfilePayloadParser.ParseProfile(Encoding.UTF8.GetBytes(profileText)).Declaration!;
+        Assert.NotNull(profile);
+        var manifest = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(
+            """{"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{"components":{"api":{}}}}}"""u8.ToArray(),
+            new([], [], [], []))).Candidate.Declaration;
+        var revision = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
+        var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((target, i) => new ConfigurationPlanningScope(target,
+            i == 0 ? AssignmentToken.New() : null, new(target,
+                i == 0 ? [new ProfileDecision.Use(profile.Reference)] : []))).ToArray();
+        var reference = new SecretRef(SecretId.New(), SecretVersionId.New());
+        var frozen = ConfigurationPlanningSnapshot.PrepareCore(revision, manifest, scopes, [profile],
+            frozenSecrets: new Dictionary<ProfileNamedSecretRef, SecretRef> { [new("shared", 1)] = reference }).Snapshot!;
+        Assert.NotNull(frozen);
+        var target = new ConfigurationDocumentTarget(ApplicationDeploymentId.New(), DeploymentGeneration.Create(1),
+            ManifestLocalId.Create("api"), ManifestLocalId.Create("settings"));
+        var composed = (await new ComposeConfigurationDocument(ConfigurationRenderingCatalog.Empty, new([], []), new NoEvidence())
+            .ExecuteAsync(frozen, target, EnvironmentRecordId.New(), default))!;
+        Assert.NotNull(composed);
+        var metadata = new ConfigurationDocumentMetadata(ConfigurationDocumentRevisionId.New(), target,
+            EnvironmentId.Create("pilot"), manifest.ApplicationId, revision, DeploymentPlanId.New(), "settings.json", "json",
+            ConfigurationJson.Profile, "fingerprint", "inputs", "actor", DateTimeOffset.UtcNow);
+        var ports = new Ports
+        {
+            Artifact = new(new(metadata, ConfigurationPlanningSnapshotCodec.Encode(frozen), "[]", composed.Tree), EnvironmentRecordId.New()),
+            Material = Encoding.UTF8.GetBytes(new string('<', sourceBytes))
+        };
+        ports.Grant = new(Guid.NewGuid(), metadata, "actor", DateTimeOffset.UtcNow, null, null, null);
+        using var result = await new DeliverConfiguration(ports, ports, ports, ConfigurationRenderingCatalog.Empty, [])
+            .ExecuteAsync("credential", metadata.Id, default);
+        Assert.Equal(allowed ? ConfigurationDeliveryStatus.Delivered : ConfigurationDeliveryStatus.LimitExceeded, result.Status);
+        Assert.Equal(1, ports.Reads);
+        if (allowed)
+        {
+            Assert.Equal(ConfigurationDocumentCodec.MaxBytes, result.Json.Length);
+            using var json = JsonDocument.Parse(result.Json);
+            Assert.Equal(new string('<', sourceBytes), json.RootElement.GetProperty("Serilog"u8).GetProperty("Value9"u8).GetString());
+        }
+        else Assert.True(result.Json.IsEmpty);
     }
 
     [Theory]

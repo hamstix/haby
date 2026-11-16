@@ -81,10 +81,18 @@ public static class ConfigurationJson
 
     // Count actual escaped UTF-8 before Utf8JsonWriter can allocate a large value buffer.
     // The same pinned encoder is used below; bounded scratch space never grows with material.
-    private static void MeasureDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved, CancellationToken token)
+    internal static long MeasureUnresolvedDelivery(ConfigurationValue value, CancellationToken token) =>
+        MeasureDelivery(value, null, token, allowUnresolved: true);
+
+    internal static long MeasureResolvedValue(ConfigurationValue value, CancellationToken token) =>
+        MeasureDelivery(value, null, token);
+
+    private static long MeasureDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved,
+        CancellationToken token, bool allowUnresolved = false)
     {
         long remaining = ConfigurationDocumentCodec.MaxBytes;
         Visit(value, "");
+        return ConfigurationDocumentCodec.MaxBytes - remaining;
         void Charge(long count) { remaining -= count; if (remaining < 0) throw new ConfigurationDocumentLimitException(); }
         void Text(string text)
         {
@@ -114,6 +122,7 @@ public static class ConfigurationJson
                 case ConfigurationNumber n: Charge(n.CanonicalText.Length); break;
                 case ConfigurationString s: Text(s.Value); break;
                 case ConfigurationDeferredValue when resolved is not null && resolved.TryGetValue(path, out var confidential): Text(confidential.Reveal()); break;
+                case ConfigurationDeferredValue or ConfigurationProjectedSecret when allowUnresolved: break;
                 case ConfigurationObject o:
                     Charge(2 + Math.Max(0, o.Members.Count - 1));
                     foreach (var (key, child) in o.Members) { Text(key); Charge(1); Visit(child, path + "/" + ConfigurationComposer.Escape(key)); }

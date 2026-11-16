@@ -124,7 +124,7 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
             if (nextOutput != outputs.Length) throw new InvalidDataException();
             // Validate every confidential node before resolving even the first SecretRef.
             Validate(revision.Tree, "");
-            long expansionBudget = ConfigurationDocumentCodec.MaxBytes;
+            long expansionBudget = ConfigurationDocumentCodec.MaxBytes - ConfigurationJson.MeasureUnresolvedDelivery(revision.Tree, token);
             var resolved = new Dictionary<string, ConfidentialConfigurationString>(StringComparer.Ordinal);
             var projected = new Dictionary<string, ConfigurationValue>(StringComparer.Ordinal);
             foreach (var group in staticSecrets.GroupBy(x => (x.Value.Definition, x.Value.Node.Reference)))
@@ -136,11 +136,17 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
                 try
                 {
                     if (bytes.Length is 0 or > MaxSecretBytes) throw new ConfigurationDocumentLimitException();
-                    var value = ParseConfigurationSecret(bytes, group.First().Value.Node.Format);
+                    var values = new Dictionary<ProfileSecretFormat, ConfigurationValue>();
                     foreach (var (path, binding) in group)
                     {
-                        if (binding.Node.Format != group.First().Value.Node.Format)
+                        token.ThrowIfCancellationRequested();
+                        if (!values.TryGetValue(binding.Node.Format, out var value))
+                        {
                             value = ParseConfigurationSecret(bytes, binding.Node.Format);
+                            values.Add(binding.Node.Format, value);
+                        }
+                        expansionBudget -= ConfigurationJson.MeasureResolvedValue(value, token);
+                        if (expansionBudget < 0) throw new ConfigurationDocumentLimitException();
                         projected.Add(path, value);
                     }
                 }
@@ -167,7 +173,7 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
                         if (!binding.Adapter.ValidateMaterial(chars)) throw new InvalidDataException();
                         var value = rendering.FormatDelivery(binding.Pin, binding.Value, chars) ?? throw new InvalidDataException();
                         token.ThrowIfCancellationRequested();
-                        expansionBudget -= Encoding.UTF8.GetByteCount(value.Reveal());
+                        expansionBudget -= ConfigurationJson.MeasureResolvedValue(new ConfigurationString(value.Reveal()), token);
                         if (expansionBudget < 0) throw new ConfigurationDocumentLimitException();
                         resolved.Add(path, value);
                     }

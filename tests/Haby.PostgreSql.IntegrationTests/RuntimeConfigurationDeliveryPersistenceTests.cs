@@ -1,10 +1,13 @@
 using System.Data.Common;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Haby.Application;
 using Haby.Configuration.Contracts;
 using Haby.Domain;
+using Haby.Manifest;
 using Haby.Operator.Host;
 using Haby.Persistence.PostgreSql;
 using Microsoft.EntityFrameworkCore;
@@ -19,9 +22,36 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed partial class DurableDeploymentPlanningTests
 {
     private async Task<(InternalScenario Scenario, RuntimePublicationRequest Request, RuntimePublicationResult Published, RuntimeAuthenticatedContext Identity)>
-        RuntimeDeliverySetup(bool publish = true, bool shared = false)
+        RuntimeDeliverySetup(bool publish = true, bool shared = false, bool projected = false)
     {
-        var scenario = await InternalScenarioAsync(initialOnly: true, configureManifest: e => ConfiguredDocuments(e, shared: shared));
+        var scenario = await InternalScenarioAsync(initialOnly: true, configureManifest: e =>
+        {
+            ConfiguredDocuments(e, shared: shared);
+            if (projected) e["manifest"]!["spec"]!["components"]!["api"]!.AsObject().Remove("documents");
+        }, acceptGeneration: projected ? async (services, environment, revision) =>
+        {
+            using var material = new SecretMaterial("projected-canary"u8.ToArray());
+            Assert.Equal(SecretOutcome.Created, (await services.GetRequiredService<SecretAdministration>().CreateAsync(
+                "initial", "runtime-configuration", Guid.NewGuid(), material, "tester", default, SecretPurpose.Configuration)).Outcome);
+            var profile = """
+                {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"runtime-secret","revision":1},"spec":{
+                  "documents":{"settings":{"fileName":"settings.json","format":"json","template":{"Mode":"frozen"}}},
+                  "staticContributions":{"secrets":{"documentRef":"settings","path":"/Secrets","value":{},
+                    "secretProjections":[{"path":"/Password","format":"string","secretRef":{"name":"runtime-configuration","version":1}}]}}}}
+                """;
+            var imported = Assert.IsType<ImportConfigurationProfileResult.Succeeded>(await new ImportConfigurationProfile(
+                services.GetRequiredService<IConfigurationProfileImportStore>(), services.GetRequiredService<TimeProvider>())
+                .ExecuteAsync(Encoding.UTF8.GetBytes(profile), "tester"));
+            var metadata = (await services.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("initial"), default))!;
+            Assert.Equal(AssignmentOutcome.Created, (await services.GetRequiredService<IProfileAssignmentStore>().ApplyAsync(metadata,
+                new(new ProfileAssignmentTarget.Environment(), [new ProfileDecision.Use(imported.Revision.Reference)]),
+                new AssignmentPrecondition.ExpectedAbsence(),
+                new("tester", services.GetRequiredService<TimeProvider>().GetUtcNow(), null), default)).Outcome);
+            return await new InternalAcceptedGenerationBuilder(services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(),
+                (PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>(),
+                services.GetServices<IInternalActionHandler>().ToArray()).AcceptForEffectAsync(environment,
+                    revision.ApplicationRecordId, revision, new DeploymentPrecondition.ExpectedAbsence(), "tester", default);
+        } : null);
         await using var services = InternalServices(scenario.Connection, scenario.Time);
         var handler = new IdentityFixture();
         Assert.Null((await ConfigurationPreparation(services).Preparation.PrepareAsync(scenario.Commit, "tester", default)).Failure);
@@ -160,7 +190,7 @@ public sealed partial class DurableDeploymentPlanningTests
     private sealed class RuntimeRpcOrder : DbCommandInterceptor
     {
         internal bool InAuthorization, Authorized, Violation;
-        internal int SizeProbes, BodyReads;
+        internal int SizeProbes, BodyReads, MaterialReads;
         internal void BeginRequest() { InAuthorization = false; Authorized = false; }
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
             CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
@@ -168,6 +198,7 @@ public sealed partial class DurableDeploymentPlanningTests
             var document = command.CommandText.Contains("configuration_document_revisions", StringComparison.Ordinal);
             var body = document && command.CommandText.Contains("payload", StringComparison.Ordinal);
             var material = command.CommandText.Contains("secret_payloads", StringComparison.Ordinal);
+            if (material && !command.CommandText.Contains("length(", StringComparison.OrdinalIgnoreCase)) MaterialReads++;
             if (document && !InAuthorization || (body || material) && !Authorized) Violation = true;
             if (body)
             {
@@ -189,10 +220,12 @@ public sealed partial class DurableDeploymentPlanningTests
         public ValueTask<ConfigurationDeliveryArtifact?> ReadAsync(RuntimeConfigurationAuthority authority, CancellationToken token) => inner.ReadAsync(authority, token);
     }
 
-    [Fact]
-    public async Task Runtime_generated_rpc_uses_production_host_exact_publication_and_keeps_credential_purposes_separate()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Runtime_generated_rpc_uses_production_host_exact_publication_and_keeps_credential_purposes_separate(bool projected)
     {
-        var setup = await RuntimeDeliverySetup(publish: false);
+        var setup = await RuntimeDeliverySetup(publish: false, projected: projected);
         await using var services = InternalServices(setup.Scenario.Connection, setup.Scenario.Time);
         var publication = Publications(services, new IdentityFixture());
         var order = new RuntimeRpcOrder();
@@ -218,13 +251,33 @@ public sealed partial class DurableDeploymentPlanningTests
             order.BeginRequest();
             Assert.Equal(StatusCode.Unauthenticated, (await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverRuntimeAsync(request, invalid))).StatusCode);
         }
-        Assert.False(order.Violation); Assert.Equal(0, order.SizeProbes); Assert.Equal(0, order.BodyReads);
-        await publication.ApplyAsync(setup.Request, default);
+        Assert.False(order.Violation); Assert.Equal(0, order.SizeProbes); Assert.Equal(0, order.BodyReads); Assert.Equal(0, order.MaterialReads);
+        var published = await publication.ApplyAsync(setup.Request, default);
         order.BeginRequest();
         var reply = await client.DeliverRuntimeAsync(request, headers);
-        Assert.Equal(request.RevisionId, reply.RevisionId); Assert.Equal("{\"Mode\":\"frozen\"}", Encoding.UTF8.GetString(reply.Json.Span));
+        Assert.Equal(request.RevisionId, reply.RevisionId);
+        using (var json = JsonDocument.Parse(reply.Json.Memory))
+        {
+            Assert.Equal("frozen", json.RootElement.GetProperty("Mode"u8).GetString());
+            if (projected) Assert.Equal("projected-canary", json.RootElement.GetProperty("Secrets"u8).GetProperty("Password"u8).GetString());
+            else Assert.Equal("{\"Mode\":\"frozen\"}", Encoding.UTF8.GetString(reply.Json.Span));
+        }
         Assert.DoesNotContain("Mode", reply.ToString(), StringComparison.Ordinal);
         Assert.False(order.Violation); Assert.Equal(1, order.SizeProbes); Assert.Equal(1, order.BodyReads);
+        Assert.Equal(projected ? 1 : 0, order.MaterialReads);
+        if (projected)
+        {
+            var wrong = new DeliverRuntimeConfigurationRequest { BindingId = request.BindingId,
+                RevisionId = ConfigurationDocumentRevisionId.New().ToString() };
+            Assert.Equal(StatusCode.PermissionDenied,
+                (await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverRuntimeAsync(wrong, headers))).StatusCode);
+            Assert.Equal(1, order.MaterialReads);
+            await publication.ApplyAsync(Revoke(setup.Request, published.CurrentPermission!.Token), default);
+            order.BeginRequest();
+            Assert.Equal(StatusCode.PermissionDenied,
+                (await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverRuntimeAsync(request, headers))).StatusCode);
+            Assert.Equal(1, order.MaterialReads);
+        }
         Assert.Equal(StatusCode.PermissionDenied, (await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverAsync(new() { RevisionId = request.RevisionId }, headers))).StatusCode);
         using var unauthenticated = GrpcChannel.ForAddress(host.Urls.Single());
         Assert.ThrowsAny<Exception>(() => new Haby.Operator.Contracts.ManifestOperator.ManifestOperatorClient(unauthenticated)

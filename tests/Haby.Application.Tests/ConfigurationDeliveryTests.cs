@@ -113,7 +113,8 @@ public sealed partial class ConfigurationDeliveryTests
         public DeliverConfiguration Service(params IConfigurationResolutionBinding[] registrations) => new(Store, Store, Store, Catalog, registrations.Length == 0 ? [Adapter] : registrations);
         public ValueTask<ConfigurationDeliveryResult> Run() => Service().ExecuteAsync("opaque", Store.Grant.Document.Id, default);
     }
-    private static async Task<Harness> Prepare(int projections = 1, bool separateRequests = false, bool configurationSecret = false)
+    private static async Task<Harness> Prepare(int projections = 1, bool separateRequests = false, bool configurationSecret = false,
+        int ordinaryPadding = 0)
     {
         var declaration = JsonNode.Parse("""
             {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{
@@ -141,6 +142,8 @@ public sealed partial class ConfigurationDeliveryTests
             {"logging":{"documentRef":"settings","path":"/Logging","value":{"WriteTo":[{"Args":{}}]},
             "secretProjections":[{"path":"/WriteTo/0/Args/password","format":"json","secretRef":{"name":"logging-password","version":1}}]}}
             """u8);
+        if (ordinaryPadding > 0) profileNode["spec"]!["staticContributions"]!["logging"]!["value"]!["Filler"] =
+            new string('x', ordinaryPadding);
         var profile = Haby.Tests.ProfilePersistenceSamples.Parse(profileNode);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
         var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((t, i) => new ConfigurationPlanningScope(t, i == 0 ? AssignmentToken.New() : null, new(t, i == 0 ? [new ProfileDecision.Use(profile.Reference)] : [])));

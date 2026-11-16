@@ -24,7 +24,7 @@ public sealed class ComposeConfigurationDocument(ConfigurationRenderingCatalog r
             if (!Static(contribution.Contribution.Value)) return null;
             ConfigurationDocumentCodec.ValidateTree(contribution.Contribution.Value);
             var projected = ProfileSecretInsertion.Apply(contribution.Contribution.Value,
-                contribution.Contribution.SecretProjections, frozen.FrozenSecrets);
+                contribution.Contribution.SecretProjections, frozen.FrozenSecrets, contribution.Contribution.Path);
             projections.Add(new(contribution.Contribution.Path, new(projected), contribution.Origin.Source));
         }
         for (var i = 0; i < layout.BindingRequests.Count; i++)

@@ -110,6 +110,18 @@ public sealed partial class ConfigurationDeliveryTests
         Assert.Equal("synthetic-private-material", json.RootElement.GetProperty("value"u8).GetString());
     }
 
+    [Fact]
+    public async Task Ordinary_projected_and_generated_content_share_the_escaped_delivery_budget()
+    {
+        var h = await Prepare(configurationSecret: true, ordinaryPadding: 50_000);
+        h.Store.ConfigurationBytes = System.Text.Encoding.UTF8.GetBytes("\"" + new string('x', 65_534) + "\"");
+        h.Adapter.Text = new string('x', ConfigurationDocumentCodec.MaxBytes - 100_000);
+        using var result = await h.Run();
+        Assert.Equal(ConfigurationDeliveryStatus.LimitExceeded, result.Status);
+        Assert.True(result.Json.IsEmpty);
+        Assert.Equal(2, h.Store.Resolutions);
+    }
+
     [Theory]
     [InlineData("purpose")]
     [InlineData("attempt")]

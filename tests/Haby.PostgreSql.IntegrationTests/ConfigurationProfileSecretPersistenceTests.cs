@@ -1,9 +1,17 @@
 using System.Text;
+using System.Data.Common;
+using System.Text.Json;
+using Grpc.Core;
+using Grpc.Net.Client;
 using Haby.Application;
+using Haby.Configuration.Contracts;
 using Haby.Domain;
 using Haby.Manifest;
+using Haby.Operator.Host;
 using Haby.Persistence.PostgreSql;
+using Haby.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using static Haby.Tests.ProfilePersistenceSamples;
@@ -68,7 +76,81 @@ public sealed partial class ConfigurationProfilePersistenceTests
         var encoded = ConfigurationPlanningSnapshotCodec.Encode(frozen);
         Assert.DoesNotContain("canary-private", encoded);
         Assert.Equal(frozen.FrozenSecrets[named], ConfigurationPlanningSnapshotCodec.Decode(encoded, applicationRef).FrozenSecrets[named]);
-        await using (var restarted = new ServiceCollection().AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore().BuildServiceProvider())
+        DurablePlan acceptedPlan;
+        DurableChangeSetCommit committed;
+        ConfigurationDocumentTarget savedTarget;
+        ConfigurationDocumentRevision savedDocument;
+        var planningReads = new SecretMaterialReads();
+        await using (var planning = DurableServices(connection, planningReads))
+        {
+            var planner = planning.GetRequiredService<IDurableDeploymentPlanner>();
+            var change = (await planner.CreateChangeSetAsync(environment.RecordId, applicationRef.ApplicationRecordId,
+                applicationRef, new DeploymentPrecondition.ExpectedAbsence(), "operator", default)).ChangeSet!;
+            var result = await planner.CreatePlanAsync(change.Id, "operator", default);
+            Assert.Equal(DurablePlanStatus.Planned, result.Status);
+            acceptedPlan = result.Plan!;
+            Assert.Equal(frozen.FrozenSecrets[named], acceptedPlan.Inputs.Configuration!.FrozenSecrets[named]);
+            committed = Assert.IsType<DurableCommitResult.Committed>(await planning.GetRequiredService<IDurableDesiredStateCommitter>()
+                .CommitAsync(change.Id, acceptedPlan.Id, "operator", default)).Commit;
+            Assert.Equal(frozen.FrozenSecrets[named], (await planning.GetRequiredService<IDurableDesiredStateCommitter>()
+                .FindGenerationAsync(committed.DeploymentId, committed.Generation, default))!.Inputs.Configuration!.FrozenSecrets[named]);
+            var progress = await planning.GetRequiredService<DurableGenerationRunner>()
+                .RunAsync(committed.DeploymentId, committed.Generation, default);
+            Assert.Equal(committed.Generation.Value, progress.Progress!.AppliedGeneration);
+            savedTarget = new(committed.DeploymentId, committed.Generation, ManifestLocalId.Create("api"), ManifestLocalId.Create("settings"));
+            var document = await planning.GetRequiredService<IConfigurationDocumentStore>().MaterializeAsync(savedTarget, "operator", default);
+            Assert.Equal(ConfigurationDocumentStatus.Created, document.Status);
+            savedDocument = document.Revision!;
+            var node = Assert.IsType<ConfigurationProjectedSecret>(Assert.IsType<ConfigurationObject>(
+                Assert.IsType<ConfigurationObject>(Assert.IsType<ConfigurationArray>(
+                Assert.IsType<ConfigurationObject>(Assert.IsType<ConfigurationObject>(savedDocument.Tree)
+                    .Members["Serilog"]).Members["WriteTo"]).Items[0]).Members["Args"]).Members["password"]);
+            Assert.Equal(frozen.FrozenSecrets[named], node.Reference);
+            Assert.Equal(ProfileSecretFormat.String, node.Format);
+            Assert.DoesNotContain("canary-private", savedDocument.FrozenInputs);
+            Assert.Equal(0, planningReads.Count);
+        }
+        var materialReads = new SecretMaterialReads();
+        await using (var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection,
+            "--Haby:Tls:Enabled=false", "--Haby:Port=0"], services =>
+            services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.AddInterceptors(materialReads))))
+        {
+            await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+            using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+            var admin = OperatorTestCredentials.Client(channel);
+            var selector = new Haby.Operator.Contracts.ConfigurationDocumentRequest
+            {
+                Environment = "staging", ApplicationId = "sample", ComponentId = "api", DocumentId = "settings",
+                Generation = committed.Generation.Value
+            };
+            var preview = await admin.PreviewConfigurationAsync(selector);
+            Assert.Equal(Haby.Operator.Contracts.ConfigurationDocumentStatus.Found, preview.Status);
+            Assert.Contains("/Serilog/WriteTo/0/Args/password", preview.PreviewJson.ToStringUtf8());
+            Assert.DoesNotContain("canary-private", preview.PreviewJson.ToStringUtf8());
+            Assert.Equal(0, materialReads.Count);
+            var grant = await admin.CreateConfigurationAccessAsync(new() { Selector = selector });
+            Assert.Equal(Haby.Operator.Contracts.ConfigurationAccessStatus.Created, grant.Status);
+            var client = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+            var headers = new Metadata { { "authorization", "Bearer " + grant.Credential } };
+            async Task Denied(ConfigurationDocumentRevisionId id)
+            {
+                var failure = await Assert.ThrowsAsync<RpcException>(async () => await client.DeliverAsync(
+                    new() { RevisionId = id.ToString() }, headers));
+                Assert.Equal(StatusCode.PermissionDenied, failure.StatusCode);
+            }
+            await Denied(ConfigurationDocumentRevisionId.New());
+            Assert.Equal(0, materialReads.Count);
+            var delivered = await client.DeliverAsync(new() { RevisionId = savedDocument.Metadata.Id.ToString() }, headers);
+            using (var json = JsonDocument.Parse(delivered.Json.Memory))
+                Assert.Equal("canary-private", json.RootElement.GetProperty("Serilog"u8).GetProperty("WriteTo"u8)[0]
+                    .GetProperty("Args"u8).GetProperty("password"u8).GetString());
+            Assert.Equal(1, materialReads.Count);
+            Assert.False((await admin.RevokeConfigurationAccessAsync(new() { GrantId = grant.Grant.GrantId })).HasCredential);
+            await Denied(savedDocument.Metadata.Id);
+            Assert.Equal(1, materialReads.Count);
+            await host.StopAsync();
+        }
+        await using (var restarted = DurableServices(connection))
         {
             Assert.Equal(frozen.FrozenSecrets[named], (await Capture())!.FrozenSecrets[named]);
             Assert.Equal(SecretPurpose.Configuration,
@@ -90,10 +172,49 @@ public sealed partial class ConfigurationProfilePersistenceTests
             var changed = (await Capture())!;
             Assert.NotEqual(frozen.FrozenSecrets[named], changed.FrozenSecrets[new("logging-password-v2", 1)]);
             Assert.Equal(frozen.FrozenSecrets[named], ConfigurationPlanningSnapshotCodec.Decode(encoded, applicationRef).FrozenSecrets[named]);
+            var loadedPlan = (await restarted.GetRequiredService<IDurableDeploymentPlanner>().FindPlanAsync(acceptedPlan.Id, default))!;
+            Assert.Equal(frozen.FrozenSecrets[named], loadedPlan.Inputs.Configuration!.FrozenSecrets[named]);
+            var loadedGeneration = (await restarted.GetRequiredService<IDurableDesiredStateCommitter>()
+                .FindGenerationAsync(committed.DeploymentId, committed.Generation, default))!;
+            Assert.Equal(frozen.FrozenSecrets[named], loadedGeneration.Inputs.Configuration!.FrozenSecrets[named]);
+            var loadedDocument = (await restarted.GetRequiredService<IConfigurationDocumentStore>().ReadAsync(savedTarget, default)).Revision!;
+            Assert.Equal(savedDocument, loadedDocument);
+            Assert.Equal(savedDocument.Metadata.Fingerprint, loadedDocument.Metadata.Fingerprint);
             using var retained = await restarted.GetRequiredService<ISecretStore>().ResolveBoundedAsync(
                 new(new SecretOwner.Environment(environment.RecordId), SecretPurpose.Configuration), frozen.FrozenSecrets[named], 65_536, default);
             Assert.NotNull(retained);
             Assert.Equal("canary-private"u8.ToArray(), retained.CopyBytes());
+        }
+    }
+
+    private static ServiceProvider DurableServices(string connection, SecretMaterialReads? reads = null) => new ServiceCollection()
+        .AddSingleton<TimeProvider>(new Clock(Time))
+        .AddSingleton(ConfigurationRenderingCatalog.Empty)
+        .AddPostgreSqlManifestCatalog(connection)
+        .AddDbContextFactory<ManifestCatalogDbContext>(options => { if (reads is not null) options.AddInterceptors(reads); })
+        .AddPostgreSqlPlaintextSecretStore()
+        .AddPostgreSqlProviderConfigurationStore()
+        .AddPostgreSqlProviderAliasStore()
+        .AddPostgreSqlProviderConfigurationCodec()
+        .AddPostgreSqlProviderRevisionPreflight()
+        .AddPostgreSqlDurableOperationJournal()
+        .AddPostgreSqlDurableOperationExecution()
+        .AddPostgreSqlDurableDesiredStateCommitter()
+        .AddSingleton<IConfigurationDocumentStore>(services => new PostgreSqlConfigurationDocumentStore(
+            services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(),
+            new(ConfigurationRenderingCatalog.Empty, new([], []), services.GetRequiredService<IConfigurationOutputEvidence>()),
+            services.GetRequiredService<TimeProvider>()))
+        .BuildServiceProvider();
+
+    private sealed class SecretMaterialReads : DbCommandInterceptor
+    {
+        internal int Count;
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("secret_payloads", StringComparison.Ordinal) &&
+                !command.CommandText.Contains("length(", StringComparison.OrdinalIgnoreCase)) Count++;
+            return ValueTask.FromResult(result);
         }
     }
 }

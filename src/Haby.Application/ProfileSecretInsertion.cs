@@ -5,10 +5,14 @@ namespace Haby.Application;
 internal static class ProfileSecretInsertion
 {
     internal static ConfigurationValue Apply(ConfigurationValue value, IReadOnlyList<ProfileSecretProjection> projections,
-        IReadOnlyDictionary<ProfileNamedSecretRef, SecretRef> frozen)
+        IReadOnlyDictionary<ProfileNamedSecretRef, SecretRef> frozen, string outerPath = "")
     {
         foreach (var projection in projections)
         {
+            // The document root plus every traversed object/array consumes one level.
+            // Check before splitting or recursively constructing missing parents.
+            if (outerPath.Count(c => c == '/') + projection.Path.Count(c => c == '/') >
+                ConfigurationDocumentCodec.MaxContainers) throw new ConfigurationDocumentLimitException();
             var parts = projection.Path[1..].Split('/').Select(x => x.Replace("~1", "/", StringComparison.Ordinal)
                 .Replace("~0", "~", StringComparison.Ordinal)).ToArray();
             if (!frozen.TryGetValue(projection.SecretRef, out var reference)) throw new InvalidDataException();
