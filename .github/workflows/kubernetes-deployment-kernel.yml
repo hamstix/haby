@@ -62,7 +62,7 @@ jobs:
           $ids = @($lines | Where-Object { $_ -cmatch '^PASS configured-C[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(16,3) })
           $readiness = @($lines | Where-Object { $_ -cmatch '^PASS configured-R[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(16,3) })
           if (($ids -join ',') -cne ((1..11 | ForEach-Object { 'C{0:d2}' -f $_ }) -join ',') -or
-              ($readiness -join ',') -cne ((1..4 | ForEach-Object { 'R{0:d2}' -f $_ }) -join ',') -or
+              ($readiness -join ',') -cne (@('R01','R05','R02','R06','R03','R04') -join ',') -or
               'Harness: PASS' -notin $lines -or 'PASS configured-owned-namespace-absent' -notin $lines -or
               'PASS configured-owned-catalog-cleanup' -notin $lines -or
               'Run-owned private directory removed.' -notin $lines -or

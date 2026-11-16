@@ -10,6 +10,8 @@
   "currentKubernetesDurableActions": 36,
   "currentKubernetesProviderAccess": 10,
   "entries": [
+    {"method":"Haby.Kubernetes.Qualification.ConfiguredDeploymentCases.Run","case":"deaea3f92e8ef40e5fed1761506b0b2363300b78953e809ded825858bfb1d26d","suite":"api-consumer","gate":"kubernetes-configured-deployment","trigger":"every-change","addedFor233":true},
+    {"method":"Haby.Kubernetes.Qualification.ConfiguredDeploymentCases.Run","case":"2eef664e6701717248bbb5a45006930145b0db87b9e5808ff6361970b24e44ba","suite":"api-consumer","gate":"kubernetes-configured-deployment","trigger":"every-change","addedFor233":true},
     {"method":"Haby.Cli.Tests.CliLoopbackTests.Observation_uses_one_generated_RPC_and_truthful_text_JSON_and_native_exits","case":"a9c52a00679dd09ec91399ce2e406da073c78444ad1bb3e49e58811ca3f35217","suite":"fast","gate":"validate","trigger":"every-change","addedFor233":true},
     {"method":"Haby.Cli.Tests.CliLoopbackTests.Observation_uses_one_generated_RPC_and_truthful_text_JSON_and_native_exits","case":"a9c52a00679dd09ec91399ce2e406da073c78444ad1bb3e49e58811ca3f35217","suite":"published-native","gate":"Native AOT (win-x64)","trigger":"every-change","addedFor233":true},
     {"method":"Haby.Cli.Tests.CliLoopbackTests.Observation_uses_one_generated_RPC_and_truthful_text_JSON_and_native_exits","case":"a9c52a00679dd09ec91399ce2e406da073c78444ad1bb3e49e58811ca3f35217","suite":"published-native","gate":"Native AOT (linux-x64)","trigger":"every-change","addedFor233":true},

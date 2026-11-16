@@ -75,9 +75,20 @@ public sealed partial class DurableDeploymentPlanningTests
         var results = await Task.WhenAll(client.ResumeGenerationAsync(resume).ResponseAsync, second.ResumeGenerationAsync(racing).ResponseAsync);
         Assert.Equal(sameKey ? 2 : 1, results.Count(x => x.Outcome == "resumed"));
         Assert.Equal(sameKey ? 1 : 0, results.Count(x => x.Replayed));
+        Assert.Equal(sameKey ? 0 : 1, results.Count(x => x.Outcome == "conflict"));
         Assert.All(results.Where(x => x.Outcome == "resumed"), x => Assert.False(x.CurrentReady));
         Assert.Equal(2, deployment.ReadinessReads); Assert.Equal(2, deployment.Writes);
-        var replay = await client.ResumeGenerationAsync(resume); Assert.True(replay.Replayed);
+        // Task.WhenAll retains request indexes; either independent Host can win.
+        var winner = Array.FindIndex(results, x => x.Outcome == "resumed");
+        var requests = new[] { resume, racing };
+        var replay = await client.ResumeGenerationAsync(requests[winner]);
+        var saved = results[winner].Clone(); saved.Replayed = true;
+        Assert.Equal(saved, replay);
+        if (!sameKey)
+        {
+            var stale = await client.ResumeGenerationAsync(requests[1 - winner]);
+            Assert.Equal("conflict", stale.Outcome); Assert.False(stale.Replayed);
+        }
         var duplicate = resume.Clone(); duplicate.RequestId = "duplicate"; duplicate.Members.Add(duplicate.Members[0].Clone());
         Assert.Equal("invalidRequest", (await client.ResumeGenerationAsync(duplicate)).Outcome);
         var actor = await host.Services.GetRequiredService<IOperatorAccessStore>().CreateAsync("another operator", "owner", null, default);
@@ -86,7 +97,15 @@ public sealed partial class DurableDeploymentPlanningTests
         await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
         {
             var attempts = await verify.ObservationAttempts.AsNoTracking().Where(x => x.Ordinal == 2).ToArrayAsync();
-            Assert.Equal(2, attempts.Length); Assert.All(attempts, x => { Assert.NotNull(x.Previous); Assert.Equal(principal, x.Actor); });
+            Assert.Equal(2, attempts.Length);
+            Assert.All(attempts, x =>
+            {
+                Assert.Equal(Guid.Parse(expired.Members.Single(original => original.Subject == x.Subject).AttemptId), x.Previous);
+                Assert.Equal(principal, x.Actor);
+                Assert.Equal(TimeSpan.FromSeconds(x.BudgetSeconds), x.Deadline - x.StartedAt);
+            });
+            Assert.Equal(4, await verify.ObservationAttempts.CountAsync());
+            Assert.Equal(2, deployment.ReadinessReads); Assert.Equal(2, deployment.Writes);
             Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
             Assert.DoesNotContain(await verify.ObservationRecords.AsNoTracking().Where(x => x.Kind == "Request").Select(x => x.InputJson).ToArrayAsync(), x => x.Contains("observer", StringComparison.Ordinal));
         }
