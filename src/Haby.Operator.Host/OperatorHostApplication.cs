@@ -131,6 +131,35 @@ public static class OperatorHostApplication
             (PostgreSqlDurableDesiredStateCommitter)p.GetRequiredService<IDurableDesiredStateCommitter>(),
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
             [new InternalDeploymentAction(p.GetRequiredService<ISecretStore>())]));
+        var submitText = builder.Configuration["Haby:WorkloadSubmission:RequestMilliseconds"];
+        if (submitText is not null && !int.TryParse(submitText, out _))
+            throw new InvalidOperationException("Invalid configuration key: Haby:WorkloadSubmission:RequestMilliseconds");
+        var submitOptions = new WorkloadSubmissionOptions(submitText is null ? 30000 : int.Parse(submitText, System.Globalization.CultureInfo.InvariantCulture));
+        submitOptions.Validate();
+        builder.Services.AddSingleton(submitOptions);
+        builder.Services.AddSingleton<InternalDeploymentAction>();
+        builder.Services.AddSingleton<InternalRuntimeIdentityAction>();
+        builder.Services.AddSingleton<InternalWorkloadConfiguration>(p => new(
+            p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
+            p.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(), p.GetRequiredService<PostgreSqlConfigurationDocumentStore>(),
+            [p.GetRequiredService<InternalDeploymentAction>()], p.GetServices<IExternalOperationOutputContract>(),
+            p.GetServices<IProviderConfigurationCodec>(), p.GetRequiredService<DurableActionAdmission>()));
+        builder.Services.AddSingleton<InternalDurableActions>(p => new(
+            p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
+            [p.GetRequiredService<InternalDeploymentAction>(), p.GetRequiredService<InternalRuntimeIdentityAction>()],
+            p.GetServices<IProviderConfigurationCodec>(), p.GetServices<IExternalOperationOutputContract>(), p.GetRequiredService<DurableActionAdmission>(),
+            p.GetRequiredService<DurableOperationSerialization>(), p.GetRequiredService<TimeProvider>(),
+            configurationPreparation: p.GetRequiredService<InternalWorkloadConfiguration>()));
+        builder.Services.AddSingleton<InternalRuntimeIdentityPreparation>(p => new(
+            p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
+            p.GetRequiredService<InternalWorkloadConfiguration>(), p.GetRequiredService<InternalDurableActions>(), InternalRuntimeIdentityAction.Create));
+        builder.Services.AddSingleton<InternalRuntimePublication>();
+        builder.Services.AddSingleton<InternalRuntimePublicationPreparation>();
+        builder.Services.AddSingleton<IOperatorWorkloadSubmission>(p => new PostgreSqlWorkloadSubmission(
+            p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
+            p.GetRequiredService<InternalWorkloadConfiguration>(), p.GetRequiredService<InternalDurableActions>(),
+            p.GetRequiredService<InternalRuntimeIdentityPreparation>(), p.GetRequiredService<InternalRuntimePublicationPreparation>(),
+            p.GetRequiredService<DurableOperationSerialization>(), submitOptions, InternalDeploymentAction.Create));
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
         builder.Services.AddPostgreSqlDurableDesiredStateCommitter();
         // Explicit pilot storage choice under ADR-006: database rows and backups contain recoverable secrets.

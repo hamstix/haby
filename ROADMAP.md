@@ -15,7 +15,7 @@ and independently reviewable PRs.
 | --- | --- | --- |
 | P1 - Resource provisioning pilot | Delivered within the isolated PostgreSQL pilot | Prepare an Environment, import an Application, Plan/commit/execute, create its database and generated application login, and grant database-owner access. |
 | P2 - Application configuration | Functionally delivered within the bounded PostgreSQL profile | Generate exact configuration documents from applied Resource outputs and shared Profiles; let an explicitly authorized application client retrieve and use them. |
-| P3 - Workload lifecycle | In progress: contracts and adapter kernel; durable runtime not implemented | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
+| P3 - Workload lifecycle | In progress: bounded initial submission; full lifecycle pending | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
 | P4 - Standard Providers | Planned | Add RabbitMQ, Redis and HTTP/auth integrations and extend PostgreSQL through complete tested application scenarios. |
 
 P1 is a working checkpoint, not a claim that configuration delivery, all
@@ -176,7 +176,7 @@ the separate naming and shared-system evidence without claiming P3 rollout.
 ## P3 - Workload lifecycle
 
 Status: in progress: contracts/pure planning, API-only qualification, immutable Placement administration and a bounded Deployment adapter kernel.
-Host-registered durable Kubernetes execution remains unimplemented. Goal: deploy and operate an Application
+The Host supports bounded initial Workload submission; full lifecycle execution remains pending. Goal: deploy and operate an Application
 using Haby-managed configuration and the same durable state/operation model.
 
 - [x] Accept the first Workload foundation packet under [ADR-046](docs/adr/0046-kubernetes-workload-foundation-and-rollout-stages.md): unified deployment planning/execution, Kubernetes-specific contracts with neutral core/storage, exact inputs, staged readiness and mandatory retirement cleanup. This is design acceptance, not implementation.
@@ -212,7 +212,8 @@ using Haby-managed configuration and the same durable state/operation model.
 - [x] Deliver exact published configuration through the independent runtime RPC with online identity authentication, fresh metadata-only publication authorization and bounded transient application-material resolution: [issue #219 guide](docs/development/219-runtime-configuration-delivery.md). P2 static delivery stays separate; projected-file startup, Deployment injection/execution, readiness and Applied advancement remain closed. Passing evidence must be attributed to its exact source; the post-P4 load rehearsal remains pending.
 - [x] Implement bounded friend-only initial configured Deployment CREATE with frozen Placement endpoint/trust, exact non-secret bootstrap and complete owned token projection: [issue #223 guide](docs/development/223-configured-deployment-bootstrap.md). Public execution, configured updates, readiness/retirement and Applied remain closed; executable inventory is distinct from exact-source passing evidence.
 - [x] Implement friend-only exact confirmed Deployment observation and audited expired-attempt resume: [issue #225 guide](docs/development/225-deployment-readiness.md). Per-Workload deadlines and truthful Submitted/Ready evidence persist; public wait/batch/CLI, retirement and Applied advancement remain closed. Executable coverage is distinct from exact-source passing evidence.
-- [x] Admit the two supported initial Workload desired-state shapes through authenticated operator Plan/Check/Commit ([issue #227 guide](docs/development/227-operator-workload-admission.md)). Exact inputs and safe inspection do not open public submission, execution, wait/resume, retirement or Applied completion.
+- [x] Admit the two supported initial Workload desired-state shapes through authenticated operator Plan/Check/Commit ([issue #227 guide](docs/development/227-operator-workload-admission.md)). These admission calls perform no submission; explicit submission is implemented separately below. Public wait/resume, retirement and Applied completion remain closed.
+- [x] Add explicit authenticated Host/generated RPC and API-only habyctl submission for those exact initial shapes ([issue #229 guide](docs/development/229-operator-workload-submission.md)): staged documents/identity/publication/CREATE, durable partial progress, observation-only uncertainty and immutable principal attribution. Historical Submitted is distinct from current rights and readiness; wait/resume, retirement, UPDATE and Applied advancement remain closed. Exact-source passing evidence is recorded separately.
 - [ ] Implement validated operator-configurable TokenReview concurrency/rate/queue/timeouts and client startup/retry settings under ADR-055. Ordinary CI covers fast deterministic correctness, cancellation/revocation/identity, token rotation and real API validation plus existing mandatory gates. Preserve bounded queue/memory/credential lifetimes, no positive cache and the total client startup deadline with backoff/jitter. Separate mass-start qualification is deferred until after P4; it does not gate P3 completion or current runtime-delivery acceptance.
 - [ ] Implement Kubernetes Runtime Identity and scoped configuration retrieval using the accepted projected-token/TokenReview model.
 - [ ] Support image/version updates through a new accepted desired generation, with observable completion and safe failure behavior.
@@ -365,7 +366,7 @@ GitHub tracking follows the delivery sequence:
 
 - [P1 - Resource provisioning pilot](https://github.com/hamstix/haby/milestone/2): closed, delivered within the documented pilot boundary.
 - [P2 - Application configuration](https://github.com/hamstix/haby/milestone/3): open administratively; bounded configuration/updates and issue #175 naming are implemented. Issue #174 required operator checkpoints passed; its private-file teardown remainder stays separately documented. P3 is the current implementation focus.
-- [P3 - Workload lifecycle](https://github.com/hamstix/haby/milestone/4): open, current contract/pure-planning work in issue #177; no executable Workload support yet.
+- [P3 - Workload lifecycle](https://github.com/hamstix/haby/milestone/4): open, bounded initial submission through issue #229; readiness/finalization and the full Workload lifecycle remain pending.
 - [P4 - Standard Providers](https://github.com/hamstix/haby/milestone/5): open, planned; individual needed Providers may be pulled forward.
 
 The completed [M2.1 - Manifest foundation](https://github.com/hamstix/haby/milestone/1)

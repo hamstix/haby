@@ -29,12 +29,29 @@ public sealed class DurablePlannerGuardTests
             .UseNpgsql().Options);
         var entity = context.Model.FindEntityType(typeof(DurableOperationAttemptRow))!;
         Assert.Equal(["AttemptId"], entity.FindPrimaryKey()!.Properties.Select(p => p.Name).ToArray());
-        Assert.Equal(["AttemptId", "AttemptNumber", "DeploymentId", "DispatchedAt", "FinishedAt",
+        Assert.Equal(["Actor", "AttemptId", "AttemptNumber", "DeploymentId", "DispatchedAt", "FinishedAt",
             "Generation", "OperationId", "Outcome", "StartedAt"],
             entity.GetProperties().Select(property => property.Name).OrderBy(name => name).ToArray());
         Assert.Contains(entity.GetIndexes(), index => index.IsUnique &&
             index.Properties.Select(p => p.Name).SequenceEqual(
                 ["DeploymentId", "Generation", "OperationId", "AttemptNumber"]));
+    }
+
+    [Fact]
+    public void Existing_attempt_actor_cannot_be_reassigned_to_a_replaying_operator()
+    {
+        using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
+        var attempt = new DurableOperationAttemptRow
+        {
+            AttemptId = Guid.NewGuid(),
+            DeploymentId = Guid.NewGuid(),
+            Generation = 1,
+            OperationId = "effect-one",
+            AttemptNumber = 1,
+            Actor = "original-operator"
+        };
+        db.Attach(attempt); attempt.Actor = "replaying-operator";
+        Assert.Equal("Action audit is immutable.", Assert.Throws<InvalidOperationException>(() => db.SaveChanges()).Message);
     }
 
     [Fact]

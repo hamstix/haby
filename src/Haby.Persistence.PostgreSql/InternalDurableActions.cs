@@ -30,107 +30,112 @@ internal sealed partial class InternalDurableActions(
     {
         var at = clock.GetUtcNow(); return at.AddTicks(-(at.Ticks % TimeSpan.TicksPerMicrosecond));
     }
-    internal async ValueTask<DurableOperationKey> AcceptAsync(DurableChangeSetCommit accepted, ProviderInput subject,
-        string action, string request, CancellationToken token)
+    internal ValueTask<DurableOperationKey> AcceptAsync(DurableChangeSetCommit accepted, ProviderInput subject,
+        string action, string request, CancellationToken token) => serialization.RunAsync(
+            new(accepted.DeploymentId, accepted.Generation, OperationId.Create("effect-" + request)),
+            () => AcceptCoreAsync(accepted, subject, action, request, null, token), token);
+
+    // Caller owns the generation gate. Catalog locks/uniqueness remain mandatory.
+    internal async ValueTask<DurableOperationKey> AcceptCoreAsync(DurableChangeSetCommit accepted, ProviderInput subject,
+        string action, string request, string? actor, CancellationToken token)
     {
+        if (actor is not null) PostgreSqlDurableDeploymentPlanner.ValidateActor(actor);
         _ = OperationId.Create(request);
         var key = new DurableOperationKey(accepted.DeploymentId, accepted.Generation, OperationId.Create("effect-" + request));
-        return await serialization.RunAsync(key, async () =>
+        // Metadata and exact handler checks precede Resource material preflight.
+        await using (var preflight = await contexts.CreateDbContextAsync(token))
         {
-            // Metadata and exact handler checks precede Resource material preflight.
-            await using (var preflight = await contexts.CreateDbContextAsync(token))
+            var source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
+            var candidate = await ContextAsync(preflight, source, key, subject, action, Guid.CreateVersion7(), Guid.CreateVersion7(), token);
+            if (candidate.Handler.RequiresPreparedConfiguration)
+                await RequireConfigurationAsync(preflight, source, token);
+            var proposed = candidate.Handler.Prepare(candidate.Context);
+            if (!candidate.Handler.Validate(candidate.Context, proposed)) throw new InvalidDataException("Action preparation refused.");
+            if (await DurableAggregateCompletion.ReadAsync(preflight, source, token, true) is null)
             {
-                var source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
-                var candidate = await ContextAsync(preflight, source, key, subject, action, Guid.CreateVersion7(), Guid.CreateVersion7(), token);
-                if (candidate.Handler.RequiresPreparedConfiguration)
-                    await RequireConfigurationAsync(preflight, source, token);
-                var proposed = candidate.Handler.Prepare(candidate.Context);
-                if (!candidate.Handler.Validate(candidate.Context, proposed)) throw new InvalidDataException("Action preparation refused.");
-                if (await DurableAggregateCompletion.ReadAsync(preflight, source, token, true) is null)
-                {
-                    var metadata = await DurableAggregateCompletion.InspectMetadataAsync(preflight, source.DeploymentId, source.Generation,
-                        resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true);
-                    var prepared = await DurableAggregateCompletion.PrepareAsync(preflight, metadata, token)
-                        ?? throw new InvalidDataException("Resource-stage evidence unavailable.");
-                    await using var tx = await preflight.Database.BeginTransactionAsync(token);
-                    await DurableAggregateCompletion.LockAsync(preflight, source.DeploymentId, token);
-                    source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
-                    if (!await DurableAggregateCompletion.TryAdvanceAsync(preflight, source.DeploymentId, source.Generation, token,
-                        resourceOutputs, resourceAdmission, typedCodecs, prepared, internalResourceStage: true)) throw new InvalidDataException("Resource-stage proof refused.");
-                    token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
-                }
+                var metadata = await DurableAggregateCompletion.InspectMetadataAsync(preflight, source.DeploymentId, source.Generation,
+                    resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true);
+                var prepared = await DurableAggregateCompletion.PrepareAsync(preflight, metadata, token)
+                    ?? throw new InvalidDataException("Resource-stage evidence unavailable.");
+                await using var tx = await preflight.Database.BeginTransactionAsync(token);
+                await DurableAggregateCompletion.LockAsync(preflight, source.DeploymentId, token);
+                source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
+                if (!await DurableAggregateCompletion.TryAdvanceAsync(preflight, source.DeploymentId, source.Generation, token,
+                    resourceOutputs, resourceAdmission, typedCodecs, prepared, internalResourceStage: true)) throw new InvalidDataException("Resource-stage proof refused.");
+                token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             }
-            await using var db = await contexts.CreateDbContextAsync(token);
-            await using var transaction = await db.Database.BeginTransactionAsync(token);
-            var deployment = Guid.Parse(key.DeploymentId.ToString());
-            await DurableAggregateCompletion.LockAsync(db, deployment, token);
-            var generation = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
-            var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true)
-                ?? throw new InvalidDataException("Resource-stage proof unavailable.");
-            var old = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.RequestId == request, token);
-            if (old is not null)
-            {
-                if (Subject(old) != subject || old.ActionContract != action || old.OperationId != key.OperationId.Value)
-                    throw new InvalidDataException("Conflicting immutable action request.");
-                _ = await LoadAsync(db, key, token);
-                return key;
-            }
-            var marker = Guid.CreateVersion7(); var managed = Guid.CreateVersion7();
-            var exact = await ContextAsync(db, generation, key, subject, action, marker, managed, token);
-            await RequireCurrentRuntimeAsync(db, exact.Context, token);
-            if (subject is ProviderInput.Workload workload)
-            {
-                if (exact.Handler.RequiresPreparedConfiguration) await RequireConfigurationAsync(db, generation, token);
-                // Never attach a superseded per-intent identity, even when initialization was bypassed.
-                await RefuseUnboundHistoryAsync(db, deployment, token);
-                var stable = await ManagedAsync(db, generation, workload, exact.Context, exact.Handler, true, token);
-                managed = stable.Id;
-                var installation = await InstallationAsync(db, token);
-                exact = (exact.Context with { ManagedIdentity = managed, InstallationId = installation }, exact.Handler);
-            }
-            var payload = exact.Handler.Prepare(exact.Context);
-            if (payload.Length is 0 or > 1_048_576 || System.Text.Encoding.UTF8.GetByteCount(payload) > 1_048_576 || !exact.Handler.Validate(exact.Context, payload)) throw new InvalidDataException("Action intent refused.");
-            var contract = exact.Handler.Contract;
-            var at = Now();
-            db.DurableOperations.Add(new()
-            {
-                DeploymentId = deployment,
-                Generation = key.Generation.Value,
-                OperationId = key.OperationId.Value,
-                CreatedAt = at,
-                State = nameof(DurableOperationState.Pending)
-            });
-            db.ActionIntents.Add(new()
-            {
-                DeploymentId = deployment,
-                Generation = key.Generation.Value,
-                OperationId = key.OperationId.Value,
-                RequestId = request,
-                Marker = marker,
-                ManagedIdentity = managed,
-                FormatVersion = 1,
-                SubjectKind = subject is ProviderInput.Workload ? "Workload" : "Resource",
-                Component = (subject as ProviderInput.Workload)?.Component.Value ?? "",
-                LocalId = subject switch { ProviderInput.Workload w => w.Id.Value, ProviderInput.Resource r => r.Id.Value, _ => throw new InvalidDataException() },
-                SubjectContract = contract.Subject,
-                ProviderKind = contract.ProviderKind,
-                ConfigurationContract = contract.Configuration,
-                Implementation = contract.Implementation,
-                ActionContract = contract.Action,
-                InputFormat = contract.InputFormat,
-                OutputContract = contract.OutputContract,
-                ProviderId = Guid.Parse(exact.Context.Provider.Instance.ToString()),
-                ConfigurationRevision = exact.Context.Provider.Configuration.Value,
-                Payload = payload,
-                ObservationRecovery = exact.Handler.ObservationRecovery,
-                CheckpointId = proof.Id,
-                InputFingerprint = generation.Fingerprint,
-                PlacementId = exact.Context.Provider.Placement is { } placement ? InternalPlacementInput.Decode(placement).Id : null,
-                CreatedAt = at
-            });
-            await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await transaction.CommitAsync(CancellationToken.None);
+        }
+        await using var db = await contexts.CreateDbContextAsync(token);
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var deployment = Guid.Parse(key.DeploymentId.ToString());
+        await DurableAggregateCompletion.LockAsync(db, deployment, token);
+        var generation = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+        var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true)
+            ?? throw new InvalidDataException("Resource-stage proof unavailable.");
+        var old = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.RequestId == request, token);
+        if (old is not null)
+        {
+            if (Subject(old) != subject || old.ActionContract != action || old.OperationId != key.OperationId.Value)
+                throw new InvalidDataException("Conflicting immutable action request.");
+            _ = await LoadAsync(db, key, token);
             return key;
-        }, token);
+        }
+        var marker = Guid.CreateVersion7(); var managed = Guid.CreateVersion7();
+        var exact = await ContextAsync(db, generation, key, subject, action, marker, managed, token);
+        await RequireCurrentRuntimeAsync(db, exact.Context, token);
+        if (subject is ProviderInput.Workload workload)
+        {
+            if (exact.Handler.RequiresPreparedConfiguration) await RequireConfigurationAsync(db, generation, token);
+            // Never attach a superseded per-intent identity, even when initialization was bypassed.
+            await RefuseUnboundHistoryAsync(db, deployment, token);
+            var stable = await ManagedAsync(db, generation, workload, exact.Context, exact.Handler, true, token);
+            managed = stable.Id;
+            var installation = await InstallationAsync(db, token);
+            exact = (exact.Context with { ManagedIdentity = managed, InstallationId = installation }, exact.Handler);
+        }
+        var payload = exact.Handler.Prepare(exact.Context);
+        if (payload.Length is 0 or > 1_048_576 || System.Text.Encoding.UTF8.GetByteCount(payload) > 1_048_576 || !exact.Handler.Validate(exact.Context, payload)) throw new InvalidDataException("Action intent refused.");
+        var contract = exact.Handler.Contract;
+        var at = Now();
+        db.DurableOperations.Add(new()
+        {
+            DeploymentId = deployment,
+            Generation = key.Generation.Value,
+            OperationId = key.OperationId.Value,
+            CreatedAt = at,
+            State = nameof(DurableOperationState.Pending)
+        });
+        db.ActionIntents.Add(new()
+        {
+            DeploymentId = deployment,
+            Generation = key.Generation.Value,
+            OperationId = key.OperationId.Value,
+            RequestId = request,
+            Marker = marker,
+            ManagedIdentity = managed,
+            FormatVersion = 1,
+            SubjectKind = subject is ProviderInput.Workload ? "Workload" : "Resource",
+            Component = (subject as ProviderInput.Workload)?.Component.Value ?? "",
+            LocalId = subject switch { ProviderInput.Workload w => w.Id.Value, ProviderInput.Resource r => r.Id.Value, _ => throw new InvalidDataException() },
+            SubjectContract = contract.Subject,
+            ProviderKind = contract.ProviderKind,
+            ConfigurationContract = contract.Configuration,
+            Implementation = contract.Implementation,
+            ActionContract = contract.Action,
+            InputFormat = contract.InputFormat,
+            OutputContract = contract.OutputContract,
+            ProviderId = Guid.Parse(exact.Context.Provider.Instance.ToString()),
+            ConfigurationRevision = exact.Context.Provider.Configuration.Value,
+            Payload = payload,
+            ObservationRecovery = exact.Handler.ObservationRecovery,
+            CheckpointId = proof.Id,
+            InputFingerprint = generation.Fingerprint,
+            PlacementId = exact.Context.Provider.Placement is { } placement ? InternalPlacementInput.Decode(placement).Id : null,
+            CreatedAt = at,
+            Actor = actor
+        });
+        await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await transaction.CommitAsync(CancellationToken.None);
+        return key;
     }
 
     internal ValueTask<InternalActionResult> ExecuteAsync(DurableOperationKey key, CancellationToken token) =>
@@ -138,7 +143,7 @@ internal sealed partial class InternalDurableActions(
     internal ValueTask<InternalActionResult> RecoverByObservationAsync(DurableOperationKey key, CancellationToken token) =>
         serialization.RunAsync(key, () => ExecuteCoreAsync(key, true, token), token);
 
-    private async ValueTask<InternalActionResult> ExecuteCoreAsync(DurableOperationKey key, bool observationOnly, CancellationToken token)
+    internal async ValueTask<InternalActionResult> ExecuteCoreAsync(DurableOperationKey key, bool observationOnly, CancellationToken token, string? actor = null)
     {
         Loaded loaded;
         await using (var db = await contexts.CreateDbContextAsync(token)) loaded = await LoadAsync(db, key, token);
@@ -160,7 +165,7 @@ internal sealed partial class InternalDurableActions(
             }
             // No catalog connection is retained over the API read.
             var observed = await loaded.Handler.ObserveAsync(loaded.Context, loaded.Intent.Payload, token);
-            return await PublishAsync(key, loaded, observed, true, token);
+            return await PublishAsync(key, loaded, observed, true, token, actor);
         }
         if (loaded.Operation.State is not (nameof(DurableOperationState.Pending) or nameof(DurableOperationState.Preparing))) return new(InternalActionOutcome.Refused, "terminal-failure");
         await using (var db = await contexts.CreateDbContextAsync(token))
@@ -169,7 +174,7 @@ internal sealed partial class InternalDurableActions(
             await DurableAggregateCompletion.LockAsync(db, loaded.Intent.DeploymentId, token);
             loaded = await LoadAsync(db, key, token);
             await RequireCurrentRuntimeAsync(db, loaded.Context, token);
-            var begun = await DurableOperationTransitions.BeginAsync(db, key, Now(), token)
+            var begun = await DurableOperationTransitions.BeginAsync(db, key, Now(), token, actor)
                 ?? throw new InvalidDataException("Action attempt refused.");
             token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             loaded = loaded with { Operation = begun };
@@ -188,7 +193,7 @@ internal sealed partial class InternalDurableActions(
         fault?.Invoke(InternalActionFault.AfterMarkerCommit);
         var result = await loaded.Handler.ExecuteAsync(loaded.Context, loaded.Intent.Payload, token);
         fault?.Invoke(InternalActionFault.AfterExternalResult);
-        if (result.Outcome == InternalActionOutcome.Confirmed) return await PublishAsync(key, loaded, result, false, token);
+        if (result.Outcome == InternalActionOutcome.Confirmed) return await PublishAsync(key, loaded, result, false, token, actor);
         // Even a pre-send or positively rejected kernel result cannot reopen this durable barrier.
         // Keeping it uncertain is conservative and permits observation, never another write.
         await using (var db = await contexts.CreateDbContextAsync(token))
@@ -202,7 +207,7 @@ internal sealed partial class InternalDurableActions(
         return result with { Receipt = null };
     }
 
-    private async ValueTask<InternalActionResult> PublishAsync(DurableOperationKey key, Loaded dispatched, InternalActionResult result, bool observation, CancellationToken token)
+    private async ValueTask<InternalActionResult> PublishAsync(DurableOperationKey key, Loaded dispatched, InternalActionResult result, bool observation, CancellationToken token, string? actor = null)
     {
         if (result.Code.Length is 0 or > 128 || result.Code.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '.')))
             throw new InvalidDataException("Invalid bounded action outcome.");
@@ -241,7 +246,8 @@ internal sealed partial class InternalDurableActions(
                 FormatVersion = 1,
                 Outcome = result.Outcome.ToString(),
                 Code = result.Code,
-                Receipt = confirmed ? result.Receipt : null
+                Receipt = confirmed ? result.Receipt : null,
+                Actor = actor
             });
         }
         if (confirmed)

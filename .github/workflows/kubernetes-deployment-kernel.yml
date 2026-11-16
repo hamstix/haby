@@ -8,6 +8,8 @@ on:
       - 'src/Haby.Application/**'
       - 'src/Haby.Persistence.PostgreSql/**'
       - 'src/Haby.Operator.Host/**'
+      - 'src/Haby.Operator.Contracts/**'
+      - 'src/habyctl/**'
       - 'src/Haby.Configuration.Contracts/**'
       - 'src/Haby.Configuration.Client/**'
       - 'schemas/kubernetes-placement.v1alpha1.json'
@@ -44,6 +46,12 @@ jobs:
           global-json-file: global.json
       - name: Restore existing pinned contour
         run: dotnet restore tools/Haby.Kubernetes.Qualification --locked-mode
+      - name: Publish the operator CLI used by production submission qualification
+        shell: bash
+        run: |
+          bash ./scripts/ensure-native-aot-prerequisites.sh
+          dotnet publish ./src/habyctl/habyctl.csproj -c Release -r linux-x64 --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true "-p:CppCompilerAndLinker=$HABY_AOT_C_COMPILER" -p:LinkerFlavor=bfd -o ./.artifacts/operator-cli
+          echo "HABY_AOT_CLI_PATH=$GITHUB_WORKSPACE/.artifacts/operator-cli/habyctl" >> "$GITHUB_ENV"
       - name: Run production-projected consumer in one disposable node
         shell: pwsh
         run: ./scripts/run-kubernetes-qualification.ps1 -Runtime docker -ConfiguredDeployment -EvidencePath .artifacts/configured-deployment/evidence.txt

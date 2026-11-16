@@ -461,6 +461,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.Property(row => row.Generation).HasColumnName("generation");
             entity.Property(row => row.OperationId).HasColumnName("operation_id").HasMaxLength(128).IsRequired();
             entity.Property(row => row.AttemptNumber).HasColumnName("attempt_number");
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(256);
             entity.Property(row => row.StartedAt).HasColumnName("started_at");
             entity.Property(row => row.DispatchedAt).HasColumnName("dispatched_at");
             entity.Property(row => row.FinishedAt).HasColumnName("finished_at");
@@ -626,6 +627,7 @@ internal sealed class DurableOperationRow
 
 internal sealed class DurableOperationAttemptRow
 {
+    public string? Actor { get; set; }
     public Guid AttemptId { get; set; }
     public Guid DeploymentId { get; set; }
     public long Generation { get; set; }

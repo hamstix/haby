@@ -9,11 +9,11 @@ namespace Haby.Operator.Host;
 public sealed partial class ManifestOperatorService(ManifestContractCatalog catalog, ImportApplicationManifest importer,
     IManifestRevisionQuery revisions, PreviewImportedDatabase preview,
     IDurableDeploymentPlanner planner, IOperatorDeploymentAdmission deploymentAdmission, DescribeWorkloadPlan workloadDescriptions, DescribeDurablePlan descriptions, IEnvironmentQuery environments, IDurableDesiredStateCommitter committer,
-    IDurableOperationExecutor executor, DurableGenerationRunner generationRunner, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
+    IDurableOperationExecutor executor, DurableGenerationRunner generationRunner, IOperatorWorkloadSubmission workloadSubmission, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
     ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess,
     ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions,
     IConfigurationDocumentStore configurationDocuments, IConfigurationAccessStore configurationAccess,
-    IOperatorAccessStore operatorAccess, IHttpContextAccessor httpContext, IProfileDiscoveryQuery profileDiscovery, MaterializeApplicationConfiguration applicationConfiguration, IResourceNamingStore naming, PlacementAdministration placements, PlacementSelectionAdministration placementSelections) : ManifestOperator.ManifestOperatorBase
+    IOperatorAccessStore operatorAccess, IHttpContextAccessor httpContext, ILogger<ManifestOperatorService> submissionLogger, IProfileDiscoveryQuery profileDiscovery, MaterializeApplicationConfiguration applicationConfiguration, IResourceNamingStore naming, PlacementAdministration placements, PlacementSelectionAdministration placementSelections) : ManifestOperator.ManifestOperatorBase
 {
     private string Actor => httpContext.HttpContext?.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
         ?? throw new InvalidOperationException("Authenticated operator identity is required.");

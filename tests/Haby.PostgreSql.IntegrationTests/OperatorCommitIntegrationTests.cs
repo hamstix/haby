@@ -282,7 +282,7 @@ public sealed partial class OperatorHostIntegrationTests
         Assert.Equal(DBNull.Value, await new NpgsqlCommand("SELECT dispatched_at FROM durable_create_operations", check).ExecuteScalarAsync());
     }
 
-    private static async Task<string> RunNativeCommitCli(string binary, string endpoint, string[] args, int expectedExit = 0, string format = "json", string environment = "pilot")
+    internal static async Task<string> RunNativeCommitCli(string binary, string endpoint, string[] args, int expectedExit = 0, string format = "json", string environment = "pilot")
     {
         var config = Path.Combine(Path.GetTempPath(), "haby-native-commit-" + Guid.NewGuid().ToString("N") + ".yaml");
         await File.WriteAllTextAsync(config, $"""

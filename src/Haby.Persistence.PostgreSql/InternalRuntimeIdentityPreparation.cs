@@ -13,7 +13,19 @@ internal sealed record PreparedRuntimeIdentity(ProviderInput.Workload Workload, 
 internal sealed class InternalRuntimeIdentityPreparation(IDbContextFactory<ManifestCatalogDbContext> contexts,
     InternalWorkloadConfiguration configuration, InternalDurableActions actions, string identityAction)
 {
-    internal async Task<IReadOnlyList<PreparedRuntimeIdentity>> PrepareAsync(DurableChangeSetCommit accepted, CancellationToken token)
+    internal string ActionContract => identityAction;
+    internal Task<IReadOnlyList<PreparedRuntimeIdentity>> PrepareAsync(DurableChangeSetCommit accepted, CancellationToken token) =>
+        PrepareWithAsync(accepted, (subject, request, ct) => actions.AcceptAsync(accepted, subject, identityAction, request, ct),
+            (key, ct) => actions.ExecuteAsync(key, ct), token);
+
+    // Only the server submission owner calls this while holding its generation gate.
+    internal Task<IReadOnlyList<PreparedRuntimeIdentity>> PrepareCoreAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token) =>
+        PrepareWithAsync(accepted, (subject, request, ct) => actions.AcceptCoreAsync(accepted, subject, identityAction, request, actor, ct),
+            (key, ct) => actions.ExecuteCoreAsync(key, false, ct, actor), token);
+
+    private async Task<IReadOnlyList<PreparedRuntimeIdentity>> PrepareWithAsync(DurableChangeSetCommit accepted,
+        Func<ProviderInput.Workload, string, CancellationToken, ValueTask<DurableOperationKey>> accept,
+        Func<DurableOperationKey, CancellationToken, ValueTask<InternalActionResult>> execute, CancellationToken token)
     {
         ProviderInput.Workload[] subjects;
         await using (var db = await contexts.CreateDbContextAsync(token))
@@ -38,8 +50,8 @@ internal sealed class InternalRuntimeIdentityPreparation(IDbContextFactory<Manif
         foreach (var subject in subjects.OrderBy(x => x.Component.Value, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal))
         {
             var request = "runtime-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(subject.Component.Value + "/" + subject.Id.Value)));
-            var key = await actions.AcceptAsync(accepted, subject, identityAction, request, token);
-            var result = await actions.ExecuteAsync(key, token);
+            var key = await accept(subject, request, token);
+            var result = await execute(key, token);
             Guid? binding = null;
             RuntimeBindingState? current = null;
             if (result.Outcome == InternalActionOutcome.Confirmed)

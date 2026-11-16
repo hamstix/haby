@@ -60,6 +60,7 @@ service ManifestOperator {
   rpc GetCommit(ChangeSetRequest) returns (CommitReply);
   rpc GetGeneration(GenerationRequest) returns (CommitReply);
   rpc ExecuteGeneration(GenerationRequest) returns (GenerationExecutionReply);
+  rpc SubmitGeneration(GenerationRequest) returns (WorkloadSubmissionReply);
   // Explicit execution only; GetOperation never dispatches or recovers.
   rpc ExecuteOperation(OperationRequest) returns (OperationReply);
   rpc GetOperation(OperationRequest) returns (OperationReply);
@@ -466,6 +467,7 @@ message WorkloadAcceptanceStage {
   optional int64 applied_generation = 2;
 }
 message CommitReply {
+  WorkloadSubmissionProgress workload_submission = 21;
   WorkloadAcceptanceStage workload_stage = 6;
   CommitStatus status = 1;
   DurableCommitSummary commit = 2;
@@ -1009,3 +1011,35 @@ message PlacementSelectionState {
   string technical_actor_id = 5; string changed_at_utc = 6; RevisionReference checked_revision = 7;
 }
 message PlacementSelectionReply { PlacementSelectionStatus status = 1; PlacementSelectionState selection = 2; }
+
+// Submission is historical API confirmation, never readiness or Applied authority.
+message WorkloadSubmissionMember {
+  string component = 1;
+  string workload = 2;
+  string documents = 3;
+  string identity = 4;
+  string publication = 5;
+  string submission = 6;
+  string runtime_authority = 7;
+  optional string operation_id = 8;
+}
+message WorkloadSubmissionProgress {
+  string deployment_id = 1;
+  int64 generation = 2;
+  int64 desired_generation = 3;
+  optional int64 applied_generation = 4;
+  string submission = 5;
+  optional string resources_ready_id = 6;
+  optional string submitted_id = 7;
+  repeated WorkloadSubmissionMember members = 8;
+  int32 completed = 9;
+  int32 total = 10;
+}
+message WorkloadSubmissionReply {
+  string outcome = 1;
+  WorkloadSubmissionProgress progress = 2;
+  optional string stage = 3;
+  optional string subject = 4;
+  optional string reason = 5;
+  bool requires_inspection = 6;
+}
