@@ -98,7 +98,7 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.Null(summary.SavedReady); Assert.Null(summary.Submitted); Assert.False(summary.OriginalRequestReady);
         }
         await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-        Assert.All(await verify.ApplicationDeployments.AsNoTracking().ToArrayAsync(), x => Assert.Null(x.AppliedGeneration));
+        Assert.All(await verify.ApplicationDeployments.AsNoTracking().ToArrayAsync(), x => Assert.Equal(x.DesiredGeneration, x.AppliedGeneration));
         Assert.Equal(2, deployment.Writes); Assert.Equal(0, identity.Writes);
     }
     [Fact]
@@ -227,11 +227,11 @@ public sealed partial class DurableDeploymentPlanningTests
         var actions = await PrepareRollout(services, scenario, deployment, identity); await SubmitRollout(actions, scenario, deployment); await SubmitRollout(actions, scenario, deployment, "second");
         var facade = BatchFacade(services, scenario, actions, deployment, identity);
         var history = BatchMember(scenario.Commit, "history");
-        Assert.True((await facade.WaitBatchAsync("history", "operator", [history], null, new(MaximumRounds: 1), null, default)).CurrentReady);
         var publication = Publications(services, identity);
         // The retained request offset rotates the second call: second reads first, main waits for pacing.
         var permission = (await publication.PreparationRequestsAsync(scenario.Commit, "tester", default)).Single(x => x.Origin!.Workload == "main");
         var before = (await publication.ReadAsync(permission.Key, default))!;
+        Assert.True((await facade.WaitBatchAsync("history", "operator", [history], null, new(MaximumRounds: 1), null, default)).CurrentApplied);
         var member = BatchMember(scenario.Commit, "revoked-in-queue");
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         using var bounded = new CancellationTokenSource(TimeSpan.FromSeconds(5));

@@ -93,6 +93,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         {
             var plan = ToPlan(row, null, null);
             var change = await db.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.ChangeSetId, token);
+            var gate = $"haby-deployment:{row.EnvironmentRecordId:N}:{row.ApplicationRecordId:N}";
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({gate}, 0))", token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == row.EnvironmentRecordId && x.ApplicationRecordId == row.ApplicationRecordId, token);
             if (change is null || !Matches(change, owner) || await db.ChangeSetCommits.AnyAsync(x => x.ChangeSetId == row.ChangeSetId, token)) return DurablePlanCurrentStatus.ChangeSetStale;
             if (change.EnvironmentRecordId != row.EnvironmentRecordId || change.ApplicationRecordId != row.ApplicationRecordId || change.RevisionNumber != row.RevisionNumber) return DurablePlanCurrentStatus.PlanInputUnavailable;
@@ -125,6 +127,9 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                 if (provider is null || await AdmitAsync(db, resource.Providers.Declaration.Spec, provider, resource, token) != DurablePlanStatus.Planned ||
                     !await ValidateGraphAsync(db, resource.Providers.Declaration.Spec, provider, resource, plan.Graph, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
             }
+            var selected = await SelectInternalDocumentsAsync(db, inputs, revision.ApplicationVersion.Value, handlers, token);
+            var inventory = await InitialRetirementAuthority.CaptureAsync(db, inputs, plan.Graph, owner, selected, token);
+            if (plan.Graph.Retirement is null || !InitialRetirementAuthority.Same(inventory, plan.Graph.Retirement)) return DurablePlanCurrentStatus.PlanInputUnavailable;
             return DurablePlanCurrentStatus.Current;
         }
         catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }

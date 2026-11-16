@@ -1156,7 +1156,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         {
                             t.HasCheckConstraint("CK_generation_stage_checkpoints_bounds", "length(input_fingerprint) = 67 AND octet_length(evidence_json) <= 2097152");
 
-                            t.HasCheckConstraint("CK_generation_stage_checkpoints_identity", "generation > 0 AND format_version = 1 AND stage IN ('ResourcesReady', 'WorkloadsSubmitted', 'RolloutReady')");
+                            t.HasCheckConstraint("CK_generation_stage_checkpoints_identity", "generation > 0 AND format_version = 1 AND stage IN ('ResourcesReady', 'WorkloadsSubmitted', 'RolloutReady', 'RetirementCompleted')");
                         });
                 });
 

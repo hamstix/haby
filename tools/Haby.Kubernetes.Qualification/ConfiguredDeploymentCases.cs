@@ -265,10 +265,36 @@ internal static class ConfiguredDeploymentCases
                 Check(rolloutReady.Ready && rolloutReady.Submitted is not null && rolloutReady.SavedReady is not null &&
                     intent.Target.MinReadySeconds == 1 && saved.Metadata.Uid == DeploymentIntents.DecodeReceipt((await actions.HistoryAsync(key, token))!.Output!.Payload).Uid,
                     "R01-controller-produced-available-minReadySeconds-exact-UID");
+                // Renew only before Applied; completed proof reads cannot authorize a new attempt.
+                observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
+                var renewedInternal = await actions.ResumeRolloutAsync(scenario.Commit, "rollout-resume", "qualifier",
+                    [new(rolloutReady.Members[0].Subject, rolloutReady.Members[0].Attempt!.Value)], token);
+                Check(!renewedInternal.Ready && renewedInternal.Members[0].Attempt != rolloutReady.Members[0].Attempt &&
+                    renewedInternal.Members[0].Observation.Outcome == RolloutOutcome.NotObserved && deploymentWrites == 1,
+                    "R04-audited-resume-renews-observation-only");
+                rolloutReady = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-renewed-internal", new(RequestMilliseconds: 30000), token);
+                observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
+                using var renewed = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                    ["deployment", "generation", "resume", scenario.Commit.DeploymentId.ToString(), scenario.Commit.Generation.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        "--member", rolloutReady.Members[0].Subject + "=" + rolloutReady.Members[0].Attempt!.Value.ToString("D")], credential: issuedCredential));
+                var renewal = renewed.RootElement.GetProperty("data"u8);
+                Check(renewed.RootElement.GetProperty("outcome"u8).GetString() == "resumed" && !renewal.GetProperty("currentReady"u8).GetBoolean() &&
+                    renewal.GetProperty("members"u8)[0].GetProperty("outcome"u8).GetString() == "NotObserved" && deploymentWrites == 1,
+                    "R06-native-public-expired-resume-observation-only");
+                rolloutReady = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-renewed-public", new(RequestMilliseconds: 30000), token);
                 using var waited = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
                     ["deployment", "generation", "wait", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
-                Check(waited.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() && deploymentWrites == 1,
+                Check(waited.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
+                    waited.RootElement.GetProperty("data"u8).GetProperty("currentApplied"u8).GetBoolean() &&
+                    waited.RootElement.GetProperty("data"u8).GetProperty("retirementId"u8).GetString() is not null && deploymentWrites == 1,
                     "R05-native-public-wait-whole-set-zero-writes");
+                await using (var completed = await contexts.CreateDbContextAsync(token))
+                {
+                    var source = await completed.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == Guid.Parse(request.DeploymentId), token);
+                    var proof = await InitialRetirementCompletion.RequireProofAsync(completed, source, token);
+                    Check((await completed.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration == source.Generation &&
+                        proof.FreshReady.Members.Length == 1 && proof.Publications.Length == 2, "A01-native-wait-exact-retirement-proof-and-Applied");
+                }
                 var peer = await DurableDeploymentPlanningTests.AcceptBatchPeerAsync(services, scenario, configuredEnvelope);
                 var submittedPeer = await client.SubmitGenerationAsync(new GenerationRequest { DeploymentId = peer.DeploymentId.ToString(), Generation = peer.Generation.Value }, cancellationToken: token);
                 Check(submittedPeer.Outcome == "submitted" && deploymentWrites == 2, "B01-second-exact-configured-generation-submitted");
@@ -290,12 +316,15 @@ internal static class ConfiguredDeploymentCases
                 string[] batchArguments = ["deployment", "generation", "wait-batch", "--file", path, "--request-id", batchId];
                 using var complete = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri, batchArguments, credential: issuedCredential));
                 Check(complete.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
-                    complete.RootElement.GetProperty("data"u8).GetProperty("members"u8).EnumerateArray().All(x => x.GetProperty("currentReady"u8).GetBoolean()) && deploymentWrites == 2,
+                    complete.RootElement.GetProperty("data"u8).GetProperty("currentApplied"u8).GetBoolean() &&
+                    complete.RootElement.GetProperty("data"u8).GetProperty("members"u8).EnumerateArray().All(x => x.GetProperty("currentReady"u8).GetBoolean() && x.GetProperty("currentApplied"u8).GetBoolean() &&
+                        x.GetProperty("retirementId"u8).GetString() is not null) && deploymentWrites == 2,
                     "B03-native-batch-complete-fresh-exact-generations-zero-extra-writes");
                 using var replayBatch = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri, batchArguments, expectedExit: 1, credential: issuedCredential));
                 Check(!replayBatch.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
                     replayBatch.RootElement.GetProperty("data"u8).GetProperty("members"u8).EnumerateArray().All(x => x.GetProperty("replayed"u8).GetBoolean() &&
-                        x.GetProperty("originalRequestReady"u8).GetBoolean() && !x.GetProperty("currentReady"u8).GetBoolean()), "B04-native-batch-replay-history-is-not-fresh-ready");
+                        x.GetProperty("originalRequestReady"u8).GetBoolean() && x.GetProperty("originalRequestApplied"u8).GetBoolean() &&
+                        !x.GetProperty("currentReady"u8).GetBoolean() && !x.GetProperty("currentApplied"u8).GetBoolean()), "B04-native-batch-replay-history-is-not-fresh-ready");
             });
             requests.Clear(); var beforeRestart = reviews;
             await WithHost(async () =>
@@ -305,22 +334,14 @@ internal static class ConfiguredDeploymentCases
                 currentPod = await Startup("primary-started", previous.Metadata.Uid);
                 Check(reviews >= beforeRestart + 2 && requests.ToArray().Distinct().Order().SequenceEqual(exact.Documents.Values.Select(Guid.Parse).Order()) &&
                     (await actions.HistoryAsync(key, token))!.Intent.Payload == DeploymentIntents.Encode(intent), "C08-restarted-Host-fresh-Pod-same-bootstrap");
+                await using (var completed = await contexts.CreateDbContextAsync(token))
+                    Check((await completed.ApplicationDeployments.AsNoTracking().ToArrayAsync(token)).All(x => x.AppliedGeneration == x.DesiredGeneration),
+                        "A02-runtime-retrieval-after-Applied-and-Host-restart");
                 actions = CreateActions();
                 var observed = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-restarted", new(RequestMilliseconds: 30000), token);
                 Check(observed.Ready && observed.SavedReady == rolloutReady!.SavedReady && observed.Members[0].Attempt == rolloutReady.Members[0].Attempt &&
                     observed.Members[0].Deadline == rolloutReady.Members[0].Deadline && deploymentWrites == expectedDeploymentWrites,
                     "R02-reconstructed-observer-original-attempt-deadline-zero-writes");
-                observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
-                var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH")!;
-                var localOperator = LocalOperatorEndpoint(activeHost!.Urls.Single());
-                var credential = OperatorTestCredentials.Credential(activeHost.Urls.Single());
-                using var renewed = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
-                    ["deployment", "generation", "resume", scenario.Commit.DeploymentId.ToString(), scenario.Commit.Generation.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        "--member", observed.Members[0].Subject + "=" + observed.Members[0].Attempt!.Value.ToString("D")], credential: credential));
-                var renewal = renewed.RootElement.GetProperty("data"u8);
-                Check(renewed.RootElement.GetProperty("outcome"u8).GetString() == "resumed" && !renewal.GetProperty("currentReady"u8).GetBoolean() &&
-                    renewal.GetProperty("members"u8)[0].GetProperty("outcome"u8).GetString() == "NotObserved" && deploymentWrites == expectedDeploymentWrites,
-                    "R06-native-public-expired-resume-observation-only");
             });
             requests.Clear(); Interlocked.Exchange(ref revokeNextRead, 1);
             await WithHost(async () =>
@@ -338,18 +359,14 @@ internal static class ConfiguredDeploymentCases
                 }
                 Check(pending is { Ready: false } && pending.SavedReady == rolloutReady!.SavedReady &&
                     pending.Members[0].Observation.Outcome == RolloutOutcome.Pending, "R03-startup-refusal-is-current-incomplete-despite-historical-Ready");
-                observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
-                var resumed = await actions.ResumeRolloutAsync(scenario.Commit, "rollout-resume", "qualifier",
-                    [new(pending!.Members[0].Subject, pending.Members[0].Attempt!.Value)], token);
-                Check(!resumed.Ready && resumed.Members[0].Attempt != pending.Members[0].Attempt &&
-                    resumed.Members[0].Observation.Outcome == RolloutOutcome.NotObserved && deploymentWrites == expectedDeploymentWrites,
-                    "R04-audited-resume-renews-observation-only");
             });
             await AdmissionRefuses("revoked-publication");
             Check((await publication.ApplyAsync(later.Receipt.Request, token)).CurrentPermission!.Status == "Revoked", "C10-revoked-admission-and-no-publication-repair");
             await using var verify = await contexts.CreateDbContextAsync(token);
-            Check(!(await verify.ApplicationDeployments.AsNoTracking().ToArrayAsync(token)).Any(x => x.AppliedGeneration is not null) &&
-                await verify.RuntimeIdentityBindings.CountAsync(token) == expectedDeploymentWrites && !await verify.ConfigurationAccess.AnyAsync(token), "C11-no-Applied-static-grant-or-new-identity");
+            Check((await verify.ApplicationDeployments.AsNoTracking().ToArrayAsync(token)).All(x => x.AppliedGeneration == x.DesiredGeneration) &&
+                await verify.RuntimeIdentityBindings.CountAsync(token) == expectedDeploymentWrites && !await verify.ConfigurationAccess.AnyAsync(token), "C11-Applied-preserves-publications-and-stable-identities");
+            Check(await verify.GenerationStageCheckpoints.CountAsync(x => x.Stage == "RetirementCompleted", token) == expectedDeploymentWrites,
+                "A03-revocation-keeps-historical-completion-without-regrant");
         }
         catch (Exception error) { primary = error; throw; }
         finally

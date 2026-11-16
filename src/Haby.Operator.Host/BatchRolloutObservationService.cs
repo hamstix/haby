@@ -24,7 +24,7 @@ public sealed partial class ManifestOperatorService
                 m.HasPollMilliseconds ? m.PollMilliseconds : null, m.HasRequestMilliseconds ? m.RequestMilliseconds : null);
             var result = await rolloutObservation.WaitBatchAsync(request.RequestId, Actor, members, settings, memberSettings,
                 ObservationDeadline(context), context.CancellationToken);
-            var reply = new GenerationBatchReadinessReply { RequestId = result.RequestId, CurrentReady = result.CurrentReady, Total = result.Members.Count, Canceled = result.Canceled, Deadline = result.Deadline };
+            var reply = new GenerationBatchReadinessReply { RequestId = result.RequestId, CurrentReady = result.CurrentReady, CurrentApplied = result.CurrentApplied, Total = result.Members.Count, Canceled = result.Canceled, Deadline = result.Deadline };
             foreach (var member in result.Members)
             {
                 var summary = new GenerationBatchSummary
@@ -33,6 +33,10 @@ public sealed partial class ManifestOperatorService
                     Outcome = BatchOutcome(member.Outcome),
                     CurrentReady = member.CurrentReady,
                     OriginalRequestReady = member.OriginalRequestReady,
+                    CurrentApplied = member.CurrentApplied,
+                    RetirementCompleted = member.Retirement is not null,
+                    OriginalRequestApplied = member.OriginalRequestApplied,
+                    CompletionReason = member.CompletionReason,
                     Replayed = member.Replayed,
                     Stop = member.Stop switch
                     {
@@ -46,6 +50,8 @@ public sealed partial class ManifestOperatorService
                     }
                 };
                 if (member.Submitted is { } submitted) summary.SubmittedId = submitted.ToString("D");
+                if (member.Retirement is { } retirement) summary.RetirementId = retirement.ToString("D");
+                if (member.AppliedGeneration is { } applied) summary.AppliedGeneration = applied;
                 if (member.SavedReady is { } ready) summary.SavedReadyId = ready.ToString("D");
                 reply.Members.Add(summary);
             }

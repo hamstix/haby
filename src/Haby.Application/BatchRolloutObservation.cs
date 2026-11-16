@@ -8,9 +8,10 @@ public sealed record BatchObservationSettings(int? Concurrency = null, int? Maxi
 public sealed record BatchObservationMember(ApplicationDeploymentId Deployment, DeploymentGeneration Generation, string RequestId);
 public sealed record BatchObservationSummary(BatchObservationMember Member, GenerationReadinessOutcome Outcome,
     bool CurrentReady = false, bool OriginalRequestReady = false, bool Replayed = false,
-    Guid? Submitted = null, Guid? SavedReady = null, string? Stop = null);
+    Guid? Submitted = null, Guid? SavedReady = null, string? Stop = null, bool CurrentApplied = false, bool OriginalRequestApplied = false,
+    Guid? Retirement = null, long? AppliedGeneration = null, string CompletionReason = "not-ready");
 public sealed record BatchObservationResult(string RequestId, bool CurrentReady, IReadOnlyList<BatchObservationSummary> Members,
-    bool Canceled = false, bool Deadline = false);
+    bool Canceled = false, bool Deadline = false, bool CurrentApplied = false);
 
 internal sealed record BatchObservationOptions(int MaximumMembers = 200, int Concurrency = 4,
     int MaximumReads = 256, int RequestMilliseconds = 30000, int StartsPerSecond = 10)

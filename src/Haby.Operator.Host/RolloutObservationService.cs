@@ -50,7 +50,7 @@ public sealed partial class ManifestOperatorService
         catch (ArgumentException) { return ""; }
     }
     private static GenerationReadinessReply InvalidObservation(string request) =>
-        new() { Outcome = "invalidRequest", RequestId = SafeObservationRequest(request) };
+        new() { Outcome = "invalidRequest", RequestId = SafeObservationRequest(request), CompletionReason = "not-ready" };
     private static GenerationReadinessReply ObservationReply(GenerationReadinessResult value)
     {
         var reply = new GenerationReadinessReply
@@ -73,8 +73,14 @@ public sealed partial class ManifestOperatorService
             RequestId = SafeObservationRequest(value.RequestId),
             CurrentReady = value.CurrentReady,
             OriginalRequestReady = value.OriginalRequestReady,
-            Replayed = value.Replayed
+            Replayed = value.Replayed,
+            CurrentApplied = value.CurrentApplied,
+            RetirementCompleted = value.Retirement is not null,
+            OriginalRequestApplied = value.OriginalRequestApplied,
+            CompletionReason = value.CompletionReason
         };
+        if (value.Retirement is { } retirement) reply.RetirementId = retirement.ToString("D");
+        if (value.AppliedGeneration is { } applied) reply.AppliedGeneration = applied;
         if (value.Submitted is { } submitted) reply.SubmittedId = submitted.ToString("D");
         if (value.SavedReady is { } saved) reply.SavedReadyId = saved.ToString("D");
         if (value.Stop is { } stop) reply.Stop = stop;

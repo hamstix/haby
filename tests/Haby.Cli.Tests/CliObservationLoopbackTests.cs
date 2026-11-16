@@ -43,6 +43,9 @@ public sealed partial class CliLoopbackTests
                 Replayed = replay,
                 CurrentReady = ready && !replay,
                 OriginalRequestReady = ready,
+                CurrentApplied = ready && !replay && Mode != "readyOnly",
+                OriginalRequestApplied = ready && Mode != "readyOnly",
+                CompletionReason = ready ? Mode == "readyOnly" ? "prerequisite-incomplete" : "applied" : "not-ready",
                 SubmittedId = Guid.NewGuid().ToString(),
                 SavedReadyId = Guid.NewGuid().ToString(),
                 Stop = Mode == "deadline" ? "RequestDeadline" : "Complete",
@@ -58,6 +61,7 @@ public sealed partial class CliLoopbackTests
                 Code = Mode == "apiUnavailable" ? "observation-unavailable" : ready ? "ready" : "rollout-pending",
                 Temporary = Mode == "apiUnavailable"
             });
+            if (ready && Mode != "readyOnly") { value.RetirementId = Guid.NewGuid().ToString("D"); value.RetirementCompleted = true; value.AppliedGeneration = 7; }
             return value;
         }
         public override Task<WorkloadSubmissionReply> SubmitGeneration(GenerationRequest request, ServerCallContext context) =>
@@ -65,6 +69,7 @@ public sealed partial class CliLoopbackTests
     }
     [Theory]
     [InlineData(false, "fresh", 0)]
+    [InlineData(false, "readyOnly", 1)]
     [InlineData(false, "replay", 1)]
     [InlineData(false, "pending", 1)]
     [InlineData(false, "deadline", 3)]

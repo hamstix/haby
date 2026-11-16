@@ -33,7 +33,7 @@ internal sealed record RolloutOptions(int MaximumCalls = 64, int MaximumRounds =
 internal sealed record RolloutMember(string Subject, Guid? Attempt, DateTimeOffset? Deadline,
     RolloutBudget Budget, RolloutObservation Observation);
 /// <summary>SavedReady is historical. Replayed results performed no fresh read; Ready belongs to the original request.</summary>
-internal sealed record RolloutResult(bool Ready, Guid? Submitted, Guid? SavedReady, RolloutStop Stop, RolloutMember[] Members, bool Replayed = false);
+internal sealed record RolloutResult(bool Ready, Guid? Submitted, Guid? SavedReady, RolloutStop Stop, RolloutMember[] Members, bool Replayed = false, Guid? Retirement = null, bool Applied = false, long? AppliedGeneration = null, string CompletionReason = "not-ready");
 internal sealed record RolloutResume(string Subject, Guid ExpectedAttempt);
 internal sealed record RolloutOrigin(string Subject, Guid Managed, string Operation, Guid DispatchAttempt,
     Guid? Confirmation, string ReceiptContract, string ReceiptHash);
@@ -52,7 +52,11 @@ internal static class RolloutJson
         if (System.Text.Encoding.UTF8.GetByteCount(json) > 2097152) throw new InvalidDataException("Observation result too large.");
         var result = JsonSerializer.Deserialize(json, RolloutMetadata.Default.RolloutResult)
             ?? throw new InvalidDataException("Observation result unavailable.");
-        if (!Enum.IsDefined(result.Stop) || result.Members is not { Length: > 0 and <= 512 } ||
+        if (result.CompletionReason is not ("not-ready" or "applied" or "inventory-conflict" or "prerequisite-incomplete" or
+                "generation-superseded" or "current-authority-unavailable" or "unsupported-inventory" or "commit-unconfirmed") ||
+            result.Retirement == Guid.Empty || result.AppliedGeneration is <= 0 ||
+            result.Applied && (!result.Ready || result.Retirement is null || result.AppliedGeneration is null || result.CompletionReason != "applied") ||
+            !result.Applied && result.CompletionReason == "applied" || !Enum.IsDefined(result.Stop) || result.Members is not { Length: > 0 and <= 512 } ||
             result.Members.Any(x => x is null || x.Subject is not { Length: > 0 and <= 256 } || x.Observation is null ||
                 !Enum.IsDefined(x.Budget) || !Enum.IsDefined(x.Observation.Outcome) ||
                 x.Observation.Code is not { Length: > 0 and <= 128 } || x.Observation.Code.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '.')) ||

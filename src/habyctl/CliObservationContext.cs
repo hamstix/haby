@@ -54,7 +54,11 @@ internal sealed partial class CliCommandContext
                     if (wire.CalculateSize() > 131072) return Invalid();
                     reply = await client.ResumeGenerationAsync(wire, ct);
                 }
+                if ((reply.CurrentApplied || reply.OriginalRequestApplied) && (!reply.HasAppliedGeneration || reply.AppliedGeneration != generation))
+                    throw new InvalidDataException("Completion generation mismatch.");
                 if (reply.RequestId != key) throw new InvalidDataException("Observation request identity mismatch.");
+                if ((reply.CurrentApplied || reply.OriginalRequestApplied) && (!reply.HasAppliedGeneration || reply.AppliedGeneration != generation))
+                    throw new InvalidDataException("Completion generation identity mismatch.");
                 var result = jsonOutput() ? jsonPresenter.PrintObservation(members is not null, reply) : presenter.PrintObservation(members is not null, reply);
                 received = true; return result;
             }, token);

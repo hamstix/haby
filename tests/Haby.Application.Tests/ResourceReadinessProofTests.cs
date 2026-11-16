@@ -26,14 +26,14 @@ public sealed class ResourceReadinessProofTests
         ResourceOutputReference[] outputs = [output];
         var operation = new ResourceOperationResult("create", Guid.CreateVersion7(), 1, null, outputs);
         ResourceOperationResult[] operations = [operation];
-        var resource = new ResourceReadyResult("database", Guid.CreateVersion7(), 1, "v4:" + new string('A', 64), false, false, operations);
+        var resource = new ResourceReadyResult("database", Guid.CreateVersion7(), 1, "v5:" + new string('A', 64), false, false, operations);
         ResourceReadyResult[] resources = [resource];
         var proof = new ResourcesReadyCheckpoint(Guid.CreateVersion7(), Guid.CreateVersion7(), 2,
-            "v4:" + new string('C', 64), DateTimeOffset.UtcNow, resources);
+            "v5:" + new string('C', 64), DateTimeOffset.UtcNow, resources);
         var encoded = ResourcesReadyCheckpointCodec.Encode(proof);
         outputs[0] = output with { Key = "changed" };
         operations[0] = new("unrelated", Guid.CreateVersion7(), 2, null, []);
-        resources[0] = new("other", Guid.CreateVersion7(), 2, "v4:" + new string('D', 64), false, false, []);
+        resources[0] = new("other", Guid.CreateVersion7(), 2, "v5:" + new string('D', 64), false, false, []);
         Assert.Equal(encoded, ResourcesReadyCheckpointCodec.Encode(proof));
         var decoded = ResourcesReadyCheckpointCodec.Decode(encoded);
         Assert.Equal(encoded, ResourcesReadyCheckpointCodec.Encode(decoded));

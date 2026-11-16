@@ -38,6 +38,9 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
     public IReadOnlyList<ResourceReuse> ReusedResources { get; }
     public IReadOnlyList<ResourceReuse> RetainedResources { get; }
     public ResourceReuseBaseline? Baseline { get; }
+    internal InitialRetirementInventory? Retirement { get; private init; }
+    internal DurableOperationGraph WithRetirement(InitialRetirementInventory inventory) =>
+        new(Nodes, ReusedResources, Baseline, RetainedResources) { Retirement = inventory };
     public DurableOperationGraph(IEnumerable<DurableOperationNode> nodes,
         IEnumerable<ResourceReuse>? reusedResources = null, ResourceReuseBaseline? baseline = null, IEnumerable<ResourceReuse>? retainedResources = null)
     {
@@ -124,7 +127,7 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
 /// <summary>One current, explicitly versioned graph format. No legacy readers.</summary>
 public static class DurableOperationGraphCodec
 {
-    public static string Encode(DurableOperationGraph graph) => JsonSerializer.Serialize(new GraphDocument(3,
+    public static string Encode(DurableOperationGraph graph) => JsonSerializer.Serialize(new GraphDocument(4,
         graph.Nodes.Select(n => new NodeDocument(n.Id.Value, n.ResourceId.Value,
             n.Action.Admission.ResourceContract.Value, n.Action.Admission.ProviderKind.Value,
             n.Action.Admission.ConfigurationContract.Value, n.Action.Admission.ImplementationId.Value,
@@ -135,16 +138,17 @@ public static class DurableOperationGraphCodec
             n.RequiredOutput is { } required ? new(n.Id.Value, required.Contract, required.Key) : null)).ToArray(),
         graph.ReusedResources.Count == 0 ? null : graph.ReusedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, r.Reintroduced)).ToArray(),
         graph.Baseline is { } b ? new BaselineDocument(b.Deployment.ToString(), b.Generation, b.Fingerprint) : null,
-        graph.RetainedResources.Count == 0 ? null : graph.RetainedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, false)).ToArray()), GraphJsonContext.Default.GraphDocument);
+        graph.RetainedResources.Count == 0 ? null : graph.RetainedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, false)).ToArray(), graph.Retirement?.Document), GraphJsonContext.Default.GraphDocument);
 
     public static DurableOperationGraph Decode(string json)
     {
         try
         {
+            if (Encoding.UTF8.GetByteCount(json) > 2097152) throw new InvalidDataException("Operation graph exceeds bound.");
             var document = JsonSerializer.Deserialize(json, GraphJsonContext.Default.GraphDocument);
-            if (document is null || document.Version != 3 || document.Nodes is null)
+            if (document is null || document.Version != 4 || document.Nodes is null)
                 throw new InvalidDataException("Unsupported operation graph format.");
-            return new(document.Nodes.Select(n => new DurableOperationNode(OperationId.Create(n.Id),
+            var graph = new DurableOperationGraph(document.Nodes.Select(n => new DurableOperationNode(OperationId.Create(n.Id),
                 ManifestLocalId.Create(n.Resource), new(new(ResourceTypeId.Create(n.ResourceContract),
                     ProviderKindId.Create(n.Kind), ProviderConfigurationContractId.Create(n.Configuration),
                     ProviderImplementationId.Create(n.Implementation)), OperationContractId.Create(n.Action)),
@@ -160,6 +164,7 @@ public static class DurableOperationGraphCodec
                 (document.Reuse ?? []).Select(r => new ResourceReuse(ManifestLocalId.Create(r.Resource), r.Management, r.Generation, r.Evidence) { Reintroduced = r.Reintroduced }),
                 document.Baseline is { } b ? new(ApplicationDeploymentId.Parse(b.Deployment), b.Generation, b.Fingerprint) : null,
                 (document.Retained ?? []).Select(r => new ResourceReuse(ManifestLocalId.Create(r.Resource), r.Management, r.Generation, r.Evidence) { Reintroduced = r.Reintroduced }));
+            return document.Retirement is { } retirement ? graph.WithRetirement(new(retirement)) : graph;
         }
         catch (Exception e) when (e is JsonException or ArgumentException or NullReferenceException or FormatException)
         { throw new InvalidDataException("Invalid operation graph."); }
@@ -169,18 +174,19 @@ public static class DurableOperationGraphCodec
     {
         graph.ValidateReferences(inputs);
         if (inputs.Configuration is { } frozen && frozen.Revision != inputs.Revision) throw new InvalidDataException("Configuration revision mismatch.");
-        var text = string.Join('\n', "haby-operation-plan/v4", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
+        var text = string.Join('\n', "haby-operation-plan/v5", inputs.Environment.ToString(), inputs.EnvironmentKey.Value,
             inputs.Revision.ApplicationRecordId.ToString(), inputs.Revision.RevisionNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ExactProviderResolutionSetCodec.Encode(inputs.Providers), Encode(graph),
             inputs.Configuration is { } configuration ? ConfigurationPlanningSnapshotCodec.Encode(configuration) : "unprepared");
-        return "v4:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+        return "v5:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 }
 
 internal sealed record GraphDocument(int Version, NodeDocument[] Nodes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Reuse = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BaselineDocument? Baseline = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Retained = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Retained = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InitialRetirementDocument? Retirement = null);
 internal sealed record ReuseDocument(string Resource, Guid Management, long Generation, string Evidence,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Reintroduced = false);
 internal sealed record BaselineDocument(string Deployment, long Generation, string Fingerprint);
@@ -188,6 +194,6 @@ internal sealed record NodeDocument(string Id, string Resource, string ResourceC
     string Configuration, string Implementation, string Action, string Environment, string Provider,
     long Revision, string Format, string Input, string[] Dependencies, OutputRefDocument[] Outputs, bool RequiresExternalOutput, OutputRefDocument? RequiredOutput);
 internal sealed record OutputRefDocument(string Producer, string Contract, string Key);
-[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectRequiredConstructorParameters = true)]
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false, RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true)]
 [JsonSerializable(typeof(GraphDocument))]
 internal partial class GraphJsonContext : JsonSerializerContext;

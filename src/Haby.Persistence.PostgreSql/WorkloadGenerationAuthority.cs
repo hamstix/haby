@@ -11,7 +11,7 @@ internal static class WorkloadGenerationAuthority
     internal static async ValueTask<WorkloadGenerationInspection> InspectAsync(
         IDbContextFactory<ManifestCatalogDbContext> contexts, InternalWorkloadConfiguration configuration,
         InternalDurableActions actions, string deploymentAction, string identityAction,
-        ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken token)
+        ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken token, bool completedRead = false)
     {
         await using var db = await contexts.CreateDbContextAsync(token);
         var id = Guid.Parse(deployment.ToString());
@@ -20,7 +20,10 @@ internal static class WorkloadGenerationAuthority
         var commit = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == generation.Value, token);
         if (commit is null || !source.InternalEffects) return new(null, [], "unsupported-shape");
         var accepted = new DurableChangeSetCommit(DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()), DeploymentPlanId.Parse(commit.PlanId.ToString()), deployment, generation, commit.CommittedAt, commit.ActorId);
-        source = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+        if (source.SnapshotFormatVersion != DurableInputStorage.Version || source.GraphJson.Length > 2097152) return new(null, [], "unsupported-inventory");
+        var retirement = DurableOperationGraphCodec.Decode(source.GraphJson).Retirement?.Document;
+        if (retirement is null || retirement.ObsoleteObjects.Length != 0 || retirement.ObsoletePublications.Length != 0) return new(null, [], "unsupported-inventory");
+        source = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, accepted, token) : await InternalGenerationAuthority.RequireAsync(db, accepted, token);
         var selection = await configuration.SelectAsync(db, source, token);
         await actions.RequireSubmissionSupportAsync(db, source, selection, deploymentAction, identityAction, token);
         var subjects = selection.Keys.OrderBy(x => x.Component.Value, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray();

@@ -30,7 +30,7 @@ internal sealed partial class PostgreSqlOperatorRolloutObservation
         await Task.WhenAll(workers);
         var canceled = token.IsCancellationRequested;
         var expired = reads.Remaining <= TimeSpan.Zero || budget.IsCancellationRequested && !canceled;
-        return new(request, !canceled && !expired && results.All(x => x.CurrentReady && !x.Replayed), results, canceled, expired);
+        return new(request, !canceled && !expired && results.All(x => x.CurrentReady && !x.Replayed), results, canceled, expired, !canceled && !expired && results.All(x => x.CurrentApplied && !x.Replayed));
 
         async Task Worker()
         {
@@ -58,7 +58,7 @@ internal sealed partial class PostgreSqlOperatorRolloutObservation
                 if (!result.Replayed && result.Members?.Any(x => x.Outcome == "Conflict") == true) outcome = GenerationReadinessOutcome.Conflict;
                 if (outcome == GenerationReadinessOutcome.Conflict) { results[index] = new(member, outcome); continue; }
                 results[index] = new(member, outcome, result.CurrentReady, result.OriginalRequestReady,
-                    result.Replayed, result.Submitted, result.SavedReady, result.Stop);
+                    result.Replayed, result.Submitted, result.SavedReady, result.Stop, result.CurrentApplied, result.OriginalRequestApplied, result.Retirement, result.AppliedGeneration, result.CompletionReason);
             }
         }
     }

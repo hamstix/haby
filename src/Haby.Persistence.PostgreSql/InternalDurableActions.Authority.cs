@@ -16,7 +16,7 @@ internal sealed partial class InternalDurableActions
     };
 
     private async Task<(InternalActionContext Context, IInternalActionHandler Handler)> ContextAsync(ManifestCatalogDbContext db,
-        DeploymentGenerationRow source, DurableOperationKey key, ProviderInput subject, string action, Guid marker, Guid managed, CancellationToken token)
+        DeploymentGenerationRow source, DurableOperationKey key, ProviderInput subject, string action, Guid marker, Guid managed, CancellationToken token, bool completedRead = false)
     {
         var inputs = source.Inputs();
         if (!inputs.Providers.Entries.TryGetValue(subject, out var exact)) throw new InvalidDataException("Subject is not declared in this generation.");
@@ -68,12 +68,14 @@ internal sealed partial class InternalDurableActions
         // Pure pre-acceptance shape validation has no installation authority; the final acceptance replaces this placeholder.
         var context = new InternalActionContext(key, inputs, subject, exact, prepared, manifestRow.ApplicationVersion, marker, managed, placement,
             installation == Guid.Empty && handler.EstablishesIdentity ? managed : installation);
-        return (await RuntimeContextAsync(db, source, context, handler, token), handler);
+        return (await RuntimeContextAsync(db, source, context, handler, token, completedRead), handler);
     }
 
-    private enum OriginPurpose { CompleteConfiguration, AuthenticationIdentity }
+    private enum OriginPurpose { CompleteConfiguration, AuthenticationIdentity, HistoricalRead }
     private Task<Loaded> LoadAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token) =>
         LoadProofAsync(db, key, OriginPurpose.CompleteConfiguration, token);
+    private Task<Loaded> LoadReadAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token) =>
+        LoadProofAsync(db, key, OriginPurpose.HistoricalRead, token);
     private Task<Loaded> LoadAuthenticationIdentityAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token) =>
         LoadProofAsync(db, key, OriginPurpose.AuthenticationIdentity, token);
 
@@ -86,22 +88,24 @@ internal sealed partial class InternalDurableActions
             ?? throw new InvalidDataException("Accepted action generation unavailable.");
         var accepted = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.ChangeSetId == generation.ChangeSetId, token)
             ?? throw new InvalidDataException("Accepted action commit unavailable.");
-        generation = await InternalGenerationAuthority.RequireAsync(db, new DurableChangeSetCommit(DeploymentChangeSetId.Parse(accepted.ChangeSetId.ToString()), DeploymentPlanId.Parse(accepted.PlanId.ToString()),
-            key.DeploymentId, key.Generation, accepted.CommittedAt, accepted.ActorId), token);
-        var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true);
+        var receipt = new DurableChangeSetCommit(DeploymentChangeSetId.Parse(accepted.ChangeSetId.ToString()), DeploymentPlanId.Parse(accepted.PlanId.ToString()),
+            key.DeploymentId, key.Generation, accepted.CommittedAt, accepted.ActorId);
+        var completedRead = purpose != OriginPurpose.CompleteConfiguration;
+        generation = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, receipt, token) : await InternalGenerationAuthority.RequireAsync(db, receipt, token);
+        var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true, completedRead);
         if (intent.FormatVersion != 1 || intent.Marker == Guid.Empty || intent.ManagedIdentity == Guid.Empty || intent.InputFingerprint != generation.Fingerprint ||
             proof is null || proof.Id != intent.CheckpointId || intent.Payload.Length is 0 or > 1_048_576 || System.Text.Encoding.UTF8.GetByteCount(intent.Payload) > 1_048_576 ||
             intent.OperationId != "effect-" + intent.RequestId) throw new InvalidDataException("Immutable action authority mismatch.");
-        var selected = await ContextAsync(db, generation, key, Subject(intent), intent.ActionContract, intent.Marker, intent.ManagedIdentity, token);
+        var selected = await ContextAsync(db, generation, key, Subject(intent), intent.ActionContract, intent.Marker, intent.ManagedIdentity, token, completedRead);
         if (Subject(intent) is ProviderInput.Workload workload)
         {
             await RefuseUnboundHistoryAsync(db, deployment, token);
             var stable = await ManagedAsync(db, generation, workload, selected.Context, selected.Handler, false, token);
             if (stable.Id != intent.ManagedIdentity) throw new InvalidDataException("Superseded Workload identity requires an explicitly initialized fresh catalog.");
-            if (purpose == OriginPurpose.CompleteConfiguration && selected.Handler.RequiresPreparedConfiguration)
-                await RequireConfigurationAsync(db, generation, token);
+            if (purpose != OriginPurpose.AuthenticationIdentity && selected.Handler.RequiresPreparedConfiguration)
+                await (configurationPreparation ?? throw new InvalidDataException("Configuration authority required.")).RequireCompleteAsync(db, generation, token, completedRead);
         }
-        var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, key.Generation.Value, resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true);
+        var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, key.Generation.Value, resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true, completedRead: completedRead);
         var credentialsValid = metadata is not null && (purpose == OriginPurpose.AuthenticationIdentity
             ? await DurableAggregateCompletion.CheckAuthenticationOriginCredentialMetadataAsync(db, metadata, token)
             : await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token));

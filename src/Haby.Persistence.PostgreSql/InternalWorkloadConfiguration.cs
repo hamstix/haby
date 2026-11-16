@@ -65,14 +65,14 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
     }
 
     // Read-only downstream authority: a partial PrepareAsync result never authorizes effects.
-    internal async Task<ProviderInput.Workload[]> RequireCompleteAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
+    internal async Task<ProviderInput.Workload[]> RequireCompleteAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token, bool completedRead = false)
     {
-        source = await InternalGenerationAuthority.RequireAsync(db, source, token);
+        source = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, source, token) : await InternalGenerationAuthority.RequireAsync(db, source, token);
         var selected = await SelectAsync(db, source, token);
-        var proof = await DurableAggregateCompletion.ReadAsync(db, source, token, true)
+        var proof = await DurableAggregateCompletion.ReadAsync(db, source, token, true, completedRead)
             ?? throw new InvalidDataException("Resource-stage proof unavailable.");
         var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, source.DeploymentId, source.Generation,
-            outputs, codecs, token, admission, internalResourceStage: true);
+            outputs, codecs, token, admission, internalResourceStage: true, completedRead: completedRead);
         if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token))
             throw new InvalidDataException("Current Resource evidence metadata unavailable.");
         var pairs = selected.SelectMany(x => x.Value.Select(d => (Workload: x.Key, Document: d))).ToArray();
@@ -109,9 +109,9 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
     }
 
     internal async Task<WorkloadConfigurationRecipient[]> RequireRecipientsAsync(ManifestCatalogDbContext db,
-        DeploymentGenerationRow source, CancellationToken token)
+        DeploymentGenerationRow source, CancellationToken token, bool completedRead = false)
     {
-        await RequireCompleteAsync(db, source, token);
+        await RequireCompleteAsync(db, source, token, completedRead);
         return (await db.WorkloadConfigurationRecipients.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId &&
             x.Generation == source.Generation).ToArrayAsync(token)).Select(x => new WorkloadConfigurationRecipient(
                 new(ManifestLocalId.Create(x.Component), ManifestLocalId.Create(x.Workload)), ManifestLocalId.Create(x.Document),

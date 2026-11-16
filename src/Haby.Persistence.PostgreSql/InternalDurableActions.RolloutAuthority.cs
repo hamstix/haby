@@ -21,12 +21,12 @@ internal sealed partial class InternalDurableActions
             .Select(Logical).Order(StringComparer.Ordinal))) throw new InvalidDataException("Unsupported observation target set.");
         return targets;
     }
-    private Task<SubmittedSet> CaptureSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) =>
-        InspectSubmittedAsync(db, source, true, token);
+    private Task<SubmittedSet> CaptureSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token, bool completedRead = false) =>
+        InspectSubmittedAsync(db, source, true, token, completedRead);
 
-    private async Task<SubmittedSet> InspectSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, bool persist, CancellationToken token)
+    private async Task<SubmittedSet> InspectSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, bool persist, CancellationToken token, bool completedRead = false)
     {
-        source = await InternalGenerationAuthority.RequireAsync(db, source, token);
+        source = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, source, token) : await InternalGenerationAuthority.RequireAsync(db, source, token);
         var targets = Targets(source); var confirmed = new List<SubmittedMember>();
         var intents = await db.ActionIntents.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.SubjectKind == "Workload").ToArrayAsync(token);
         foreach (var subject in targets)
@@ -41,8 +41,9 @@ internal sealed partial class InternalDurableActions
             if (candidates.Length == 0) continue;
             if (candidates.Length != 1) throw new InvalidDataException("Ambiguous submitted action.");
             var candidate = candidates[0];
-            var loaded = await LoadAsync(db, new(ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
-                DeploymentGeneration.Create(source.Generation), OperationId.Create(candidate.OperationId)), token);
+            var key = new DurableOperationKey(ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
+                DeploymentGeneration.Create(source.Generation), OperationId.Create(candidate.OperationId));
+            var loaded = completedRead ? await LoadReadAsync(db, key, token) : await LoadAsync(db, key, token);
             if (loaded.Operation.State != nameof(DurableOperationState.Succeeded)) continue;
             var result = await TerminalAsync(db, loaded, token); // Catalog-only proof; no terminal replay I/O.
             var observation = await db.ActionObservations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == source.DeploymentId &&

@@ -12,9 +12,10 @@ public sealed record GenerationReadinessMember(string Subject, Guid? Attempt, Da
 /// <summary>OriginalRequestReady and SavedReady are historical; CurrentReady requires a fresh complete request.</summary>
 public sealed record GenerationReadinessResult(GenerationReadinessOutcome Outcome, string RequestId,
     bool CurrentReady = false, bool OriginalRequestReady = false, bool Replayed = false, Guid? Submitted = null,
-    Guid? SavedReady = null, string? Stop = null, IReadOnlyList<GenerationReadinessMember>? Members = null);
+    Guid? SavedReady = null, string? Stop = null, IReadOnlyList<GenerationReadinessMember>? Members = null, bool CurrentApplied = false, bool OriginalRequestApplied = false,
+    Guid? Retirement = null, long? AppliedGeneration = null, string CompletionReason = "not-ready");
 
-/// <summary>Authenticated exact-generation readiness observation and expired observation renewal only.</summary>
+/// <summary>Authenticated exact-generation readiness, bounded initial completion and observation-only expired renewal.</summary>
 public interface IOperatorRolloutObservation
 {
     ValueTask<BatchObservationResult> WaitBatchAsync(string request, string actor, IReadOnlyList<BatchObservationMember> members,

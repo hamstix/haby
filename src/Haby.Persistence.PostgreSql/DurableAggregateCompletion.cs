@@ -109,7 +109,7 @@ internal static partial class DurableAggregateCompletion
         catch (InvalidDataException) { return false; }
     }
 
-    internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token, bool internalResourceStage = false)
+    internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token, bool internalResourceStage = false, bool completedRead = false)
     {
         if (source.InternalEffects && !internalResourceStage) throw new InvalidDataException("Internal generation is not publicly admitted.");
         var rows = await context.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == ResourcesReadyCheckpoint.Stage).ToArrayAsync(token);
@@ -126,7 +126,7 @@ internal static partial class DurableAggregateCompletion
         if (graph.Nodes.Count + graph.ReusedResources.Count == 0)
         {
             if (!internalResourceStage || !InternalResourceStage.IsEmpty(inputs, graph)) throw new InvalidDataException("Empty stage authority unavailable.");
-            _ = await InternalGenerationAuthority.RequireAsync(context, source, token);
+            _ = completedRead ? await InternalGenerationAuthority.RequireReadAsync(context, source, token) : await InternalGenerationAuthority.RequireAsync(context, source, token);
         }
         if (!internalResourceStage && inputs.Configuration!.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
             !ResourceReadinessCoverage.IsComplete(inputs.Configuration!.Manifest.Spec.Resources.Keys.Select(x => x.Value),

@@ -24,8 +24,8 @@ internal static partial class DurableAggregateCompletion
     internal static Task<ReadinessMetadata?> InspectMetadataAsync(ManifestCatalogDbContext db, Guid deployment,
         long generation, IEnumerable<IExternalOperationOutputContract> registrations,
         IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token,
-        DurableActionAdmission? admission = null, PendingResult? pending = null, bool internalResourceStage = false) =>
-        InspectMetadataCoreAsync(db, deployment, generation, registrations, codecs, token, admission, pending, internalResourceStage ? EvidencePurpose.InternalResourceStage : EvidencePurpose.Aggregate);
+        DurableActionAdmission? admission = null, PendingResult? pending = null, bool internalResourceStage = false, bool completedRead = false) =>
+        InspectMetadataCoreAsync(db, deployment, generation, registrations, codecs, token, admission, pending, internalResourceStage ? EvidencePurpose.InternalResourceStage : EvidencePurpose.Aggregate, completedRead);
 
     internal static Task<ReadinessMetadata?> InspectPublicationAsync(ManifestCatalogDbContext db, PendingResult pending,
         IEnumerable<IExternalOperationOutputContract> registrations, IEnumerable<IProviderConfigurationCodec> codecs,
@@ -35,7 +35,7 @@ internal static partial class DurableAggregateCompletion
     private static async Task<ReadinessMetadata?> InspectMetadataCoreAsync(ManifestCatalogDbContext db, Guid deployment,
         long generation, IEnumerable<IExternalOperationOutputContract> registrations,
         IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token,
-        DurableActionAdmission? admission, PendingResult? pending, EvidencePurpose purpose)
+        DurableActionAdmission? admission, PendingResult? pending, EvidencePurpose purpose, bool completedRead = false)
     {
         try
         {
@@ -89,7 +89,7 @@ internal static partial class DurableAggregateCompletion
                     !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                         graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
                     graph.Nodes.Count + graph.ReusedResources.Count == 0 && !(row.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))) return null;
-                if (row.InternalEffects) _ = await InternalGenerationAuthority.RequireAsync(db, row, token);
+                if (row.InternalEffects) _ = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, row, token) : await InternalGenerationAuthority.RequireAsync(db, row, token);
                 if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint || admission is not null && !admission.Supports(graph)) return null;
                 var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token);
                 if (revision is null) return null;
@@ -108,7 +108,7 @@ internal static partial class DurableAggregateCompletion
                         ? matches is not [var validator] || node.RequiredOutput != validator.Identity
                         : matches.Length != 0 || node.RequiredOutput is not null) return null;
                 }
-                if (admission is not null && !await ValidateSourceGraphAsync(db, row, inputs, graph, typedCodecs, admission, token)) return null;
+                if (admission is not null && !await ValidateSourceGraphAsync(db, row, inputs, graph, typedCodecs, admission, token, completedRead)) return null;
                 sources.Add(new(row, inputs, graph, selected));
             }
             // All registration identities and accepted source contexts above precede
@@ -198,14 +198,18 @@ internal static partial class DurableAggregateCompletion
 
     private static async Task<bool> ValidateSourceGraphAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
         DurablePlanningInputs inputs, DurableOperationGraph graph, IProviderConfigurationCodec[] codecs,
-        DurableActionAdmission admission, CancellationToken token)
+        DurableActionAdmission admission, CancellationToken token, bool completedRead = false)
     {
         if (source.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))
         {
-            _ = await InternalGenerationAuthority.RequireAsync(db, source, token);
+            _ = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, source, token) : await InternalGenerationAuthority.RequireAsync(db, source, token);
             return true;
         }
-        if (source.InternalEffects) inputs = InternalResourceStage.Project(inputs);
+        if (source.InternalEffects)
+        {
+            inputs = InternalResourceStage.Project(inputs);
+            graph = new(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources);
+        }
         var pin = inputs.Providers.RequireUniformResourceProvider();
         var id = Guid.Parse(pin.Instance.ToString());
         var instance = await db.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.EnvironmentRecordId == source.EnvironmentRecordId, token);
