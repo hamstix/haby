@@ -50,6 +50,7 @@ internal static class CommitCommands
         { DeploymentId = parse.GetRequiredValue(submitId), Generation = parse.GetRequiredValue(submitNumber) }, token));
         generation.Subcommands.Add(submit);
         generation.Subcommands.Add(ObservationCommands.Wait(context));
+        generation.Subcommands.Add(ObservationCommands.WaitBatch(context));
         generation.Subcommands.Add(ObservationCommands.Resume(context));
         group.Subcommands.Add(generation);
         return group;

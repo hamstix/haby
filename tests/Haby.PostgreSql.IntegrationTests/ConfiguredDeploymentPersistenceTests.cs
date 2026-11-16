@@ -22,7 +22,7 @@ public sealed partial class DurableDeploymentPlanningTests
         public bool ValidateObservation(string intent, string receipt, RolloutObservation observation) => adapter.ValidateObservation(intent, receipt, observation);
         public async ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string payload, string receipt, CancellationToken token)
         {
-            ReadinessReads++;
+            Interlocked.Increment(ref ReadinessReads);
             if (BeforeRead is not null) await BeforeRead(token);
             var intent = DeploymentIntents.Decode(payload); var saved = DeploymentIntents.DecodeReceipt(receipt);
             var obj = DeploymentObjects.Read(DeploymentObjects.Create(intent));

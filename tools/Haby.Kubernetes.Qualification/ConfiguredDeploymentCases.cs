@@ -55,6 +55,8 @@ internal static class ConfiguredDeploymentCases
             var delivery = new RuntimeConfiguration($"https://{hostAddress}:{port}/", new("custom-ca", root.ExportCertificatePem()), new(TotalTimeoutSeconds: 30));
             var requests = new ConcurrentQueue<Guid>(); var reviews = 0; var revokeNextRead = 0;
             var deploymentWrites = 0; var loseConfirmation = false; var loseIdentityConfirmation = false;
+            var expectedDeploymentWrites = 1;
+            System.Text.Json.Nodes.JsonNode configuredEnvelope = null!;
             ownedNamespace = await admin.CoreV1.CreateNamespaceAsync(new() { Metadata = new() { Name = ns, Labels = new Dictionary<string, string> { ["haby.dev/qualification"] = ns } } }, cancellationToken: token);
             async Task<KubernetesProviderConfiguration> Configuration(ISecretStore store, EnvironmentRecordId environment)
             {
@@ -85,6 +87,7 @@ internal static class ConfiguredDeploymentCases
                     properties["configuration"]!["documents"]![1] = "other";
                     properties["image"]!["reference"] = image; properties["containerName"] = "configured-consumer";
                     properties["overrides"] = new System.Text.Json.Nodes.JsonObject { ["minReadySeconds"] = 1 };
+                    configuredEnvelope = envelope.DeepClone();
                 }, runtimeConfigurationJson: ConfigurationJson(delivery), acceptGeneration: async (composition, environment, reference) =>
                 {
                     var factory = composition.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
@@ -178,7 +181,8 @@ internal static class ConfiguredDeploymentCases
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(token); wait.CancelAfter(TimeSpan.FromSeconds(35));
                 while (true)
                 {
-                    var pods = await admin.CoreV1.ListNamespacedPodAsync(ns, cancellationToken: wait.Token);
+                    var pods = await admin.CoreV1.ListNamespacedPodAsync(ns,
+                        labelSelector: DeploymentIntents.ManagedKey + "=" + intent.ManagedWorkload.ToString("N"), cancellationToken: wait.Token);
                     foreach (var pod in pods.Items.Where(x => x.Metadata.Uid != excludedUid && x.Status?.ContainerStatuses?.Any(c =>
                         c.Name == intent.Target.Container && (c.State?.Running is not null || c.State?.Terminated is not null || c.LastState?.Terminated is not null)) == true))
                     {
@@ -265,6 +269,33 @@ internal static class ConfiguredDeploymentCases
                     ["deployment", "generation", "wait", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
                 Check(waited.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() && deploymentWrites == 1,
                     "R05-native-public-wait-whole-set-zero-writes");
+                var peer = await DurableDeploymentPlanningTests.AcceptBatchPeerAsync(services, scenario, configuredEnvelope);
+                var submittedPeer = await client.SubmitGenerationAsync(new GenerationRequest { DeploymentId = peer.DeploymentId.ToString(), Generation = peer.Generation.Value }, cancellationToken: token);
+                Check(submittedPeer.Outcome == "submitted" && deploymentWrites == 2, "B01-second-exact-configured-generation-submitted");
+                expectedDeploymentWrites = 2;
+                var path = Path.Combine(directory, "batch-members.json");
+                async Task WriteBatch(params BatchQualificationMember[] members) => await File.WriteAllTextAsync(path,
+                    JsonSerializer.Serialize(new BatchQualificationFile(members), BatchQualificationMetadata.Default.BatchQualificationFile), token);
+                var originalMember = new BatchQualificationMember(request.DeploymentId, request.Generation);
+                var peerMember = new BatchQualificationMember(peer.DeploymentId.ToString(), peer.Generation.Value);
+                await WriteBatch(originalMember, new(ApplicationDeploymentId.New().ToString(), 1));
+                using var mixed = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                    ["deployment", "generation", "wait-batch", "--file", path], expectedExit: 1, credential: issuedCredential));
+                var mixedData = mixed.RootElement.GetProperty("data"u8);
+                Check(!mixedData.GetProperty("currentReady"u8).GetBoolean() && mixedData.GetProperty("members"u8).GetArrayLength() == 2 &&
+                    mixedData.GetProperty("members"u8)[0].GetProperty("currentReady"u8).GetBoolean() &&
+                    mixedData.GetProperty("members"u8)[1].GetProperty("outcome"u8).GetString() == "NotFound", "B02-native-batch-failure-preserves-another-fresh-success");
+                await WriteBatch(originalMember, peerMember);
+                var batchId = Guid.NewGuid().ToString("D");
+                string[] batchArguments = ["deployment", "generation", "wait-batch", "--file", path, "--request-id", batchId];
+                using var complete = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri, batchArguments, credential: issuedCredential));
+                Check(complete.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
+                    complete.RootElement.GetProperty("data"u8).GetProperty("members"u8).EnumerateArray().All(x => x.GetProperty("currentReady"u8).GetBoolean()) && deploymentWrites == 2,
+                    "B03-native-batch-complete-fresh-exact-generations-zero-extra-writes");
+                using var replayBatch = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri, batchArguments, expectedExit: 1, credential: issuedCredential));
+                Check(!replayBatch.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
+                    replayBatch.RootElement.GetProperty("data"u8).GetProperty("members"u8).EnumerateArray().All(x => x.GetProperty("replayed"u8).GetBoolean() &&
+                        x.GetProperty("originalRequestReady"u8).GetBoolean() && !x.GetProperty("currentReady"u8).GetBoolean()), "B04-native-batch-replay-history-is-not-fresh-ready");
             });
             requests.Clear(); var beforeRestart = reviews;
             await WithHost(async () =>
@@ -277,7 +308,7 @@ internal static class ConfiguredDeploymentCases
                 actions = CreateActions();
                 var observed = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-restarted", new(RequestMilliseconds: 30000), token);
                 Check(observed.Ready && observed.SavedReady == rolloutReady!.SavedReady && observed.Members[0].Attempt == rolloutReady.Members[0].Attempt &&
-                    observed.Members[0].Deadline == rolloutReady.Members[0].Deadline && deploymentWrites == 1,
+                    observed.Members[0].Deadline == rolloutReady.Members[0].Deadline && deploymentWrites == expectedDeploymentWrites,
                     "R02-reconstructed-observer-original-attempt-deadline-zero-writes");
                 observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
                 var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH")!;
@@ -288,7 +319,7 @@ internal static class ConfiguredDeploymentCases
                         "--member", observed.Members[0].Subject + "=" + observed.Members[0].Attempt!.Value.ToString("D")], credential: credential));
                 var renewal = renewed.RootElement.GetProperty("data"u8);
                 Check(renewed.RootElement.GetProperty("outcome"u8).GetString() == "resumed" && !renewal.GetProperty("currentReady"u8).GetBoolean() &&
-                    renewal.GetProperty("members"u8)[0].GetProperty("outcome"u8).GetString() == "NotObserved" && deploymentWrites == 1,
+                    renewal.GetProperty("members"u8)[0].GetProperty("outcome"u8).GetString() == "NotObserved" && deploymentWrites == expectedDeploymentWrites,
                     "R06-native-public-expired-resume-observation-only");
             });
             requests.Clear(); Interlocked.Exchange(ref revokeNextRead, 1);
@@ -311,14 +342,14 @@ internal static class ConfiguredDeploymentCases
                 var resumed = await actions.ResumeRolloutAsync(scenario.Commit, "rollout-resume", "qualifier",
                     [new(pending!.Members[0].Subject, pending.Members[0].Attempt!.Value)], token);
                 Check(!resumed.Ready && resumed.Members[0].Attempt != pending.Members[0].Attempt &&
-                    resumed.Members[0].Observation.Outcome == RolloutOutcome.NotObserved && deploymentWrites == 1,
+                    resumed.Members[0].Observation.Outcome == RolloutOutcome.NotObserved && deploymentWrites == expectedDeploymentWrites,
                     "R04-audited-resume-renews-observation-only");
             });
             await AdmissionRefuses("revoked-publication");
             Check((await publication.ApplyAsync(later.Receipt.Request, token)).CurrentPermission!.Status == "Revoked", "C10-revoked-admission-and-no-publication-repair");
             await using var verify = await contexts.CreateDbContextAsync(token);
-            Check((await verify.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration is null &&
-                await verify.RuntimeIdentityBindings.CountAsync(token) == 1 && !await verify.ConfigurationAccess.AnyAsync(token), "C11-no-Applied-static-grant-or-new-identity");
+            Check(!(await verify.ApplicationDeployments.AsNoTracking().ToArrayAsync(token)).Any(x => x.AppliedGeneration is not null) &&
+                await verify.RuntimeIdentityBindings.CountAsync(token) == expectedDeploymentWrites && !await verify.ConfigurationAccess.AnyAsync(token), "C11-no-Applied-static-grant-or-new-identity");
         }
         catch (Exception error) { primary = error; throw; }
         finally

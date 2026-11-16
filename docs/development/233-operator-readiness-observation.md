@@ -8,7 +8,7 @@ habyctl deployment generation wait <deployment-id> <generation> --request-id <uu
 habyctl deployment generation resume <deployment-id> <generation> --member Workload/api/main=<expired-attempt-uuid> -o json
 ```
 
-Each invocation makes one generated operator RPC. The CLI does not contact Kubernetes or poll. `resume` renews only the explicitly named expired observation attempts and returns without a live read. Use a separate `wait` afterward. These commands do not resume submission, recover uncertain writes, change desired inputs, retire objects or advance AppliedGeneration. Full lifecycle wait/resume and batch remain separate work.
+Each invocation makes one generated operator RPC. The CLI does not contact Kubernetes or poll. `resume` renews only the explicitly named expired observation attempts and returns without a live read. Use a separate `wait` afterward. These commands do not resume submission, recover uncertain writes, change desired inputs, retire objects or advance AppliedGeneration. [Bounded product/CI batch observation](235-batch-readiness-wait.md) uses a separate one-RPC command. Full lifecycle wait/resume remains separate work.
 
 ## Request identity and historical results
 

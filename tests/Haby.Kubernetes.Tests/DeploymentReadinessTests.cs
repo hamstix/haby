@@ -184,6 +184,41 @@ public sealed class DeploymentReadinessTests
         Assert.Equal(outcome, observed.Outcome.ToString()); Assert.Equal(temporary, observed.Temporary); Assert.Equal(1, api.Reads);
         Assert.DoesNotContain("PRIVATE", observed.Evidence ?? observed.Code);
     }
+    [Fact]
+    public async Task Batch_admission_is_after_connection_acquisition_and_immediately_before_the_actual_GET()
+    {
+        var intent = ConfiguredDeploymentTests.Intent(); var obj = ReadyObject(intent); var receipt = DeploymentObjects.Receipt(obj, intent, ConfirmationSource.Response);
+        var api = new ReadOnlyApi(200, obj);
+        var connected = new TaskCompletionSource<KernelClient>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var admissions = 0;
+        var kernel = new DeploymentKernel(intent.Binding, async ct => await connected.Task.WaitAsync(ct));
+        var result = kernel.ReadinessAsync(intent, receipt, default, new ProbeAdmission(async (read, ct) =>
+        {
+            Assert.True(connected.Task.IsCompleted); Assert.Equal(0, api.Reads); admissions++;
+            return await read(ct);
+        }));
+        Assert.Equal(0, admissions); Assert.Equal(0, api.Reads);
+        connected.SetResult(new KernelClient(new k8s.Kubernetes(new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, api)));
+        Assert.Equal(RolloutOutcome.Ready, (await result).Outcome); Assert.Equal(1, admissions); Assert.Equal(1, api.Reads);
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Batch_admission_budget_or_revocation_is_not_hidden_by_adapter_error_mapping(bool revoked)
+    {
+        var intent = ConfiguredDeploymentTests.Intent(); var obj = ReadyObject(intent); var receipt = DeploymentObjects.Receipt(obj, intent, ConfirmationSource.Response);
+        var api = new ReadOnlyApi(200, obj);
+        var kernel = new DeploymentKernel(intent.Binding, _ => ValueTask.FromResult(new KernelClient(new k8s.Kubernetes(
+            new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, api))));
+        var admission = new ProbeAdmission((_, _) => throw (revoked ? new RolloutReadRefusedException() : new RolloutBatchExhaustedException()));
+        if (revoked) await Assert.ThrowsAsync<RolloutReadRefusedException>(() => kernel.ReadinessAsync(intent, receipt, default, admission));
+        else await Assert.ThrowsAsync<RolloutBatchExhaustedException>(() => kernel.ReadinessAsync(intent, receipt, default, admission));
+        Assert.Equal(0, api.Reads);
+    }
+    private sealed class ProbeAdmission(Func<Func<CancellationToken, ValueTask<RolloutObservation>>, CancellationToken, ValueTask<RolloutObservation>> invoke) : IReadinessReadAdmission
+    {
+        public ValueTask<RolloutObservation> RunAsync(Func<CancellationToken, ValueTask<RolloutObservation>> read, CancellationToken token) => invoke(read, token);
+    }
     private sealed class ReadOnlyApi(int status, JsonObject obj) : DelegatingHandler
     {
         internal int Reads;

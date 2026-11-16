@@ -118,7 +118,8 @@ internal static class DeploymentReadiness
 
 public sealed partial class DeploymentKernel
 {
-    internal async Task<RolloutObservation> ReadinessAsync(DeploymentIntent intent, DeploymentReceipt receipt, CancellationToken token)
+    internal async Task<RolloutObservation> ReadinessAsync(DeploymentIntent intent, DeploymentReceipt receipt, CancellationToken token,
+        IReadinessReadAdmission? admission = null)
     {
         try
         {
@@ -129,10 +130,16 @@ public sealed partial class DeploymentKernel
         {
             token.ThrowIfCancellationRequested();
             using var lease = await _connect(token);
-            var current = await Read(lease.Client, intent, token);
-            return current is null ? new(RolloutOutcome.Conflict, "object-absent") : DeploymentReadiness.Evaluate(current, intent, receipt);
+            return admission is null ? await Observe(token) : await admission.RunAsync(Observe, token);
+            async ValueTask<RolloutObservation> Observe(CancellationToken ct)
+            {
+                var current = await Read(lease.Client, intent, ct);
+                return current is null ? new(RolloutOutcome.Conflict, "object-absent") : DeploymentReadiness.Evaluate(current, intent, receipt);
+            }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (RolloutBatchExhaustedException) { throw; }
+        catch (RolloutReadRefusedException) { throw; }
         catch (JsonException) { return new(RolloutOutcome.Pending, "status-invalid"); }
         catch (WorkloadContractException) { return new(RolloutOutcome.Unavailable, "api-access-denied"); }
         catch (HttpOperationException error)

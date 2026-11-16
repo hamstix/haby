@@ -62,6 +62,7 @@ service ManifestOperator {
   rpc ExecuteGeneration(GenerationRequest) returns (GenerationExecutionReply);
   rpc SubmitGeneration(GenerationRequest) returns (WorkloadSubmissionReply);
   rpc WaitGeneration(GenerationWaitRequest) returns (GenerationReadinessReply);
+  rpc WaitGenerationBatch(GenerationBatchWaitRequest) returns (GenerationBatchReadinessReply);
   rpc ResumeGeneration(GenerationResumeRequest) returns (GenerationReadinessReply);
   // Explicit execution only; GetOperation never dispatches or recovers.
   rpc ExecuteOperation(OperationRequest) returns (OperationReply);
@@ -1053,6 +1054,66 @@ message GenerationObservationSettings {
   optional int32 read_timeout_milliseconds = 3;
   optional int32 poll_milliseconds = 4;
   optional int32 request_milliseconds = 5;
+}
+message GenerationBatchSettings {
+  optional int32 concurrency = 1;
+  optional int32 maximum_reads = 2;
+  optional int32 request_milliseconds = 3;
+  optional int32 starts_per_second = 4;
+}
+message GenerationBatchMember {
+  string deployment_id = 1;
+  int64 generation = 2;
+  string request_id = 3;
+}
+message GenerationBatchWaitRequest {
+  string request_id = 1;
+  repeated GenerationBatchMember members = 2;
+  GenerationBatchSettings settings = 3;
+  GenerationObservationSettings member_settings = 4;
+}
+enum BatchReadinessOutcome {
+  BATCH_READINESS_OUTCOME_UNSPECIFIED = 0;
+  BATCH_READINESS_OUTCOME_OBSERVED = 1;
+  BATCH_READINESS_OUTCOME_INVALID_REQUEST = 2;
+  BATCH_READINESS_OUTCOME_NOT_FOUND = 3;
+  BATCH_READINESS_OUTCOME_UNSUPPORTED_SHAPE = 4;
+  BATCH_READINESS_OUTCOME_UNKNOWN = 5;
+  BATCH_READINESS_OUTCOME_CONFLICT = 6;
+  BATCH_READINESS_OUTCOME_REFUSED = 7;
+  BATCH_READINESS_OUTCOME_CANCELED = 8;
+  BATCH_READINESS_OUTCOME_DEADLINE = 9;
+  BATCH_READINESS_OUTCOME_UNAVAILABLE = 10;
+  BATCH_READINESS_OUTCOME_NOT_STARTED_BUDGET = 11;
+  BATCH_READINESS_OUTCOME_INTERRUPTED = 12;
+  BATCH_READINESS_OUTCOME_BUDGET_EXHAUSTED = 13;
+}
+enum BatchReadinessStop {
+  BATCH_READINESS_STOP_UNSPECIFIED = 0;
+  BATCH_READINESS_STOP_COMPLETE = 1;
+  BATCH_READINESS_STOP_CALL_LIMIT = 2;
+  BATCH_READINESS_STOP_REQUEST_DEADLINE = 3;
+  BATCH_READINESS_STOP_CANCELED = 4;
+  BATCH_READINESS_STOP_INTERRUPTED = 5;
+}
+message GenerationBatchSummary {
+  GenerationBatchMember member = 1;
+  BatchReadinessOutcome outcome = 2;
+  bool current_ready = 3;
+  bool original_request_ready = 4;
+  bool replayed = 5;
+  optional string submitted_id = 6;
+  optional string saved_ready_id = 7;
+  BatchReadinessStop stop = 8;
+}
+message GenerationBatchReadinessReply {
+  string request_id = 1;
+  bool current_ready = 2;
+  repeated GenerationBatchSummary members = 3;
+  int32 total = 4;
+  bool invalid_request = 5;
+  bool canceled = 6;
+  bool deadline = 7;
 }
 message GenerationWaitRequest {
   string deployment_id = 1;

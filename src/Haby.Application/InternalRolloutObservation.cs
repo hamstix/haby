@@ -15,6 +15,9 @@ internal interface IInternalReadinessHandler
     int ObservationSeconds(string intent, string receipt);
     bool ValidateObservation(string intent, string receipt, RolloutObservation observation);
     ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string intent, string receipt, CancellationToken token);
+    ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string intent, string receipt,
+        IReadinessReadAdmission admission, CancellationToken token) =>
+        admission.RunAsync(ct => ReadinessAsync(context, intent, receipt, ct), token);
 }
 
 internal sealed record RolloutOptions(int MaximumCalls = 64, int MaximumRounds = 32,

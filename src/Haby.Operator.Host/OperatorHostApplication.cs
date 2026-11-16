@@ -172,10 +172,22 @@ public static class OperatorHostApplication
         var observationLimits = new RolloutOptions(ObservationSetting("MaximumCalls", 64), ObservationSetting("MaximumRounds", 32),
             ObservationSetting("ReadTimeoutMilliseconds", 10000), ObservationSetting("PollMilliseconds", 1000), ObservationSetting("RequestMilliseconds", 30000));
         observationLimits.Validate();
+        int BatchSetting(string name, int fallback)
+        {
+            var key = "Haby:WorkloadBatchObservation:" + name;
+            var value = builder.Configuration[key];
+            if (value is null) return fallback;
+            if (!int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                throw new InvalidOperationException("Invalid configuration key: " + key);
+            return parsed;
+        }
+        var batchLimits = new BatchObservationOptions(BatchSetting("MaximumMembers", 200), BatchSetting("Concurrency", 4),
+            BatchSetting("MaximumReads", 256), BatchSetting("RequestMilliseconds", 30000), BatchSetting("StartsPerSecond", 10));
+        batchLimits.Validate();
         builder.Services.AddSingleton<IOperatorRolloutObservation>(p => new PostgreSqlOperatorRolloutObservation(
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
             p.GetRequiredService<InternalWorkloadConfiguration>(), p.GetRequiredService<InternalDurableActions>(), observationLimits,
-            p.GetRequiredService<TimeProvider>(), InternalDeploymentAction.Create, InternalRuntimeIdentityAction.Create));
+            p.GetRequiredService<TimeProvider>(), InternalDeploymentAction.Create, InternalRuntimeIdentityAction.Create, batchLimits));
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
         builder.Services.AddPostgreSqlDurableDesiredStateCommitter();
         // Explicit pilot storage choice under ADR-006: database rows and backups contain recoverable secrets.

@@ -21,9 +21,10 @@ internal sealed partial class InternalDurableActions
     }
     // Trusted public composition supplies the original total-budget timestamp and token.
     internal ValueTask<RolloutResult> ObserveOperatorRolloutAsync(DurableChangeSetCommit accepted, string request, string actor,
-        RolloutOptions options, long started, TimeSpan totalBudget, CancellationToken callerToken, CancellationToken token) =>
+        RolloutOptions options, long started, TimeSpan totalBudget, CancellationToken callerToken, CancellationToken token,
+        BatchMemberObservation? batch = null) =>
         serialization.RunAsync(RolloutKey(accepted), () => ObserveRolloutCoreAsync(accepted, request, options, started,
-            callerToken, token, actor, true, totalBudget), token);
+            callerToken, token, actor, true, totalBudget, batch), token);
 
     private async ValueTask<ObservationCall> BeginObservationCallAsync(DurableChangeSetCommit accepted, string request,
         RolloutOptions? options, RolloutResume[]? resumes, string actor, CancellationToken token, bool publicRequest = false)
@@ -75,11 +76,12 @@ internal sealed partial class InternalDurableActions
     }
     private async ValueTask<RolloutResult> ObserveRolloutCoreAsync(DurableChangeSetCommit accepted, string request,
         RolloutOptions options, long started, CancellationToken callerToken, CancellationToken callToken,
-        string actor = "observer", bool publicRequest = false, TimeSpan? totalBudget = null)
+        string actor = "observer", bool publicRequest = false, TimeSpan? totalBudget = null, BatchMemberObservation? batch = null)
     {
         callToken.ThrowIfCancellationRequested();
         var requestBudget = totalBudget ?? TimeSpan.FromMilliseconds(options.RequestMilliseconds);
         if (clock.GetElapsedTime(started) >= requestBudget) throw new OperationCanceledException(callToken);
+        batch?.Start();
         var call = await BeginObservationCallAsync(accepted, request, options, null, actor, callToken, publicRequest);
         if (call.Replay is not null) return call.Replay;
         var set = call.Set;
@@ -131,8 +133,16 @@ internal sealed partial class InternalDurableActions
                     readToken.ThrowIfCancellationRequested();
                     if (!reservation.Recovery && !RolloutDeadlines.CanReadActive(clock, readStarted, activeLimit, member.Attempt.Deadline))
                         throw new OperationCanceledException(readToken);
-                    observed = await ((IInternalReadinessHandler)member.Loaded.Handler).ReadinessAsync(member.Loaded.Context,
-                        member.Loaded.Intent.Payload, member.Receipt, readToken);
+                    var handler = (IInternalReadinessHandler)member.Loaded.Handler;
+                    observed = batch is null
+                        ? await handler.ReadinessAsync(member.Loaded.Context, member.Loaded.Intent.Payload, member.Receipt, readToken)
+                        : await handler.ReadinessAsync(member.Loaded.Context, member.Loaded.Intent.Payload, member.Receipt,
+                            batch.Budget.Admission(ct => ReauthorizeReadAsync(call, member, ct), () =>
+                            {
+                                if (clock.GetElapsedTime(readStarted) >= readLimit) readBudget.Cancel();
+                                if (!reservation.Recovery && !RolloutDeadlines.CanReadActive(clock, readStarted, activeLimit, member.Attempt.Deadline)) activeBudget.Cancel();
+                                readToken.ThrowIfCancellationRequested();
+                            }), readToken);
                     if (!((IInternalReadinessHandler)member.Loaded.Handler).ValidateObservation(member.Loaded.Intent.Payload, member.Receipt, observed))
                         throw new InvalidDataException("Invalid adapter readiness evidence.");
                 }
@@ -140,8 +150,13 @@ internal sealed partial class InternalDurableActions
                 {
                     observed = new(RolloutOutcome.Unavailable, callToken.IsCancellationRequested ? "call-stopped" : "read-timeout", true);
                 }
-                // Catalog closure uses an independent finite budget after caller cancellation; no further API work.
-                using var publish = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                catch (RolloutReadRefusedException) { observed = new(RolloutOutcome.Refused, "runtime-authority-unavailable"); }
+                catch (RolloutBatchExhaustedException)
+                {
+                    return Result(set, null, RolloutStop.CallLimit, observations) with { Ready = false };
+                }
+                // Single-generation closure has a finite grace; batch closure retains the original deadline.
+                using var publish = ClosureBudget();
                 var publication = await PublishReadAsync(call, member, reservation.Id.Value, observed, samples, observations, publish.Token);
                 if (publication.Expired) expiredMembers.Add(member.Subject);
                 if (publication.Completed is not null) return publication.Completed;
@@ -159,8 +174,24 @@ internal sealed partial class InternalDurableActions
             try { await Task.Delay(TimeSpan.FromMilliseconds(options.PollMilliseconds), clock, callToken); }
             catch (OperationCanceledException) { stop = callerToken.IsCancellationRequested ? RolloutStop.Canceled : RolloutStop.RequestDeadline; break; }
         }
-        using var finalBudget = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var finalBudget = ClosureBudget();
         return await FinishObservationCallAsync(call, observations, stop, finalBudget.Token);
+
+        CancellationTokenSource ClosureBudget() => batch is null
+            ? new CancellationTokenSource(TimeSpan.FromSeconds(10)) : CancellationTokenSource.CreateLinkedTokenSource(callToken);
+    }
+    private async ValueTask ReauthorizeReadAsync(ObservationCall call, SubmittedMember member, CancellationToken token)
+    {
+        await using var db = await contexts.CreateDbContextAsync(token);
+        await using var tx = await db.Database.BeginTransactionAsync(token);
+        await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
+        var latest = await db.ObservationAttempts.AsNoTracking().Where(x => x.DeploymentId == call.Set.Source.DeploymentId &&
+            x.Generation == call.Set.Source.Generation && x.Subject == member.Subject).OrderByDescending(x => x.Ordinal).FirstAsync(token);
+        if (latest.Id != member.Attempt.Id) throw new RolloutReadRefusedException();
+        try { await RequireCurrentRuntimeAsync(db, member.Loaded.Context, token); }
+        catch (Exception error) when (error is InvalidDataException or InvalidOperationException) { throw new RolloutReadRefusedException(); }
+        token.ThrowIfCancellationRequested();
+        // Read-only transaction: disposal releases its lock before the admission hook invokes the API.
     }
     private async Task<ReadReservation> ReserveReadAsync(ObservationCall call, SubmittedMember member, int round,
         bool knownExpired, bool recoveryConsumed, bool activeAllowed, CancellationToken token, bool publicRequest = false)
