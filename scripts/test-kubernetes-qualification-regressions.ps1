@@ -255,6 +255,36 @@ try{
     $cleanupIds=@('inner-cleanup-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-completed','inner-cleanup-completed')
     $fullIds=$secondIds+@('mixed-delivery-start','mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed','mixed-delivery-completed')+$cleanupIds
     if($fullIds.Count -ne 39){throw 'Closed boundary control inventory changed'}
+    # Optional finite scenario-group boundaries preserve old journals and interrupted cleanup.
+    $earlyIds=@('workload-actions-start','accepted-setup-start','accepted-setup-completed','restore-start','restore-completed',
+        'accepted-setup-start','accepted-setup-completed','workload-actions-completed','identity-actions-start',
+        'runtime-setup-start','runtime-setup-completed','restore-start','restore-completed','identity-actions-completed')
+    $earlyPrefix=$entryIds[0..5]+$earlyIds
+    $earlyFull=$earlyPrefix+$secondIds[6..($secondIds.Count-1)]+@('mixed-delivery-start','mixed-baseline-prepared',
+        'mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed','mixed-delivery-completed')+$cleanupIds
+    foreach($case in @(
+        @{Ids=$earlyFull;Status='valid'},
+        @{Ids=($entryIds[0..5]+$earlyIds[0..1]);Status='valid'},
+        @{Ids=($entryIds[0..5]+$earlyIds[0..1]+$cleanupIds);Status='valid'},
+        @{Ids=($entryIds[0..5]+@('accepted-setup-completed'));Status='invalid'},
+        @{Ids=($entryIds[0..5]+@('workload-actions-start','accepted-setup-start','restore-start'));Status='invalid'},
+        @{Ids=($entryIds[0..5]+@('workload-actions-start','accepted-setup-start','workload-actions-completed'));Status='invalid'},
+        @{Ids=($entryIds[0..5]+@('workload-actions-start','accepted-setup-start','accepted-setup-completed','accepted-setup-completed'));Status='invalid'},
+        @{Ids=($entryIds[0..5]+@('restore-start'));Status='invalid'},
+        @{Ids=($entryIds[0..5]+@('workload-actions-start')+(@('accepted-setup-start','accepted-setup-completed')*17));Status='invalid'},
+        @{Ids=($secondIds+@('mixed-delivery-start','mixed-preparation-completed','mixed-baseline-prepared'));Status='invalid'},
+        @{Ids=($entryIds[0..5]+@('workload-actions-start','protected-raw-sentinel'));Status='invalid'}
+    )){
+        $records=@(for($index=0;$index -lt $case.Ids.Count;$index++){($index+1).ToString()+' '+$case.Ids[$index]+' '+($index*10).ToString()})
+        [IO.File]::WriteAllText($journal,($records -join "`n")+"`n")
+        $parsed=Read-QualificationJournal $journalRoot
+        $output=@(Format-QualificationJournal $parsed)
+        if($parsed.Status -cne $case.Status -or $output -match '^PASS |^Harness: PASS$|protected-'){
+            throw 'Early scenario boundaries, finite repeats or value exclusion changed'
+        }
+    }
+    Write-Output 'PASS early scenario preparation, restore, action-group and mixed-baseline boundaries (synthetic)'
+
     foreach($case in @(
         @{Ids=$fullIds;Status='valid';Outcome='completed'},
         @{Ids=($entryIds+@('runtime-final-revoke-start')+$disposeIds+$cleanupIds);Status='valid';Outcome='completed'},

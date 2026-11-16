@@ -265,10 +265,11 @@ public sealed partial class DurableDeploymentPlanningTests
 
         internal async Task<InternalScenario> PrepareMixedAsync(
             Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? suppliedConfiguration = null, string namespaceName = "test",
-            Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualProbe = null)
+            Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualProbe = null, Action? baselinePrepared = null)
         {
             var baseline = await Prepare(full: true, render: true);
             ownedCatalog = baseline.Connection;
+            baselinePrepared?.Invoke();
             await using (var execute = ApplicationLoginScenario.Services(baseline.Connection, full: true, access: true))
                 Assert.Null((await execute.GetRequiredService<DurableGenerationRunner>().RunAsync(baseline.Commit.DeploymentId, baseline.Commit.Generation, default)).StopOutcome);
             ProviderAliasBinding? exactProvider = null;

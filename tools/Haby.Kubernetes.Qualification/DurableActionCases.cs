@@ -87,7 +87,9 @@ internal static class DurableActionCases
             async Task<(DurableDeploymentPlanningTests.InternalScenario Scenario, DurableOperationKey Key, Counter Counter)> Accepted(Action<InternalActionFault>? fault = null, bool initialOnly = false)
             {
                 Console.WriteLine(initialOnly ? "Durable phase: imported-initial-Workload-only-generation" : "Durable phase: arrange-real-Resource-and-accepted-mixed-generation");
+                diagnostics.Mark(QualificationMilestone.AcceptedSetupStart);
                 var scenario = await setup.InternalScenarioAsync(Configuration, name, actualKubernetesProbe: Preflight, initialOnly: initialOnly);
+                diagnostics.Mark(QualificationMilestone.AcceptedSetupCompleted);
                 await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
                 var counter = new Counter(scenario.Connection);
                 var actions = Compose(services, counter, fault);
@@ -99,10 +101,13 @@ internal static class DurableActionCases
             // API acceptance followed by a deliberately dropped response. Preserve catalog,
             // restart the service on a real pg_dump/restore and learn the original UID by read.
             diagnostics.Mark(QualificationMilestone.DurableSuiteStart);
+            diagnostics.Mark(QualificationMilestone.WorkloadActionsStart);
             var lost = await Accepted(); lost.Counter.DropResponse = true;
             await using (var services = DurableDeploymentPlanningTests.InternalServices(lost.Scenario.Connection, lost.Scenario.Time))
                 Check((await Compose(services, lost.Counter).ExecuteAsync(lost.Key, token)).Outcome == InternalActionOutcome.Uncertain, "D01-accepted-response-lost");
+            diagnostics.Mark(QualificationMilestone.RestoreStart);
             var restored = await Restore(postgres, lost.Scenario.Connection, token);
+            diagnostics.Mark(QualificationMilestone.RestoreCompleted);
             lost.Counter.Connection = restored; lost.Counter.DropResponse = false;
             await using (var services = DurableDeploymentPlanningTests.InternalServices(restored, lost.Scenario.Time))
             {
@@ -244,7 +249,9 @@ internal static class DurableActionCases
             await using (var services = DurableDeploymentPlanningTests.InternalServices(initialLost.Scenario.Connection, initialLost.Scenario.Time))
                 Check((await Compose(services, initialLost.Counter).ExecuteAsync(initialLost.Key, token)).Outcome == InternalActionOutcome.Uncertain,
                     "D16-initial-lost-response-preserves-uncertainty");
+            diagnostics.Mark(QualificationMilestone.RestoreStart);
             var initialRestored = await Restore(postgres, initialLost.Scenario.Connection, token);
+            diagnostics.Mark(QualificationMilestone.RestoreCompleted);
             initialLost.Counter.Connection = initialRestored; initialLost.Counter.DropResponse = false;
             await using (var services = DurableDeploymentPlanningTests.InternalServices(initialRestored, initialLost.Scenario.Time))
             {
@@ -294,9 +301,11 @@ internal static class DurableActionCases
                 bool initial = true, string? targetNamespace = null,
                 Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? configuration = null)
             {
+                diagnostics.Mark(QualificationMilestone.RuntimeSetupStart);
                 var scenario = await setup.InternalScenarioAsync(configuration ?? Configuration, targetNamespace ?? name,
                     actualKubernetesProbe: configuration is null ? Preflight : AccessOnlyPreflight, initialOnly: initial,
                     configureManifest: e => DurableDeploymentPlanningTests.ConfiguredDocuments(e, secondDocument: true));
+                diagnostics.Mark(QualificationMilestone.RuntimeSetupCompleted);
                 await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
                 var documents = await DurableDeploymentPlanningTests.ConfigurationPreparation(services).Preparation.PrepareAsync(scenario.Commit, "qualifier", token);
                 if (documents.Failure is not null || documents.Prepared.Count != 2) throw new InvalidOperationException("Exact runtime documents unavailable.");
@@ -316,6 +325,8 @@ internal static class DurableActionCases
             var accountsBefore = (await admin.CoreV1.ListNamespacedServiceAccountAsync(name, cancellationToken: token)).Items.Count;
             var rolesBefore = (await admin.RbacAuthorizationV1.ListNamespacedRoleBindingAsync(name, cancellationToken: token)).Items.Count;
             var secretsBefore = (await admin.CoreV1.ListNamespacedSecretAsync(name, cancellationToken: token)).Items.Count;
+            diagnostics.Mark(QualificationMilestone.WorkloadActionsCompleted);
+            diagnostics.Mark(QualificationMilestone.IdentityActionsStart);
             var runtime = await RuntimeAccepted();
             await using (var services = DurableDeploymentPlanningTests.InternalServices(runtime.Scenario.Connection, runtime.Scenario.Time))
             {
@@ -326,7 +337,9 @@ internal static class DurableActionCases
                     account.Metadata.Uid == receipt.Uid, "D19-runtime-initial-owned-disabled-automount");
             }
             var originalRuntime = await RuntimeSaved(runtime.Scenario.Connection);
+            diagnostics.Mark(QualificationMilestone.RestoreStart);
             var runtimeRestored = await Restore(postgres, runtime.Scenario.Connection, token);
+            diagnostics.Mark(QualificationMilestone.RestoreCompleted);
             await using (var services = DurableDeploymentPlanningTests.InternalServices(runtimeRestored, runtime.Scenario.Time))
             {
                 var counter = new Counter(runtimeRestored) { Key = runtime.Key };
@@ -366,7 +379,9 @@ internal static class DurableActionCases
                 account.AutomountServiceAccountToken = false;
                 await admin.CoreV1.ReplaceNamespacedServiceAccountAsync(account, intent.Name, name, cancellationToken: token);
             }
+            diagnostics.Mark(QualificationMilestone.RestoreStart);
             var lostRestored = await Restore(postgres, runtimeLost.Scenario.Connection, token);
+            diagnostics.Mark(QualificationMilestone.RestoreCompleted);
             await using (var services = DurableDeploymentPlanningTests.InternalServices(lostRestored, runtimeLost.Scenario.Time))
             {
                 var counter = new Counter(lostRestored) { Key = runtimeLost.Key };
@@ -454,6 +469,7 @@ internal static class DurableActionCases
             Check(lost.Counter.Barriers == 1 && interrupted.Counter.Barriers == 1 && absent.Counter.Barriers == 0 &&
                 lost.Counter.TransactionChecks > 0 && interrupted.Counter.TransactionChecks > 0 && absent.Counter.TransactionChecks > 0, "D12-committed-marker-no-network-under-catalog-transaction");
             // Publication and authentication use actual prepared identities, including a mixed baseline.
+            diagnostics.Mark(QualificationMilestone.IdentityActionsCompleted);
             var initialPublication = (Scenario: runtimeLost.Scenario with { Connection = lostRestored }, Key: runtimeLost.Key,
                 Counter: new Counter(lostRestored) { Key = runtimeLost.Key });
             foreach (var candidate in new[] { runtimeMixed, initialPublication })
@@ -536,7 +552,8 @@ internal static class DurableActionCases
             diagnostics.Mark(QualificationMilestone.MixedDeliveryStart);
             using (var login = new DurableDeploymentPlanningTests.RuntimeAuthenticationLoginScenario(postgres))
             {
-                var scenario = await login.PrepareMixedAsync(Configuration, name, Preflight);
+                var scenario = await login.PrepareMixedAsync(Configuration, name, Preflight,
+                    () => diagnostics.Mark(QualificationMilestone.MixedBaselinePrepared));
                 diagnostics.Mark(QualificationMilestone.MixedPreparationCompleted);
                 await using var services = ApplicationLoginScenario.Services(scenario.Connection, full: true, access: true, internalActions: true);
                 var preparation = DurableDeploymentPlanningTests.ConfigurationPreparation(services, rendering: Haby.PostgreSql.PostgreSqlConnectionRendering.CreateCatalog(),
