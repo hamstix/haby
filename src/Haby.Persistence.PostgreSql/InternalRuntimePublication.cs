@@ -61,6 +61,9 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
             // The request is stable even after a revoke: never choose a fresh token on resume.
             var request = new RuntimePublicationRequest(InternalRuntimePublicationPreparation.Key(origin, Guid.Parse(recipient.Revision.ToString())),
                 RuntimePublicationOperation.PublishPermission, binding.Id, Guid.Parse(recipient.Revision.ToString()), null, actor, origin);
+            var original = await db.RuntimePublicationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.RequestKey == request.Key, token);
+            if (original is not null)
+                request = InternalRuntimePublicationPreparation.OriginalRequest(request, ReadReceipt(original).Request);
             if (binding.Status == "Revoked") throw new RuntimePublicationBlockedException(request);
             result.Add(request);
         }

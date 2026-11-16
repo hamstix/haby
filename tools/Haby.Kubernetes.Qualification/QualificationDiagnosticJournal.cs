@@ -6,6 +6,7 @@ namespace Haby.Kubernetes.Qualification;
 
 internal enum QualificationMilestone
 {
+    DeliveryProvenanceStart, DeliveryProvenanceCompleted, DeliveryPodStart, DeliveryPodCompleted, DeliveryTokenStart, DeliveryTokenCompleted, DeliveryHostFirstStart, DeliveryHostFirstStarted, DeliveryHostFirstDisposeStart, DeliveryHostFirstDisposeCompleted, DeliveryHostRestartStart, DeliveryHostRestartStarted, DeliveryHostRestartDisposeStart, DeliveryHostRestartDisposeCompleted, DeliveryFirstRequestStart, DeliveryFirstRequestCompleted, DeliveryPodCleanupStart, DeliveryPodCleanupCompleted, DeliveryPodCleanupFailed,
     DurableEntry, CatalogInitStart, CatalogInitCompleted, NamespaceCreateStart, NamespaceCreateCompleted,
     WorkloadActionsStart, WorkloadActionsCompleted, AcceptedSetupStart, AcceptedSetupCompleted, RestoreStart, RestoreCompleted, IdentityActionsStart, IdentityActionsCompleted, RuntimeSetupStart, RuntimeSetupCompleted, MixedBaselinePrepared,
     DurableSuiteStart, RuntimeAuthStart, InitialDeliveryStart, MixedDeliveryStart,
@@ -51,6 +52,25 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
         {
             var id = milestone switch
             {
+                QualificationMilestone.DeliveryProvenanceStart => "delivery-provenance-start",
+                QualificationMilestone.DeliveryProvenanceCompleted => "delivery-provenance-completed",
+                QualificationMilestone.DeliveryPodStart => "delivery-pod-start",
+                QualificationMilestone.DeliveryPodCompleted => "delivery-pod-completed",
+                QualificationMilestone.DeliveryTokenStart => "delivery-token-start",
+                QualificationMilestone.DeliveryTokenCompleted => "delivery-token-completed",
+                QualificationMilestone.DeliveryHostFirstStart => "delivery-host-first-start",
+                QualificationMilestone.DeliveryHostFirstStarted => "delivery-host-first-started",
+                QualificationMilestone.DeliveryHostFirstDisposeStart => "delivery-host-first-dispose-start",
+                QualificationMilestone.DeliveryHostFirstDisposeCompleted => "delivery-host-first-dispose-completed",
+                QualificationMilestone.DeliveryHostRestartStart => "delivery-host-restart-start",
+                QualificationMilestone.DeliveryHostRestartStarted => "delivery-host-restart-started",
+                QualificationMilestone.DeliveryHostRestartDisposeStart => "delivery-host-restart-dispose-start",
+                QualificationMilestone.DeliveryHostRestartDisposeCompleted => "delivery-host-restart-dispose-completed",
+                QualificationMilestone.DeliveryFirstRequestStart => "delivery-first-request-start",
+                QualificationMilestone.DeliveryFirstRequestCompleted => "delivery-first-request-completed",
+                QualificationMilestone.DeliveryPodCleanupStart => "delivery-pod-cleanup-start",
+                QualificationMilestone.DeliveryPodCleanupCompleted => "delivery-pod-cleanup-completed",
+                QualificationMilestone.DeliveryPodCleanupFailed => "delivery-pod-cleanup-failed",
                 QualificationMilestone.DurableEntry => "durable-entry",
                 QualificationMilestone.CatalogInitStart => "catalog-init-start",
                 QualificationMilestone.CatalogInitCompleted => "catalog-init-completed",

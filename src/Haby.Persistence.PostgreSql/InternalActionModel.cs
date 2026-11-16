@@ -9,6 +9,8 @@ public sealed partial class ManifestCatalogDbContext
     internal DbSet<InternalPlanInputRow> InternalPlanInputs => Set<InternalPlanInputRow>();
     private void ValidateInternalActionWrites()
     {
+        if (ChangeTracker.Entries<DurableOperationAttemptRow>().Any(x => x.State == EntityState.Modified && x.Property(p => p.Actor).IsModified))
+            throw new InvalidOperationException("Action audit is immutable.");
         if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or RuntimePublicationReceiptRow &&
             x.State is EntityState.Modified or EntityState.Deleted)) throw new InvalidOperationException("Action history is immutable.");
         foreach (var entry in ChangeTracker.Entries<RuntimeIdentityBindingRow>())
@@ -59,6 +61,7 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.DeploymentId).HasColumnName("deployment_id");
             e.Property(x => x.Generation).HasColumnName("generation");
             e.Property(x => x.OperationId).HasColumnName("operation_id").HasMaxLength(128);
+            e.Property(x => x.Actor).HasColumnName("actor").HasMaxLength(256);
             e.Property(x => x.RequestId).HasColumnName("request_id").HasMaxLength(128);
             e.Property(x => x.Marker).HasColumnName("marker");
             e.Property(x => x.ManagedIdentity).HasColumnName("managed_identity");
@@ -95,6 +98,7 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.Generation).HasColumnName("generation");
             e.Property(x => x.OperationId).HasColumnName("operation_id").HasMaxLength(128);
             e.Property(x => x.AttemptId).HasColumnName("attempt_id");
+            e.Property(x => x.Actor).HasColumnName("actor").HasMaxLength(256);
             e.Property(x => x.Ordinal).HasColumnName("ordinal");
             e.Property(x => x.At).HasColumnName("observed_at");
             e.Property(x => x.Confirmed).HasColumnName("confirmed");
@@ -121,6 +125,7 @@ internal sealed class InternalPlanInputRow
 }
 internal sealed class DurableActionIntentRow
 {
+    public string? Actor { get; set; }
     public Guid DeploymentId { get; set; }
     public long Generation { get; set; }
     public string OperationId { get; set; } = "";
@@ -149,6 +154,7 @@ internal sealed class DurableActionIntentRow
 }
 internal sealed class DurableActionObservationRow
 {
+    public string? Actor { get; set; }
     public Guid Id { get; set; }
     public Guid DeploymentId { get; set; }
     public long Generation { get; set; }

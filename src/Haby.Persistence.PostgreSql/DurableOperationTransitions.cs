@@ -12,7 +12,7 @@ internal static class DurableOperationTransitions
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         return db.DurableOperations.Where(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.OperationId == key.OperationId.Value);
     }
-    internal static async Task<DurableOperationRow?> BeginAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token)
+    internal static async Task<DurableOperationRow?> BeginAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token, string? actor = null)
     {
         var attempt = Guid.CreateVersion7();
         var changed = await Operation(db, key).Where(x => x.State == nameof(DurableOperationState.Pending) || x.State == nameof(DurableOperationState.Preparing))
@@ -32,7 +32,8 @@ internal static class DurableOperationTransitions
             OperationId = row.OperationId,
             AttemptId = attempt,
             AttemptNumber = row.AttemptNumber,
-            StartedAt = at
+            StartedAt = at,
+            Actor = actor
         });
         await db.SaveChangesAsync(token);
         return row;

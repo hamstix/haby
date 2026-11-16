@@ -350,6 +350,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(128)")
                         .HasColumnName("action_contract");
 
+                    b.Property<string>("Actor")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
                     b.Property<Guid>("CheckpointId")
                         .HasColumnType("uuid")
                         .HasColumnName("checkpoint_id");
@@ -489,6 +494,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("Actor")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
                     b.Property<DateTimeOffset>("At")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("observed_at");
@@ -612,6 +622,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("attempt_id");
+
+                    b.Property<string>("Actor")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
 
                     b.Property<long>("AttemptNumber")
                         .HasColumnType("bigint")

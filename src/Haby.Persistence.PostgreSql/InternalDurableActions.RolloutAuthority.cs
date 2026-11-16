@@ -21,7 +21,10 @@ internal sealed partial class InternalDurableActions
             .Select(Logical).Order(StringComparer.Ordinal))) throw new InvalidDataException("Unsupported observation target set.");
         return targets;
     }
-    private async Task<SubmittedSet> CaptureSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
+    private Task<SubmittedSet> CaptureSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) =>
+        InspectSubmittedAsync(db, source, true, token);
+
+    private async Task<SubmittedSet> InspectSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, bool persist, CancellationToken token)
     {
         source = await InternalGenerationAuthority.RequireAsync(db, source, token);
         var targets = Targets(source); var confirmed = new List<SubmittedMember>();
@@ -56,7 +59,7 @@ internal sealed partial class InternalDurableActions
             {
                 initial = NewObservationAttempt(source, subject, candidate.OperationId, originJson, 1, null,
                     loaded.Operation.FinalizedAt.Value, seconds, source.ActorId);
-                db.ObservationAttempts.Add(initial);
+                if (persist) db.ObservationAttempts.Add(initial);
             }
             ValidateAttempt(initial, source, candidate.OperationId, originJson, seconds);
             if (initial.StartedAt != loaded.Operation.FinalizedAt || initial.Previous is not null) throw new InvalidDataException("Initial deadline anchor mismatch.");
@@ -75,7 +78,18 @@ internal sealed partial class InternalDurableActions
         {
             var evidence = RolloutJson.Encode(new SubmittedProof(1, "WorkloadsSubmitted", source.DeploymentId, source.Generation,
                 source.Fingerprint, confirmed.Select(x => x.Origin).ToArray()));
-            checkpoint = await CheckpointAsync(db, source, "WorkloadsSubmitted", evidence, token);
+            if (persist) checkpoint = await CheckpointAsync(db, source, "WorkloadsSubmitted", evidence, token);
+            else
+            {
+                var saved = await db.GenerationStageCheckpoints.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == source.DeploymentId &&
+                    x.Generation == source.Generation && x.Stage == "WorkloadsSubmitted", token);
+                if (saved is not null)
+                {
+                    if (saved.FormatVersion != 1 || saved.InputFingerprint != source.Fingerprint || saved.EvidenceJson != evidence ||
+                        saved.EvidenceFingerprint != ResourcesReadyCheckpointCodec.Hash(evidence)) throw new InvalidDataException("Submission proof conflict.");
+                    checkpoint = saved.Id;
+                }
+            }
         }
         return new(source, targets, confirmed.ToArray(), checkpoint);
     }
