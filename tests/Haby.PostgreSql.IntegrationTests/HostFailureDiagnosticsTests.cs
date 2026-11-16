@@ -5,6 +5,55 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class HostFailureDiagnosticsTests
 {
+    private sealed class HostileSubmissionFailure : Exception
+    {
+        public override string Message => throw new InvalidOperationException("Protected exception text accessed.");
+        public override string ToString() => throw new InvalidOperationException("Protected exception text accessed.");
+    }
+
+    [Fact]
+    public async Task Submission_failure_capture_is_closed_and_preserves_primary_cleanup_and_writer_failure()
+    {
+        const string secret = "PROTECTED,\r\nBearer credential /private/subject";
+        var lines = new List<string>();
+        var order = new List<int>();
+        var diagnostic = new SubmissionFailureDiagnostics(false, true, true, false, lines.Add);
+        var primary = new Xunit.Sdk.XunitException(secret);
+        var cleanup = new IOException(secret);
+        var error = await Record.ExceptionAsync(() => HostFailureDiagnostics.RunAsync(defer =>
+        {
+            defer(() => { order.Add(1); throw cleanup; });
+            defer(() => { order.Add(2); throw cleanup; });
+            diagnostic.At(SubmissionCheckpoint.InitialOutcome);
+            diagnostic.Values(SubmissionDiagnosticValue.Stopped, "cancelled");
+            throw primary;
+        }, () => HostFailurePhase.Catalog, () => null, diagnostic.Record));
+        Assert.Same(primary, error);
+        Assert.Equal([2, 1], order);
+        Assert.Equal(3, lines.Count);
+        Assert.EndsWith(",addition-configured-lost,initial-submit,InitialOutcome,Stopped,Cancelled,assertion,unavailable-evidence", lines[0]);
+        Assert.All(lines.Skip(1), line => Assert.EndsWith(",cleanup,Cleanup,None,None,io,unavailable-evidence", line));
+        foreach (var checkpoint in Enum.GetValues<SubmissionCheckpoint>())
+        {
+            diagnostic.At(checkpoint); diagnostic.Values(SubmissionDiagnosticValue.Submitted, secret);
+            var line = diagnostic.Render(HostFailurePhase.Catalog, new HostileSubmissionFailure());
+            Assert.Equal(8, line.Split(',').Length);
+            Assert.DoesNotContain(",unknown,", line);
+            Assert.DoesNotContain(secret, line); Assert.DoesNotContain('\r', line); Assert.DoesNotContain('\n', line);
+        }
+        diagnostic.At((SubmissionCheckpoint)999); diagnostic.Values((SubmissionDiagnosticValue)999, secret);
+        var hostileRpc = new RpcException(new Status((StatusCode)999, secret), new Metadata { { "private", secret } });
+        Assert.EndsWith(",Unknown,Other,Other,rpc,unknown-status", diagnostic.Render(HostFailurePhase.Catalog, hostileRpc));
+        diagnostic.At(SubmissionCheckpoint.Replay);
+        Assert.EndsWith(",Replay,None,None,rpc,Internal", diagnostic.Render(HostFailurePhase.Catalog,
+            new RpcException(new Status(StatusCode.Internal, secret))));
+
+        var unavailable = new SubmissionFailureDiagnostics(false, true, true, false, _ => throw new HostileSubmissionFailure());
+        error = await Record.ExceptionAsync(() => HostFailureDiagnostics.RunAsync(_ => throw primary,
+            () => HostFailurePhase.Catalog, () => null, unavailable.Record));
+        Assert.Same(primary, error);
+    }
+
     [Fact]
     public async Task Protected_reflection_denial_accepts_exact_status_at_creation_write_completion_or_read()
     {

@@ -36,7 +36,12 @@ internal static class OperatorTestCredentials
     private static string Key(string endpoint) => new Uri(endpoint.Contains("://", StringComparison.Ordinal) ? endpoint : "http://" + endpoint).Authority;
     internal static string Credential(string endpoint) => Credentials[Key(endpoint)];
     internal static Metadata Headers(string endpoint) => new() { { "authorization", "Bearer " + Credential(endpoint) } };
-    internal static ManifestOperator.ManifestOperatorClient Client(GrpcChannel channel) => new(channel.Intercept(new Attach(Credential(channel.Target))));
+    internal static ManifestOperator.ManifestOperatorClient Client(GrpcChannel channel) => Client(channel, Credential(channel.Target));
+    internal static ManifestOperator.ManifestOperatorClient Client(GrpcChannel channel, string credential)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(credential);
+        return new(channel.Intercept(new Attach(credential)));
+    }
     private sealed class Attach(string credential) : Interceptor
     {
         public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(TRequest request, ClientInterceptorContext<TRequest, TResponse> context,

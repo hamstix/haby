@@ -282,21 +282,28 @@ public sealed partial class OperatorHostIntegrationTests
         Assert.Equal(DBNull.Value, await new NpgsqlCommand("SELECT dispatched_at FROM durable_create_operations", check).ExecuteScalarAsync());
     }
 
-    internal static async Task<string> RunNativeCommitCli(string binary, string endpoint, string[] args, int expectedExit = 0, string format = "json", string environment = "pilot")
+    internal static Task WriteNativeCommitConfiguration(string path, string endpoint, string environment, string? credential = null)
     {
-        var config = Path.Combine(Path.GetTempPath(), "haby-native-commit-" + Guid.NewGuid().ToString("N") + ".yaml");
-        await File.WriteAllTextAsync(config, $"""
+        credential ??= OperatorTestCredentials.Credential(endpoint);
+        ArgumentException.ThrowIfNullOrWhiteSpace(credential);
+        return File.WriteAllTextAsync(path, $"""
             formatVersion: 1
             currentContext: pilot
             instances:
               local:
                 endpoint: {endpoint}
-                token: {OperatorTestCredentials.Credential(endpoint)}
+                token: {credential}
             contexts:
               pilot:
                 instance: local
                 environmentId: {environment}
             """);
+    }
+
+    internal static async Task<string> RunNativeCommitCli(string binary, string endpoint, string[] args, int expectedExit = 0, string format = "json", string environment = "pilot", string? credential = null)
+    {
+        var config = Path.Combine(Path.GetTempPath(), "haby-native-commit-" + Guid.NewGuid().ToString("N") + ".yaml");
+        await WriteNativeCommitConfiguration(config, endpoint, environment, credential);
         try
         {
             var start = new ProcessStartInfo(binary) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };

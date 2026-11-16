@@ -199,9 +199,12 @@ internal static class ConfiguredDeploymentCases
             }
             await WithHost(async () =>
             {
-                using var channel = GrpcChannel.ForAddress(activeHost!.Urls.Single(), new GrpcChannelOptions
+                var listener = activeHost!.Urls.Single();
+                var localOperator = LocalOperatorEndpoint(listener);
+                var issuedCredential = OperatorTestCredentials.Credential(listener);
+                using var channel = GrpcChannel.ForAddress(localOperator, new GrpcChannelOptions
                 { HttpHandler = new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator } });
-                var client = OperatorTestCredentials.Client(channel);
+                var client = OperatorTestCredentials.Client(channel, issuedCredential);
                 var request = new GenerationRequest { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = scenario.Commit.Generation.Value };
                 loseIdentityConfirmation = true;
                 WorkloadSubmissionReply partial;
@@ -243,8 +246,8 @@ internal static class ConfiguredDeploymentCases
                 later = (await publication.ReadAsync(requestsToPublish.Single(x => x.Origin!.Document == "settings").Key, token))!;
                 var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
                 if (string.IsNullOrWhiteSpace(binary) || !File.Exists(binary)) throw new InvalidOperationException("Published qualification CLI is required.");
-                using var submission = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, activeHost.Urls.Single(),
-                    ["deployment", "generation", "submit", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)]));
+                using var submission = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                    ["deployment", "generation", "submit", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
                 Check(submission.RootElement.GetProperty("outcome"u8).GetString() == "submitted" && deploymentWrites == 1,
                     "C05-production-generated-create-confirmed");
                 currentPod = await Startup("primary-started");
@@ -326,6 +329,14 @@ internal static class ConfiguredDeploymentCases
             catch (Exception error) { cleanup.Add(error); }
             if (cleanup.Count > 0) throw new AggregateException(primary is null ? cleanup : [primary, .. cleanup]);
         }
+    }
+    // Only this fixture's local operator clients use loopback; the listener and Pod delivery address stay unchanged.
+    internal static Uri LocalOperatorEndpoint(string listener)
+    {
+        var address = new Uri(listener);
+        if (address.Scheme != "https" || address.Host != IPAddress.Any.ToString())
+            throw new InvalidOperationException("Unexpected configured fixture listener.");
+        return new UriBuilder(address) { Host = IPAddress.Loopback.ToString() }.Uri;
     }
     private static string ConfigurationJson(RuntimeConfiguration value)
     {

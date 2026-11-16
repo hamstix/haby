@@ -4,7 +4,7 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 78,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1098,
+  "currentPostgresql": 1099,
   "currentFast": 1695,
   "currentKubernetesApiObjects": 24,
   "currentKubernetesDurableActions": 36,
@@ -3095,6 +3095,7 @@
     {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_refuses_missing_or_corrupt_first_receipt_without_accepting_or_dispatching_second","case":"d333829454073a5f7709da70e998a225b80fb3885106bdea7611e68e329d8d64","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229R1":true},
     {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Operator_submit_request_budget_expires_while_waiting_for_generation_gate_without_starting_work","case":"ee33060b90eb0e17bdccd84dfc5b1dfa8744f218d1e9820fedbdd77b13307251","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229R1":true},
     {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Protected_reflection_denial_accepts_exact_status_at_creation_write_completion_or_read","case":"0d223d837028c54d1fc261b0e46dec76769037b36edff5c41778c0ddf1fdfed9","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229ReflectionBoundary":true},
-    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Protected_reflection_denial_refuses_success_wrong_status_and_unrelated_error","case":"b936c2d85476bc4970c93e99ce43141e579045f12cced3779884642e10171289","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229ReflectionBoundary":true}
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Protected_reflection_denial_refuses_success_wrong_status_and_unrelated_error","case":"b936c2d85476bc4970c93e99ce43141e579045f12cced3779884642e10171289","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229ReflectionBoundary":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Submission_failure_capture_is_closed_and_preserves_primary_cleanup_and_writer_failure","case":"385a8ff2525af3d4ccf640acf4624b6c14e89421b17b874da6420dcc666f0df7","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor229SubmissionCapture":true}
   ]
 }
