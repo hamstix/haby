@@ -5,6 +5,10 @@
 - Scope: P2 persisted assignments and operator administration
 - Extends: ADR-026/027/033/035/037/038
 
+## Accepted execution amendment (2026-11-16)
+
+[ADR-057](0057-profile-configuration-secret-delivery.md) authorizes issue #209 after #239, defines Environment-owned Configuration secrets and exact authorized delivery, and narrowly permits secret-projection traversal through existing arrays. It supersedes the original execution deferral and object-only restriction for this projection kind only. Until implementation lands, the unsupported runtime result remains in effect.
+
 ## Decision
 
 ### Identity, scope and existence checks
