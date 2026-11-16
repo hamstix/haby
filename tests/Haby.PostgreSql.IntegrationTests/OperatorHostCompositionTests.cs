@@ -128,6 +128,63 @@ public sealed class OperatorHostCompositionTests
         }
     }
 
+    [Fact]
+    public Task Migration_cancellation_disposes_configuration_once_even_when_dependency_disposal_throws() =>
+        RequireMigrationConfigurationDisposalAsync(cleanupThrows: true);
+
+    [Fact]
+    public Task Migration_cancellation_with_normal_disposal_releases_configuration_provider_once() =>
+        RequireMigrationConfigurationDisposalAsync(cleanupThrows: false);
+
+    private static async Task RequireMigrationConfigurationDisposalAsync(bool cleanupThrows)
+    {
+        var configuration = new ObservableConfigurationProvider();
+        var dependency = new AsyncResource(cleanupThrows);
+        var port = AvailablePort();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => OperatorHostApplication.BuildComposedMigratedAsync(
+            ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"],
+            (services, hostConfiguration) =>
+            {
+                ((IConfigurationBuilder)hostConfiguration).Add(new ObservableConfigurationSource(configuration));
+                services.AddSingleton(_ => dependency);
+                services.AddSingleton(provider =>
+                {
+                    provider.GetRequiredService<AsyncResource>();
+                    return new ProviderPreflightRegistry(provider.GetServices<IProviderPreflightHandler>(),
+                        provider.GetServices<IProviderConfigurationCodec>(), provider.GetServices<IProviderDeclarationAdapter>());
+                });
+            }, cancellation.Token));
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        Assert.True(dependency.Disposed);
+        Assert.Equal(1, configuration.Disposals);
+        await RequireNotListeningAsync(port);
+    }
+
+    [Fact]
+    public async Task Successful_factory_leaves_configuration_owned_by_caller_lifecycle_and_disposes_provider_once()
+    {
+        var configuration = new ObservableConfigurationProvider();
+        var app = OperatorHostApplication.BuildComposed(
+            ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"],
+            (_, hostConfiguration) => ((IConfigurationBuilder)hostConfiguration).Add(new ObservableConfigurationSource(configuration)));
+        try { Assert.Equal(0, configuration.Disposals); }
+        finally { await app.DisposeAsync(); }
+        Assert.Equal(1, configuration.Disposals);
+    }
+
+    private sealed class ObservableConfigurationSource(ObservableConfigurationProvider provider) : IConfigurationSource
+    {
+        public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
+    }
+
+    private sealed class ObservableConfigurationProvider : ConfigurationProvider, IDisposable
+    {
+        internal int Disposals { get; private set; }
+        public void Dispose() => Disposals++;
+    }
+
     internal static int AvailablePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

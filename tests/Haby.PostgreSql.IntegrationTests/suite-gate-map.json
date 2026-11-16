@@ -4,7 +4,7 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 104,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1158,
+  "currentPostgresql": 1161,
   "currentFast": 1759,
   "currentKubernetesApiObjects": 24,
   "currentKubernetesDurableActions": 36,
@@ -3280,6 +3280,9 @@
     {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Successful_app_keeps_resolved_dependencies_until_caller_disposes_and_does_not_own_external_instances","case":"2d9c51fe9f064fcf1cf38fb2b28a4a20b0749608af18657ed187cdff63aae3fc","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true},
     {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Callback_or_provider_validation_failure_never_listens","case":"5872f2fa0bf201430dc16097709b17416e805bc8182b5636f8da65e2b3298c0a","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true},
     {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Callback_or_provider_validation_failure_never_listens","case":"4111ab24484c389c1db3d6f784a751154515dfa11b0fad3876a523aeaba60ff8","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true},
-    {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Existing_entrypoints_and_null_callback_contract_remain_source_compatible","case":"128fd185d0d76f38dd80c5350920e550ded793103151d094b8211ad7cba74b40","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true}
+    {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Existing_entrypoints_and_null_callback_contract_remain_source_compatible","case":"128fd185d0d76f38dd80c5350920e550ded793103151d094b8211ad7cba74b40","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Migration_cancellation_disposes_configuration_once_even_when_dependency_disposal_throws","case":"238d207bb7a5752e3766a7b94defd6fdae153c25be9cf2da2f6ea966451e611a","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Migration_cancellation_with_normal_disposal_releases_configuration_provider_once","case":"b083115c971a4e5194671b0e6f80117917d88846eef279e4ed2a9f29b8d64d26","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Successful_factory_leaves_configuration_owned_by_caller_lifecycle_and_disposes_provider_once","case":"1169272d234a2389d01ef22a7d92387e6579ef53562e87230e588c837162e366","suite":"functional","gate":"postgresql-integration","trigger":"every-change","addedFor239":true}
   ]
 }
