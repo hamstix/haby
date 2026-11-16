@@ -115,10 +115,12 @@ internal static class RuntimeDeliveryCases
                         collection.AddSingleton<IRuntimeConfigurationStore>(p => new ReadBoundary(new PostgreSqlRuntimeConfigurationStore(
                             p.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()), async () => { if (afterAuthority is { } hook) { afterAuthority = null; await hook(); } }));
                     });
+                    diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstBuilt : QualificationMilestone.DeliveryHostRestartBuilt);
                     var disposalStarted = false;
                     try
                     {
-                        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+                        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host, () =>
+                            diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstCredentialReady : QualificationMilestone.DeliveryHostRestartCredentialReady));
                         diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstStarted : QualificationMilestone.DeliveryHostRestartStarted);
                         using var channel = GrpcChannel.ForAddress(host.Urls.Single(), new GrpcChannelOptions { MaxReceiveMessageSize = 8 * 1024 * 1024 });
                         var client = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);

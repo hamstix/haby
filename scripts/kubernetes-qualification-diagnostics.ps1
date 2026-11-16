@@ -59,9 +59,11 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             'delivery-provenance-start'='durable-suite-start';'delivery-provenance-completed'='delivery-provenance-start'
             'delivery-pod-start'='delivery-provenance-completed';'delivery-pod-completed'='delivery-pod-start'
             'delivery-token-start'='delivery-pod-completed';'delivery-token-completed'='delivery-token-start'
-            'delivery-host-first-start'='delivery-token-completed';'delivery-host-first-started'='delivery-host-first-start'
+            'delivery-host-first-start'='delivery-token-completed';'delivery-host-first-built'='delivery-host-first-start'
+            'delivery-host-first-credential-ready'='delivery-host-first-built';'delivery-host-first-started'='delivery-host-first-credential-ready'
             'delivery-host-first-dispose-start'='delivery-host-first-start';'delivery-host-first-dispose-completed'='delivery-host-first-dispose-start'
-            'delivery-host-restart-start'='delivery-host-first-dispose-completed';'delivery-host-restart-started'='delivery-host-restart-start'
+            'delivery-host-restart-start'='delivery-host-first-dispose-completed';'delivery-host-restart-built'='delivery-host-restart-start'
+            'delivery-host-restart-credential-ready'='delivery-host-restart-built';'delivery-host-restart-started'='delivery-host-restart-credential-ready'
             'delivery-host-restart-dispose-start'='delivery-host-restart-start';'delivery-host-restart-dispose-completed'='delivery-host-restart-dispose-start'
             'delivery-first-request-start'='delivery-token-completed';'delivery-first-request-completed'='delivery-first-request-start'
             'delivery-pod-cleanup-start'='delivery-pod-completed';'delivery-pod-cleanup-completed'='delivery-pod-cleanup-start';'delivery-pod-cleanup-failed'='delivery-pod-cleanup-start'
@@ -131,16 +133,20 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
                     'delivery-token-start'{if($deliveryPhase -eq 4){5}else{-1}}
                     'delivery-token-completed'{if($deliveryPhase -eq 5){6}else{-1}}
                     'delivery-host-first-start'{if($deliveryPhase -eq 6){7}else{-1}}
-                    'delivery-host-first-started'{if($deliveryPhase -eq 7){8}else{-1}}
+                    'delivery-host-first-built'{if($deliveryPhase -eq 7){22}else{-1}}
+                    'delivery-host-first-credential-ready'{if($deliveryPhase -eq 22){23}else{-1}}
+                    'delivery-host-first-started'{if($deliveryPhase -eq 23){8}else{-1}}
                     'delivery-first-request-start'{if($deliveryPhase -eq 8){9}elseif($deliveryPhase -eq 14){15}else{-1}}
                     'delivery-first-request-completed'{if($deliveryPhase -eq 9){10}elseif($deliveryPhase -eq 15){16}else{-1}}
-                    'delivery-host-first-dispose-start'{if($deliveryPhase -in @(7,8,9,10)){11}else{-1}}
+                    'delivery-host-first-dispose-start'{if($deliveryPhase -in @(7,22,23,8,9,10)){11}else{-1}}
                     'delivery-host-first-dispose-completed'{if($deliveryPhase -eq 11){12}else{-1}}
                     'delivery-host-restart-start'{if($deliveryPhase -eq 12){13}else{-1}}
-                    'delivery-host-restart-started'{if($deliveryPhase -eq 13){14}else{-1}}
-                    'delivery-host-restart-dispose-start'{if($deliveryPhase -in @(13,14,15,16)){17}else{-1}}
+                    'delivery-host-restart-built'{if($deliveryPhase -eq 13){24}else{-1}}
+                    'delivery-host-restart-credential-ready'{if($deliveryPhase -eq 24){25}else{-1}}
+                    'delivery-host-restart-started'{if($deliveryPhase -eq 25){14}else{-1}}
+                    'delivery-host-restart-dispose-start'{if($deliveryPhase -in @(13,24,25,14,15,16)){17}else{-1}}
                     'delivery-host-restart-dispose-completed'{if($deliveryPhase -eq 17){18}else{-1}}
-                    'delivery-pod-cleanup-start'{if($deliveryPhase -ge 4 -and $deliveryPhase -le 18){19}else{-1}}
+                    'delivery-pod-cleanup-start'{if(($deliveryPhase -ge 4 -and $deliveryPhase -le 18) -or $deliveryPhase -in @(22,23,24,25)){19}else{-1}}
                     'delivery-pod-cleanup-completed'{if($deliveryPhase -eq 19){20}else{-1}}
                     'delivery-pod-cleanup-failed'{if($deliveryPhase -eq 19){21}else{-1}}
                     default{-1}

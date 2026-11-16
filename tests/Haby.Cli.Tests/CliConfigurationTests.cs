@@ -47,6 +47,7 @@ public sealed class CliConfigurationTests
     private sealed class Client : IRegistryClient
     {
         public Task<GenerationReadinessReply> WaitGenerationAsync(GenerationWaitRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<GenerationBatchReadinessReply> WaitGenerationBatchAsync(GenerationBatchWaitRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<GenerationReadinessReply> ResumeGenerationAsync(GenerationResumeRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<PlacementSelectionReply> ApplyPlacementSelectionAsync(ApplyPlacementSelectionRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<PlacementSelectionReply> GetPlacementSelectionAsync(GetPlacementSelectionRequest request, CancellationToken token) => throw new NotSupportedException();

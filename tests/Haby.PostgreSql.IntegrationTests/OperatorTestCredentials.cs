@@ -15,7 +15,7 @@ internal static class OperatorTestCredentials
 {
     private static readonly ConcurrentDictionary<string, string> Credentials = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<Guid, string> Retained = new();
-    internal static async Task StartWithIssuedOperatorAsync(WebApplication host)
+    internal static async Task StartWithIssuedOperatorAsync(WebApplication host, Action? credentialReady = null)
     {
         var store = host.Services.GetRequiredService<IOperatorAccessStore>();
         // Retain the same issued credential across restart/restore, including actor-bound retries.
@@ -28,6 +28,7 @@ internal static class OperatorTestCredentials
             var created = await store.CreateAsync("integration fixture", LocalOperatorIssuance.LocalActor, null, default);
             Retained[created.Grant.Id] = created.Credential; credential = created.Credential;
         }
+        credentialReady?.Invoke();
         await host.StartAsync();
         Credentials[Key(host.Urls.Single())] = credential;
     }

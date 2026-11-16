@@ -5,6 +5,14 @@ namespace Haby.Cli.Commands.Planning;
 
 internal static class ObservationCommands
 {
+    internal static Command WaitBatch(CliCommandContext context)
+    {
+        var file = new Option<string>("--file") { Required = true, Description = "Bounded JSON with explicit exact deploymentId/generation members." };
+        var request = new Option<string?>("--request-id") { Description = "Correlation UUID; generated once. Identical repeats may replay interrupted history, not resume it." };
+        var command = new Command("wait-batch", "Observe an explicit bounded batch through one Host RPC.") { file, request };
+        command.SetAction((parse, token) => context.ObserveBatchAsync(parse.GetRequiredValue(file), parse.GetValue(request), token));
+        return command;
+    }
     internal static Command Wait(CliCommandContext context)
     {
         var id = new Argument<string>("deployment-id"); var generation = new Argument<long>("generation");

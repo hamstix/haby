@@ -21,6 +21,9 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
     public bool ValidateObservation(string intent, string receipt, RolloutObservation observation) => DeploymentReadiness.Validate(intent, receipt, observation);
     public async ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string intent, string receipt, CancellationToken token) =>
         await Kernel(context).ReadinessAsync(DeploymentIntents.Decode(intent), DeploymentIntents.DecodeReceipt(receipt), token);
+    public async ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string intent, string receipt,
+        IReadinessReadAdmission admission, CancellationToken token) =>
+        await Kernel(context).ReadinessAsync(DeploymentIntents.Decode(intent), DeploymentIntents.DecodeReceipt(receipt), token, admission);
     public InternalManagedTarget ManagedTarget(InternalActionContext context) => RuntimeIdentityCodec.Target(Resolve(context));
     public string Prepare(InternalActionContext context)
     {
