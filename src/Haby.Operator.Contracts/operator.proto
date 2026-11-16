@@ -1105,6 +1105,12 @@ message GenerationBatchSummary {
   optional string submitted_id = 6;
   optional string saved_ready_id = 7;
   BatchReadinessStop stop = 8;
+  bool current_applied = 9;
+  bool original_request_applied = 10;
+  optional string retirement_id = 11;
+  optional int64 applied_generation = 12;
+  string completion_reason = 13;
+  bool retirement_completed = 14;
 }
 message GenerationBatchReadinessReply {
   string request_id = 1;
@@ -1114,6 +1120,7 @@ message GenerationBatchReadinessReply {
   bool invalid_request = 5;
   bool canceled = 6;
   bool deadline = 7;
+  bool current_applied = 8;
 }
 message GenerationWaitRequest {
   string deployment_id = 1;
@@ -1151,4 +1158,10 @@ message GenerationReadinessReply {
   optional string stop = 8;
   repeated GenerationReadinessMember members = 9;
   int32 total = 10;
+  bool current_applied = 11;
+  bool original_request_applied = 12;
+  optional string retirement_id = 13;
+  optional int64 applied_generation = 14;
+  string completion_reason = 15;
+  bool retirement_completed = 16;
 }

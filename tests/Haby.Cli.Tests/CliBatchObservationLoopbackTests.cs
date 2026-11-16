@@ -24,25 +24,33 @@ public sealed partial class CliLoopbackTests
             Calls++; Last = request.Clone(); BatchObservationWire.Validate(request);
             if (Mode == "unavailable") throw new RpcException(new Status(StatusCode.Unavailable, "private-batch-sentinel"));
             if (Mode == "invalid") return Task.FromResult(new GenerationBatchReadinessReply { RequestId = request.RequestId, InvalidRequest = true });
-            var reply = new GenerationBatchReadinessReply { RequestId = request.RequestId, Total = request.Members.Count, CurrentReady = Mode == "fresh", Deadline = Mode == "deadline" };
+            var reply = new GenerationBatchReadinessReply { RequestId = request.RequestId, Total = request.Members.Count, CurrentReady = Mode is "fresh" or "readyOnly", CurrentApplied = Mode == "fresh", Deadline = Mode == "deadline" };
             foreach (var member in request.Members)
                 reply.Members.Add(new GenerationBatchSummary
                 {
                     Member = member.Clone(),
                     Outcome = Mode == "deadline" ? BatchReadinessOutcome.Interrupted : BatchReadinessOutcome.Observed,
-                    CurrentReady = Mode == "fresh",
-                    OriginalRequestReady = Mode is "fresh" or "replay",
+                    CurrentReady = Mode is "fresh" or "readyOnly",
+                    OriginalRequestReady = Mode is "fresh" or "replay" or "readyOnly",
+                    CurrentApplied = Mode == "fresh",
+                    OriginalRequestApplied = Mode is "fresh" or "replay",
+                    RetirementId = Guid.NewGuid().ToString("D"),
+                    RetirementCompleted = true,
+                    AppliedGeneration = member.Generation,
+                    CompletionReason = Mode is "fresh" or "replay" ? "applied" : Mode == "readyOnly" ? "prerequisite-incomplete" : "not-ready",
                     Replayed = Mode == "replay",
                     SubmittedId = Guid.NewGuid().ToString("D"),
                     SavedReadyId = Guid.NewGuid().ToString("D"),
                     Stop = BatchReadinessStop.Complete
                 });
+            if (Mode == "readyOnly") foreach (var item in reply.Members) { item.ClearRetirementId(); item.RetirementCompleted = false; }
             if (Mode == "malformed") reply.Members.RemoveAt(0);
             return Task.FromResult(reply);
         }
     }
     [Theory]
     [InlineData("fresh", 0)]
+    [InlineData("readyOnly", 1)]
     [InlineData("replay", 1)]
     [InlineData("pending", 1)]
     [InlineData("invalid", 2)]

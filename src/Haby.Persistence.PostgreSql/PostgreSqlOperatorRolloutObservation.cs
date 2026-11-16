@@ -53,9 +53,9 @@ internal sealed partial class PostgreSqlOperatorRolloutObservation(IDbContextFac
         {
             budget.Token.ThrowIfCancellationRequested();
             var inspected = await WorkloadGenerationAuthority.InspectAsync(contexts, configuration, actions, deploymentAction,
-                identityAction, deployment, generation, budget.Token);
+                identityAction, deployment, generation, budget.Token, completedRead: true);
             if (inspected.Reason is not null) return new(inspected.Reason == "generation-not-found" ? GenerationReadinessOutcome.NotFound :
-                GenerationReadinessOutcome.UnsupportedShape, request);
+                GenerationReadinessOutcome.UnsupportedShape, request, CompletionReason: inspected.Reason == "unsupported-inventory" ? "unsupported-inventory" : "not-ready");
             if (clock.GetElapsedTime(started) >= duration) return new(GenerationReadinessOutcome.Deadline, request);
             var result = resumes is null
                 ? await actions.ObserveOperatorRolloutAsync(inspected.Accepted!, request, actor, options, started, duration, token, budget.Token, batch)
@@ -63,7 +63,8 @@ internal sealed partial class PostgreSqlOperatorRolloutObservation(IDbContextFac
             return new(resumes is null ? GenerationReadinessOutcome.Observed : GenerationReadinessOutcome.Resumed, request,
                 result.Ready && !result.Replayed, result.Ready, result.Replayed, result.Submitted, result.SavedReady,
                 result.Stop.ToString(), result.Members.Select(x => new GenerationReadinessMember(x.Subject, x.Attempt, x.Deadline,
-                    x.Budget.ToString(), x.Observation.Outcome.ToString(), x.Observation.Code, x.Observation.Temporary)).ToArray());
+                    x.Budget.ToString(), x.Observation.Outcome.ToString(), x.Observation.Code, x.Observation.Temporary)).ToArray(), result.Applied && !result.Replayed && result.Ready, result.Applied,
+                result.Retirement, result.AppliedGeneration, result.CompletionReason);
         }
         catch (RolloutRequestConflictException) { return new(GenerationReadinessOutcome.Conflict, request); }
         catch (RolloutPermissionException) { return new(GenerationReadinessOutcome.Refused, request); }
@@ -75,9 +76,9 @@ internal sealed partial class PostgreSqlOperatorRolloutObservation(IDbContextFac
         }
         catch (ArgumentException) { return new(GenerationReadinessOutcome.InvalidRequest, request); }
         catch (Exception error) when (error is InvalidDataException or System.Text.Json.JsonException or InvalidOperationException or OverflowException)
-        { return new(GenerationReadinessOutcome.Unknown, request); }
+        { return new(GenerationReadinessOutcome.Unknown, request, CompletionReason: "prerequisite-incomplete"); }
         catch (Exception error) when (error is Npgsql.NpgsqlException or DbUpdateException or IOException)
-        { return new(GenerationReadinessOutcome.Unavailable, request); }
+        { return new(GenerationReadinessOutcome.Unavailable, request, CompletionReason: "commit-unconfirmed"); }
     }
     private static bool ValidSubject(string subject)
     {

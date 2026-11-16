@@ -34,10 +34,10 @@ internal sealed partial class InternalDurableActions
     internal async Task<WorkloadSubmissionProgress> ReadSubmissionAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
         InternalWorkloadConfiguration preparation, CancellationToken token)
     {
-        var set = await InspectSubmittedAsync(db, source, false, token);
+        var set = await InspectSubmittedAsync(db, source, false, token, completedRead: true);
         var selection = await preparation.SelectAsync(db, source, token);
         var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
-        var resources = await DurableAggregateCompletion.ReadAsync(db, source, token, true);
+        var resources = await DurableAggregateCompletion.ReadAsync(db, source, token, true, completedRead: true);
         var rows = await db.WorkloadConfigurationRecipients.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation).ToArrayAsync(token);
         var members = new List<WorkloadSubmissionMember>();
         var deploymentActions = handlers.Where(h => h is IInternalReadinessHandler).Select(h => h.Contract.Action).ToArray();
@@ -62,7 +62,7 @@ internal sealed partial class InternalDurableActions
             if (pair.Value.Count == 0) identity = publication = "notApplicable";
             else if (binding is not null)
             {
-                await RequireIdentityOriginAsync(db, binding, token);
+                await RequireIdentityOriginCoreAsync(db, binding, OriginPurpose.HistoricalRead, token);
                 identity = "confirmed"; authority = InternalRuntimePublication.BindingState(binding).Status == "Prepared" ? "available" : "revoked";
                 var permissions = await db.RuntimeConfigurationPermissions.AsNoTracking().Where(x => x.BindingId == binding.Id).ToArrayAsync(token);
                 var exact = documents.Select(x => x.RevisionId).ToArray();

@@ -72,10 +72,10 @@ public sealed class OperatorCommitReplayTests
             ApplicationRecordId = change.ApplicationRecordId,
             RevisionNumber = 2,
             EnvironmentKey = "pilot",
-            SnapshotFormatVersion = 4,
+            SnapshotFormatVersion = 5,
             ProviderInputsJson = "same-canonical-provider-inputs",
             ConfigurationJson = "same-canonical-configuration",
-            Fingerprint = "v4:" + new string('a', 64),
+            Fingerprint = "v5:" + new string('a', 64),
             GraphJson = DurableOperationGraphCodec.Encode(new([])),
             Presence = nameof(DesiredPresence.Present),
             ActorId = "creation-operator",
@@ -91,11 +91,11 @@ public sealed class OperatorCommitReplayTests
             ApplicationRecordId = change.ApplicationRecordId,
             RevisionNumber = 2,
             EnvironmentKey = "pilot",
-            SnapshotFormatVersion = 4,
+            SnapshotFormatVersion = 5,
             ProviderInputsJson = generation.ProviderInputsJson,
             ConfigurationJson = generation.ConfigurationJson,
             GraphJson = DurableOperationGraphCodec.Encode(graph),
-            Fingerprint = "v4:" + new string('c', 64),
+            Fingerprint = "v5:" + new string('c', 64),
             ActorId = "plan-operator"
         };
         return (change, receipt, plan, generation);

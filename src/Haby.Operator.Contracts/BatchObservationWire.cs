@@ -23,7 +23,7 @@ public static class BatchObservationWire
     }
     public static GenerationBatchReadinessReply WorstReply(GenerationBatchWaitRequest request)
     {
-        var value = new GenerationBatchReadinessReply { RequestId = request.RequestId, CurrentReady = true, Total = request.Members.Count, InvalidRequest = true, Canceled = true, Deadline = true };
+        var value = new GenerationBatchReadinessReply { RequestId = request.RequestId, CurrentReady = true, CurrentApplied = true, Total = request.Members.Count, InvalidRequest = true, Canceled = true, Deadline = true };
         foreach (var member in request.Members)
             value.Members.Add(new GenerationBatchSummary
             {
@@ -32,6 +32,12 @@ public static class BatchObservationWire
                 CurrentReady = true,
                 OriginalRequestReady = true,
                 Replayed = true,
+                CurrentApplied = true,
+                OriginalRequestApplied = true,
+                RetirementCompleted = true,
+                AppliedGeneration = long.MaxValue,
+                CompletionReason = "current-authority-unavailable",
+                RetirementId = "ffffffff-ffff-ffff-ffff-ffffffffffff",
                 SubmittedId = "ffffffff-ffff-ffff-ffff-ffffffffffff",
                 SavedReadyId = "ffffffff-ffff-ffff-ffff-ffffffffffff",
                 Stop = BatchReadinessStop.Interrupted

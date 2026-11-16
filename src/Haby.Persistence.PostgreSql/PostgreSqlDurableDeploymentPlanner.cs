@@ -85,6 +85,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (row is null) return new(DurablePlanStatus.ChangeSetNotFound);
         if (await context.ChangeSetCommits.AsNoTracking().AnyAsync(item => item.ChangeSetId == changeId,
             cancellationToken)) return new(DurablePlanStatus.ChangeSetStale);
+        var retirementGate = $"haby-deployment:{row.EnvironmentRecordId:N}:{row.ApplicationRecordId:N}";
+        await context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({retirementGate}, 0))", cancellationToken);
         var baseline = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(item =>
             item.EnvironmentRecordId == row.EnvironmentRecordId &&
             item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken);
@@ -185,6 +187,15 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (mode == DeploymentAdmissionMode.Operator && internalEffects &&
             !await OperatorWorkloadShapeAsync(context, row, baseline, inputs, graph, cancellationToken))
             return new(DurablePlanStatus.UnsupportedShape);
+        if (internalEffects)
+        {
+            try
+            {
+                var selected = await SelectInternalDocumentsAsync(context, inputs, revision.ApplicationVersion.Value, handlers ?? [], cancellationToken);
+                graph = graph.WithRetirement(await InitialRetirementAuthority.CaptureAsync(context, inputs, graph, baseline, selected, cancellationToken));
+            }
+            catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
+        }
         var id = DeploymentPlanId.New();
         var createdAt = clock.GetUtcNow();
         var planRow = new DurablePlanRow
@@ -459,7 +470,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == Guid.Parse(baseline.Deployment.ToString()), token);
             return owner is not null && owner.EnvironmentRecordId == Guid.Parse(inputs.Environment.ToString()) && owner.ApplicationRecordId == Guid.Parse(inputs.Revision.ApplicationRecordId.ToString()) &&
                 owner.DesiredGeneration == baseline.Generation && owner.AppliedGeneration == baseline.Generation &&
-                (await ReuseGraphAsync(context, owner, spec, revision, inputs, token))?.Equals(graph) == true;
+                (await ReuseGraphAsync(context, owner, spec, revision, inputs, token))?.Equals(new DurableOperationGraph(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources)) == true;
         }
         var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(r => r.Id == revision.ProviderInstanceId, token);
         return instance is not null && admission.ValidateGraph(spec,

@@ -191,6 +191,7 @@ public sealed partial class DurableDeploymentPlanningTests
                         var readiness = await freshClient.WaitGenerationAsync(waitRequest);
                         Assert.Equal("observed", readiness.Outcome);
                         Assert.Equal(!lost, readiness.CurrentReady); Assert.Equal(!lost, readiness.OriginalRequestReady);
+                        Assert.Equal(!lost, readiness.CurrentApplied); Assert.Equal(!lost, readiness.RetirementCompleted);
                         Assert.Equal(mixedRecipients ? 2 : 1, readiness.Members.Count);
                         if (lost) Assert.Contains(readiness.Members, x => x.Outcome == "Refused" && x.Code == "runtime-authority-unavailable");
                         else Assert.True(readiness.HasSavedReadyId);
@@ -227,9 +228,11 @@ public sealed partial class DurableDeploymentPlanningTests
                         diagnostic.At(SubmissionCheckpoint.GenerationRead);
                         var get = await freshClient.GetGenerationAsync(request);
                         diagnostic.At(SubmissionCheckpoint.ProgressEquality);
-                        Assert.Equal(replay.Progress, get.WorkloadSubmission);
+                        var expectedProgress = replay.Progress.Clone();
+                        if (!lost) expectedProgress.AppliedGeneration = request.Generation;
+                        Assert.Equal(expectedProgress, get.WorkloadSubmission);
                         diagnostic.At(SubmissionCheckpoint.AppliedGeneration);
-                        Assert.Equal(initial ? null : (long?)1, get.WorkloadSubmission.HasAppliedGeneration ? get.WorkloadSubmission.AppliedGeneration : null);
+                        Assert.Equal(lost ? initial ? null : (long?)1 : request.Generation, get.WorkloadSubmission.HasAppliedGeneration ? get.WorkloadSubmission.AppliedGeneration : null);
                         await HostFailureDiagnostics.RunAsync(async release =>
                         {
                             diagnostic.At(SubmissionCheckpoint.AuditContext);

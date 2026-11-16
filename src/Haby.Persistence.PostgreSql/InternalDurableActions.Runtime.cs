@@ -8,11 +8,11 @@ internal sealed partial class InternalDurableActions
 {
     // Reconstruct immutable preparation from catalog-owned evidence; never accept caller UUIDs as authority.
     private async Task<InternalActionContext> RuntimeContextAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
-        InternalActionContext context, IInternalActionHandler handler, CancellationToken token)
+        InternalActionContext context, IInternalActionHandler handler, CancellationToken token, bool completedRead = false)
     {
         if (!handler.RequiresRuntimePublication || handler.PreparationDocuments(context).Count == 0) return context;
         var recipients = await (configurationPreparation ?? throw new InvalidDataException("Configuration authority unavailable."))
-            .RequireRecipientsAsync(db, source, token);
+            .RequireRecipientsAsync(db, source, token, completedRead);
         var subject = (ProviderInput.Workload)context.Subject;
         var selected = recipients.Where(x => x.Workload == subject).ToArray();
         var managed = await db.ManagedWorkloads.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == source.DeploymentId &&
@@ -20,12 +20,13 @@ internal sealed partial class InternalDurableActions
         var binding = await db.RuntimeIdentityBindings.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == managed.Id, token)
             ?? throw new InvalidDataException("Prepared runtime binding required.");
         InternalRuntimePublication.ValidateBinding(binding);
-        await RequireIdentityOriginAsync(db, binding, token);
+        if (completedRead) await RequireIdentityOriginCoreAsync(db, binding, OriginPurpose.HistoricalRead, token);
+        else await RequireIdentityOriginAsync(db, binding, token);
         if (binding.EnvironmentId != source.EnvironmentRecordId || binding.ProviderId.ToString() != context.Provider.Instance.ToString() ||
             binding.ConfigurationRevision != context.Provider.Configuration.Value || binding.InstallationId != context.InstallationId)
             throw new InvalidDataException("Prepared binding scope mismatch.");
         var identity = await db.OwnedObjects.AsNoTracking().SingleAsync(x => x.ManagedWorkloadId == managed.Id && x.Role == binding.Role, token);
-        var checkpoint = await DurableAggregateCompletion.ReadAsync(db, source, token, true) ?? throw new InvalidDataException("Resource proof required.");
+        var checkpoint = await DurableAggregateCompletion.ReadAsync(db, source, token, true, completedRead) ?? throw new InvalidDataException("Resource proof required.");
         foreach (var recipient in selected)
         {
             var revision = Guid.Parse(recipient.Revision.ToString());

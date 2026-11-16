@@ -6,7 +6,7 @@ namespace Haby.Persistence.PostgreSql;
 /// <summary>One current durable format across every accepted-history reader.</summary>
 internal static class DurableInputStorage
 {
-    internal const int Version = 4;
+    internal const int Version = 5;
     internal static DurablePlanningInputs Inputs(this DurablePlanRow row) => Read(row.SnapshotFormatVersion,
         row.EnvironmentRecordId, row.EnvironmentKey, row.ApplicationRecordId, row.RevisionNumber,
         row.ConfigurationJson, row.ProviderInputsJson, row.GraphJson, row.Fingerprint);

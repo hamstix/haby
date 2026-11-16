@@ -98,7 +98,7 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.Null(summary.SavedReady); Assert.Null(summary.Submitted); Assert.False(summary.OriginalRequestReady);
         }
         await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-        Assert.All(await verify.ApplicationDeployments.AsNoTracking().ToArrayAsync(), x => Assert.Null(x.AppliedGeneration));
+        Assert.All(await verify.ApplicationDeployments.AsNoTracking().ToArrayAsync(), x => Assert.Equal(x.DesiredGeneration, x.AppliedGeneration));
         Assert.Equal(2, deployment.Writes); Assert.Equal(0, identity.Writes);
     }
     [Fact]
@@ -201,11 +201,27 @@ public sealed partial class DurableDeploymentPlanningTests
         foreach (var invalid in new[] { new GenerationBatchWaitRequest(), duplicate, tooMany, oversized, wrongKey, wider })
             Assert.True((await client.WaitGenerationBatchAsync(invalid)).InvalidRequest);
         Assert.Equal(0, deployment.ReadinessReads);
+        long beforeCompletionToken;
         await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
             Assert.False(await verify.ObservationRecords.AsNoTracking().AnyAsync());
+            beforeCompletionToken = (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).ConcurrencyToken;
+        }
         var results = await Task.WhenAll(client.WaitGenerationBatchAsync(request).ResponseAsync, second.WaitGenerationBatchAsync(request).ResponseAsync);
         Assert.Equal(1, results.Count(x => x.CurrentReady)); Assert.Equal(1, results.Count(x => x.Members.Single().Replayed));
         Assert.Equal(1, deployment.ReadinessReads);
+        Assert.Equal(1, results.Count(x => x.CurrentApplied));
+        // A concurrent loser can read the reserved request before the winner commits its outcome.
+        // A subsequent historical replay must expose the one durable completion.
+        var replay = await second.WaitGenerationBatchAsync(request);
+        Assert.True(replay.Members.Single().Replayed); Assert.True(replay.Members.Single().OriginalRequestApplied);
+        Assert.False(replay.CurrentApplied); Assert.Equal(1, deployment.ReadinessReads);
+        await using (var verify = await peer.Services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
+            await AssertAtomicCompletionAsync(verify, "wire", present: true);
+            Assert.Equal(beforeCompletionToken + 1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).ConcurrencyToken);
+        }
+        Assert.Equal(1, deployment.Writes); Assert.Equal(0, identity.Writes);
         var conflict = request.Clone(); conflict.MemberSettings.MaximumRounds = 2;
         Assert.Equal(BatchReadinessOutcome.Conflict, (await second.WaitGenerationBatchAsync(conflict)).Members.Single().Outcome);
         var full = new GenerationBatchWaitRequest { RequestId = "two-hundred" };
@@ -227,11 +243,11 @@ public sealed partial class DurableDeploymentPlanningTests
         var actions = await PrepareRollout(services, scenario, deployment, identity); await SubmitRollout(actions, scenario, deployment); await SubmitRollout(actions, scenario, deployment, "second");
         var facade = BatchFacade(services, scenario, actions, deployment, identity);
         var history = BatchMember(scenario.Commit, "history");
-        Assert.True((await facade.WaitBatchAsync("history", "operator", [history], null, new(MaximumRounds: 1), null, default)).CurrentReady);
         var publication = Publications(services, identity);
         // The retained request offset rotates the second call: second reads first, main waits for pacing.
         var permission = (await publication.PreparationRequestsAsync(scenario.Commit, "tester", default)).Single(x => x.Origin!.Workload == "main");
         var before = (await publication.ReadAsync(permission.Key, default))!;
+        Assert.True((await facade.WaitBatchAsync("history", "operator", [history], null, new(MaximumRounds: 1), null, default)).CurrentApplied);
         var member = BatchMember(scenario.Commit, "revoked-in-queue");
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         using var bounded = new CancellationTokenSource(TimeSpan.FromSeconds(5));

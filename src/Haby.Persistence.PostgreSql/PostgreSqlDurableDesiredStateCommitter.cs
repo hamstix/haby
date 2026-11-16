@@ -206,6 +206,16 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             !await PostgreSqlDurableDeploymentPlanner.ValidateOperatorPinsAsync(context, plan.Id, inputs, cancellationToken)))
             return new DurableCommitResult.UnsupportedShape();
 
+        if (internalEffects)
+        {
+            try
+            {
+                var selected = await planner.SelectInternalDocumentsAsync(context, inputs, manifestRow.ApplicationVersion, handlers ?? [], cancellationToken);
+                var inventory = await InitialRetirementAuthority.CaptureAsync(context, inputs, graph, actual, selected, cancellationToken);
+                if (graph.Retirement is null || !InitialRetirementAuthority.Same(inventory, graph.Retirement)) return new DurableCommitResult.PlanInputUnavailable();
+            }
+            catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
+        }
         cancellationToken.ThrowIfCancellationRequested();
         var deploymentId = actual is null ? ApplicationDeploymentId.New() : ApplicationDeploymentId.Parse(actual.Id.ToString());
         var deploymentGuid = Guid.Parse(deploymentId.ToString());

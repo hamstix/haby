@@ -121,10 +121,10 @@ public sealed partial class DurableDeploymentPlanningTests
             ConfigurationPreparation(services).Preparation, actions, new(PollMilliseconds: 100), scenario.Time, deployment.Contract.Action, identity.Contract.Action);
         ValueTask<GenerationReadinessResult> Wait(string key, Haby.Application.GenerationObservationSettings? settings = null) => facade.WaitAsync(
             scenario.Commit.DeploymentId, scenario.Commit.Generation, key, "public-operator", settings, null, default);
-        var ready = await Wait("ready", new(MaximumRounds: 1)); Assert.True(ready.CurrentReady);
         var publication = Publications(services, identity);
         var request = (await publication.PreparationRequestsAsync(scenario.Commit, "tester", default))[0];
         var before = (await publication.ReadAsync(request.Key, default))!;
+        var ready = await Wait("ready", new(MaximumRounds: 1)); Assert.True(ready.CurrentReady); Assert.True(ready.CurrentApplied);
         deployment.Pending = true;
         deployment.BeforeRead = async _ => { await publication.ApplyAsync(Revoke(request, before.CurrentPermission!.Token), default); };
         var refused = await Wait("revoke-during-read", new(MaximumRounds: 3));
@@ -142,7 +142,7 @@ public sealed partial class DurableDeploymentPlanningTests
         await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
         Assert.Equal(1, await verify.ObservationAttempts.CountAsync());
         Assert.Equal(1, deployment.Writes); Assert.Equal(1, identity.Writes);
-        Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        Assert.Equal(scenario.Commit.Generation.Value, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
     }
 
     [Fact]

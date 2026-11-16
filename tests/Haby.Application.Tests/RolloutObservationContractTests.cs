@@ -42,6 +42,11 @@ public sealed class RolloutObservationContractTests
             if (corruption == "code") node["Members"]![0]!["Observation"]!["Code"] = "unsafe raw message";
             if (corruption == "unknown") node["Extra"] = true;
             Assert.ThrowsAny<Exception>(() => RolloutJson.Decode(node.ToJsonString()));
+            if (corruption == "unknown")
+            {
+                Assert.Throws<InvalidDataException>(() => RolloutJson.Decode(RolloutJson.Encode(value with { Applied = true, CompletionReason = "applied" })));
+                Assert.Throws<InvalidDataException>(() => RolloutJson.Decode(RolloutJson.Encode(value with { CompletionReason = "future-success" })));
+            }
         }
     }
 }

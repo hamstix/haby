@@ -8,6 +8,29 @@ namespace Haby.Persistence.PostgreSql;
 internal static class InternalGenerationAuthority
 {
     internal static async Task<DeploymentGenerationRow> RequireAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
+        => await RequireCoreAsync(db, accepted, false, token);
+
+    internal static async Task<DeploymentGenerationRow> RequireReadAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
+    {
+        var id = Guid.Parse(accepted.DeploymentId.ToString());
+        // Cache immutable proof validation only within this catalog transaction. Current
+        // permission and attempt checks remain separate and are never cached here.
+        if (db.Database.CurrentTransaction is not null && db.CompletedInitialReads.TryGetValue((db.Database.CurrentTransaction.TransactionId, id, accepted.Generation.Value), out var verified))
+        {
+            if (verified.PlanId.ToString() != accepted.PlanId.ToString() || verified.ChangeSetId.ToString() != accepted.ChangeSetId.ToString() ||
+                verified.AcceptedAt != accepted.CommittedAt || verified.ActorId != accepted.ActorId)
+                throw new InvalidDataException("Conflicting completed read authority.");
+            return verified;
+        }
+        var applied = await db.ApplicationDeployments.AsNoTracking().Where(x => x.Id == id).Select(x => x.AppliedGeneration).SingleOrDefaultAsync(token);
+        if (applied < accepted.Generation.Value || applied is null) return await RequireAsync(db, accepted, token);
+        var row = await RequireCoreAsync(db, accepted, true, token);
+        _ = await InitialRetirementCompletion.RequireProofAsync(db, row, token);
+        if (db.Database.CurrentTransaction is not null) db.CompletedInitialReads[(db.Database.CurrentTransaction.TransactionId, id, accepted.Generation.Value)] = row;
+        return row;
+    }
+
+    private static async Task<DeploymentGenerationRow> RequireCoreAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, bool readOnly, CancellationToken token)
     {
         var deployment = Guid.Parse(accepted.DeploymentId.ToString());
         var row = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == accepted.Generation.Value, token)
@@ -18,13 +41,15 @@ internal static class InternalGenerationAuthority
         var change = await db.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.ChangeSetId, token);
         var inputs = row.Inputs();
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson); graph.ValidateReferences(inputs);
-        var initial = InternalResourceStage.IsEmpty(inputs, graph) && row.Generation == 1 && owner?.AppliedGeneration is null &&
+        var retirement = graph.Retirement?.Document ?? throw new InvalidDataException("Frozen retirement authority required.");
+        var priorApplied = readOnly ? retirement.PriorApplied : owner?.AppliedGeneration;
+        var initial = InternalResourceStage.IsEmpty(inputs, graph) && row.Generation == 1 && priorApplied is null &&
             change is { ExpectedAbsence: true, ExpectedGeneration: null };
-        var mixed = graph.Baseline is not null && owner?.AppliedGeneration is not null && owner.AppliedGeneration == graph.Baseline.Generation &&
-            owner.AppliedGeneration < row.Generation && graph.Nodes.Count == 0 && graph.RetainedResources.Count == 0 &&
+        var mixed = graph.Baseline is not null && priorApplied is not null && priorApplied == graph.Baseline.Generation &&
+            priorApplied < row.Generation && graph.Nodes.Count == 0 && graph.RetainedResources.Count == 0 &&
             graph.ReusedResources.Count == inputs.Configuration!.Manifest.Spec.Resources.Count && graph.ReusedResources.Count > 0 &&
             change is { ExpectedAbsence: false } && change.ExpectedGeneration == graph.Baseline.Generation;
-        if ((!initial && !mixed) || !row.InternalEffects || row.Presence != nameof(DesiredPresence.Present) || owner is null || owner.DesiredGeneration != row.Generation ||
+        if ((!initial && !mixed) || !row.InternalEffects || row.Presence != nameof(DesiredPresence.Present) || owner is null || (readOnly ? owner.DesiredGeneration < row.Generation : owner.DesiredGeneration != row.Generation) ||
             owner.EnvironmentRecordId != row.EnvironmentRecordId || owner.ApplicationRecordId != row.ApplicationRecordId ||
             plan is null || !plan.InternalEffects || plan.ChangeSetId != row.ChangeSetId || plan.EnvironmentRecordId != row.EnvironmentRecordId ||
             plan.ApplicationRecordId != row.ApplicationRecordId || plan.RevisionNumber != row.RevisionNumber || plan.EnvironmentKey != row.EnvironmentKey ||
@@ -66,17 +91,25 @@ internal static class InternalGenerationAuthority
         return row;
     }
 
-    internal static async Task<DeploymentGenerationRow> RequireAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
+    internal static Task<DeploymentGenerationRow> RequireAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) => RequireRowAsync(db, source, false, token);
+    internal static Task<DeploymentGenerationRow> RequireReadAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) => RequireRowAsync(db, source, true, token);
+    private static async Task<DeploymentGenerationRow> RequireRowAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, bool readOnly, CancellationToken token)
     {
         var commit = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.ChangeSetId == source.ChangeSetId, token)
             ?? throw new InvalidDataException("Accepted internal commit unavailable.");
-        var accepted = await RequireAsync(db, new DurableChangeSetCommit(DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()),
+        var receipt = new DurableChangeSetCommit(DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()),
             DeploymentPlanId.Parse(commit.PlanId.ToString()), ApplicationDeploymentId.Parse(commit.DeploymentId.ToString()),
-            DeploymentGeneration.Create(commit.Generation), commit.CommittedAt, commit.ActorId), token);
+            DeploymentGeneration.Create(commit.Generation), commit.CommittedAt, commit.ActorId);
+        var accepted = readOnly ? await RequireReadAsync(db, receipt, token) : await RequireAsync(db, receipt, token);
         if (accepted.DeploymentId != source.DeploymentId || accepted.Generation != source.Generation || accepted.PlanId != source.PlanId ||
             accepted.Fingerprint != source.Fingerprint || accepted.ProviderInputsJson != source.ProviderInputsJson ||
             accepted.ConfigurationJson != source.ConfigurationJson || accepted.GraphJson != source.GraphJson || !source.InternalEffects)
             throw new InvalidDataException("Internal source identity mismatch.");
         return accepted;
     }
+}
+
+public sealed partial class ManifestCatalogDbContext
+{
+    internal Dictionary<(Guid Transaction, Guid Deployment, long Generation), DeploymentGenerationRow> CompletedInitialReads { get; } = [];
 }
