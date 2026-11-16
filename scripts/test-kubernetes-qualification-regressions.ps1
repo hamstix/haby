@@ -3,13 +3,823 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-evidence.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
+# Frozen rev2 wire transcripts are synthetic controls, never runtime case evidence.
+function Test-QualificationCallerJournalControls([string]$PrivateDirectory) {
+    $journal=Join-Path $PrivateDirectory 'diagnostic-progress.txt'
+    $normal=@'
+1 durable-entry 3600000
+2 catalog-init-start 3600000
+3 catalog-init-completed 3600000
+4 namespace-create-start 3600000
+5 namespace-create-completed 3600000
+6 durable-suite-start 3600000
+7 workload-actions-start 3600000
+8 accepted-setup-start 3600000
+9 accepted-setup-completed 3600000
+10 restore-start 3600000
+11 restore-completed 3600000
+12 accepted-setup-start 3600000
+13 accepted-setup-completed 3600000
+14 accepted-setup-start 3600000
+15 accepted-setup-completed 3600000
+16 accepted-setup-start 3600000
+17 accepted-setup-completed 3600000
+18 accepted-setup-start 3600000
+19 accepted-setup-completed 3600000
+20 accepted-setup-start 3600000
+21 accepted-setup-completed 3600000
+22 restore-start 3600000
+23 restore-completed 3600000
+24 accepted-setup-start 3600000
+25 accepted-setup-completed 3600000
+26 workload-actions-completed 3600000
+27 identity-actions-start 3600000
+28 runtime-setup-start 3600000
+29 runtime-setup-completed 3600000
+30 restore-start 3600000
+31 restore-completed 3600000
+32 runtime-setup-start 3600000
+33 runtime-setup-completed 3600000
+34 runtime-setup-start 3600000
+35 runtime-setup-completed 3600000
+36 restore-start 3600000
+37 restore-completed 3600000
+38 runtime-setup-start 3600000
+39 runtime-setup-completed 3600000
+40 runtime-setup-start 3600000
+41 runtime-setup-completed 3600000
+42 runtime-setup-start 3600000
+43 runtime-setup-completed 3600000
+44 runtime-setup-start 3600000
+45 runtime-setup-completed 3600000
+46 runtime-setup-start 3600000
+47 runtime-setup-completed 3600000
+48 identity-actions-completed 3600000
+49 runtime-auth-start 3600000
+50 runtime-auth-completed 3600000
+51 runtime-final-revoke-start 3600000
+52 runtime-final-revoke-completed 3600000
+53 runtime-final-history-start 3600000
+54 runtime-final-history-completed 3600000
+55 runtime-final-authorization-start 3600000
+56 runtime-final-authorization-completed 3600000
+57 runtime-candidate-dispose-start 3600000
+58 runtime-candidate-dispose-completed 3600000
+59 initial-delivery-start 3600000
+60 delivery-provenance-start 3600000
+61 delivery-provenance-completed 3600000
+62 delivery-pod-start 3600000
+63 delivery-pod-completed 3600000
+64 delivery-token-start 3600000
+65 delivery-token-completed 3600000
+66 delivery-host-first-start 3600000
+67 delivery-host-first-built 3600000
+68 delivery-host-first-credential-ready 3600000
+69 delivery-host-first-started 3600000
+70 delivery-first-request-start 3600000
+71 delivery-first-request-completed 3600000
+72 delivery-after-state-start 3600000
+73 delivery-after-state-completed 3600000
+74 delivery-result-check-start 3600000
+75 delivery-result-check-completed 3600000
+76 delivery-review-refusal-start 3600000
+77 delivery-review-refusal-completed 3600000
+78 delivery-review-republish-start 3600000
+79 delivery-review-republish-completed 3600000
+80 delivery-authority-call-start 3600000
+81 delivery-authority-call-completed 3600000
+82 delivery-authority-refusal-start 3600000
+83 delivery-authority-refusal-completed 3600000
+84 delivery-authority-republish-start 3600000
+85 delivery-authority-republish-completed 3600000
+86 delivery-startup-start 3600000
+87 startup-pod-start 3600000
+88 startup-pod-completed 3600000
+89 startup-token-start 3600000
+90 startup-token-completed 3600000
+91 startup-file-start 3600000
+92 startup-file-completed 3600000
+93 startup-fingerprints-start 3600000
+94 startup-fingerprints-completed 3600000
+95 startup-before-state-start 3600000
+96 startup-before-state-completed 3600000
+97 startup-first-fetch-start 3600000
+98 startup-first-fetch-completed 3600000
+99 startup-after-state-start 3600000
+100 startup-after-state-completed 3600000
+101 startup-restart-fetch-start 3600000
+102 startup-restart-fetch-completed 3600000
+103 startup-revoke-start 3600000
+104 startup-revoke-completed 3600000
+105 startup-denial-probe-start 3600000
+106 startup-denial-probe-completed 3600000
+107 startup-republish-start 3600000
+108 startup-republish-completed 3600000
+109 startup-pod-cleanup-start 3600000
+110 startup-pod-cleanup-completed 3600000
+111 startup-directory-cleanup-start 3600000
+112 startup-directory-cleanup-completed 3600000
+113 delivery-startup-completed 3600000
+114 delivery-host-first-dispose-start 3600000
+115 delivery-host-stop-start 3600000
+116 delivery-host-stop-completed 3600000
+117 delivery-host-dispose-start 3600000
+118 delivery-host-dispose-completed 3600000
+119 delivery-host-first-dispose-completed 3600000
+120 delivery-host-restart-start 3600000
+121 delivery-host-restart-built 3600000
+122 delivery-host-restart-credential-ready 3600000
+123 delivery-host-restart-started 3600000
+124 delivery-first-request-start 3600000
+125 delivery-first-request-completed 3600000
+126 delivery-after-state-start 3600000
+127 delivery-after-state-completed 3600000
+128 delivery-result-check-start 3600000
+129 delivery-result-check-completed 3600000
+130 delivery-host-restart-dispose-start 3600000
+131 delivery-host-stop-start 3600000
+132 delivery-host-stop-completed 3600000
+133 delivery-host-dispose-start 3600000
+134 delivery-host-dispose-completed 3600000
+135 delivery-host-restart-dispose-completed 3600000
+136 delivery-catalog-verify-start 3600000
+137 delivery-catalog-verify-completed 3600000
+138 delivery-pod-cleanup-start 3600000
+139 delivery-pod-cleanup-completed 3600000
+140 runtime-auth-start 3600000
+141 runtime-auth-completed 3600000
+142 runtime-final-revoke-start 3600000
+143 runtime-final-revoke-completed 3600000
+144 runtime-final-history-start 3600000
+145 runtime-final-history-completed 3600000
+146 runtime-final-authorization-start 3600000
+147 runtime-final-authorization-completed 3600000
+148 runtime-candidate-dispose-start 3600000
+149 runtime-candidate-dispose-completed 3600000
+150 mixed-delivery-start 3600000
+151 mixed-baseline-prepared 3600000
+152 mixed-preparation-completed 3600000
+153 mixed-documents-completed 3600000
+154 mixed-identity-completed 3600000
+155 mixed-publication-completed 3600000
+156 delivery-provenance-start 3600000
+157 delivery-provenance-completed 3600000
+158 delivery-pod-start 3600000
+159 delivery-pod-completed 3600000
+160 delivery-token-start 3600000
+161 delivery-token-completed 3600000
+162 delivery-host-first-start 3600000
+163 delivery-host-first-built 3600000
+164 delivery-host-first-credential-ready 3600000
+165 delivery-host-first-started 3600000
+166 delivery-first-request-start 3600000
+167 delivery-first-request-completed 3600000
+168 delivery-after-state-start 3600000
+169 delivery-after-state-completed 3600000
+170 delivery-result-check-start 3600000
+171 delivery-result-check-completed 3600000
+172 delivery-review-refusal-start 3600000
+173 delivery-review-refusal-completed 3600000
+174 delivery-review-republish-start 3600000
+175 delivery-review-republish-completed 3600000
+176 delivery-authority-call-start 3600000
+177 delivery-authority-call-completed 3600000
+178 delivery-authority-refusal-start 3600000
+179 delivery-authority-refusal-completed 3600000
+180 delivery-authority-republish-start 3600000
+181 delivery-authority-republish-completed 3600000
+182 delivery-host-first-dispose-start 3600000
+183 delivery-host-stop-start 3600000
+184 delivery-host-stop-completed 3600000
+185 delivery-host-dispose-start 3600000
+186 delivery-host-dispose-completed 3600000
+187 delivery-host-first-dispose-completed 3600000
+188 delivery-host-restart-start 3600000
+189 delivery-host-restart-built 3600000
+190 delivery-host-restart-credential-ready 3600000
+191 delivery-host-restart-started 3600000
+192 delivery-first-request-start 3600000
+193 delivery-first-request-completed 3600000
+194 delivery-after-state-start 3600000
+195 delivery-after-state-completed 3600000
+196 delivery-result-check-start 3600000
+197 delivery-result-check-completed 3600000
+198 delivery-host-restart-dispose-start 3600000
+199 delivery-host-stop-start 3600000
+200 delivery-host-stop-completed 3600000
+201 delivery-host-dispose-start 3600000
+202 delivery-host-dispose-completed 3600000
+203 delivery-host-restart-dispose-completed 3600000
+204 delivery-catalog-verify-start 3600000
+205 delivery-catalog-verify-completed 3600000
+206 delivery-pod-cleanup-start 3600000
+207 delivery-pod-cleanup-completed 3600000
+208 mixed-delivery-completed 3600000
+209 inner-cleanup-start 3600000
+210 namespace-cleanup-start 3600000
+211 namespace-absence-confirmed 3600000
+212 catalog-dispose-start 3600000
+213 catalog-dispose-completed 3600000
+214 inner-cleanup-completed 3600000
+'@
+    $normal=$normal.Replace("`r`n","`n")+"`n"
+    $exceptional=@'
+1 durable-entry 3600000
+2 catalog-init-start 3600000
+3 catalog-init-completed 3600000
+4 namespace-create-start 3600000
+5 namespace-create-completed 3600000
+6 durable-suite-start 3600000
+7 workload-actions-start 3600000
+8 accepted-setup-start 3600000
+9 accepted-setup-completed 3600000
+10 restore-start 3600000
+11 restore-completed 3600000
+12 accepted-setup-start 3600000
+13 accepted-setup-completed 3600000
+14 accepted-setup-start 3600000
+15 accepted-setup-completed 3600000
+16 accepted-setup-start 3600000
+17 accepted-setup-completed 3600000
+18 accepted-setup-start 3600000
+19 accepted-setup-completed 3600000
+20 accepted-setup-start 3600000
+21 accepted-setup-completed 3600000
+22 restore-start 3600000
+23 restore-completed 3600000
+24 accepted-setup-start 3600000
+25 accepted-setup-completed 3600000
+26 workload-actions-completed 3600000
+27 identity-actions-start 3600000
+28 runtime-setup-start 3600000
+29 runtime-setup-completed 3600000
+30 restore-start 3600000
+31 restore-completed 3600000
+32 runtime-setup-start 3600000
+33 runtime-setup-completed 3600000
+34 runtime-setup-start 3600000
+35 runtime-setup-completed 3600000
+36 restore-start 3600000
+37 restore-completed 3600000
+38 runtime-setup-start 3600000
+39 runtime-setup-completed 3600000
+40 runtime-setup-start 3600000
+41 runtime-setup-completed 3600000
+42 runtime-setup-start 3600000
+43 runtime-setup-completed 3600000
+44 runtime-setup-start 3600000
+45 runtime-setup-completed 3600000
+46 runtime-setup-start 3600000
+47 runtime-setup-completed 3600000
+48 identity-actions-completed 3600000
+49 runtime-auth-start 3600000
+50 runtime-auth-completed 3600000
+51 runtime-final-revoke-start 3600000
+52 runtime-final-revoke-completed 3600000
+53 runtime-final-history-start 3600000
+54 runtime-final-history-completed 3600000
+55 runtime-final-authorization-start 3600000
+56 runtime-final-authorization-completed 3600000
+57 runtime-candidate-dispose-start 3600000
+58 runtime-candidate-dispose-completed 3600000
+59 initial-delivery-start 3600000
+60 delivery-provenance-start 3600000
+61 delivery-provenance-completed 3600000
+62 delivery-pod-start 3600000
+63 delivery-pod-completed 3600000
+64 delivery-token-start 3600000
+65 delivery-token-completed 3600000
+66 delivery-host-first-start 3600000
+67 delivery-host-first-built 3600000
+68 delivery-host-first-credential-ready 3600000
+69 delivery-host-first-started 3600000
+70 delivery-first-request-start 3600000
+71 delivery-first-request-completed 3600000
+72 delivery-after-state-start 3600000
+73 delivery-after-state-completed 3600000
+74 delivery-result-check-start 3600000
+75 delivery-result-check-completed 3600000
+76 delivery-review-refusal-start 3600000
+77 delivery-review-refusal-completed 3600000
+78 delivery-review-republish-start 3600000
+79 delivery-review-republish-completed 3600000
+80 delivery-authority-call-start 3600000
+81 delivery-authority-call-completed 3600000
+82 delivery-authority-refusal-start 3600000
+83 delivery-authority-refusal-completed 3600000
+84 delivery-authority-republish-start 3600000
+85 delivery-authority-republish-completed 3600000
+86 delivery-startup-start 3600000
+87 startup-pod-start 3600000
+88 startup-pod-completed 3600000
+89 startup-token-start 3600000
+90 startup-token-completed 3600000
+91 startup-file-start 3600000
+92 startup-file-completed 3600000
+93 startup-fingerprints-start 3600000
+94 startup-fingerprints-completed 3600000
+95 startup-before-state-start 3600000
+96 startup-before-state-completed 3600000
+97 startup-first-fetch-start 3600000
+98 startup-first-fetch-completed 3600000
+99 startup-after-state-start 3600000
+100 startup-after-state-completed 3600000
+101 startup-restart-fetch-start 3600000
+102 startup-restart-fetch-completed 3600000
+103 startup-revoke-start 3600000
+104 startup-revoke-completed 3600000
+105 startup-denial-probe-start 3600000
+106 startup-denial-probe-completed 3600000
+107 startup-republish-start 3600000
+108 startup-republish-completed 3600000
+109 startup-pod-cleanup-start 3600000
+110 startup-pod-cleanup-completed 3600000
+111 startup-directory-cleanup-start 3600000
+112 startup-directory-cleanup-completed 3600000
+113 delivery-startup-completed 3600000
+114 delivery-host-first-dispose-start 3600000
+115 delivery-host-stop-start 3600000
+116 delivery-host-stop-completed 3600000
+117 delivery-host-dispose-start 3600000
+118 delivery-host-dispose-completed 3600000
+119 delivery-host-first-dispose-completed 3600000
+120 delivery-host-restart-start 3600000
+121 delivery-host-restart-built 3600000
+122 delivery-host-restart-credential-ready 3600000
+123 delivery-host-restart-started 3600000
+124 delivery-first-request-start 3600000
+125 delivery-first-request-completed 3600000
+126 delivery-after-state-start 3600000
+127 delivery-after-state-completed 3600000
+128 delivery-result-check-start 3600000
+129 delivery-result-check-completed 3600000
+130 delivery-host-restart-dispose-start 3600000
+131 delivery-host-stop-start 3600000
+132 delivery-host-stop-completed 3600000
+133 delivery-host-dispose-start 3600000
+134 delivery-host-dispose-completed 3600000
+135 delivery-host-restart-dispose-completed 3600000
+136 delivery-catalog-verify-start 3600000
+137 delivery-catalog-verify-completed 3600000
+138 delivery-pod-cleanup-start 3600000
+139 delivery-pod-cleanup-completed 3600000
+140 runtime-auth-start 3600000
+141 runtime-auth-completed 3600000
+142 runtime-final-revoke-start 3600000
+143 runtime-final-revoke-completed 3600000
+144 runtime-final-history-start 3600000
+145 runtime-final-history-completed 3600000
+146 runtime-final-authorization-start 3600000
+147 runtime-final-authorization-completed 3600000
+148 runtime-candidate-dispose-start 3600000
+149 runtime-candidate-dispose-completed 3600000
+150 mixed-delivery-start 3600000
+151 mixed-baseline-prepared 3600000
+152 mixed-preparation-completed 3600000
+153 mixed-documents-completed 3600000
+154 mixed-identity-completed 3600000
+155 mixed-publication-completed 3600000
+156 delivery-provenance-start 3600000
+157 delivery-provenance-completed 3600000
+158 delivery-pod-start 3600000
+159 delivery-pod-completed 3600000
+160 delivery-token-start 3600000
+161 delivery-token-completed 3600000
+162 delivery-host-first-start 3600000
+163 delivery-host-first-built 3600000
+164 delivery-host-first-credential-ready 3600000
+165 delivery-host-first-started 3600000
+166 delivery-first-request-start 3600000
+167 delivery-first-request-completed 3600000
+168 delivery-after-state-start 3600000
+169 delivery-after-state-completed 3600000
+170 delivery-result-check-start 3600000
+171 delivery-result-check-completed 3600000
+172 delivery-review-refusal-start 3600000
+173 delivery-review-refusal-completed 3600000
+174 delivery-review-republish-start 3600000
+175 delivery-review-republish-completed 3600000
+176 delivery-authority-call-start 3600000
+177 delivery-authority-call-completed 3600000
+178 delivery-authority-refusal-start 3600000
+179 delivery-authority-refusal-completed 3600000
+180 delivery-authority-republish-start 3600000
+181 delivery-authority-republish-completed 3600000
+182 delivery-host-first-dispose-start 3600000
+183 delivery-host-stop-start 3600000
+184 delivery-host-stop-completed 3600000
+185 delivery-host-dispose-start 3600000
+186 delivery-host-dispose-completed 3600000
+187 delivery-host-first-dispose-completed 3600000
+188 delivery-host-restart-start 3600000
+189 delivery-host-restart-built 3600000
+190 delivery-host-restart-credential-ready 3600000
+191 delivery-host-restart-started 3600000
+192 delivery-first-request-start 3600000
+193 delivery-first-request-completed 3600000
+194 delivery-after-state-start 3600000
+195 delivery-after-state-completed 3600000
+196 delivery-result-check-start 3600000
+197 delivery-result-check-completed 3600000
+198 delivery-host-restart-dispose-start 3600000
+199 delivery-host-stop-start 3600000
+200 delivery-host-stop-completed 3600000
+201 delivery-host-dispose-start 3600000
+202 delivery-host-dispose-completed 3600000
+203 delivery-host-restart-dispose-completed 3600000
+204 delivery-catalog-verify-start 3600000
+205 delivery-catalog-verify-completed 3600000
+206 delivery-pod-cleanup-start 3600000
+207 delivery-pod-cleanup-completed 3600000
+208 mixed-delivery-completed 3600000
+209 inner-cleanup-start 3600000
+210 namespace-cleanup-start 3600000
+211 namespace-absence-confirmed 3600000
+212 catalog-dispose-start 3600000
+213 catalog-dispose-completed 3600000
+214 catalog-dispose-failed 3600000
+215 inner-cleanup-failed 3600000
+'@
+    $exceptional=$exceptional.Replace("`r`n","`n")+"`n"
+    $cancellation=@'
+1 durable-entry 3600000
+2 catalog-init-start 3600000
+3 catalog-init-completed 3600000
+4 namespace-create-start 3600000
+5 namespace-create-completed 3600000
+6 durable-suite-start 3600000
+7 workload-actions-start 3600000
+8 accepted-setup-start 3600000
+9 accepted-setup-completed 3600000
+10 restore-start 3600000
+11 restore-completed 3600000
+12 accepted-setup-start 3600000
+13 accepted-setup-completed 3600000
+14 accepted-setup-start 3600000
+15 accepted-setup-completed 3600000
+16 accepted-setup-start 3600000
+17 accepted-setup-completed 3600000
+18 accepted-setup-start 3600000
+19 accepted-setup-completed 3600000
+20 accepted-setup-start 3600000
+21 accepted-setup-completed 3600000
+22 restore-start 3600000
+23 restore-completed 3600000
+24 accepted-setup-start 3600000
+25 accepted-setup-completed 3600000
+26 workload-actions-completed 3600000
+27 identity-actions-start 3600000
+28 runtime-setup-start 3600000
+29 runtime-setup-completed 3600000
+30 restore-start 3600000
+31 restore-completed 3600000
+32 runtime-setup-start 3600000
+33 runtime-setup-completed 3600000
+34 runtime-setup-start 3600000
+35 runtime-setup-completed 3600000
+36 restore-start 3600000
+37 restore-completed 3600000
+38 runtime-setup-start 3600000
+39 runtime-setup-completed 3600000
+40 runtime-setup-start 3600000
+41 runtime-setup-completed 3600000
+42 runtime-setup-start 3600000
+43 runtime-setup-completed 3600000
+44 runtime-setup-start 3600000
+45 runtime-setup-completed 3600000
+46 runtime-setup-start 3600000
+47 runtime-setup-completed 3600000
+48 identity-actions-completed 3600000
+49 runtime-auth-start 3600000
+50 runtime-auth-completed 3600000
+51 runtime-final-revoke-start 3600000
+52 runtime-final-revoke-completed 3600000
+53 runtime-final-history-start 3600000
+54 runtime-final-history-completed 3600000
+55 runtime-final-authorization-start 3600000
+56 runtime-final-authorization-completed 3600000
+57 runtime-candidate-dispose-start 3600000
+58 runtime-candidate-dispose-completed 3600000
+59 initial-delivery-start 3600000
+60 delivery-provenance-start 3600000
+61 delivery-provenance-completed 3600000
+62 delivery-pod-start 3600000
+63 delivery-pod-completed 3600000
+64 delivery-token-start 3600000
+65 delivery-token-completed 3600000
+66 delivery-host-first-start 3600000
+67 delivery-host-first-built 3600000
+68 delivery-host-first-credential-ready 3600000
+69 delivery-host-first-started 3600000
+70 delivery-first-request-start 3600000
+71 delivery-first-request-completed 3600000
+72 delivery-after-state-start 3600000
+73 delivery-after-state-completed 3600000
+74 delivery-result-check-start 3600000
+75 delivery-result-check-completed 3600000
+76 delivery-review-refusal-start 3600000
+77 delivery-review-refusal-completed 3600000
+78 delivery-review-republish-start 3600000
+79 delivery-review-republish-completed 3600000
+80 delivery-authority-call-start 3600000
+81 delivery-authority-call-completed 3600000
+82 delivery-authority-refusal-start 3600000
+83 delivery-authority-refusal-completed 3600000
+84 delivery-authority-republish-start 3600000
+85 delivery-authority-republish-completed 3600000
+86 delivery-startup-start 3600000
+87 startup-pod-start 3600000
+88 startup-pod-completed 3600000
+89 startup-token-start 3600000
+90 startup-token-completed 3600000
+91 startup-file-start 3600000
+92 startup-file-completed 3600000
+93 startup-fingerprints-start 3600000
+94 startup-fingerprints-completed 3600000
+95 startup-before-state-start 3600000
+96 startup-before-state-completed 3600000
+97 startup-first-fetch-start 3600000
+98 startup-first-fetch-failed 3600000
+99 startup-pod-cleanup-start 3600000
+100 startup-pod-cleanup-completed 3600000
+101 startup-directory-cleanup-start 3600000
+102 startup-directory-cleanup-completed 3600000
+103 delivery-startup-failed 3600000
+104 delivery-host-first-dispose-start 3600000
+105 delivery-host-dispose-start 3600000
+106 delivery-host-dispose-completed 3600000
+107 delivery-host-first-dispose-completed 3600000
+108 delivery-pod-cleanup-start 3600000
+109 delivery-pod-cleanup-completed 3600000
+110 runtime-candidate-dispose-start 3600000
+111 runtime-candidate-dispose-completed 3600000
+112 inner-cleanup-start 3600000
+113 namespace-cleanup-start 3600000
+114 namespace-absence-confirmed 3600000
+115 catalog-dispose-start 3600000
+116 catalog-dispose-completed 3600000
+117 catalog-dispose-failed 3600000
+118 inner-cleanup-failed 3600000
+'@
+    $cancellation=$cancellation.Replace("`r`n","`n")+"`n"
+    $cancellationValid=@'
+1 durable-entry 3600000
+2 catalog-init-start 3600000
+3 catalog-init-completed 3600000
+4 namespace-create-start 3600000
+5 namespace-create-completed 3600000
+6 durable-suite-start 3600000
+7 workload-actions-start 3600000
+8 accepted-setup-start 3600000
+9 accepted-setup-completed 3600000
+10 restore-start 3600000
+11 restore-completed 3600000
+12 accepted-setup-start 3600000
+13 accepted-setup-completed 3600000
+14 accepted-setup-start 3600000
+15 accepted-setup-completed 3600000
+16 accepted-setup-start 3600000
+17 accepted-setup-completed 3600000
+18 accepted-setup-start 3600000
+19 accepted-setup-completed 3600000
+20 accepted-setup-start 3600000
+21 accepted-setup-completed 3600000
+22 restore-start 3600000
+23 restore-completed 3600000
+24 accepted-setup-start 3600000
+25 accepted-setup-completed 3600000
+26 workload-actions-completed 3600000
+27 identity-actions-start 3600000
+28 runtime-setup-start 3600000
+29 runtime-setup-completed 3600000
+30 restore-start 3600000
+31 restore-completed 3600000
+32 runtime-setup-start 3600000
+33 runtime-setup-completed 3600000
+34 runtime-setup-start 3600000
+35 runtime-setup-completed 3600000
+36 restore-start 3600000
+37 restore-completed 3600000
+38 runtime-setup-start 3600000
+39 runtime-setup-completed 3600000
+40 runtime-setup-start 3600000
+41 runtime-setup-completed 3600000
+42 runtime-setup-start 3600000
+43 runtime-setup-completed 3600000
+44 runtime-setup-start 3600000
+45 runtime-setup-completed 3600000
+46 runtime-setup-start 3600000
+47 runtime-setup-completed 3600000
+48 identity-actions-completed 3600000
+49 runtime-auth-start 3600000
+50 runtime-auth-completed 3600000
+51 runtime-final-revoke-start 3600000
+52 runtime-final-revoke-completed 3600000
+53 runtime-final-history-start 3600000
+54 runtime-final-history-completed 3600000
+55 runtime-final-authorization-start 3600000
+56 runtime-final-authorization-completed 3600000
+57 runtime-candidate-dispose-start 3600000
+58 runtime-candidate-dispose-completed 3600000
+59 initial-delivery-start 3600000
+60 delivery-provenance-start 3600000
+61 delivery-provenance-completed 3600000
+62 delivery-pod-start 3600000
+63 delivery-pod-completed 3600000
+64 delivery-token-start 3600000
+65 delivery-token-completed 3600000
+66 delivery-host-first-start 3600000
+67 delivery-host-first-built 3600000
+68 delivery-host-first-credential-ready 3600000
+69 delivery-host-first-started 3600000
+70 delivery-first-request-start 3600000
+71 delivery-first-request-completed 3600000
+72 delivery-after-state-start 3600000
+73 delivery-after-state-completed 3600000
+74 delivery-result-check-start 3600000
+75 delivery-result-check-completed 3600000
+76 delivery-review-refusal-start 3600000
+77 delivery-review-refusal-completed 3600000
+78 delivery-review-republish-start 3600000
+79 delivery-review-republish-completed 3600000
+80 delivery-authority-call-start 3600000
+81 delivery-authority-call-completed 3600000
+82 delivery-authority-refusal-start 3600000
+83 delivery-authority-refusal-completed 3600000
+84 delivery-authority-republish-start 3600000
+85 delivery-authority-republish-completed 3600000
+86 delivery-startup-start 3600000
+87 startup-pod-start 3600000
+88 startup-pod-completed 3600000
+89 startup-token-start 3600000
+90 startup-token-completed 3600000
+91 startup-file-start 3600000
+92 startup-file-completed 3600000
+93 startup-fingerprints-start 3600000
+94 startup-fingerprints-completed 3600000
+95 startup-before-state-start 3600000
+96 startup-before-state-completed 3600000
+97 startup-first-fetch-start 3600000
+98 startup-first-fetch-failed 3600000
+99 startup-pod-cleanup-start 3600000
+100 startup-pod-cleanup-completed 3600000
+101 startup-directory-cleanup-start 3600000
+102 startup-directory-cleanup-completed 3600000
+103 delivery-startup-failed 3600000
+104 delivery-host-first-dispose-start 3600000
+105 delivery-host-dispose-start 3600000
+106 delivery-host-dispose-completed 3600000
+107 delivery-host-first-dispose-completed 3600000
+108 delivery-pod-cleanup-start 3600000
+109 delivery-pod-cleanup-completed 3600000
+110 runtime-candidate-dispose-start 3600000
+111 runtime-candidate-dispose-completed 3600000
+112 inner-cleanup-start 3600000
+113 namespace-cleanup-start 3600000
+114 namespace-absence-confirmed 3600000
+115 catalog-dispose-start 3600000
+116 catalog-dispose-completed 3600000
+117 inner-cleanup-completed 3600000
+'@
+    $cancellationValid=$cancellationValid.Replace("`r`n","`n")+"`n"
+    foreach($case in @(
+        @{Name='N';Text=$normal;Count=214;Bytes=8344;Hash='61082729674b86c6c63b8f73c72fd1b7b1c3f9055a4f03f76ccb06865bca5539';Status='valid'},
+        @{Name='E';Text=$exceptional;Count=215;Bytes=8376;Hash='f99aa3759ec5855e7884a3532417fc055a9657f334c76a742e042536577e2213';Status='invalid'},
+        @{Name='C';Text=$cancellation;Count=118;Bytes=4328;Hash='daa75b9bb0c99fbe921f538ac5012138288459a2c9ac98ab3a0c051648bcefa7';Status='invalid'},
+        @{Name='C-valid';Text=$cancellationValid;Count=117;Bytes=4296;Hash='899f84814e5f94dd62cc67df9ffe72f58698eb2a74d13be8dd8d4f39dbe6d0ae';Status='valid'}
+    )){
+        $wire=[Text.Encoding]::ASCII.GetBytes($case.Text)
+        $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($wire)).ToLowerInvariant()
+        if($wire.Length -ne $case.Bytes -or ($case.Text.Split("`n").Length-1) -ne $case.Count -or $hash -cne $case.Hash){throw ('Frozen transcript changed: '+$case.Name)}
+        [IO.File]::WriteAllBytes($journal,$wire)
+        $parsed=Read-QualificationJournal $PrivateDirectory
+        $output=@(Format-QualificationJournal $parsed)
+        if($parsed.Status -cne $case.Status){throw ('Caller transcript classification: '+$case.Name+' expected '+$case.Status+' actual '+$parsed.Status)}
+        if($parsed.Status -ceq 'valid' -and $parsed.Records.Count -ne $case.Count){throw 'Validated caller records lost'}
+        if($output -match '^PASS |^Harness: PASS$|protected-'){throw 'Caller progress became gate success or leaked payload'}
+        if($parsed.Status -ceq 'invalid' -and ($parsed.Records.Count -ne 0 -or 'Diagnostic inner namespace: unknown' -cnotin $output -or 'Diagnostic inner catalog: unknown' -cnotin $output)){throw 'Invalid complete contradiction was salvaged'}
+        Write-Output ('PASS frozen caller transcript '+$case.Name+' (synthetic)')
+    }
+    $normalLines=$normal.TrimEnd("`n").Split("`n")
+    $prefix=($normalLines[0..96] -join "`n")+"`n"
+    foreach($case in @(
+        @{Text=($prefix+'98 startup-fi');Status='partial-prefix';Records=97},
+        @{Text=($prefix+"98 startup-fi`n");Status='invalid';Records=0},
+        @{Text=($prefix.Replace('1 durable-entry','1 protected-sentinel')+'98 startup-fi');Status='invalid';Records=0},
+        @{Text=($prefix+'98 protected-final-sentinel');Status='partial-prefix';Records=97},
+        @{Text=($prefix+"98 startup-first-fetch-completed 3600000`n99 startup-first-fetch-failed 3600000`n");Status='invalid';Records=0},
+        @{Text=$normal.Replace('delivery-after-state-start','startup-before-state-start');Status='invalid';Records=0},
+        @{Text=$normal.Replace('delivery-review-republish-completed','delivery-review-refusal-completed');Status='invalid';Records=0},
+        @{Text=$normal.Replace('startup-denial-probe-completed','startup-first-fetch-completed');Status='invalid';Records=0}
+    )){
+        [IO.File]::WriteAllText($journal,$case.Text,[Text.UTF8Encoding]::new($false))
+        $parsed=Read-QualificationJournal $PrivateDirectory
+        $output=@(Format-QualificationJournal $parsed)
+        if($parsed.Status -cne $case.Status -or $parsed.Records.Count -ne $case.Records -or $output -match 'protected-|^PASS |^Harness: PASS$'){throw 'Partial prefix, complete-record/context rejection or privacy changed'}
+        if($case.Status -ceq 'partial-prefix' -and ('Diagnostic journal incomplete: final unterminated fragment discarded; FAILURE' -cnotin $output -or 'Diagnostic progress: 97 startup-first-fetch-start 3600000' -cnotin $output)){throw 'Torn fragment prefix was lost or promoted to success'}
+        if('Diagnostic inner namespace: unknown' -cnotin $output -or 'Diagnostic inner catalog: unknown' -cnotin $output){throw 'Partial or invalid journal claimed cleanup'}
+    }
+    # Caller cancellation reaches independent cleanup; a late server terminal emits nothing.
+    $callerIds=@($cancellationValid.TrimEnd("`n").Split("`n") | ForEach-Object {($_ -split ' ')[1]})
+    if('startup-first-fetch-failed' -cnotin $callerIds -or 'startup-directory-cleanup-completed' -cnotin $callerIds -or 'delivery-host-dispose-completed' -cnotin $callerIds){throw 'Cancellation cleanup control inventory changed'}
+    # A failed stop still enters disposal; a failed Pod cleanup still enters directory cleanup.
+    foreach($text in @(
+        $normal.Replace('delivery-host-stop-completed','delivery-host-stop-failed'),
+        $cancellationValid.Replace('startup-pod-cleanup-completed','startup-pod-cleanup-failed')
+    )){
+        # Stop failure cannot continue to restart or later body work: retain only reachable cleanup.
+        if($text -cmatch 'delivery-host-stop-failed'){
+            $ids=@($text.TrimEnd("`n").Split("`n") | ForEach-Object {($_ -split ' ')[1]})
+            $cut=[Array]::IndexOf($ids,'delivery-host-first-dispose-completed')
+            $ids=$ids[0..$cut]+@('delivery-pod-cleanup-start','delivery-pod-cleanup-completed','inner-cleanup-start','namespace-cleanup-start','namespace-absence-confirmed','catalog-dispose-start','catalog-dispose-completed','inner-cleanup-completed')
+            $text=(@(for($i=0;$i -lt $ids.Count;$i++){($i+1).ToString()+' '+$ids[$i]+' 3600000'}) -join "`n")+"`n"
+        }
+        [IO.File]::WriteAllText($journal,$text)
+        if((Read-QualificationJournal $PrivateDirectory).Status -cne 'valid'){throw 'Independent cleanup after caller failure rejected'}
+    }
+    [IO.File]::WriteAllBytes($journal,[byte[]](49,32,100,117,114,97,98,108,101,45,101,110,116,114,121,32,48,10,255))
+    if((Read-QualificationJournal $PrivateDirectory).Status -cne 'invalid'){throw 'Non-ASCII torn fragment accepted'}
+    # Compile the actual journal source in an isolated control assembly; no cluster or Host runs.
+    $writerSource=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '../tools/Haby.Kubernetes.Qualification/QualificationDiagnosticJournal.cs'))
+    $deliverySource=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '../tools/Haby.Kubernetes.Qualification/RuntimeDeliveryCases.cs'))
+    $bindings=@([regex]::Matches($writerSource,'QualificationMilestone\.([A-Za-z]+) => "((?:delivery|startup)-[a-z-]+)"') | Where-Object {$_.Groups[2].Value -cmatch '^(?:delivery-(?:after-state|result-check|review-refusal|review-republish|authority-call|authority-refusal|authority-republish|startup|host-stop|host-dispose|catalog-verify)|startup-(?:pod|token|file|fingerprints|before-state|first-fetch|after-state|restart-fetch|revoke|denial-probe|republish|pod-cleanup|directory-cleanup))-(?:start|completed|failed)$'})
+    if($bindings.Count -ne 72 -or ([regex]::Matches($deliverySource,'diagnostics\?\.Begin\(')).Count -ne 24){throw 'Closed writer/caller manifest changed'}
+    $ids=@($bindings | ForEach-Object {$_.Groups[2].Value})
+    $manifestHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::ASCII.GetBytes(($ids -join "`n")+"`n"))).ToLowerInvariant()
+    if($manifestHash -cne '1d871312d1ba0cc7c3fde9a60964b250454176605f0426fd80fb0c86b7d3aaf0'){throw 'Closed 72-ID manifest digest changed'}
+    foreach($range in @(
+        @('        async Task Revoke()','        void Check('),
+        @('                        afterAuthority = async () =>','                        var startup = new RuntimeStartupClient(client);'),
+        @('    private sealed class ReviewBoundary','    private sealed class ReadBoundary'),
+        @('    private sealed class ReadBoundary',$null)
+    )){
+        $start=$deliverySource.IndexOf($range[0],[StringComparison]::Ordinal)
+        $end=if($range[1]){$deliverySource.IndexOf($range[1],$start,[StringComparison]::Ordinal)}else{$deliverySource.Length}
+        if($start -lt 0 -or $end -le $start -or $deliverySource.Substring($start,$end-$start) -cmatch 'diagnostics|QualificationMilestone|Progress'){throw 'Server-hook diagnostic writer introduced'}
+    }
+    $controlSource=@'
+public static class DiagnosticWriterControls
+{
+    public static void Run(string directory, string[] names)
+    {
+        string path = Path.Combine(directory, "diagnostic-progress.txt");
+        File.WriteAllText(path, "");
+        using (var journal = new QualificationDiagnosticJournal(directory))
+        {
+            foreach (string name in names) journal.Mark(Enum.Parse<QualificationMilestone>(name));
+            if (journal.Failed) throw new InvalidOperationException("Closed writer IDs failed.");
+        }
+        if (File.ReadAllLines(path).Length != 72) throw new InvalidOperationException("Closed ID inventory lost.");
+        File.WriteAllText(path, "");
+        using (var journal = new QualificationDiagnosticJournal(directory))
+        {
+            using (var span = journal.Begin(QualificationMilestone.DeliveryAfterStateStart, QualificationMilestone.DeliveryAfterStateCompleted, QualificationMilestone.DeliveryAfterStateFailed))
+            { span.Complete(); span.Complete(); }
+            var primary = new OperationCanceledException("protected-writer-sentinel");
+            try
+            {
+                using var span = journal.Begin(QualificationMilestone.StartupFirstFetchStart, QualificationMilestone.StartupFirstFetchCompleted, QualificationMilestone.StartupFirstFetchFailed);
+                throw primary;
+            }
+            catch (OperationCanceledException caught)
+            { if (!ReferenceEquals(primary, caught)) throw new InvalidOperationException("Primary replaced."); }
+            using (var cleanup = journal.Begin(QualificationMilestone.StartupDirectoryCleanupStart, QualificationMilestone.StartupDirectoryCleanupCompleted, QualificationMilestone.StartupDirectoryCleanupFailed))
+            { cleanup.Complete(); }
+            if (journal.Failed) throw new InvalidOperationException("Caller scope writer failed.");
+        }
+        string[] records = File.ReadAllLines(path);
+        string[] expected = { "delivery-after-state-start", "delivery-after-state-completed", "startup-first-fetch-start", "startup-first-fetch-failed", "startup-directory-cleanup-start", "startup-directory-cleanup-completed" };
+        if (records.Length != expected.Length) throw new InvalidOperationException("Caller terminals repeated or lost.");
+        for (int i = 0; i < records.Length; i++)
+            if (records[i].Split(' ')[1] != expected[i]) throw new InvalidOperationException("Caller terminal order changed.");
+        if (File.ReadAllText(path).Contains("protected-")) throw new InvalidOperationException("Exception payload leaked.");
+        File.WriteAllText(path, "");
+        using (var journal = new QualificationDiagnosticJournal(directory))
+        {
+            for (int i = 0; i < 256; i++) journal.Mark(QualificationMilestone.DurableEntry);
+            if (journal.Failed) throw new InvalidOperationException("Writer cap decreased.");
+            journal.Mark(QualificationMilestone.DurableEntry);
+            if (!journal.Failed) throw new InvalidOperationException("Writer cap increased.");
+        }
+        if (File.ReadAllLines(path).Length != 256 || new FileInfo(path).Length > 16384)
+            throw new InvalidOperationException("Writer overflow retained extra records.");
+    }
+}
+'@
+    Add-Type -TypeDefinition ("using System;`nusing System.IO;`n"+$writerSource+"`n"+$controlSource) -ErrorAction Stop
+    [Haby.Kubernetes.Qualification.DiagnosticWriterControls]::Run($PrivateDirectory,[string[]]@($bindings | ForEach-Object {$_.Groups[1].Value}))
+    Write-Output 'PASS actual closed-ID writer, terminal-once cancellation/cleanup, primary exception, 256-record cap and no hook writers'
+
+    Write-Output 'PASS caller cancellation, opaque temporary hook fault, expected denial, independent cleanup and torn-prefix controls (synthetic)'
+}
+
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
-foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary')){
+foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')){
     $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@();CopyCalls=0}
     $syntheticTimeout=$null
     $copyTimeout=if($scenario -ceq 'copy-timeout'){New-QualificationProcessFailure 'command-deadline' 42L}else{$null}
-    if($scenario -eq 'harness-timeout'){
+    if($scenario -in @('harness-timeout','journal-partial-timeout')){
         $syntheticTimeout=New-QualificationProcessFailure 'command-deadline' 180001
         $syntheticTimeoutDiagnostic=Get-QualificationProcessDiagnostic $syntheticTimeout
         if($syntheticTimeout.GetType() -ne [TimeoutException] -or $syntheticTimeoutDiagnostic.Kind -cne 'command-deadline' -or
@@ -25,11 +835,11 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
                 if($scenario -eq 'elapsed-malformed'){$result.ElapsedMilliseconds='protected-raw-sentinel'}
                 if($scenario -eq 'elapsed-out-of-range'){$result.ElapsedMilliseconds=3600001L}
             }
-            if($arguments[0] -eq 'run' -and $scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary')){
+            if($arguments[0] -eq 'run' -and $scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')){
                 $path=Join-Path $state.Private 'diagnostic-progress.txt'
-                [IO.File]::WriteAllText($path, $(if($scenario -like 'journal-invalid*'){ "1 protected-JWT-config-sentinel 0`n" }else{ "1 durable-entry 0`n2 catalog-init-start 10`n" }))
-                if($scenario -eq 'harness-timeout'){throw $syntheticTimeout}
-                if($scenario -eq 'journal-invalid-primary'){$result.ExitCode=17}
+                [IO.File]::WriteAllText($path, $(if($scenario -like 'journal-invalid*'){ "1 protected-JWT-config-sentinel 0`n" }elseif($scenario -like 'journal-partial*'){ "1 durable-entry 0`n2 catalog-init-start 10`n3 protected-fragment" }else{ "1 durable-entry 0`n2 catalog-init-start 10`n" }))
+                if($scenario -in @('harness-timeout','journal-partial-timeout')){throw $syntheticTimeout}
+                if($scenario -cin @('journal-invalid-primary','journal-partial-primary')){$result.ExitCode=17}
             }
             $result.Output='synthetic-sdk/harness';return $result
         }
@@ -62,7 +872,7 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     $evidence=Join-Path $PSScriptRoot ("../.artifacts/regression-"+[Guid]::NewGuid().ToString("N")+".txt")
     if($scenario -eq 'evidence-failure'){$evidence=((Get-Process -Id $PID).Path+[IO.Path]::DirectorySeparatorChar+[Guid]::NewGuid().ToString('N'))}
     $caught=$false
-    $diagnosticMode=$scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary')
+    $diagnosticMode=$scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')
     try{& $launcher -Runtime $runtime -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence -DurableActions:$diagnosticMode | Out-Null}catch{$caught=$true}
     if($caught -ne ($scenario -cnotin @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range'))){throw "Wrong exit: $scenario"}
     if($scenario -cin @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range')){
@@ -94,7 +904,7 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     if($diagnosticMode){
         $lines=Get-Content $evidence
         if($lines -match 'protected-|JWT|config-sentinel'){throw 'Protected journal content leaked'}
-        if($scenario -eq 'harness-timeout'){
+        if($scenario -in @('harness-timeout','journal-partial-timeout')){
             $hasPrimaryFailureRecord=-not ('Failure: stage=harness; reason=command; category=TimeoutException' -notin $lines)
             $hasProcessKindElapsedRecord=-not ('Diagnostic process: command-deadline; elapsed-ms=180001' -notin $lines)
             $hasJournalProgressRecord=-not ('Diagnostic progress: 2 catalog-init-start 10' -notin $lines)
@@ -133,8 +943,9 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
                 throw 'Primary timeout/progress/unknown cleanup not retained'
             }
         }
+        if($scenario -like 'journal-partial*' -and ('Diagnostic journal: partial-prefix' -cnotin $lines -or 'Diagnostic journal incomplete: final unterminated fragment discarded; FAILURE' -cnotin $lines -or 'Diagnostic progress: 2 catalog-init-start 10' -cnotin $lines -or !$caught)){throw 'Partial journal became valid/success or lost its validated prefix'}
         if($scenario -like 'journal-invalid*' -and 'Diagnostic journal: invalid' -notin $lines){throw 'Diagnostic failure missing'}
-        if($scenario -eq 'journal-invalid-primary' -and 'Failure: stage=harness; reason=nonzero; category=RuntimeException' -notin $lines){throw 'Diagnostic failure replaced primary harness failure'}
+        if($scenario -cin @('journal-invalid-primary','journal-partial-primary') -and 'Failure: stage=harness; reason=nonzero; category=RuntimeException' -notin $lines){throw 'Diagnostic failure replaced primary harness failure'}
     }
     if($scenario -in @('partial-launch','acl-failure','copy-failure')){
         $idLine=Get-Content $evidence | Where-Object {$_ -like 'Evidence ID: *'}
@@ -351,7 +1162,7 @@ try{
         if($text -notmatch 'catalog-dispose-completed' -and ('Diagnostic inner namespace: unknown' -notin $output -or 'Diagnostic inner catalog: unknown' -notin $output)){throw 'Incomplete phase claimed cleanup'}
     }
     foreach($case in @(
-        @{Text="1 durable-entry 0`n2 catalog-init-start 10";Status='partial'},
+        @{Text="1 durable-entry 0`n2 catalog-init-start 10";Status='partial-prefix'},
         @{Text="1 durable-entry 0`n3 catalog-init-start 10`n";Status='invalid'},
         @{Text="1 durable-entry 0`n2 catalog-dispose-completed 10`n";Status='invalid'},
         @{Text="1 durable-entry 0`n2 catalog-init-start 10`n3 catalog-init-completed 20`n4 namespace-create-start 30`n5 namespace-create-completed 40`n6 namespace-cleanup-start 50`n7 catalog-dispose-start 60`n8 namespace-absence-confirmed 70`n";Status='invalid'},
@@ -384,6 +1195,7 @@ try{
         if($parsed.Status -cne $case.Status -or $output -match 'protected-|JWT|SQL|config|argument|PASS'){throw 'Unsafe/incorrect rejected journal evidence'}
         if($output -notmatch 'namespace: unknown' -or $output -notmatch 'catalog: unknown'){throw 'Invalid journal claimed inner cleanup'}
     }
+    Test-QualificationCallerJournalControls $journalRoot
     Remove-Item -LiteralPath $journal
     $outside=Join-Path $journalRoot 'outside.txt'
     [IO.File]::WriteAllText($outside,'protected-link-sentinel')

@@ -17,6 +17,105 @@ function Initialize-QualificationJournal([string]$PrivateDirectory) {
     $stream=[IO.File]::Open($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     $stream.Dispose()
 }
+# Caller-only spans have finite lexical contexts. Server hooks emit no records.
+function Test-QualificationCallerSequence([string[]]$Ids,[string[]]$Stems) {
+    $context=0; $hostRole=''; $requestCompleted=$false; $disposing=$false; $disposed=$false
+    $body=@(); $cursor=0; $active=''; $failed=$false; $enhanced=$false; $disposeOutcome=''
+    $startupActive=''; $startupCursor=0; $startupFailed=$false; $startupCleaning=$false
+    $podCreated=$false; $podCleaned=$false; $directoryCleaned=$false; $catalogSeen=$false
+    $children=@('startup-pod','startup-token','startup-file','startup-fingerprints','startup-before-state',
+        'startup-first-fetch','startup-after-state','startup-restart-fetch','startup-revoke','startup-denial-probe','startup-republish')
+    $counts=@{}; $outerCleanup=$false
+    foreach($id in $Ids){
+        $stem=''; $terminal=''
+        if($id -cmatch '^(.*)-(start|completed|failed)$' -and $Matches[1] -cin $Stems){$stem=$Matches[1];$terminal=$Matches[2]}
+        if(!$stem){
+            if($active -or $startupActive){return $false}
+            if($failed -and $id -cin @('runtime-auth-start','initial-delivery-start','mixed-delivery-start')){return $false}
+            if($id -cin @('inner-cleanup-start','namespace-cleanup-start','catalog-dispose-start')){$outerCleanup=$true}
+            switch -CaseSensitive ($id){
+                'initial-delivery-start'{$context=1;$catalogSeen=$false}
+                'mixed-delivery-start'{$context=2;$catalogSeen=$false}
+                {$_ -cin @('delivery-host-first-start','delivery-host-restart-start')}{
+                    if($failed){return $false}
+                    $hostRole=if($id -ceq 'delivery-host-first-start'){'first'}else{'restart'}
+                    $requestCompleted=$false;$disposing=$false;$disposed=$false;$cursor=0;$enhanced=$false;$disposeOutcome=''
+                    $body=@('delivery-after-state','delivery-result-check')
+                    if($hostRole -ceq 'first'){
+                        $body+=@('delivery-review-refusal','delivery-review-republish','delivery-authority-call','delivery-authority-refusal','delivery-authority-republish')
+                        if($context -eq 1){$body+=@('delivery-startup')}
+                    }
+                }
+                'delivery-first-request-completed'{$requestCompleted=$true}
+                {$_ -cin @('delivery-host-first-dispose-start','delivery-host-restart-dispose-start')}{$disposing=$true}
+                {$_ -cin @('delivery-host-first-dispose-completed','delivery-host-restart-dispose-completed')}{
+                    if($enhanced -and $disposeOutcome -cne 'completed'){return $false}
+                    $disposed=$true
+                }
+                'delivery-pod-cleanup-start'{$hostRole=''}
+            }
+            continue
+        }
+        if($context -eq 0 -or $outerCleanup){return $false}
+        if($terminal -ceq 'start'){
+            if(!$counts.ContainsKey($stem)){$counts[$stem]=0}
+            $counts[$stem]++
+            $maximum=if($stem.StartsWith('startup-',[StringComparison]::Ordinal) -or $stem -ceq 'delivery-startup'){1}
+                elseif($stem -cin @('delivery-after-state','delivery-result-check','delivery-host-stop','delivery-host-dispose')){4}else{2}
+            if($counts[$stem] -gt $maximum){return $false}
+        }
+        if($stem.StartsWith('startup-',[StringComparison]::Ordinal)){
+            if($active -cne 'delivery-startup' -or $context -ne 1 -or $hostRole -cne 'first'){return $false}
+            if($terminal -ceq 'start'){
+                if($startupActive){return $false}
+                if($stem -ceq 'startup-pod-cleanup'){
+                    if(!$podCreated -or $podCleaned -or $directoryCleaned){return $false}
+                    $startupCleaning=$true
+                }elseif($stem -ceq 'startup-directory-cleanup'){
+                    if(($podCreated -and !$podCleaned) -or $directoryCleaned){return $false}
+                    $startupCleaning=$true
+                }elseif($startupFailed -or $startupCleaning -or $startupCursor -ge $children.Count -or $stem -cne $children[$startupCursor]){return $false}
+                $startupActive=$stem
+            }else{
+                if($startupActive -cne $stem){return $false}
+                $startupActive=''
+                if($stem -ceq 'startup-pod-cleanup'){$podCleaned=$true}
+                elseif($stem -ceq 'startup-directory-cleanup'){$directoryCleaned=$true}
+                else{$startupCursor++}
+                if($stem -ceq 'startup-pod' -and $terminal -ceq 'completed'){$podCreated=$true}
+                if($terminal -ceq 'failed'){$startupFailed=$true}
+            }
+            continue
+        }
+        if($terminal -ceq 'start'){
+            if($active){return $false}
+            if($stem -ceq 'delivery-catalog-verify'){
+                if($hostRole -cne 'restart' -or !$disposed -or $failed -or $catalogSeen){return $false}
+                $catalogSeen=$true
+            }elseif($stem -ceq 'delivery-host-dispose'){
+                if(!$hostRole -or !$disposing -or $disposed -or $disposeOutcome){return $false}
+            }elseif($stem -ceq 'delivery-host-stop'){
+                if(!$hostRole -or !$disposing -or $disposed -or $failed -or ($enhanced -and $cursor -ne $body.Count)){return $false}
+            }else{
+                if(!$hostRole -or !$requestCompleted -or $disposing -or $failed -or $cursor -ge $body.Count -or $stem -cne $body[$cursor]){return $false}
+                if($stem -ceq 'delivery-startup'){
+                    $startupCursor=0;$startupFailed=$false;$startupCleaning=$false;$podCreated=$false;$podCleaned=$false;$directoryCleaned=$false
+                }
+            }
+            $active=$stem;$enhanced=$true
+        }else{
+            if($active -cne $stem -or $startupActive){return $false}
+            if($stem -ceq 'delivery-startup' -and $terminal -ceq 'completed' -and
+                ($startupFailed -or $startupCursor -ne $children.Count -or !$podCleaned -or !$directoryCleaned)){return $false}
+            $active=''
+            if($stem -ceq 'delivery-host-dispose'){$disposeOutcome=$terminal}
+            elseif($stem -cnotin @('delivery-host-stop','delivery-catalog-verify')){$cursor++}
+            if($terminal -ceq 'failed'){$failed=$true}
+        }
+    }
+    return $true
+}
+
 function Read-QualificationJournal([string]$PrivateDirectory) {
     function Result([string]$Status,[string[]]$Records=@()){return [pscustomobject]@{Status=$Status;Records=$Records}}
     try{$path=Get-QualificationJournalPath $PrivateDirectory}catch{return Result 'path-refused'}
@@ -30,11 +129,12 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             if($length -gt 16384){return Result 'overflow'}
         }finally{$stream.Dispose()}
         if($length -eq 0){return Result 'empty'}
-        if($bytes[$length-1] -ne 10){return Result 'partial'}
         # ASCII only; replacement decoding must not turn malformed bytes into accepted IDs.
         for($i=0;$i -lt $length;$i++){if($bytes[$i] -gt 127 -or $bytes[$i] -eq 0){return Result 'invalid'}}
+        $partial=$bytes[$length-1] -ne 10
         $lines=[Text.Encoding]::ASCII.GetString($bytes,0,$length).Split("`n")
-        if($lines.Length-1 -gt 256){return Result 'overflow'}
+        if($lines.Length-1+[int]$partial -gt 256){return Result 'overflow'}
+        if($partial -and $lines[-1].Length -gt 61){return Result 'invalid'}
         $requires=@{
             'durable-entry'='';'catalog-init-start'='durable-entry';'catalog-init-completed'='catalog-init-start'
             'namespace-create-start'='catalog-init-completed';'namespace-create-completed'='namespace-create-start'
@@ -70,6 +170,16 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             'namespace-cleanup-start'='namespace-create-completed';'namespace-absence-confirmed'='namespace-cleanup-start'
             'catalog-dispose-start'='catalog-init-completed';'catalog-dispose-completed'='catalog-dispose-start'
         }
+        $callerStems=@(
+            'delivery-after-state','delivery-result-check','delivery-review-refusal','delivery-review-republish',
+            'delivery-authority-call','delivery-authority-refusal','delivery-authority-republish','delivery-startup',
+            'delivery-host-stop','delivery-host-dispose','delivery-catalog-verify','startup-pod',
+            'startup-token','startup-file','startup-fingerprints','startup-before-state',
+            'startup-first-fetch','startup-after-state','startup-restart-fetch','startup-revoke',
+            'startup-denial-probe','startup-republish','startup-pod-cleanup','startup-directory-cleanup'
+        )
+        $callerIds=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach($stem in $callerStems){foreach($suffix in @('start','completed','failed')){$callerIds.Add($stem+'-'+$suffix) | Out-Null}}
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $records=[Collections.Generic.List[string]]::new()
         $previousElapsed=0L; $authStarts=0; $authCompleted=0; $authOpen=$false; $postAuthPhase=0; $candidateDisposals=0
@@ -87,6 +197,7 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
             $elapsed=[long]$Matches[3]
             if($elapsed -gt 3600000 -or $elapsed -lt $previousElapsed){return Result 'invalid'}
             $previousElapsed=$elapsed
+            if($callerIds.Contains($id)){$records.Add($line);continue}
             if(!$requires.ContainsKey($id) -or ($requires[$id] -and !$seen.Contains($requires[$id])) -or
                 ($seen.Contains($id) -and $id -cnotin $repeat) -or
                 ($i -eq 0 -and $id -cne 'durable-entry')){return Result 'invalid'}
@@ -187,12 +298,16 @@ function Read-QualificationJournal([string]$PrivateDirectory) {
                     (!$seen.Contains('namespace-cleanup-failed') -and !$seen.Contains('catalog-dispose-failed'))))){return Result 'invalid'}
             $seen.Add($id) | Out-Null; $records.Add($line)
         }
+        $ids=@($records | ForEach-Object {($_ -split ' ')[1]})
+        if(!(Test-QualificationCallerSequence $ids $callerStems)){return Result 'invalid'}
+        if($partial){return Result 'partial-prefix' $records.ToArray()}
         return Result 'valid' $records.ToArray()
     }catch{return Result 'io-failure'}
 }
 function Format-QualificationJournal($Journal) {
     'Diagnostic journal: '+$Journal.Status
-    if($Journal.Status -ceq 'valid'){
+    if($Journal.Status -cin @('valid','partial-prefix')){
+        if($Journal.Status -ceq 'partial-prefix'){'Diagnostic journal incomplete: final unterminated fragment discarded; FAILURE'}
         'Diagnostic managed elapsed origin: journal-initialization; excludes-build-startup; clock=monotonic'
         foreach($line in $Journal.Records){'Diagnostic progress: '+$line}
     }

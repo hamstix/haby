@@ -7,6 +7,30 @@ namespace Haby.Kubernetes.Qualification;
 internal enum QualificationMilestone
 {
     DeliveryProvenanceStart, DeliveryProvenanceCompleted, DeliveryPodStart, DeliveryPodCompleted, DeliveryTokenStart, DeliveryTokenCompleted, DeliveryHostFirstStart, DeliveryHostFirstStarted, DeliveryHostFirstDisposeStart, DeliveryHostFirstDisposeCompleted, DeliveryHostRestartStart, DeliveryHostRestartStarted, DeliveryHostRestartDisposeStart, DeliveryHostRestartDisposeCompleted, DeliveryFirstRequestStart, DeliveryFirstRequestCompleted, DeliveryPodCleanupStart, DeliveryPodCleanupCompleted, DeliveryPodCleanupFailed,
+    DeliveryAfterStateStart, DeliveryAfterStateCompleted, DeliveryAfterStateFailed,
+    DeliveryResultCheckStart, DeliveryResultCheckCompleted, DeliveryResultCheckFailed,
+    DeliveryReviewRefusalStart, DeliveryReviewRefusalCompleted, DeliveryReviewRefusalFailed,
+    DeliveryReviewRepublishStart, DeliveryReviewRepublishCompleted, DeliveryReviewRepublishFailed,
+    DeliveryAuthorityCallStart, DeliveryAuthorityCallCompleted, DeliveryAuthorityCallFailed,
+    DeliveryAuthorityRefusalStart, DeliveryAuthorityRefusalCompleted, DeliveryAuthorityRefusalFailed,
+    DeliveryAuthorityRepublishStart, DeliveryAuthorityRepublishCompleted, DeliveryAuthorityRepublishFailed,
+    DeliveryStartupStart, DeliveryStartupCompleted, DeliveryStartupFailed,
+    DeliveryHostStopStart, DeliveryHostStopCompleted, DeliveryHostStopFailed,
+    DeliveryHostDisposeStart, DeliveryHostDisposeCompleted, DeliveryHostDisposeFailed,
+    DeliveryCatalogVerifyStart, DeliveryCatalogVerifyCompleted, DeliveryCatalogVerifyFailed,
+    StartupPodStart, StartupPodCompleted, StartupPodFailed,
+    StartupTokenStart, StartupTokenCompleted, StartupTokenFailed,
+    StartupFileStart, StartupFileCompleted, StartupFileFailed,
+    StartupFingerprintsStart, StartupFingerprintsCompleted, StartupFingerprintsFailed,
+    StartupBeforeStateStart, StartupBeforeStateCompleted, StartupBeforeStateFailed,
+    StartupFirstFetchStart, StartupFirstFetchCompleted, StartupFirstFetchFailed,
+    StartupAfterStateStart, StartupAfterStateCompleted, StartupAfterStateFailed,
+    StartupRestartFetchStart, StartupRestartFetchCompleted, StartupRestartFetchFailed,
+    StartupRevokeStart, StartupRevokeCompleted, StartupRevokeFailed,
+    StartupDenialProbeStart, StartupDenialProbeCompleted, StartupDenialProbeFailed,
+    StartupRepublishStart, StartupRepublishCompleted, StartupRepublishFailed,
+    StartupPodCleanupStart, StartupPodCleanupCompleted, StartupPodCleanupFailed,
+    StartupDirectoryCleanupStart, StartupDirectoryCleanupCompleted, StartupDirectoryCleanupFailed,
     DurableEntry, CatalogInitStart, CatalogInitCompleted, NamespaceCreateStart, NamespaceCreateCompleted,
     DeliveryHostFirstBuilt, DeliveryHostFirstCredentialReady, DeliveryHostRestartBuilt, DeliveryHostRestartCredentialReady,
     WorkloadActionsStart, WorkloadActionsCompleted, AcceptedSetupStart, AcceptedSetupCompleted, RestoreStart, RestoreCompleted, IdentityActionsStart, IdentityActionsCompleted, RuntimeSetupStart, RuntimeSetupCompleted, MixedBaselinePrepared,
@@ -120,6 +144,78 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
                 QualificationMilestone.NamespaceAbsenceConfirmed => "namespace-absence-confirmed",
                 QualificationMilestone.CatalogDisposeStart => "catalog-dispose-start",
                 QualificationMilestone.CatalogDisposeCompleted => "catalog-dispose-completed",
+                QualificationMilestone.DeliveryAfterStateStart => "delivery-after-state-start",
+                QualificationMilestone.DeliveryAfterStateCompleted => "delivery-after-state-completed",
+                QualificationMilestone.DeliveryAfterStateFailed => "delivery-after-state-failed",
+                QualificationMilestone.DeliveryResultCheckStart => "delivery-result-check-start",
+                QualificationMilestone.DeliveryResultCheckCompleted => "delivery-result-check-completed",
+                QualificationMilestone.DeliveryResultCheckFailed => "delivery-result-check-failed",
+                QualificationMilestone.DeliveryReviewRefusalStart => "delivery-review-refusal-start",
+                QualificationMilestone.DeliveryReviewRefusalCompleted => "delivery-review-refusal-completed",
+                QualificationMilestone.DeliveryReviewRefusalFailed => "delivery-review-refusal-failed",
+                QualificationMilestone.DeliveryReviewRepublishStart => "delivery-review-republish-start",
+                QualificationMilestone.DeliveryReviewRepublishCompleted => "delivery-review-republish-completed",
+                QualificationMilestone.DeliveryReviewRepublishFailed => "delivery-review-republish-failed",
+                QualificationMilestone.DeliveryAuthorityCallStart => "delivery-authority-call-start",
+                QualificationMilestone.DeliveryAuthorityCallCompleted => "delivery-authority-call-completed",
+                QualificationMilestone.DeliveryAuthorityCallFailed => "delivery-authority-call-failed",
+                QualificationMilestone.DeliveryAuthorityRefusalStart => "delivery-authority-refusal-start",
+                QualificationMilestone.DeliveryAuthorityRefusalCompleted => "delivery-authority-refusal-completed",
+                QualificationMilestone.DeliveryAuthorityRefusalFailed => "delivery-authority-refusal-failed",
+                QualificationMilestone.DeliveryAuthorityRepublishStart => "delivery-authority-republish-start",
+                QualificationMilestone.DeliveryAuthorityRepublishCompleted => "delivery-authority-republish-completed",
+                QualificationMilestone.DeliveryAuthorityRepublishFailed => "delivery-authority-republish-failed",
+                QualificationMilestone.DeliveryStartupStart => "delivery-startup-start",
+                QualificationMilestone.DeliveryStartupCompleted => "delivery-startup-completed",
+                QualificationMilestone.DeliveryStartupFailed => "delivery-startup-failed",
+                QualificationMilestone.DeliveryHostStopStart => "delivery-host-stop-start",
+                QualificationMilestone.DeliveryHostStopCompleted => "delivery-host-stop-completed",
+                QualificationMilestone.DeliveryHostStopFailed => "delivery-host-stop-failed",
+                QualificationMilestone.DeliveryHostDisposeStart => "delivery-host-dispose-start",
+                QualificationMilestone.DeliveryHostDisposeCompleted => "delivery-host-dispose-completed",
+                QualificationMilestone.DeliveryHostDisposeFailed => "delivery-host-dispose-failed",
+                QualificationMilestone.DeliveryCatalogVerifyStart => "delivery-catalog-verify-start",
+                QualificationMilestone.DeliveryCatalogVerifyCompleted => "delivery-catalog-verify-completed",
+                QualificationMilestone.DeliveryCatalogVerifyFailed => "delivery-catalog-verify-failed",
+                QualificationMilestone.StartupPodStart => "startup-pod-start",
+                QualificationMilestone.StartupPodCompleted => "startup-pod-completed",
+                QualificationMilestone.StartupPodFailed => "startup-pod-failed",
+                QualificationMilestone.StartupTokenStart => "startup-token-start",
+                QualificationMilestone.StartupTokenCompleted => "startup-token-completed",
+                QualificationMilestone.StartupTokenFailed => "startup-token-failed",
+                QualificationMilestone.StartupFileStart => "startup-file-start",
+                QualificationMilestone.StartupFileCompleted => "startup-file-completed",
+                QualificationMilestone.StartupFileFailed => "startup-file-failed",
+                QualificationMilestone.StartupFingerprintsStart => "startup-fingerprints-start",
+                QualificationMilestone.StartupFingerprintsCompleted => "startup-fingerprints-completed",
+                QualificationMilestone.StartupFingerprintsFailed => "startup-fingerprints-failed",
+                QualificationMilestone.StartupBeforeStateStart => "startup-before-state-start",
+                QualificationMilestone.StartupBeforeStateCompleted => "startup-before-state-completed",
+                QualificationMilestone.StartupBeforeStateFailed => "startup-before-state-failed",
+                QualificationMilestone.StartupFirstFetchStart => "startup-first-fetch-start",
+                QualificationMilestone.StartupFirstFetchCompleted => "startup-first-fetch-completed",
+                QualificationMilestone.StartupFirstFetchFailed => "startup-first-fetch-failed",
+                QualificationMilestone.StartupAfterStateStart => "startup-after-state-start",
+                QualificationMilestone.StartupAfterStateCompleted => "startup-after-state-completed",
+                QualificationMilestone.StartupAfterStateFailed => "startup-after-state-failed",
+                QualificationMilestone.StartupRestartFetchStart => "startup-restart-fetch-start",
+                QualificationMilestone.StartupRestartFetchCompleted => "startup-restart-fetch-completed",
+                QualificationMilestone.StartupRestartFetchFailed => "startup-restart-fetch-failed",
+                QualificationMilestone.StartupRevokeStart => "startup-revoke-start",
+                QualificationMilestone.StartupRevokeCompleted => "startup-revoke-completed",
+                QualificationMilestone.StartupRevokeFailed => "startup-revoke-failed",
+                QualificationMilestone.StartupDenialProbeStart => "startup-denial-probe-start",
+                QualificationMilestone.StartupDenialProbeCompleted => "startup-denial-probe-completed",
+                QualificationMilestone.StartupDenialProbeFailed => "startup-denial-probe-failed",
+                QualificationMilestone.StartupRepublishStart => "startup-republish-start",
+                QualificationMilestone.StartupRepublishCompleted => "startup-republish-completed",
+                QualificationMilestone.StartupRepublishFailed => "startup-republish-failed",
+                QualificationMilestone.StartupPodCleanupStart => "startup-pod-cleanup-start",
+                QualificationMilestone.StartupPodCleanupCompleted => "startup-pod-cleanup-completed",
+                QualificationMilestone.StartupPodCleanupFailed => "startup-pod-cleanup-failed",
+                QualificationMilestone.StartupDirectoryCleanupStart => "startup-directory-cleanup-start",
+                QualificationMilestone.StartupDirectoryCleanupCompleted => "startup-directory-cleanup-completed",
+                QualificationMilestone.StartupDirectoryCleanupFailed => "startup-directory-cleanup-failed",
                 _ => throw new InvalidOperationException("Unknown diagnostic milestone.")
             };
             var elapsed = Math.Clamp(managedClock.ElapsedMilliseconds, 0L, 3600000L);
@@ -133,6 +229,31 @@ internal sealed class QualificationDiagnosticJournal : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             Failed = true;
+        }
+    }
+
+    // Caller scopes only: no server callback captures a span or writes a terminal later.
+    internal Progress Begin(QualificationMilestone start, QualificationMilestone completed, QualificationMilestone failed)
+    {
+        Mark(start);
+        return new Progress(this, completed, failed);
+    }
+
+    internal sealed class Progress(QualificationDiagnosticJournal journal, QualificationMilestone completed, QualificationMilestone failed) : IDisposable
+    {
+        private bool terminal;
+
+        internal void Complete()
+        {
+            if (terminal) return;
+            terminal = true;
+            journal.Mark(completed);
+        }
+
+        public void Dispose()
+        {
+            if (!terminal) journal.Mark(failed);
+            terminal = true;
         }
     }
 
