@@ -17,27 +17,99 @@ public static class OperatorHostApplication
     public const string TechnicalActorId = "haby-alpha-operator-host";
 
     public static async Task<WebApplication> BuildMigratedAsync(string[] args,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) => await BuildMigratedCoreAsync(args, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Builds an unstarted Host with trusted additive services registered after stock services.</summary>
+    public static WebApplication BuildComposed(string[] args,
+        Action<IServiceCollection, IConfiguration> configureServices)
     {
-        var app = Build(args);
+        ArgumentNullException.ThrowIfNull(configureServices);
+        return BuildCore(args, configureServices);
+    }
+
+    /// <summary>Builds, validates and migrates an unstarted Host. The caller owns its successful lifecycle.</summary>
+    public static async Task<WebApplication> BuildComposedMigratedAsync(string[] args,
+        Action<IServiceCollection, IConfiguration> configureServices, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(configureServices);
+        return await BuildMigratedCoreAsync(args, configureServices, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<WebApplication> BuildMigratedCoreAsync(string[] args,
+        Action<IServiceCollection, IConfiguration>? configureServices, CancellationToken cancellationToken)
+    {
+        var app = BuildCore(args, configureServices, out var resources);
         try
         {
-            await app.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync(cancellationToken);
+            await app.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync(cancellationToken).ConfigureAwait(false);
             return app;
         }
         catch
         {
-            await app.DisposeAsync();
+            await DisposeFailedAsync(app, resources).ConfigureAwait(false);
             throw;
         }
     }
 
-    public static WebApplication Build(string[] args) => Build(args, null);
+    public static WebApplication Build(string[] args) => BuildCore(args, null);
 
     // Tests use the real composition with deterministic internal fault hooks, never a production setting or RPC.
-    internal static WebApplication Build(string[] args, Action<IServiceCollection>? configureServices)
+    internal static WebApplication Build(string[] args, Action<IServiceCollection>? configureServices) =>
+        BuildCore(args, configureServices is null ? null : (services, _) => configureServices(services));
+
+    private static WebApplication BuildCore(string[] args, Action<IServiceCollection, IConfiguration>? configureServices) =>
+        BuildCore(args, configureServices, out _);
+
+    private static WebApplication BuildCore(string[] args, Action<IServiceCollection, IConfiguration>? configureServices,
+        out HostResources resources)
     {
         var builder = WebApplication.CreateBuilder(args);
+        var ownership = resources = new HostResources(builder.Configuration);
+        WebApplication? app = null;
+        try { return BuildCore(builder, configureServices, ownership, out app); }
+        catch
+        {
+            // This synchronous API must also finish asynchronous disposal. Start cleanup without
+            // the caller's SynchronizationContext, and join it; never leave detached cleanup work.
+            if (app is not null) Task.Run(() => DisposeFailedAsync(app, ownership)).GetAwaiter().GetResult();
+            else ReleaseFailedResources(ownership);
+            throw;
+        }
+    }
+
+    private static async Task DisposeFailedAsync(WebApplication app, HostResources resources)
+    {
+        try { await app.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception) { /* Preserve the original validation/migration failure, without logging secrets. */ }
+        finally { ReleaseFailedResources(resources); }
+    }
+
+    private static void ReleaseFailedResources(HostResources resources)
+    {
+        try { resources.Dispose(); }
+        catch (Exception) { /* Preserve the factory failure. */ }
+        try { resources.ReleaseConfiguration(); }
+        catch (Exception) { /* Preserve the factory failure. */ }
+    }
+
+    // Retain factory-created ownership independently of the provider: failed DI disposal may
+    // never reach ConfigurationManager. Never resolve new services while disposing the app.
+    private sealed class HostResources(ConfigurationManager configuration) : IDisposable
+    {
+        private X509Certificate2? _value;
+        private ConfigurationManager? _configuration = configuration;
+        internal X509Certificate2? Value { get => _value; set => _value = value; }
+        public void Dispose() => Interlocked.Exchange(ref _value, null)?.Dispose();
+        // ConfigurationManager owns provider disposal and safely handles its already-disposed
+        // state. Do not enumerate/dispose arbitrary downstream providers or external instances.
+        internal void ReleaseConfiguration() => Interlocked.Exchange(ref _configuration, null)?.Dispose();
+    }
+
+    private static WebApplication BuildCore(WebApplicationBuilder builder,
+        Action<IServiceCollection, IConfiguration>? configureServices, HostResources certificateOwner,
+        out WebApplication? app)
+    {
+        app = null;
         var runtimeAuthentication = RuntimeAuthenticationComposition.Read(builder.Configuration);
         RuntimeAuthenticationComposition.Add(builder.Services, runtimeAuthentication);
         var runtimeDelivery = RuntimeDeliveryOptions.Read(builder.Configuration);
@@ -70,7 +142,7 @@ public static class OperatorHostApplication
         if (!int.TryParse(portText, out var port) || port is < 0 or > 65535) invalid.Add("Haby:Port");
         if (invalid.Count > 0)
             throw new InvalidOperationException("Missing or invalid configuration keys: " + string.Join(", ", invalid));
-        var certificate = tlsEnabled
+        var certificate = certificateOwner.Value = tlsEnabled
             ? X509CertificateLoader.LoadPkcs12FromFile(certificatePath!, certificatePassword)
             : null;
         builder.WebHost.ConfigureKestrel(options => options.Listen(listenAddress!, port, listen =>
@@ -219,8 +291,10 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlProviderAliasStore();
         builder.Services.AddSingleton<ProviderAccessAdministration>();
         builder.Services.AddSingleton<IProviderIdentityQuery, PostgreSqlProviderIdentityQuery>();
-        configureServices?.Invoke(builder.Services);
-        var app = builder.Build();
+        builder.Services.AddSingleton(_ => certificateOwner);
+        configureServices?.Invoke(builder.Services, builder.Configuration);
+        app = builder.Build();
+        _ = app.Services.GetRequiredService<HostResources>();
         // Validate only current-build registrations, never require handlers for every stored revision.
         _ = app.Services.GetRequiredService<ProviderDeclarationRegistry>();
         _ = app.Services.GetRequiredService<IProviderConfigurationStore>();

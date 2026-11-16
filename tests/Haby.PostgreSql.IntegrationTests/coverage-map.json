@@ -237,6 +237,27 @@
         "regular-full"
       ]
     },
+    "OperatorHostCompositionTests": {
+      "responsibilities": [
+        "Operator/E2E"
+      ],
+      "isolation": "none",
+      "baselineCases": 0,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
+    },
     "OperatorHostConfigurationTests": {
       "responsibilities": [
         "Operator/E2E"

@@ -25,6 +25,8 @@ $coverage = @()
 $cleanupExit = $null
 $oldDockerHost = $env:DOCKER_HOST
 $oldSourceRoot = $env:HABY_TEST_SOURCE_ROOT
+$oldCompositionSample = $env:HABY_COMPOSITION_SAMPLE_PATH
+$compositionHash = $null
 $suiteExecution = $null
 $rawTrxPaths = @((Join-Path $private 'full.trx'))
 $sha = (& git -C $root rev-parse HEAD | Out-String).Trim()
@@ -69,6 +71,18 @@ try {
         $arguments = @($phase, $project, '--artifacts-path', $artifacts)
         if ($phase -eq 'build') { $arguments += '--no-restore' }
         if ($phase -eq 'test') {
+            if ('functional' -cin $selectedSuites) {
+                $primaryPhase = 'composition-publication'
+                $publication = Join-Path $destination 'composition-sample'
+                & dotnet publish (Join-Path $root 'tools/Haby.Operator.Composition.Sample/Haby.Operator.Composition.Sample.csproj') -c Release --artifacts-path $artifacts -p:TreatWarningsAsErrors=true -o $publication *> (Join-Path $private 'composition-publication.log')
+                $publishExit = $LASTEXITCODE
+                $phases.Add([pscustomobject]@{ phase = 'composition-publication'; seconds = $timer.Elapsed.TotalSeconds; exitCode = $publishExit })
+                if ($publishExit -ne 0) { $testExit = $publishExit; break }
+                $env:HABY_COMPOSITION_SAMPLE_PATH = Join-Path $publication 'Haby.Operator.Composition.Sample.dll'
+                $compositionHash = (Get-FileHash -LiteralPath $env:HABY_COMPOSITION_SAMPLE_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+                $timer.Restart()
+                $primaryPhase = 'test'
+            }
             if ($Docker) {
                 & dotnet test $project --no-build --no-restore --artifacts-path $artifacts --list-tests *> (Join-Path $private 'discovery.log')
                 $discoveryExit = $LASTEXITCODE
@@ -109,6 +123,7 @@ try {
 } finally {
     $env:HABY_TEST_TIMING_DIRECTORY = $oldTimingDirectory
     $env:HABY_TEST_SOURCE_ROOT = $oldSourceRoot
+    $env:HABY_COMPOSITION_SAMPLE_PATH = $oldCompositionSample
     try {
         $timer = [Diagnostics.Stopwatch]::StartNew()
         try {
@@ -142,6 +157,7 @@ try {
         [pscustomobject]@{
             source = $sha; trackedDiffSha256 = $diffHash; sdk = (& dotnet --version | Out-String).Trim()
             testAssemblySha256 = $assemblyHash
+            compositionSampleSha256 = $compositionHash
             untrackedFileCountAtStart = $untracked.Count
             sourceChangedDuringRun = $sha -ne $endSha -or $diffHash -ne $endDiffHash
             installedRuntimes = @(& dotnet --list-runtimes | ForEach-Object { ($_ -split ' ')[0..1] -join ' ' })

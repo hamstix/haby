@@ -131,7 +131,12 @@ internal static class RuntimeDeliveryCases
                         diagnostics?.Mark(QualificationMilestone.DeliveryFirstRequestStart);
                         var reply = await client.DeliverRuntimeAsync(call, headers, deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: token);
                         diagnostics?.Mark(QualificationMilestone.DeliveryFirstRequestCompleted);
+                        using var afterStateProgress = diagnostics?.Begin(QualificationMilestone.DeliveryAfterStateStart,
+                            QualificationMilestone.DeliveryAfterStateCompleted, QualificationMilestone.DeliveryAfterStateFailed);
                         var afterState = await State(contexts, token);
+                        afterStateProgress?.Complete();
+                        using var resultProgress = diagnostics?.Begin(QualificationMilestone.DeliveryResultCheckStart,
+                            QualificationMilestone.DeliveryResultCheckCompleted, QualificationMilestone.DeliveryResultCheckFailed);
                         Check(reply.RevisionId == call.RevisionId && reply.SourceFingerprint == fingerprint && reviews == before + 1 && beforeState.SequenceEqual(afterState),
                             first ? "T01-generated-Host-real-Pod-TokenReview-exact-revision" : "T06-restarted-Host-fresh-TokenReview-exact-authority");
                         using var json = JsonDocument.Parse(reply.Json.Memory);
@@ -154,27 +159,62 @@ internal static class RuntimeDeliveryCases
                         }
                         else Check(Encoding.UTF8.GetString(reply.Json.Span) == "{\"Mode\":\"frozen\"}",
                             first ? "T02-exact-complete-static-JSON" : "T08-restarted-exact-complete-static-JSON");
+                        resultProgress?.Complete();
                         if (first)
                         {
                             afterReview = Revoke;
+                            using var reviewRefusalProgress = diagnostics?.Begin(QualificationMilestone.DeliveryReviewRefusalStart,
+                                QualificationMilestone.DeliveryReviewRefusalCompleted, QualificationMilestone.DeliveryReviewRefusalFailed);
                             var refusal = await Refused(client, call, headers, token);
+                            reviewRefusalProgress?.Complete();
                             Check(refusal == StatusCode.PermissionDenied, "T04-permission-revoked-during-real-TokenReview-denies");
+                            using var reviewRepublishProgress = diagnostics?.Begin(QualificationMilestone.DeliveryReviewRepublishStart,
+                                QualificationMilestone.DeliveryReviewRepublishCompleted, QualificationMilestone.DeliveryReviewRepublishFailed);
                             await Republish();
+                            reviewRepublishProgress?.Complete();
                             afterAuthority = Revoke;
+                            using var authorityProgress = diagnostics?.Begin(QualificationMilestone.DeliveryAuthorityCallStart,
+                                QualificationMilestone.DeliveryAuthorityCallCompleted, QualificationMilestone.DeliveryAuthorityCallFailed);
                             var inflight = await client.DeliverRuntimeAsync(call, headers, cancellationToken: token);
-                            Check(inflight.RevisionId == call.RevisionId && await Refused(client, call, headers, token) == StatusCode.PermissionDenied,
-                                "T05-revoke-after-authority-inflight-only-next-request-denied");
+                            authorityProgress?.Complete();
+                            // Preserve the original short circuit: no refusal RPC when the revision differs.
+                            var authorityMatches = inflight.RevisionId == call.RevisionId;
+                            if (authorityMatches)
+                            {
+                                using var authorityRefusalProgress = diagnostics?.Begin(QualificationMilestone.DeliveryAuthorityRefusalStart,
+                                    QualificationMilestone.DeliveryAuthorityRefusalCompleted, QualificationMilestone.DeliveryAuthorityRefusalFailed);
+                                authorityMatches = await Refused(client, call, headers, token) == StatusCode.PermissionDenied;
+                                authorityRefusalProgress?.Complete();
+                            }
+                            Check(authorityMatches, "T05-revoke-after-authority-inflight-only-next-request-denied");
+                            using var authorityRepublishProgress = diagnostics?.Begin(QualificationMilestone.DeliveryAuthorityRepublishStart,
+                                QualificationMilestone.DeliveryAuthorityRepublishCompleted, QualificationMilestone.DeliveryAuthorityRepublishFailed);
                             await Republish();
+                            authorityRepublishProgress?.Complete();
                         }
-                        if (first && mandatory is not null) await Startup(client, mandatory);
+                        if (first && mandatory is not null)
+                        {
+                            using var startupProgress = diagnostics?.Begin(QualificationMilestone.DeliveryStartupStart,
+                                QualificationMilestone.DeliveryStartupCompleted, QualificationMilestone.DeliveryStartupFailed);
+                            await Startup(client, mandatory);
+                            startupProgress?.Complete();
+                        }
                         diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstDisposeStart : QualificationMilestone.DeliveryHostRestartDisposeStart);
                         disposalStarted = true;
+                        using var stopProgress = diagnostics?.Begin(QualificationMilestone.DeliveryHostStopStart,
+                            QualificationMilestone.DeliveryHostStopCompleted, QualificationMilestone.DeliveryHostStopFailed);
                         await host.StopAsync(token);
+                        stopProgress?.Complete();
                     }
                     finally
                     {
                         if (!disposalStarted) diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstDisposeStart : QualificationMilestone.DeliveryHostRestartDisposeStart);
-                        await host.DisposeAsync();
+                        {
+                            using var disposeProgress = diagnostics?.Begin(QualificationMilestone.DeliveryHostDisposeStart,
+                                QualificationMilestone.DeliveryHostDisposeCompleted, QualificationMilestone.DeliveryHostDisposeFailed);
+                            await host.DisposeAsync();
+                            disposeProgress?.Complete();
+                        }
                         diagnostics?.Mark(first ? QualificationMilestone.DeliveryHostFirstDisposeCompleted : QualificationMilestone.DeliveryHostRestartDisposeCompleted);
                     }
                 }
@@ -191,6 +231,8 @@ internal static class RuntimeDeliveryCases
                     Exception? startupFailure = null;
                     try
                     {
+                        using var podProgress = diagnostics?.Begin(QualificationMilestone.StartupPodStart,
+                            QualificationMilestone.StartupPodCompleted, QualificationMilestone.StartupPodFailed);
                         secondPod = await admin.CoreV1.CreateNamespacedPodAsync(new V1Pod
                         {
                             Metadata = new() { Name = secondPodName },
@@ -201,6 +243,9 @@ internal static class RuntimeDeliveryCases
                                 Containers = [new() { Name = "app", Image = "registry.k8s.io/pause:3.10" }]
                             }
                         }, ns, cancellationToken: token);
+                        podProgress?.Complete();
+                        using var tokenProgress = diagnostics?.Begin(QualificationMilestone.StartupTokenStart,
+                            QualificationMilestone.StartupTokenCompleted, QualificationMilestone.StartupTokenFailed);
                         var replacementToken = await admin.CoreV1.CreateNamespacedServiceAccountTokenAsync(new Authenticationv1TokenRequest
                         {
                             Spec = new()
@@ -210,16 +255,23 @@ internal static class RuntimeDeliveryCases
                                 BoundObjectRef = new() { ApiVersion = "v1", Kind = "Pod", Name = secondPodName, Uid = secondPod.Metadata.Uid }
                             }
                         }, receipt.Intent.Name, ns, cancellationToken: token);
+                        tokenProgress?.Complete();
                         replacementBytes = Encoding.ASCII.GetBytes(replacementToken.Status.Token);
                         Check(!bytes.SequenceEqual(replacementBytes), "S02-two-distinct-real-Pod-bound-issued-tokens");
                         var credentialPath = Path.Combine(privatePath, "projected");
+                        using var fileProgress = diagnostics?.Begin(QualificationMilestone.StartupFileStart,
+                            QualificationMilestone.StartupFileCompleted, QualificationMilestone.StartupFileFailed);
                         await File.WriteAllBytesAsync(credentialPath, bytes, token);
+                        fileProgress?.Complete();
                         var revisions = selection.Select(x => x.Revision!.Value.ToString()).ToArray();
                         var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
+                        using var fingerprintProgress = diagnostics?.Begin(QualificationMilestone.StartupFingerprintsStart,
+                            QualificationMilestone.StartupFingerprintsCompleted, QualificationMilestone.StartupFingerprintsFailed);
                         await using (var read = await contexts.CreateDbContextAsync(token))
                             foreach (var selected in selection)
                                 fingerprints.Add(selected.Revision!.Value.ToString(), await read.ConfigurationDocuments.AsNoTracking()
                                     .Where(x => x.Id == selected.Revision).Select(x => x.Fingerprint).SingleAsync(token));
+                        fingerprintProgress?.Complete();
                         expectedReviewedCredential = bytes;
                         var beforeReviews = reviews;
                         var firstReviewProven = false;
@@ -234,9 +286,15 @@ internal static class RuntimeDeliveryCases
                             throw new ConfigurationDeliveryStorageException();
                         };
                         var startup = new RuntimeStartupClient(client);
+                        using var beforeStateProgress = diagnostics?.Begin(QualificationMilestone.StartupBeforeStateStart,
+                            QualificationMilestone.StartupBeforeStateCompleted, QualificationMilestone.StartupBeforeStateFailed);
                         var beforeState = await State(contexts, token);
+                        beforeStateProgress?.Complete();
+                        using var firstFetchProgress = diagnostics?.Begin(QualificationMilestone.StartupFirstFetchStart,
+                            QualificationMilestone.StartupFirstFetchCompleted, QualificationMilestone.StartupFirstFetchFailed);
                         using (var complete = await startup.FetchAsync(request.Binding.ToString(), revisions, credentialPath, cancellationToken: token))
                         {
+                            firstFetchProgress?.Complete();
                             Check(firstReviewProven, "S03-first-real-review-before-controlled-temporary-boundary");
                             Check(complete.Documents.Select(x => x.RevisionId).SequenceEqual(revisions) && complete.Documents.All(x =>
                                 x.SourceFingerprint == fingerprints[x.RevisionId]) && Encoding.UTF8.GetString(complete.Documents[0].Json.Span) == "{\"Mode\":\"frozen\"}" &&
@@ -245,13 +303,23 @@ internal static class RuntimeDeliveryCases
                             Check(reviews == beforeReviews + 3 && startupReviews == 3 && startupCredentialsMatch,
                                 "S05-retry-rereads-atomic-file-replacement-and-real-second-Pod-token");
                         }
+                        using var completedStateProgress = diagnostics?.Begin(QualificationMilestone.StartupAfterStateStart,
+                            QualificationMilestone.StartupAfterStateCompleted, QualificationMilestone.StartupAfterStateFailed);
                         var completedState = await State(contexts, token);
+                        completedStateProgress?.Complete();
                         Check(beforeState.SequenceEqual(completedState), "S06-helper-created-no-authority-or-state");
                         var beforeRestart = reviews;
+                        using var restartFetchProgress = diagnostics?.Begin(QualificationMilestone.StartupRestartFetchStart,
+                            QualificationMilestone.StartupRestartFetchCompleted, QualificationMilestone.StartupRestartFetchFailed);
                         using (var restarted = await new RuntimeStartupClient(client).FetchAsync(request.Binding.ToString(), revisions, credentialPath, cancellationToken: token))
+                        {
+                            restartFetchProgress?.Complete();
                             Check(restarted.Documents.Count == 2 && reviews == beforeRestart + 2 && startupCredentialsMatch,
                                 "S07-restarted-consumer-fresh-file-reads-and-real-delivery");
+                        }
                         var second = selection[1];
+                        using var revokeProgress = diagnostics?.Begin(QualificationMilestone.StartupRevokeStart,
+                            QualificationMilestone.StartupRevokeCompleted, QualificationMilestone.StartupRevokeFailed);
                         var current = (await publication.ReadAsync(second.Key, token))!;
                         await publication.ApplyAsync(second with
                         {
@@ -260,6 +328,9 @@ internal static class RuntimeDeliveryCases
                             Origin = null,
                             ExpectedToken = current.CurrentPermission!.Token
                         }, token);
+                        revokeProgress?.Complete();
+                        using var denialProgress = diagnostics?.Begin(QualificationMilestone.StartupDenialProbeStart,
+                            QualificationMilestone.StartupDenialProbeCompleted, QualificationMilestone.StartupDenialProbeFailed);
                         var primaryEntered = false;
                         try
                         {
@@ -268,8 +339,12 @@ internal static class RuntimeDeliveryCases
                         }
                         catch (RuntimeStartupException failure) when (failure.Failure == RuntimeStartupFailure.AccessDenied) { }
                         Check(!primaryEntered, "S08-later-independent-revocation-prevents-primary-start");
+                        denialProgress?.Complete();
+                        using var republishProgress = diagnostics?.Begin(QualificationMilestone.StartupRepublishStart,
+                            QualificationMilestone.StartupRepublishCompleted, QualificationMilestone.StartupRepublishFailed);
                         current = (await publication.ReadAsync(second.Key, token))!;
                         await publication.ApplyAsync(second with { Key = "startup-republish-" + Guid.NewGuid().ToString("N"), ExpectedToken = current.CurrentPermission!.Token }, token);
+                        republishProgress?.Complete();
                     }
                     catch (Exception error) { startupFailure = error; throw; }
                     finally
@@ -279,11 +354,23 @@ internal static class RuntimeDeliveryCases
                         Exception? cleanupFailure = null;
                         try
                         {
-                            if (secondPod is not null) await admin.CoreV1.DeleteNamespacedPodAsync(secondPodName, ns,
-                                new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = secondPod.Metadata.Uid }, GracePeriodSeconds = 0 }, cancellationToken: CancellationToken.None);
+                            if (secondPod is not null)
+                            {
+                                using var podCleanupProgress = diagnostics?.Begin(QualificationMilestone.StartupPodCleanupStart,
+                                    QualificationMilestone.StartupPodCleanupCompleted, QualificationMilestone.StartupPodCleanupFailed);
+                                await admin.CoreV1.DeleteNamespacedPodAsync(secondPodName, ns,
+                                    new V1DeleteOptions { Preconditions = new V1Preconditions { Uid = secondPod.Metadata.Uid }, GracePeriodSeconds = 0 }, cancellationToken: CancellationToken.None);
+                                podCleanupProgress?.Complete();
+                            }
                         }
                         catch (Exception error) { cleanupFailure = error; }
-                        try { Directory.Delete(privatePath, true); }
+                        try
+                        {
+                            using var directoryCleanupProgress = diagnostics?.Begin(QualificationMilestone.StartupDirectoryCleanupStart,
+                                QualificationMilestone.StartupDirectoryCleanupCompleted, QualificationMilestone.StartupDirectoryCleanupFailed);
+                            Directory.Delete(privatePath, true);
+                            directoryCleanupProgress?.Complete();
+                        }
                         catch (Exception error) { cleanupFailure ??= error; }
                         if (cleanupFailure is not null)
                         {
@@ -296,9 +383,16 @@ internal static class RuntimeDeliveryCases
                 await DeliveryHost(false);
             }
             finally { CryptographicOperations.ZeroMemory(bytes); }
-            await using var verify = await contexts.CreateDbContextAsync(token);
-            var applied = (await verify.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration;
-            Check(applied == (login ? (long?)1 : null) && !await verify.ConfigurationAccess.AnyAsync(token), "T07-no-Applied-or-static-grant-mutation");
+            {
+                using var verifyProgress = diagnostics?.Begin(QualificationMilestone.DeliveryCatalogVerifyStart,
+                    QualificationMilestone.DeliveryCatalogVerifyCompleted, QualificationMilestone.DeliveryCatalogVerifyFailed);
+                {
+                    await using var verify = await contexts.CreateDbContextAsync(token);
+                    var applied = (await verify.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration;
+                    Check(applied == (login ? (long?)1 : null) && !await verify.ConfigurationAccess.AnyAsync(token), "T07-no-Applied-or-static-grant-mutation");
+                }
+                verifyProgress?.Complete();
+            }
         }
         catch (Exception error) { primary = error; throw; }
         finally

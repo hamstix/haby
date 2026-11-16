@@ -1,0 +1,6 @@
+syntax = "proto3";
+option csharp_namespace = "Haby.Operator.Composition.Sample.Wire";
+package haby.composition.sample;
+service CompositionProbe { rpc Read (ReadRequest) returns (ReadReply); }
+message ReadRequest {}
+message ReadReply { string value = 1; string actor = 2; int64 utc_year = 3; }
