@@ -105,27 +105,30 @@ items. Path/name/version/format all participate in structural equality/hash and
 same-revision catalog conflict detection; list order does not. Collections are
 snapshots. Relative paths use canonical non-root JSON Pointers: `/` is the empty
 Object key; escaped/numeric keys work. Missing Object parents are allowed.
-Non-Object roots/parents, occupied leaves, duplicate and ancestor/descendant targets
+Secret projections may traverse an existing array at a canonical in-range index,
+but cannot create arrays or replace elements. Non-Object final parents, occupied
+leaves, duplicate and ancestor/descendant targets
 refuse. Each secret target reserves an opaque whole node. The outer contribution
 reserves its entire subtree during selected-document collision checks.
 
-Current expansion explicitly refuses any effective secret-bearing contribution
-with `profile.secret-projections.unsupported`, returning no layouts, including for
-direct semantic Component contributions. It cannot produce an ordinary document
-with the requested insertion silently omitted. Callers must use this expansion
-gate before composing Profile contributions; composing a bare Value would discard
-declaration metadata and is not Profile materialization. Disabling or replacing a
-secret-bearing Profile before expansion uses only the actual effective revision.
+Planning requires an exact Environment-owned Configuration secret name and positive
+version for each effective projection. Missing, wrong-purpose or wrong-Environment
+references refuse the layout with `profile.secret-reference.unavailable`.
+Import/read never looks up material or requires the named secret to exist.
+The accepted planning snapshot pins internal exact references; a later assignment
+or new secret cannot retarget its document. Other projection kinds keep their
+object-only traversal rules.
 
 Ordinary magic-looking JSON remains ordinary: no discriminator/member can create
-SecretReference, DeferredValue or commands. Future planning must pin exact internal
+SecretReference, DeferredValue or commands. Planning pins exact internal
 references. [ADR-039](../adr/0039-scoped-profile-assignment-administration.md)
 accepts trusted administrator assignment as distribution consent for all declared
 secrets in the target scope; no per-secret permission check is required in this
 pilot. Confidential retrieval still requires its separate authorization boundary.
-Future delivery must implement typed JSON insertion, whole-node redaction and
-all-or-nothing output. A String-only formatter is insufficient for format json.
-None of those capabilities or permissions is provided by successful parsing.
+Preview redacts each inserted node as a whole and reports its final path. Authorized
+delivery parses strict UTF-8 `string` or one strict JSON value, retaining types and
+exact numbers. It fails the complete document on invalid material or limits.
+Successful parsing alone grants no delivery permission.
 
 ## Normalized exact declaration reads
 

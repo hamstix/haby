@@ -12,12 +12,14 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
 {
     private ConfigurationPlanningSnapshot(ManifestRevisionRef revision, NormalizedApplicationManifest manifest,
         ImmutableArray<ConfigurationPlanningScope> scopes, ImmutableArray<ConfigurationProfileRevision> profiles,
-        IReadOnlyList<EffectiveComponentLayout> layouts, IReadOnlyList<ConfigurationRenderPin> pins)
+        IReadOnlyList<EffectiveComponentLayout> layouts, IReadOnlyList<ConfigurationRenderPin> pins,
+        IReadOnlyDictionary<ProfileNamedSecretRef, SecretRef> secrets)
     {
-        Revision = revision; Manifest = manifest; Scopes = scopes; Profiles = profiles; Layouts = layouts; RenderPins = pins;
+        Revision = revision; Manifest = manifest; Scopes = scopes; Profiles = profiles; Layouts = layouts; RenderPins = pins; FrozenSecrets = secrets;
     }
 
     public IReadOnlyList<ConfigurationRenderPin> RenderPins { get; }
+    public IReadOnlyDictionary<ProfileNamedSecretRef, SecretRef> FrozenSecrets { get; }
     public ManifestRevisionRef Revision { get; }
     public NormalizedApplicationManifest Manifest { get; }
     public IReadOnlyList<ConfigurationPlanningScope> Scopes { get; }
@@ -37,7 +39,8 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
     internal static (ConfigurationPlanningSnapshot? Snapshot, ProfileExpansionResult Expansion) PrepareCore(
         ManifestRevisionRef revision, NormalizedApplicationManifest manifest,
         IEnumerable<ConfigurationPlanningScope> scopes, IEnumerable<ConfigurationProfileRevision> profiles,
-        ConfigurationRenderingCatalog? rendering = null, IReadOnlyList<ConfigurationRenderPin>? frozenPins = null, IReadOnlyList<DurableOperationNode>? producers = null)
+        ConfigurationRenderingCatalog? rendering = null, IReadOnlyList<ConfigurationRenderPin>? frozenPins = null, IReadOnlyList<DurableOperationNode>? producers = null,
+        IReadOnlyDictionary<ProfileNamedSecretRef, SecretRef>? frozenSecrets = null)
     {
         var targets = Targets(manifest);
         var local = scopes.ToImmutableArray();
@@ -56,7 +59,7 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
             {
                 var target = (ProfileAssignmentTarget.Component)x.Target;
                 return new ProfileComponentInput(target.ComponentRef, manifest.Spec.Components[target.ComponentRef], x.Declaration.Decisions);
-            }));
+            }), frozenSecrets);
         if (!result.IsSuccess) return (null, result);
         var pins = new List<ConfigurationRenderPin>();
         var errors = new List<ProfileExpansionDiagnostic>();
@@ -80,7 +83,10 @@ public sealed class ConfigurationPlanningSnapshot : IEquatable<ConfigurationPlan
             }
         if (frozenPins is not null && frozenPins.Count != pins.Count) throw new InvalidDataException();
         if (errors.Count != 0) return (null, new([], errors));
-        return (new(revision, manifest, local, content, result.Layouts!, pins.ToImmutableArray()), result);
+        var needed = result.Layouts!.SelectMany(x => x.Contributions).SelectMany(x => x.Contribution.SecretProjections)
+            .Select(x => x.SecretRef).Distinct().ToArray();
+        return (new(revision, manifest, local, content, result.Layouts, pins.ToImmutableArray(),
+            needed.ToImmutableDictionary(x => x, x => frozenSecrets![x])), result);
     }
 
     public bool Equals(ConfigurationPlanningSnapshot? other) => other is not null &&

@@ -640,7 +640,7 @@ message ListEnvironmentsReply {
 }
 
 // Write-only input. Never log, snapshot or format this message as JSON.
-message CreateSecretRequest { string environment = 1; string name = 2; string request_id = 3; bytes material = 4; }
+message CreateSecretRequest { string environment = 1; string name = 2; string request_id = 3; bytes material = 4; string purpose = 5; }
 message GetSecretRequest { string environment = 1; string name = 2; string secret_id = 3; }
 message ListSecretsRequest { string environment = 1; int32 page_size = 2; string cursor = 3; }
 enum SecretStatus {

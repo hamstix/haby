@@ -9,14 +9,16 @@ public sealed partial class ManifestOperatorService
     public override async Task<SecretReply> CreateSecret(CreateSecretRequest request, ServerCallContext context)
     {
         if (!Guid.TryParse(request.RequestId, out var requestId) || requestId == Guid.Empty ||
-            request.Material.Length is < 1 or > SecretAdministration.MaxBytes)
+            request.Material.Length is < 1 or > SecretAdministration.MaxBytes ||
+            request.Purpose is not ("" or "ProviderAdministrator" or "Configuration"))
             return new SecretReply { Status = SecretStatus.InvalidRequest };
         var bytes = request.Material.ToByteArray();
         try
         {
             using var material = new SecretMaterial(bytes);
             return SecretReplyOf(await secretAdministration.CreateAsync(request.Environment, request.Name, requestId,
-                material, Actor, context.CancellationToken));
+                material, Actor, context.CancellationToken, request.Purpose == "Configuration"
+                    ? Haby.Domain.SecretPurpose.Configuration : Haby.Domain.SecretPurpose.ProviderAdministrator));
         }
         finally { Array.Clear(bytes); }
     }
@@ -48,6 +50,7 @@ public sealed partial class ManifestOperatorService
             Purpose = value.Purpose switch
             {
                 Haby.Domain.SecretPurpose.ProviderAdministrator => "ProviderAdministrator",
+                Haby.Domain.SecretPurpose.Configuration => "Configuration",
                 _ => throw new InvalidOperationException("Unsupported administrative secret purpose.")
             }
         };

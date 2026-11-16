@@ -66,7 +66,20 @@ internal static class ConfigurationPlanningCapture
             if (row is null) throw new InvalidDataException("Selected Profile revision is unavailable.");
             profiles.Add(ProfileSnapshotCodec.Decode(row.Snapshot, row.ProfileId, row.Revision, row.SnapshotFormatVersion, row.ModelVersion));
         }
-        return ConfigurationPlanningSnapshot.PrepareCore(revision, manifest, scopes, profiles, rendering, frozenPins, producers);
+        var names = profiles.SelectMany(x => x.Contributions).SelectMany(x => x.SecretProjections).Select(x => x.SecretRef).Distinct().ToArray();
+        var secrets = new Dictionary<ProfileNamedSecretRef, SecretRef>();
+        foreach (var named in names)
+        {
+            var row = await (from secret in context.Secrets.AsNoTracking()
+                             join version in context.SecretVersions.AsNoTracking() on secret.Id equals version.SecretId
+                             where secret.EnvironmentRecordId == Guid.Parse(environment.RecordId.ToString()) &&
+                                   secret.Owner == "Environment" && secret.Purpose == "Configuration" &&
+                                   secret.ApplicationRecordId == null && secret.ResourceLocalId == null &&
+                                   secret.Name == named.Name && version.Number == named.Version
+                             select new { secret.Id, Version = version.Id }).SingleOrDefaultAsync(token);
+            if (row is not null) secrets.Add(named, new(SecretId.Parse(row.Id.ToString()), SecretVersionId.Parse(row.Version.ToString())));
+        }
+        return ConfigurationPlanningSnapshot.PrepareCore(revision, manifest, scopes, profiles, rendering, frozenPins, producers, secrets);
     }
 
     internal static bool SameScopes(IReadOnlyList<ConfigurationPlanningScope> left, IReadOnlyList<ConfigurationPlanningScope> right) =>

@@ -14,9 +14,10 @@ internal static class SecretCommands
         var name = new Argument<string>("name");
         var stdin = new Option<bool>("--stdin") { Description = "Read exact secret bytes from stdin until EOF." };
         var requestId = new Option<string?>("--request-id") { Description = "UUID for durable retry; generated once when omitted." };
-        var create = new Command("create", "Create a named Provider administrator secret, version 1.") { name, stdin, requestId };
+        var purpose = new Option<string?>("--purpose") { Description = "Secret purpose: administrator (default) or configuration." };
+        var create = new Command("create", "Create a named Environment secret, version 1.") { name, stdin, requestId, purpose };
         create.SetAction((parse, token) => context.CreateSecretAsync(parse.GetRequiredValue(name),
-            parse.GetValue(environment), parse.GetValue(stdin), parse.GetValue(requestId), token));
+            parse.GetValue(environment), parse.GetValue(stdin), parse.GetValue(requestId), token, parse.GetValue(purpose)));
         group.Subcommands.Add(create);
 
         var selection = new Argument<string?>("name") { Arity = ArgumentArity.ZeroOrOne };

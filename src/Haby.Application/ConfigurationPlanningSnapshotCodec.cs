@@ -7,7 +7,7 @@ namespace Haby.Application;
 /// <summary>Closed current planning format, with explicit frozen capability inputs and a checked saved layout.</summary>
 internal static class ConfigurationPlanningSnapshotCodec
 {
-    internal const int Version = 2;
+    internal const int Version = 3;
     internal static string Encode(ConfigurationPlanningSnapshot snapshot)
     {
         using var stream = new MemoryStream();
@@ -29,7 +29,14 @@ internal static class ConfigurationPlanningSnapshotCodec
             }
             w.WriteEndArray(); w.WriteStartArray("profiles"u8);
             foreach (var profile in snapshot.Profiles) Canonical(w, ProfileSnapshotCodec.Encode(profile));
-            w.WriteEndArray(); w.WritePropertyName("renderPins"u8); ConfigurationRenderPinCodec.Write(w, snapshot.RenderPins); w.WritePropertyName("layouts"u8); WriteLayouts(w, snapshot.Layouts); w.WriteEndObject();
+            w.WriteEndArray(); w.WritePropertyName("renderPins"u8); ConfigurationRenderPinCodec.Write(w, snapshot.RenderPins);
+            w.WriteStartArray("secrets"u8);
+            foreach (var (named, exact) in snapshot.FrozenSecrets.OrderBy(x => x.Key.Name, StringComparer.Ordinal).ThenBy(x => x.Key.Version))
+            {
+                w.WriteStartArray(); w.WriteStringValue(named.Name); w.WriteNumberValue(named.Version);
+                w.WriteStringValue(exact.SecretId.ToString()); w.WriteStringValue(exact.SecretVersionId.ToString()); w.WriteEndArray();
+            }
+            w.WriteEndArray(); w.WritePropertyName("layouts"u8); WriteLayouts(w, snapshot.Layouts); w.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
     }
@@ -40,7 +47,7 @@ internal static class ConfigurationPlanningSnapshotCodec
         {
             using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 160 });
             var root = doc.RootElement;
-            Exact(root, "format", "applicationRecord", "revision", "manifest", "scopes", "profiles", "layouts", "renderPins");
+            Exact(root, "format", "applicationRecord", "revision", "manifest", "scopes", "profiles", "layouts", "renderPins", "secrets");
             if (root.GetProperty("format"u8).GetInt32() != Version || root.GetProperty("applicationRecord"u8).GetString() != expected.ApplicationRecordId.ToString() ||
                 root.GetProperty("revision"u8).GetInt64() != expected.RevisionNumber.Value) throw new InvalidDataException();
             var m = root.GetProperty("manifest"u8);
@@ -61,7 +68,18 @@ internal static class ConfigurationPlanningSnapshotCodec
             });
             var profiles = root.GetProperty("profiles"u8).EnumerateArray().Select(p => ProfileSnapshotCodec.Decode(p.GetRawText(),
                 p.GetProperty("id"u8).GetString()!, p.GetProperty("revision"u8).GetInt32(), ProfileSnapshotCodec.FormatVersion, ProfileSnapshotCodec.ModelVersion));
-            var result = ConfigurationPlanningSnapshot.PrepareCore(expected, manifest, scopes, profiles, frozenPins: ConfigurationRenderPinCodec.Read(root.GetProperty("renderPins"u8))).Snapshot ?? throw new InvalidDataException();
+            var secrets = new Dictionary<ProfileNamedSecretRef, SecretRef>();
+            foreach (var item in root.GetProperty("secrets"u8).EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Array || item.GetArrayLength() != 4) throw new InvalidDataException();
+                if (!secrets.TryAdd(new(item[0].GetString()!, item[1].GetInt32()),
+                    new(SecretId.Parse(item[2].GetString()!), SecretVersionId.Parse(item[3].GetString()!)))) throw new InvalidDataException();
+            }
+            var result = ConfigurationPlanningSnapshot.PrepareCore(expected, manifest, scopes, profiles,
+                frozenPins: ConfigurationRenderPinCodec.Read(root.GetProperty("renderPins"u8)), frozenSecrets: secrets).Snapshot ?? throw new InvalidDataException();
+            var required = result.Layouts.SelectMany(x => x.Contributions).SelectMany(x => x.Contribution.SecretProjections)
+                .Select(x => x.SecretRef).Distinct().ToArray();
+            if (required.Length != secrets.Count || required.Any(x => !secrets.ContainsKey(x))) throw new InvalidDataException();
             // Admission is based exclusively on frozen content. Unknown members, duplicate keys,
             // malformed layouts and a layout that disagrees with its exact inputs all refuse.
             using var canonical = new MemoryStream();

@@ -111,7 +111,7 @@ public sealed class ConfigurationPlanningSnapshotTests
             else parent[keys[^1]] = "corrupt";
             Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(node.ToJsonString(), Revision));
         }
-        Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(text.Replace("\"format\":2", "\"format\":2,\"format\":2", StringComparison.Ordinal), Revision));
+        Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(text.Replace("\"format\":3", "\"format\":3,\"format\":3", StringComparison.Ordinal), Revision));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public sealed class ConfigurationPlanningSnapshotTests
         var manifest = Manifest(); var profile = Parse(Profile(true)); var scopes = Scopes(manifest, AssignmentToken.New(), new ProfileDecision.Use(profile.Reference));
         var refusal = ConfigurationPlanningSnapshot.Prepare(Revision, manifest, scopes, [profile]);
         Assert.Null(refusal.Snapshot); Assert.Null(refusal.Expansion.Layouts);
-        Assert.Contains(refusal.Expansion.Diagnostics, x => x.Code == "profile.secret-projections.unsupported");
+        Assert.Contains(refusal.Expansion.Diagnostics, x => x.Code == "profile.secret-reference.unavailable");
         // Suppress only the secret-bearing Profile; an independent ordinary Profile supplies the slot.
         var ordinaryNode = Profile(); ordinaryNode["metadata"]!["id"] = "ordinary";
         var ordinary = Parse(ordinaryNode);

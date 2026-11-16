@@ -130,7 +130,7 @@ public static class ConfigurationJson
     private static Utf8JsonWriter Writer(Stream stream) => new(stream, new JsonWriterOptions { Encoder = JavaScriptEncoder.Default, MaxDepth = 512 });
     private static bool Confidential(ConfigurationValue value) => value switch
     {
-        ConfigurationSecretReference or ConfigurationDeferredValue => true,
+        ConfigurationSecretReference or ConfigurationDeferredValue or ConfigurationProjectedSecret => true,
         ConfigurationArray array => array.Items.Any(Confidential),
         ConfigurationObject obj => obj.Members.Values.Any(Confidential),
         _ => false
@@ -163,7 +163,7 @@ public static class ConfigurationJson
             case ConfigurationDeferredValue when resolved is not null && resolved.TryGetValue(path, out var confidential):
                 writer.WriteStringValue(confidential.Reveal());
                 break;
-            case ConfigurationSecretReference or ConfigurationDeferredValue when redacted is not null:
+            case ConfigurationSecretReference or ConfigurationDeferredValue or ConfigurationProjectedSecret when redacted is not null:
                 writer.WriteStringValue(RedactedMarker);
                 redacted.Add(path);
                 break;

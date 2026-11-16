@@ -71,6 +71,8 @@ public sealed partial class ConfigurationDeliveryTests
         public int Reads;
         public int Resolutions;
         public byte[] Bytes = Encoding.UTF8.GetBytes("synthetic-private-material");
+        public SecretRef? ConfigurationReference;
+        public byte[] ConfigurationBytes = Encoding.UTF8.GetBytes("{\"enabled\":true}");
         public SecretMaterial? LastMaterial;
         public bool Missing;
         public bool Throw;
@@ -80,11 +82,21 @@ public sealed partial class ConfigurationDeliveryTests
         public ValueTask<ConfigurationDeliveryArtifact?> ReadAsync(ConfigurationAccessGrant grant, CancellationToken token) { Reads++; return ValueTask.FromResult<ConfigurationDeliveryArtifact?>(Artifact); }
         public ValueTask<SecretMaterial?> ResolveBoundedAsync(SecretDefinition definition, SecretRef reference, int maximumBytes, CancellationToken cancellationToken)
         {
-            Resolutions++; Assert.Equal(new SecretOwner.Resource(new(Artifact.Environment, Artifact.Revision.Metadata.Revision.ApplicationRecordId, ManifestLocalId.Create("resource"))), definition.Owner);
-            Assert.Equal(SecretPurpose.ApplicationLogin, definition.Purpose); Assert.Equal(65536, maximumBytes);
+            Resolutions++;
+            if (definition.Purpose == SecretPurpose.Configuration)
+            {
+                Assert.Equal(new SecretOwner.Environment(Artifact.Environment), definition.Owner);
+                Assert.Equal(ConfigurationReference, reference);
+            }
+            else
+            {
+                Assert.Equal(new SecretOwner.Resource(new(Artifact.Environment, Artifact.Revision.Metadata.Revision.ApplicationRecordId, ManifestLocalId.Create("resource"))), definition.Owner);
+                Assert.Equal(SecretPurpose.ApplicationLogin, definition.Purpose);
+            }
+            Assert.Equal(65536, maximumBytes);
             if (Cancel) throw new OperationCanceledException();
             if (Throw) throw new ConfigurationDeliveryStorageException();
-            LastMaterial = Missing ? null : new(Bytes);
+            LastMaterial = Missing ? null : new(definition.Purpose == SecretPurpose.Configuration ? ConfigurationBytes : Bytes);
             CancelAfterRead?.Cancel();
             return ValueTask.FromResult(LastMaterial);
         }
@@ -101,7 +113,7 @@ public sealed partial class ConfigurationDeliveryTests
         public DeliverConfiguration Service(params IConfigurationResolutionBinding[] registrations) => new(Store, Store, Store, Catalog, registrations.Length == 0 ? [Adapter] : registrations);
         public ValueTask<ConfigurationDeliveryResult> Run() => Service().ExecuteAsync("opaque", Store.Grant.Document.Id, default);
     }
-    private static async Task<Harness> Prepare(int projections = 1, bool separateRequests = false)
+    private static async Task<Harness> Prepare(int projections = 1, bool separateRequests = false, bool configurationSecret = false)
     {
         var declaration = JsonNode.Parse("""
             {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},"spec":{
@@ -125,15 +137,22 @@ public sealed partial class ConfigurationDeliveryTests
             """u8)!;
         if (projections == 2) profileNode["spec"]!["bindingRules"]!["connection"]!["documentProjections"]!.AsArray().Add(new JsonObject { ["documentRef"] = "settings", ["path"] = "/second" });
         if (separateRequests) profileNode["spec"]!["documents"]!.AsObject().Remove("settings");
+        if (configurationSecret) profileNode["spec"]!["staticContributions"] = JsonNode.Parse("""
+            {"logging":{"documentRef":"settings","path":"/Logging","value":{"WriteTo":[{"Args":{}}]},
+            "secretProjections":[{"path":"/WriteTo/0/Args/password","format":"json","secretRef":{"name":"logging-password","version":1}}]}}
+            """u8);
         var profile = Haby.Tests.ProfilePersistenceSamples.Parse(profileNode);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
         var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((t, i) => new ConfigurationPlanningScope(t, i == 0 ? AssignmentToken.New() : null, new(t, i == 0 ? [new ProfileDecision.Use(profile.Reference)] : [])));
         var adapter = new Adapter();
         var formatters = new ConfigurationFormatterCatalog([new FormatDefinition()], [new(Implementation, Formatter)]);
         var catalog = new ConfigurationRenderingCatalog([new Definition()], [new SyntheticRenderer(adapter)], formatters, [adapter]);
-        var frozen = ConfigurationPlanningSnapshot.Prepare(reference, manifest, scopes, [profile], catalog,
+        var configurationReference = new SecretRef(SecretId.New(), SecretVersionId.New());
+        var named = configurationSecret ? Assert.Single(Assert.Single(profile.Contributions).SecretProjections).SecretRef : null;
+        var frozen = ConfigurationPlanningSnapshot.PrepareCore(reference, manifest, scopes, [profile], catalog, producers:
             [new(OperationId.Create("create"), ManifestLocalId.Create("resource"), Action,
-                new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample/v1"), new("sample/v1", "{}"), [])]).Snapshot!;
+                new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1), "sample/v1"), new("sample/v1", "{}"), [])],
+            frozenSecrets: configurationSecret ? new Dictionary<ProfileNamedSecretRef, SecretRef> { [named!] = configurationReference } : null).Snapshot!;
         var environment = EnvironmentRecordId.New();
         var target = new ConfigurationDocumentTarget(ApplicationDeploymentId.New(), DeploymentGeneration.Create(1), ManifestLocalId.Create("api"), ManifestLocalId.Create("settings"));
         var composed = (await new ComposeConfigurationDocument(catalog, formatters, new Evidence(adapter)).ExecuteAsync(frozen, target, environment, default))!;
@@ -145,7 +164,12 @@ public sealed partial class ConfigurationDeliveryTests
         });
         var revision = new ConfigurationDocumentRevision(new(ConfigurationDocumentRevisionId.New(), target, EnvironmentId.Create("pilot"), manifest.ApplicationId, reference, DeploymentPlanId.New(),
             "appsettings.json", "json", ConfigurationJson.Profile, "safe-source", "frozen", "tester", DateTimeOffset.UnixEpoch), ConfigurationPlanningSnapshotCodec.Encode(frozen), associations, composed.Tree);
-        var store = new Store { Artifact = new(revision, environment), Grant = new(Guid.CreateVersion7(), revision.Metadata, "tester", DateTimeOffset.UnixEpoch, null, null, null) };
+        var store = new Store
+        {
+            Artifact = new(revision, environment),
+            Grant = new(Guid.CreateVersion7(), revision.Metadata, "tester", DateTimeOffset.UnixEpoch, null, null, null),
+            ConfigurationReference = configurationSecret ? configurationReference : null
+        };
         // Delivery has no renderer registration at all, proving that it cannot rerender.
         return new(store, adapter, new([new Definition()], [], formatters, [adapter]));
     }

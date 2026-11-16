@@ -37,7 +37,7 @@ public sealed class MaterializeApplicationConfigurationTests
             var existed = Saved.TryGetValue(target, out var saved);
             saved ??= new(new(ConfigurationDocumentRevisionId.New(), target, EnvironmentId.Create("pilot"), Haby.Domain.ApplicationId.Create("app"),
                 ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)), DeploymentPlanId.New(), "settings.json", "json", ConfigurationJson.Profile,
-                "sha256:configuration-revision-v1:" + new string('a', 64), new string('b', 64), actor, DateTimeOffset.UnixEpoch), "", "", new ConfigurationBoolean(true));
+                "sha256:configuration-revision-v2:" + new string('a', 64), new string('b', 64), actor, DateTimeOffset.UnixEpoch), "", "", new ConfigurationBoolean(true));
             Saved[target] = saved;
             After?.Invoke(Calls.Count);
             return ValueTask.FromResult(new ConfigurationDocumentResult(existed ? ConfigurationDocumentStatus.Existing : ConfigurationDocumentStatus.Created, saved, target));

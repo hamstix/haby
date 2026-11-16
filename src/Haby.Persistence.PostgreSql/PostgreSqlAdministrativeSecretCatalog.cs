@@ -12,8 +12,10 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
     private const string Operation = "CreateAdministrativeSecret";
 
     public async ValueTask<SecretResult> CreateAsync(EnvironmentRecordId environment, string name, Guid requestId,
-        SecretMaterial material, string actor, CancellationToken cancellationToken)
+        SecretMaterial material, string actor, CancellationToken cancellationToken, SecretPurpose purpose = SecretPurpose.ProviderAdministrator)
     {
+        if (purpose is not (SecretPurpose.ProviderAdministrator or SecretPurpose.Configuration))
+            return new(SecretOutcome.InvalidRequest, RequestId: requestId);
         var bytes = material.CopyBytes();
         try
         {
@@ -44,7 +46,7 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
                 if (store is not PostgreSqlPlaintextSecretStore)
                     return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
                 secret = SecretRowMapping.Create(new SecretDefinition(new SecretOwner.Environment(environment),
-                    SecretPurpose.ProviderAdministrator), Guid.Parse(SecretId.New().ToString()));
+                    purpose), Guid.Parse(SecretId.New().ToString()));
                 secret.Name = name;
                 secret.CreatedAt = now;
                 version = new SecretVersionRow
@@ -65,15 +67,15 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
             else
             {
                 if (secret is null) return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
-                if (secret.Name != name || !SecretRowMapping.IsAdministrative(secret))
+                if (secret.Name != name || !SecretRowMapping.IsNamedEnvironment(secret, purpose))
                     return new(SecretOutcome.RequestContentConflict, RequestId: requestId);
                 version = await context.SecretVersions.SingleOrDefaultAsync(x => x.SecretId == secret.Id &&
                     (receipt == null ? x.Number == 1 : x.Id == receipt.VersionId), cancellationToken);
                 if (version is null) return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
                 var reference = new SecretRef(SecretId.Parse(secret.Id.ToString()), SecretVersionId.Parse(version.Id.ToString()));
                 using var accepted = store is PostgreSqlPlaintextSecretStore postgres
-                    ? await postgres.ResolveAsync(context, new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, cancellationToken)
-                    : await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, cancellationToken);
+                    ? await postgres.ResolveAsync(context, new SecretDefinition(new SecretOwner.Environment(environment), purpose), reference, cancellationToken)
+                    : await store.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), purpose), reference, cancellationToken);
                 if (accepted is null) return new(SecretOutcome.SecretStorageUnavailable, RequestId: requestId);
                 var original = accepted.CopyBytes();
                 try
@@ -113,7 +115,7 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var env = Guid.Parse(environment.ToString());
         var identity = id is null ? (Guid?)null : Guid.Parse(id.ToString());
-        var row = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env && x.Owner == "Environment" && x.Purpose == "ProviderAdministrator" &&
+        var row = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env && x.Owner == "Environment" && (x.Purpose == "ProviderAdministrator" || x.Purpose == "Configuration") &&
             x.ApplicationRecordId == null && x.ResourceLocalId == null && (identity == null ? x.Name == name : x.Id == identity), cancellationToken);
         if (row is null) return null;
         // Discovery reports the initial numbered version only. Legacy versions remain explicitly unnumbered.
@@ -128,7 +130,7 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var env = Guid.Parse(environment.ToString());
         var query = context.Secrets.AsNoTracking().Where(x => x.EnvironmentRecordId == env &&
-            x.Owner == "Environment" && x.Purpose == "ProviderAdministrator" && x.ApplicationRecordId == null && x.ResourceLocalId == null);
+            x.Owner == "Environment" && (x.Purpose == "ProviderAdministrator" || x.Purpose == "Configuration") && x.ApplicationRecordId == null && x.ResourceLocalId == null);
         if (after is not null) query = query.Where(x => string.Compare(EF.Functions.Collate(x.Name ?? "~" + x.Id.ToString(), "C"), after) > 0);
         var rows = await query.OrderBy(x => EF.Functions.Collate(x.Name ?? "~" + x.Id.ToString(), "C")).Take(limit).ToArrayAsync(cancellationToken);
         var ids = rows.Select(x => x.Id).ToArray();
@@ -141,5 +143,6 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
     private static SecretMetadata Metadata(SecretRow row, IReadOnlyList<SecretVersionRow> versions) => new(
         EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
         new SecretOwner.Environment(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString())), SecretId.Parse(row.Id.ToString()), row.Name,
-        SecretPurpose.ProviderAdministrator, row.CreatedAt, versions.Select(v => new SecretVersionMetadata(SecretVersionId.Parse(v.Id.ToString()), v.Number, v.CreatedAt)).ToArray());
+        row.Purpose == "Configuration" ? SecretPurpose.Configuration : SecretPurpose.ProviderAdministrator, row.CreatedAt,
+        versions.Select(v => new SecretVersionMetadata(SecretVersionId.Parse(v.Id.ToString()), v.Number, v.CreatedAt)).ToArray());
 }

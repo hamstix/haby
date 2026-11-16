@@ -70,8 +70,17 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
             ConfigurationDocumentCodec.ValidateTree(revision.Tree);
             var frozen = ConfigurationPlanningSnapshotCodec.Decode(revision.FrozenInputs, revision.Metadata.Revision);
             var layout = frozen.Layouts.Single(x => x.Component == revision.Metadata.Target.Component);
-            if (layout.Contributions.Any(x => x.Contribution.Document == revision.Metadata.Target.Document && x.Contribution.SecretProjections.Count != 0))
-                throw new InvalidDataException();
+            var staticSecrets = new Dictionary<string, (SecretDefinition Definition, ConfigurationProjectedSecret Node)>(StringComparer.Ordinal);
+            foreach (var contribution in layout.Contributions.Where(x => x.Contribution.Document == revision.Metadata.Target.Document))
+                foreach (var projection in contribution.Contribution.SecretProjections)
+                {
+                    if (!frozen.FrozenSecrets.TryGetValue(projection.SecretRef, out var exact)) throw new InvalidDataException();
+                    var path = contribution.Contribution.Path + projection.Path;
+                    if (At(revision.Tree, path) is not ConfigurationProjectedSecret node || node.Reference != exact ||
+                        node.Format != projection.Format || !staticSecrets.TryAdd(path,
+                            (new(new SecretOwner.Environment(artifact.Environment), SecretPurpose.Configuration), node)))
+                        throw new InvalidDataException();
+                }
             using var associations = JsonDocument.Parse(revision.OutputAssociations);
             if (associations.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
             var outputs = associations.RootElement.EnumerateArray().Select(a =>
@@ -117,6 +126,26 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
             Validate(revision.Tree, "");
             long expansionBudget = ConfigurationDocumentCodec.MaxBytes;
             var resolved = new Dictionary<string, ConfidentialConfigurationString>(StringComparer.Ordinal);
+            var projected = new Dictionary<string, ConfigurationValue>(StringComparer.Ordinal);
+            foreach (var group in staticSecrets.GroupBy(x => (x.Value.Definition, x.Value.Node.Reference)))
+            {
+                token.ThrowIfCancellationRequested();
+                using var secret = await secrets.ResolveBoundedAsync(group.Key.Definition, group.Key.Reference, MaxSecretBytes, token)
+                    ?? throw new InvalidDataException();
+                var bytes = secret.CopyBytes();
+                try
+                {
+                    if (bytes.Length is 0 or > MaxSecretBytes) throw new ConfigurationDocumentLimitException();
+                    var value = ParseConfigurationSecret(bytes, group.First().Value.Node.Format);
+                    foreach (var (path, binding) in group)
+                    {
+                        if (binding.Node.Format != group.First().Value.Node.Format)
+                            value = ParseConfigurationSecret(bytes, binding.Node.Format);
+                        projected.Add(path, value);
+                    }
+                }
+                finally { CryptographicOperations.ZeroMemory(bytes); }
+            }
             // Group by exact trusted scope: resolve once, format every receiving node,
             // then dispose before loading the next secret. Material memory stays bounded
             // independently of the number of distinct references in the saved artifact.
@@ -146,7 +175,7 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
                 finally { CryptographicOperations.ZeroMemory(bytes); if (chars is not null) Array.Clear(chars); }
             }
             token.ThrowIfCancellationRequested();
-            var json = ConfigurationJson.SerializeDelivery(revision.Tree, resolved, token);
+            var json = ConfigurationJson.SerializeDelivery(ReplaceProjected(revision.Tree, ""), resolved, token);
             if (token.IsCancellationRequested) { CryptographicOperations.ZeroMemory(json); token.ThrowIfCancellationRequested(); }
             return new(ConfigurationDeliveryStatus.Delivered, json, revision.Metadata.Fingerprint);
 
@@ -159,10 +188,22 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
                         if (!authorized.TryGetValue(path, out var binding) || binding.Value != d) throw new InvalidDataException();
                         break;
                     case ConfigurationSecretReference: throw new InvalidDataException();
+                    case ConfigurationProjectedSecret s:
+                        if (!staticSecrets.TryGetValue(path, out var bound) || bound.Node != s) throw new InvalidDataException();
+                        break;
                     case ConfigurationObject o: foreach (var (key, child) in o.Members) Validate(child, path + "/" + ConfigurationComposer.Escape(key)); break;
                     case ConfigurationArray a: for (var j = 0; j < a.Items.Count; j++) Validate(a.Items[j], path + "/" + j.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
                 }
             }
+            ConfigurationValue ReplaceProjected(ConfigurationValue node, string path) => node switch
+            {
+                ConfigurationProjectedSecret => projected.TryGetValue(path, out var value) ? value : throw new InvalidDataException(),
+                ConfigurationObject o => new ConfigurationObject(o.Members.Select(x => KeyValuePair.Create(x.Key,
+                    ReplaceProjected(x.Value, path + "/" + ConfigurationComposer.Escape(x.Key))))),
+                ConfigurationArray a => new ConfigurationArray(a.Items.Select((x, i) => ReplaceProjected(x,
+                    path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture)))),
+                _ => node
+            };
         }
         catch (OperationCanceledException) { throw; }
         catch (ConfigurationDocumentLimitException) { return new(ConfigurationDeliveryStatus.LimitExceeded); }
@@ -177,9 +218,45 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
         foreach (var segment in path[1..].Split('/'))
         {
             var key = segment.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
-            if (ConfigurationComposer.Escape(key) != segment || tree is not ConfigurationObject o || !o.Members.TryGetValue(key, out tree!)) throw new InvalidDataException();
+            if (ConfigurationComposer.Escape(key) != segment) throw new InvalidDataException();
+            if (tree is ConfigurationObject o && o.Members.TryGetValue(key, out var child)) tree = child;
+            else if (tree is ConfigurationArray a && int.TryParse(key, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var index) && index >= 0 && index < a.Items.Count &&
+                key == index.ToString(System.Globalization.CultureInfo.InvariantCulture)) tree = a.Items[index];
+            else throw new InvalidDataException();
         }
         return tree;
+    }
+    private static ConfigurationValue ParseConfigurationSecret(byte[] bytes, ProfileSecretFormat format)
+    {
+        var text = StrictUtf8.GetString(bytes);
+        if (format == ProfileSecretFormat.String) return new ConfigurationString(text);
+        if (format != ProfileSecretFormat.Json) throw new InvalidDataException();
+        using var parsed = JsonDocument.Parse(bytes, new JsonDocumentOptions
+        {
+            MaxDepth = ConfigurationDocumentCodec.MaxContainers,
+            CommentHandling = JsonCommentHandling.Disallow,
+            AllowTrailingCommas = false
+        });
+        return Convert(parsed.RootElement);
+
+        static ConfigurationValue Convert(JsonElement value) => value.ValueKind switch
+        {
+            JsonValueKind.Null => ConfigurationNull.Instance,
+            JsonValueKind.True => new ConfigurationBoolean(true),
+            JsonValueKind.False => new ConfigurationBoolean(false),
+            JsonValueKind.String => new ConfigurationString(value.GetString()!),
+            JsonValueKind.Number => ConfigurationNumber.Parse(value.GetRawText()),
+            JsonValueKind.Array => new ConfigurationArray(value.EnumerateArray().Select(Convert)),
+            JsonValueKind.Object => Object(value),
+            _ => throw new InvalidDataException()
+        };
+        static ConfigurationObject Object(JsonElement value)
+        {
+            var members = value.EnumerateObject().ToArray();
+            if (members.Select(x => x.Name).Distinct(StringComparer.Ordinal).Count() != members.Length) throw new InvalidDataException();
+            return new ConfigurationObject(members.Select(x => KeyValuePair.Create(x.Name, Convert(x.Value))));
+        }
     }
     private static IEnumerable<SecretRef> References(ConfigurationValue value)
     {

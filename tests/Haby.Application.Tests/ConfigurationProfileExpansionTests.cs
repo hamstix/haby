@@ -529,9 +529,9 @@ public sealed class ConfigurationProfileExpansionTests
             Assert.Throws<ArgumentException>(() => new ConfigurationProfileCatalog([profile, other]));
         }
         var result = Expand([profile], [new ProfileDecision.Use(profile.Reference)], [Component(), Component("worker")]);
-        Fails(result, "profile.secret-projections.unsupported");
+        Fails(result, "profile.secret-reference.unavailable");
         // The same restriction applies to direct semantic contributions, so the earlier path cannot drop metadata.
-        Fails(Expand([Layout()], [Use("layout")], [Component(contributions: profile.Contributions)]), "profile.secret-projections.unsupported");
+        Fails(Expand([Layout()], [Use("layout")], [Component(contributions: profile.Contributions)]), "profile.secret-reference.unavailable");
         var collision = WireProfile("collision", """{"staticContributions":{"child":{"documentRef":"settings","path":"/OpenTelemetry/Other","value":null}}}""");
         Fails(Expand([profile, collision], [new ProfileDecision.Use(profile.Reference), new ProfileDecision.Use(collision.Reference)]), "render.projection.path-conflict");
         var missing = WireProfile("missing", """{"staticContributions":{"c":{"documentRef":"external","path":"/x","value":null}}}""");

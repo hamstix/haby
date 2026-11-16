@@ -24,8 +24,13 @@ internal sealed partial class CliCommandContext
             return action(client, env, ct);
         }, requireContext: false, token);
 
-    internal Task<int> CreateSecretAsync(string name, string? environment, bool stdin, string? suppliedRequestId, CancellationToken token)
+    internal Task<int> CreateSecretAsync(string name, string? environment, bool stdin, string? suppliedRequestId, CancellationToken token, string? purpose = null)
     {
+        if (purpose is not (null or "administrator" or "configuration"))
+        {
+            error.WriteLine("Purpose must be administrator or configuration.");
+            return Task.FromResult(CliApplication.UsageError);
+        }
         var requestId = Guid.NewGuid();
         if (suppliedRequestId is not null && (!Guid.TryParse(suppliedRequestId, out requestId) || requestId == Guid.Empty))
         {
@@ -44,14 +49,20 @@ internal sealed partial class CliCommandContext
             try
             {
                 var request = new CreateSecretRequest
-                { Environment = env, Name = name, RequestId = requestId.ToString(), Material = ByteString.CopyFrom(bytes) };
+                {
+                    Environment = env,
+                    Name = name,
+                    RequestId = requestId.ToString(),
+                    Material = ByteString.CopyFrom(bytes),
+                    Purpose = purpose == "configuration" ? "Configuration" : "ProviderAdministrator"
+                };
                 try
                 {
                     var reply = await client.CreateSecretAsync(request, ct);
                     if (reply.Status == SecretStatus.SecretStorageUnavailable) Retry();
                     if (reply.Status is SecretStatus.Created or SecretStatus.ExistingEquivalent &&
                         (!reply.HasRequestId || !Guid.TryParse(reply.RequestId, out var acceptedRequest) ||
-                         acceptedRequest != requestId || reply.Secret?.Name != name))
+                         acceptedRequest != requestId || reply.Secret?.Name != name || reply.Secret.Purpose != request.Purpose))
                         throw new InvalidDataException("Incomplete creation result.");
                     return PrintSecret("secret create", reply);
                 }
@@ -64,7 +75,7 @@ internal sealed partial class CliCommandContext
             }
             finally { Array.Clear(bytes); }
 
-            void Retry() => error.WriteLine($"Creation outcome is uncertain or storage is unavailable. RequestId: {requestId}. Retry secret create with the same Environment, name, exact input and --request-id {requestId}; do not change the value.");
+            void Retry() => error.WriteLine($"Creation outcome is uncertain or storage is unavailable. RequestId: {requestId}. Retry secret create with the same Environment, name, purpose, exact input and --request-id {requestId}; do not change the value.");
         }, token);
     }
 }

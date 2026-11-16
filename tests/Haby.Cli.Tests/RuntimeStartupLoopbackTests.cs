@@ -114,7 +114,7 @@ public sealed partial class CliLoopbackTests
             return Task.FromResult(new DeliverConfigurationReply
             {
                 RevisionId = request.RevisionId,
-                SourceFingerprint = "sha256:configuration-revision-v1:" + new string('a', 64),
+                SourceFingerprint = "sha256:configuration-revision-v2:" + new string('a', 64),
                 Json = ByteString.CopyFromUtf8("{\"state\":\"ready\"}")
             });
         }

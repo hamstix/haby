@@ -88,6 +88,28 @@ public sealed partial class ConfigurationDeliveryTests
         Assert.Equal(RuntimeDeliveryOutcome.Delivered, repeated.Outcome); Assert.Equal(2, h.Store.Resolutions);
     }
 
+    [Fact]
+    public async Task Runtime_configuration_secret_requires_fresh_publication_and_preserves_generated_login_delivery()
+    {
+        var h = await Prepare(configurationSecret: true);
+        var ports = new RuntimePorts(h);
+        using var admission = new RuntimeAuthenticationAdmission(new(), TimeProvider.System);
+        ports.Published = false;
+        using (var denied = await ports.Service(admission).ExecuteAsync(ports.Trust.Binding,
+            h.Store.Artifact.Revision.Metadata.Id, "projected"u8.ToArray(), default))
+            Assert.Equal(RuntimeDeliveryOutcome.PermissionDenied, denied.Outcome);
+        Assert.Equal(0, h.Store.Resolutions);
+        ports.Published = true;
+        using var delivered = await ports.Service(admission).ExecuteAsync(ports.Trust.Binding,
+            h.Store.Artifact.Revision.Metadata.Id, "projected"u8.ToArray(), default);
+        Assert.Equal(RuntimeDeliveryOutcome.Delivered, delivered.Outcome);
+        Assert.Equal(2, h.Store.Resolutions);
+        using var json = System.Text.Json.JsonDocument.Parse(delivered.Document!.Json);
+        Assert.True(json.RootElement.GetProperty("Logging"u8).GetProperty("WriteTo"u8)[0]
+            .GetProperty("Args"u8).GetProperty("password"u8).GetProperty("enabled"u8).GetBoolean());
+        Assert.Equal("synthetic-private-material", json.RootElement.GetProperty("value"u8).GetString());
+    }
+
     [Theory]
     [InlineData("purpose")]
     [InlineData("attempt")]

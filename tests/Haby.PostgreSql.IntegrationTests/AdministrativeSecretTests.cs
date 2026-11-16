@@ -15,6 +15,43 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class AdministrativeSecretTests(CatalogServerFixture server) : CatalogTestCase(server)
 {
     [Fact]
+    public async Task Configuration_purpose_replays_exact_version_after_restart_and_conflicts_with_administrator_name()
+    {
+        var connection = await DatabaseAsync();
+        var request = Guid.NewGuid();
+        SecretMetadata accepted;
+        await using (var first = Services(connection))
+        {
+            var created = await Create(first, "logging-password", request, [1, 2, 3], purpose: SecretPurpose.Configuration);
+            Assert.Equal(SecretOutcome.Created, created.Outcome);
+            accepted = created.Secret!;
+            Assert.Equal(SecretPurpose.Configuration, accepted.Purpose);
+            Assert.Equal(SecretOutcome.ExistingEquivalent,
+                (await Create(first, "logging-password", Guid.NewGuid(), [1, 2, 3], purpose: SecretPurpose.Configuration)).Outcome);
+            Assert.Equal(SecretOutcome.RequestContentConflict,
+                (await Create(first, "logging-password", request, [1, 2, 3])).Outcome);
+            Assert.Equal(SecretOutcome.RequestContentConflict,
+                (await Create(first, "logging-password", Guid.NewGuid(), [1, 2, 3])).Outcome);
+            Assert.Equal(SecretOutcome.RequestContentConflict,
+                (await Create(first, "logging-password", request, [1, 2, 4], purpose: SecretPurpose.Configuration)).Outcome);
+        }
+        await using (var restarted = Services(connection))
+        {
+            var replay = await Create(restarted, "logging-password", request, [1, 2, 3], purpose: SecretPurpose.Configuration);
+            Assert.Equal(SecretOutcome.ExistingEquivalent, replay.Outcome);
+            Assert.Equal(accepted.SecretId, replay.Secret!.SecretId);
+            Assert.Equal(Assert.Single(accepted.Versions).VersionId, Assert.Single(replay.Secret.Versions).VersionId);
+            var metadata = await restarted.GetRequiredService<SecretAdministration>().GetAsync("pilot", "logging-password", null, default);
+            Assert.Equal(SecretPurpose.Configuration, metadata.Secret!.Purpose);
+        }
+        await using var check = Context(connection);
+        var version = Guid.Parse(Assert.Single(accepted.Versions).VersionId.ToString());
+        await Assert.ThrowsAsync<PostgresException>(() => check.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM secret_versions WHERE id = {version}"));
+        Assert.True(await check.SecretVersions.AsNoTracking().AnyAsync(x => x.Id == version));
+    }
+
+    [Fact]
     public async Task Equivalent_retry_reuses_transaction_connection_with_a_single_connection_pool()
     {
         var connection = new NpgsqlConnectionStringBuilder(await DatabaseAsync()) { MaxPoolSize = 1, Timeout = 3 }.ConnectionString;
@@ -368,10 +405,11 @@ public sealed class AdministrativeSecretTests(CatalogServerFixture server) : Cat
     }
 
     private static async Task<SecretResult> Create(ServiceProvider services, string name, Guid request,
-        byte[]? bytes = null, string environment = "pilot", string actor = "actor")
+        byte[]? bytes = null, string environment = "pilot", string actor = "actor",
+        SecretPurpose purpose = SecretPurpose.ProviderAdministrator)
     {
         using var material = new SecretMaterial(bytes ?? [1]);
-        return await services.GetRequiredService<SecretAdministration>().CreateAsync(environment, name, request, material, actor, default);
+        return await services.GetRequiredService<SecretAdministration>().CreateAsync(environment, name, request, material, actor, default, purpose);
     }
 
     private async Task<string> DatabaseAsync(bool migrate = true)

@@ -17,7 +17,7 @@ public sealed record SecretListResult(SecretOutcome Outcome, IReadOnlyList<Secre
 public interface IAdministrativeSecretCatalog
 {
     ValueTask<SecretResult> CreateAsync(EnvironmentRecordId environment, string name, Guid requestId,
-        SecretMaterial material, string actor, CancellationToken cancellationToken);
+        SecretMaterial material, string actor, CancellationToken cancellationToken, SecretPurpose purpose = SecretPurpose.ProviderAdministrator);
     ValueTask<SecretMetadata?> GetAsync(EnvironmentRecordId environment, string? name, SecretId? id, CancellationToken cancellationToken);
     ValueTask<IReadOnlyList<SecretMetadata>> ListAsync(EnvironmentRecordId environment, string? after, int limit, CancellationToken cancellationToken);
 }
@@ -30,7 +30,7 @@ public sealed class SecretAdministration(IEnvironmentQuery environments, IAdmini
     public const int MaxPageSize = 100;
 
     public async ValueTask<SecretResult> CreateAsync(string? environment, string? name, Guid requestId,
-        SecretMaterial material, string actor, CancellationToken cancellationToken)
+        SecretMaterial material, string actor, CancellationToken cancellationToken, SecretPurpose purpose = SecretPurpose.ProviderAdministrator)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var env = Name(environment);
@@ -39,13 +39,14 @@ public sealed class SecretAdministration(IEnvironmentQuery environments, IAdmini
         try
         {
             if (env is null || secretName is null || requestId == Guid.Empty || bytes.Length is < 1 or > MaxBytes ||
+                purpose is not (SecretPurpose.ProviderAdministrator or SecretPurpose.Configuration) ||
                 string.IsNullOrWhiteSpace(actor) || actor.Length > 256)
                 return new(SecretOutcome.InvalidRequest, RequestId: requestId);
         }
         finally { Array.Clear(bytes); }
         var record = await environments.FindAsync(env, cancellationToken);
         return record is null ? new(SecretOutcome.EnvironmentNotFound, RequestId: requestId) :
-            await catalog.CreateAsync(record, secretName.Value, requestId, material, actor, cancellationToken);
+            await catalog.CreateAsync(record, secretName.Value, requestId, material, actor, cancellationToken, purpose);
     }
 
     public async ValueTask<SecretResult> GetAsync(string? environment, string? name, string? id, CancellationToken cancellationToken)
