@@ -2,7 +2,8 @@
 
 This roadmap tracks usable outcomes. The initial manifest foundation has been
 delivered; configuration and bounded update/naming outcomes are established in P2.
-The current focus is P3 Workload contracts and pure planning, not M2.1 foundation work.
+The current focus is P3 operator Workload submission, followed by public wait/resume
+and lifecycle completion.
 
 The delivery stages below reorganize existing commitments. They do not change
 accepted ADRs, stabilize alpha contracts or claim general production readiness.
@@ -15,7 +16,7 @@ and independently reviewable PRs.
 | --- | --- | --- |
 | P1 - Resource provisioning pilot | Delivered within the isolated PostgreSQL pilot | Prepare an Environment, import an Application, Plan/commit/execute, create its database and generated application login, and grant database-owner access. |
 | P2 - Application configuration | Functionally delivered within the bounded PostgreSQL profile | Generate exact configuration documents from applied Resource outputs and shared Profiles; let an explicitly authorized application client retrieve and use them. |
-| P3 - Workload lifecycle | In progress: contracts and adapter kernel; durable runtime not implemented | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
+| P3 - Workload lifecycle | In progress: internal durable CREATE, configuration delivery and readiness; operator desired-state admission delivered, public submission in progress | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
 | P4 - Standard Providers | Planned | Add RabbitMQ, Redis and HTTP/auth integrations and extend PostgreSQL through complete tested application scenarios. |
 
 P1 is a working checkpoint, not a claim that configuration delivery, all
@@ -175,46 +176,57 @@ the separate naming and shared-system evidence without claiming P3 rollout.
 
 ## P3 - Workload lifecycle
 
-Status: in progress: contracts/pure planning, API-only qualification, immutable Placement administration and a bounded Deployment adapter kernel.
-Host-registered durable Kubernetes execution remains unimplemented. Goal: deploy and operate an Application
-using Haby-managed configuration and the same durable state/operation model.
+Status: in progress. Internal durable initial Deployment CREATE, runtime configuration
+and exact readiness are implemented; authenticated operator Plan/Check/Commit admits
+the two supported initial shapes. Public submission is in progress in
+[issue #229 / PR #230](https://github.com/hamstix/haby/pull/230), not merged as of
+2026-11-16. Public wait/resume/batch, retirement and Workload AppliedGeneration
+completion remain unavailable. Goal: deploy and operate an Application using
+Haby-managed configuration and the same durable state/operation model.
+
+The checklist separates implemented bounded slices from remaining lifecycle work.
+Earlier slice guides retain their original exclusions and evidence; later completed
+items below supersede those exclusions only for their explicitly implemented scope.
 
 - [x] Accept the first Workload foundation packet under [ADR-046](docs/adr/0046-kubernetes-workload-foundation-and-rollout-stages.md): unified deployment planning/execution, Kubernetes-specific contracts with neutral core/storage, exact inputs, staged readiness and mandatory retirement cleanup. This is design acceptance, not implementation.
-- [x] Accept Workload declaration and Placement selection rules under [ADR-047](docs/adr/0047-kubernetes-workload-declarations-and-placement.md): immutable Placement revisions, Environment defaults, Application/Component selection, explicit placementRef, bounded overrides, named ports and capability refusal. This is architecture acceptance; implemented contract/administration slices are listed below and execution remains unimplemented.
+- [x] Accept Workload declaration and Placement selection rules under [ADR-047](docs/adr/0047-kubernetes-workload-declarations-and-placement.md): immutable Placement revisions, Environment defaults, Application/Component selection, explicit placementRef, bounded overrides, named ports and capability refusal. This is architecture acceptance; implemented contract, administration and bounded runtime slices are listed below.
 - [x] Accept [ADR-054](docs/adr/0054-p3-workload-contracts-and-typed-images.md): image.name with exact ApplicationVersion/static tag or full reference, Placement registry/prefix, independent containerName default app, explicit defaults/document selection and distinct exact Provider resolutions.
 - [x] Accept [ADR-055](docs/adr/0055-p3-implementation-closure-and-coordination.md): Environment-scoped Providers and alias-scoped Placement selection, namespace authority, explicit credentials/preflight, durable publication/revoke, configurable load defaults, distinct wait/resume, 200-member batch bound, retirement marker and coordinator discretion. Design acceptance only.
-- [x] Implement [issue #177](https://github.com/hamstix/haby/issues/177): closed current Workload/Placement contracts, placementRef normalization/snapshot preservation, typed immutable models and pure scoped/default/override/name/image resolution with exact Provider inputs. Keep durable Workload admission disabled until its stages are implemented.
+- [x] Implement [issue #177](https://github.com/hamstix/haby/issues/177): closed current Workload/Placement contracts, placementRef normalization/snapshot preservation, typed immutable models and pure scoped/default/override/name/image resolution with exact Provider inputs. Merged [PR #178](https://github.com/hamstix/haby/pull/178) delivered pure planning; bounded operator admission is now implemented below.
 - [x] Specify closed JSON and pure reusable placement inheritance/overrides ([contract matrix](docs/architecture/kubernetes-workload-placement-v1alpha1.md); no executor): existing namespace (normally shared per Environment), container/image/ports/env/resources, replicas/strategy/rollout, startup/liveness/readiness probes, nodeSelector, imagePullSecrets and existing ConfigMap/Secret/PVC mounts with optional/readOnly/subPath semantics. Explicit Development Recreate and Production RollingUpdate settings are configuration choices, not Environment-name inference.
 - [x] Add authenticated exact Kubernetes Provider JSON preparation, access-only preflight and alias CAS through Host/habyctl ([issue #204 runbook](docs/development/204-kubernetes-provider-administration.md)). This checks authentication without a selected namespace; Placement/capability admission and executable Workloads remain separate.
 - [x] Complete issue #179 API-only Kubernetes qualification with the strict factory, pinned client/API compatibility checks and isolated evidence under PR #180. Qualification is not a production SDK adapter or executable Workload support.
 - [x] Persist/administer exact immutable Placement revisions through authenticated validate/import/get, with Environment + Provider-alias scope, complete portable JSON, retry/concurrency/restart/restore and Native AOT operator paths: [issue #181 runbook](docs/development/181-placement-revisions.md). Preparatory import changes no selections or desired state.
 - [x] Implement exact named/scoped Placement selections with conditional updates and operator exact reads: [issue #183 runbook](docs/development/183-placement-selections.md). Selection metadata changes no accepted Plan or generation.
-- [x] Persist authoritative declaration-keyed exact Provider input sets in Plans/generations ([issue #185 contract](docs/development/185-durable-provider-input-sets.md)), preserving the explicit Resource-pilot restrictions. This does not enable Workload admission or effects.
-- [x] Persist evidence-bearing ResourcesReady checkpoints for admitted Resource-only generations through one completion boundary ([issue #187 contract](docs/development/187-resources-ready-checkpoints.md)). Preserve original provenance, audited recovery and confirmed effects; Workload admission and later stages remain closed.
+- [x] Persist authoritative declaration-keyed exact Provider input sets in Plans/generations ([issue #185 contract](docs/development/185-durable-provider-input-sets.md)), preserving the explicit Resource-pilot restrictions. This slice alone enabled no Workload admission or effects; subsequent slices are listed below.
+- [x] Persist evidence-bearing ResourcesReady checkpoints for admitted Resource-only generations through one completion boundary ([issue #187 contract](docs/development/187-resources-ready-checkpoints.md)). Preserve original provenance, audited recovery and confirmed effects; subsequent Workload-stage extensions are listed below.
 - [x] Complete the evidence maintenance sequence: [PR #194](https://github.com/hamstix/haby/pull/194) hosted entrypoint, [PR #196](https://github.com/hamstix/haby/pull/196) fixture isolation, [PR #198](https://github.com/hamstix/haby/pull/198) explicit suites and [PR #199](https://github.com/hamstix/haby/pull/199) bounded failure evidence. The earlier #191 proposal/PR #192 was superseded and is not implemented on main. These changes do not implement Workload runtime stages.
-- [x] Implement the [issue #200 bounded Deployment kernel](docs/development/200-deployment-kernel.md): strict explicit transport, closed intent/receipts, one-shot create, conditional keyed update and separate read-only uncertain observation. It is not Host-registered, has no persisted dispatch linkage and cannot admit Workloads or advance AppliedGeneration. Internal durable CREATE intent/dispatch linkage is implemented in [issue #202](docs/development/202-durable-workload-intents.md); public Workload integration and durable UPDATE admission remain closed.
-- [ ] Implement durable exact Placement capture and stage checkpoints. Placement revision/selection administration alone does not enable these paths.
-- [ ] Implement Deployment and explicitly selected Service and headless Service (allowed together), plus individual Ingress controlled by placement. No compulsory bundle, arbitrary PodSpec/YAML or ownership of referenced objects; shared product routing remains separate.
+- [x] Implement the [issue #200 bounded Deployment kernel](docs/development/200-deployment-kernel.md): strict explicit transport, closed intent/receipts, one-shot create, conditional keyed update and separate read-only uncertain observation. The stateless kernel alone grants no durable authority. Internal durable CREATE intent/dispatch linkage is delivered by [PR #203](https://github.com/hamstix/haby/pull/203) ([issue #202 guide](docs/development/202-durable-workload-intents.md)); durable UPDATE and Workload Applied completion remain unavailable.
+- [x] Implement durable exact Placement capture, initial unchanged-Resource mixed CREATE and explicit empty ResourcesReady for initial Workload-only generations: merged [PR #203](https://github.com/hamstix/haby/pull/203) and [PR #207](https://github.com/hamstix/haby/pull/207) ([empty-stage guide](docs/development/206-workload-only-empty-resource-stage.md)). Internal Submitted/Ready checkpoints follow below; retirement/final completion remain separate.
+- [x] Implement bounded initial Deployment CREATE, with and without selected runtime configuration: [PR #203](https://github.com/hamstix/haby/pull/203) and [PR #224](https://github.com/hamstix/haby/pull/224). This is an internal runtime boundary, not full supported-contract execution.
+- [ ] Complete the accepted Deployment field contract and explicitly selected Service and headless Service (allowed together), plus individual Ingress controlled by placement. No compulsory bundle, arbitrary PodSpec/YAML or ownership of referenced objects; shared product routing remains separate.
 - [x] Accept [ADR-049](docs/adr/0049-kubernetes-object-ownership-and-uncertain-writes.md): stable applicationId-componentId-workloadId names with optional nameOverride, exact UID/ownership, bounded managed fields, conditional JSON Patch, conflicts and evidence-based observation after uncertain writes. This is architecture acceptance, not implementation.
-- [ ] Implement the ADR-049 object inventory, closed field/metadata/evidence contracts, conditional writes and observation recovery. Validate kind-specific names and headless suffixes without truncation; no foreign-object adoption, implicit rename/recreation or companion-object cascade. Prove against a real Kubernetes API.
-- [x] Implement internal pre-Applied exact document preparation under [issue #208](docs/development/208-preapplied-workload-configuration.md), with original Resource proof, stable recipient associations and unchanged public/executable guards. Runtime identity, publication and configured Deployment submission remain closed; static Profile secret projection execution awaits #209.
-- [x] Implement internal stable Workload identity and owned ServiceAccount/binding preparation after complete exact documents ([issue #211](docs/development/211-stable-workload-runtime-identity.md)). Binding alone grants no access; public execution, publication, configured Deployment submission and Applied remain closed.
-- [ ] Implement Resource-ready -> exact configuration/access preparation -> Workload submission -> readiness -> AppliedGeneration completion. Preserve the Resource-only path and the existing ordinary fully-applied configuration selector.
+- [x] Implement bounded Deployment write/observation contracts and uncertain CREATE recovery, plus owned ServiceAccount/configured Deployment inventory: [PR #201](https://github.com/hamstix/haby/pull/201), [PR #203](https://github.com/hamstix/haby/pull/203), [PR #212](https://github.com/hamstix/haby/pull/212) and [PR #224](https://github.com/hamstix/haby/pull/224). The conditional UPDATE kernel is not durable Workload UPDATE admission.
+- [ ] Complete ADR-049 inventory and closed effect contracts for the remaining supported fields/companion objects, durable updates and deletion. Validate kind-specific names and headless suffixes without truncation; no foreign-object adoption, implicit rename/recreation or companion-object cascade. Prove against a real Kubernetes API.
+- [x] Implement internal pre-Applied exact document preparation under [issue #208](docs/development/208-preapplied-workload-configuration.md), with original Resource proof, stable recipient associations and unchanged public/executable guards. Merged [PR #210](https://github.com/hamstix/haby/pull/210) establishes this preparation boundary; subsequent identity/publication/CREATE slices are listed below. Static Profile secret projection execution awaits the separate contract decision in [#209](https://github.com/hamstix/haby/issues/209), with no implementation authorization.
+- [x] Implement internal stable Workload identity and owned ServiceAccount/binding preparation after complete exact documents ([issue #211](docs/development/211-stable-workload-runtime-identity.md)). Merged [PR #212](https://github.com/hamstix/haby/pull/212). Binding alone grants no access; publication and configured CREATE are separate implemented slices below, while public execution and Applied completion remain unavailable.
+- [ ] Complete the partially implemented Resource-ready -> exact configuration/access preparation -> Workload submission -> readiness -> retirement -> AppliedGeneration path. Internal preparation/CREATE/readiness are delivered below; public orchestration and retirement/finalization remain. Preserve the Resource-only path and the existing ordinary fully-applied configuration selector.
 - [x] Accept [ADR-051](docs/adr/0051-workload-readiness-wait-and-retirement.md): exact readiness, bounded server-side wait/resume, product-upgrade and CI batch waiting, mandatory planned retirement before AppliedGeneration, and recovery by observation after external repairs. Design acceptance, not implementation.
-- [ ] Implement submission without waiting, exact-generation server wait/resume and bounded product/CI batch observation under ADR-051. CLI never contacts Kubernetes; deadline/history survives restart, and external registry-secret repair can complete the same generation without replaying confirmed work.
+- [ ] Expose submission without waiting through the operator: [#229 / draft PR #230](https://github.com/hamstix/haby/pull/230) is in progress, not merged. Internal submission and exact readiness are already implemented below.
+- [ ] Expose exact-generation server wait/resume and bounded product/CI batch observation under ADR-051. CLI never contacts Kubernetes; deadline/history survives restart, and external registry-secret repair can complete the same generation without replaying confirmed work.
 - [x] Accept [ADR-053](docs/adr/0053-forward-correction-without-rollback.md): forward correction through explicit desired generations, without automatic or dedicated rollback. Historical revisions/earlier images remain explicitly selectable under current admission rules, never as reversal of external effects. Keep the bounded ADR-052 incomplete-rollout path.
 - [x] Accept [ADR-052](docs/adr/0052-corrective-generations-for-incomplete-workload-rollout.md): explicit corrective generation after confirmed ResourcesReady, with no uncertain writes and before retirement, atomic executor handoff, direct original Resource evidence and accumulated inventory. This is a narrow future P3 exception to ADR-045, not implemented P2 support.
 - [ ] Implement the ADR-052 corrective intent/Plan/Commit and executor fencing, including failed first rollout, unchanged Resource/Workload identity sets, direct confirmed source reuse and safe eventual retirement. Ordinary updates still require fully applied baseline; no adoption, rollback or replay. Implement planned cleanup with exact inventory/UID/recipient checks.
 - [x] Accept [ADR-050](docs/adr/0050-kubernetes-runtime-identity-and-configuration-publication.md): stable per-ManagedWorkload ServiceAccount/binding, service-account-bound TokenReview, separate exact-document publication/revocation and bounded mass startup. Old Pods may request newer explicitly published revisions; materialization alone grants no access. Design acceptance, not implementation.
-- [ ] Implement exact runtime publication and checked pre-readiness preparation, stable identity/projected token integration, revocation-safe replay and generated delivery clients under ADR-050. Document audience, restore/clone identity and operator procedures using the [mechanism guide](docs/architecture/kubernetes-runtime-configuration.md).
-- [x] Persist friend-only exact runtime publication/revocation metadata with immutable intent receipts, conditional permission lifecycle and terminal binding revoke: [issue #213 guide](docs/development/213-runtime-configuration-publication.md). This opens no runtime authentication, delivery endpoint or configured Workload execution.
-- [x] Add internal exact-binding Kubernetes TokenReview authentication with original identity proof, a fresh binding lifecycle check and validated shared Host admission: [issue #215 guide](docs/development/215-runtime-tokenreview-authentication.md). Authentication grants no document permission; delivery, projected-file integration, configured execution and mass-start acceptance remain separate.
-- [x] Deliver exact published configuration through the independent runtime RPC with online identity authentication, fresh metadata-only publication authorization and bounded transient application-material resolution: [issue #219 guide](docs/development/219-runtime-configuration-delivery.md). P2 static delivery stays separate; projected-file startup, Deployment injection/execution, readiness and Applied advancement remain closed. Passing evidence must be attributed to its exact source; the post-P4 load rehearsal remains pending.
-- [x] Implement bounded friend-only initial configured Deployment CREATE with frozen Placement endpoint/trust, exact non-secret bootstrap and complete owned token projection: [issue #223 guide](docs/development/223-configured-deployment-bootstrap.md). Public execution, configured updates, readiness/retirement and Applied remain closed; executable inventory is distinct from exact-source passing evidence.
-- [x] Implement friend-only exact confirmed Deployment observation and audited expired-attempt resume: [issue #225 guide](docs/development/225-deployment-readiness.md). Per-Workload deadlines and truthful Submitted/Ready evidence persist; public wait/batch/CLI, retirement and Applied advancement remain closed. Executable coverage is distinct from exact-source passing evidence.
-- [x] Admit the two supported initial Workload desired-state shapes through authenticated operator Plan/Check/Commit ([issue #227 guide](docs/development/227-operator-workload-admission.md)). Exact inputs and safe inspection do not open public submission, execution, wait/resume, retirement or Applied completion.
-- [ ] Implement validated operator-configurable TokenReview concurrency/rate/queue/timeouts and client startup/retry settings under ADR-055. Ordinary CI covers fast deterministic correctness, cancellation/revocation/identity, token rotation and real API validation plus existing mandatory gates. Preserve bounded queue/memory/credential lifetimes, no positive cache and the total client startup deadline with backoff/jitter. Separate mass-start qualification is deferred until after P4; it does not gate P3 completion or current runtime-delivery acceptance.
-- [ ] Implement Kubernetes Runtime Identity and scoped configuration retrieval using the accepted projected-token/TokenReview model.
+- [x] Implement the bounded ADR-050 initial identity/publication/delivery/client/projected-token path through the completed slices below. Audience, restore/clone identity and operator boundaries are documented in the [mechanism guide](docs/architecture/kubernetes-runtime-configuration.md) and slice guides. Cross-generation rollout/retirement remains incomplete.
+- [x] Persist friend-only exact runtime publication/revocation metadata with immutable intent receipts, conditional permission lifecycle and terminal binding revoke: [issue #213 guide](docs/development/213-runtime-configuration-publication.md). Merged [PR #214](https://github.com/hamstix/haby/pull/214); authentication, delivery and configured CREATE follow below, without conflating publication history with current authority.
+- [x] Add internal exact-binding Kubernetes TokenReview authentication with original identity proof, a fresh binding lifecycle check and validated shared Host admission: [issue #215 guide](docs/development/215-runtime-tokenreview-authentication.md). Merged [PR #216](https://github.com/hamstix/haby/pull/216). Authentication grants no document permission; subsequent delivery and projected-file integration remain separately authorized.
+- [x] Deliver exact published configuration through the independent runtime RPC with online identity authentication, fresh metadata-only publication authorization and bounded transient application-material resolution: [issue #219 guide](docs/development/219-runtime-configuration-delivery.md). Merged [PR #220](https://github.com/hamstix/haby/pull/220). P2 static delivery stays separate; startup, configured CREATE and readiness are separate slices below, and Applied advancement remains unavailable. Passing evidence must be attributed to its exact source; the post-P4 load rehearsal remains pending.
+- [x] Fetch all exact mandatory documents before primary application startup, rereading projected credentials per attempt with bounded temporary retry/backoff/jitter and one total deadline: [issue #221 guide](docs/development/221-runtime-startup-client.md), merged [PR #222](https://github.com/hamstix/haby/pull/222). This does not promise a stable public SDK, hot reload or the deferred load capacity.
+- [x] Implement bounded friend-only initial configured Deployment CREATE with frozen Placement endpoint/trust, exact non-secret bootstrap and complete owned token projection: [issue #223 guide](docs/development/223-configured-deployment-bootstrap.md). Merged [PR #224](https://github.com/hamstix/haby/pull/224). Public execution, configured updates, retirement and Applied remain unavailable; internal readiness follows below. Executable inventory is distinct from exact-source passing evidence.
+- [x] Implement friend-only exact confirmed Deployment observation and audited expired-attempt resume: [issue #225 guide](docs/development/225-deployment-readiness.md). Merged [PR #226](https://github.com/hamstix/haby/pull/226). Per-Workload deadlines and truthful Submitted/Ready evidence persist; public wait/batch/CLI, retirement and Applied advancement remain closed. Executable coverage is distinct from exact-source passing evidence.
+- [x] Admit the two supported initial Workload desired-state shapes through authenticated operator Plan/Check/Commit ([issue #227 guide](docs/development/227-operator-workload-admission.md)). Merged [PR #228](https://github.com/hamstix/haby/pull/228). Exact inputs and safe inspection do not open public submission, execution, wait/resume, retirement or Applied completion.
+- [x] Implement validated operator-configurable TokenReview concurrency/rate/queue/timeouts ([PR #216](https://github.com/hamstix/haby/pull/216), [Host settings](docs/development/215-runtime-tokenreview-authentication.md#host-settings)) and client startup/retry settings ([PR #222](https://github.com/hamstix/haby/pull/222), [client options](docs/development/221-runtime-startup-client.md#validated-startup-options-and-bounds)), including frozen Placement client settings in [PR #224](https://github.com/hamstix/haby/pull/224), under ADR-055. Ordinary CI covers fast deterministic correctness, cancellation/revocation/identity, token rotation and real API validation plus existing mandatory gates. Preserve bounded queue/memory/credential lifetimes, no positive cache and the total client startup deadline with backoff/jitter. Separate mass-start qualification is deferred until after P4; it does not gate P3 completion or current runtime-delivery acceptance.
 - [ ] Support image/version updates through a new accepted desired generation, with observable completion and safe failure behavior.
 - [ ] Separate desired replicas from suspend/resume and temporary operational overrides.
 - [ ] Plan Application/Component removal and workload cleanup explicitly; apply Resource retain/orphan/delete policy only when that capability is implemented and authorized.
@@ -237,42 +249,43 @@ capabilities, not prerequisites for this milestone.
 
 ### Accepted P3 execution order
 
-**Test architecture prerequisite (stop-loss accepted 2026-11-13):** stop new
+**Historical stop-loss (accepted 2026-11-13):** the instruction was to stop new
 qualification attempts for [#191](https://github.com/hamstix/haby/issues/191) and
 [#188](https://github.com/hamstix/haby/issues/188), safely reconcile owned resources
 and preserve completed, failed and unperformed evidence. Keep the issues and PRs
-open and unmerged. Start the maintenance stage from current main under
+open and unmerged at that checkpoint, then start maintenance from main under
 [ADR-056](docs/adr/0056-test-responsibilities-isolation-and-execution.md), without
-requiring the unmerged local harness:
+requiring the unmerged local harness. That historical instruction is retained here
+as context; the maintenance prerequisite is now complete:
 
-- [ ] Map every case/theory parameter and provide one documented runner with a short preflight and useful safe diagnostics.
-- [ ] Separate catalog persistence from Provider effects with explicit database/server isolation and measured configurable concurrency.
-- [ ] Separate Host/E2E and infrastructure qualification; migrate CI with complete coverage mapping and remove only replaced execution paths.
+- [x] Map every case/theory parameter and provide the documented runner/preflight: merged [PR #194](https://github.com/hamstix/haby/pull/194).
+- [x] Separate catalog persistence from Provider effects with explicit database/server isolation and measured configurable concurrency: merged [PR #196](https://github.com/hamstix/haby/pull/196).
+- [x] Separate functional/Host and infrastructure qualification execution with complete coverage mapping: merged [PR #198](https://github.com/hamstix/haby/pull/198).
+- [x] Finish #188 through the new path with bounded row-associated failure evidence: merged [PR #199](https://github.com/hamstix/haby/pull/199). #191 / PR #192 was superseded, not implemented on main.
 
-After maintenance, finish or explicitly reassess #188/#191 through the new path
-before resuming functional P3. Retain useful fixes rather than all accumulated
-infrastructure; stopping an investigation does not close its unresolved failures.
+Functional P3 has resumed. Earlier failed runs and unresolved historical causes
+remain separately attributed; maintenance completion does not erase that evidence.
 
 GitHub-hosted Linux is the primary full integration gate; a separate Linux runner
 can support diagnostics and periodic heavy qualification. Preserve Windows-specific
 and published Native AOT checks and real external semantics. ADR-055 mass-start
 qualification remains pending after P4 under the user-approved 2026-11-14
-supersession; it does not block P3. This is accepted work, not completed migration or a waiver of
-current checks. Ordinary validation uses source/build/results attribution rather
-than immutable Git-index or repeated forensic preparation requirements.
+supersession; it does not block P3. The maintenance migration is complete; deferred
+load qualification is not a waiver of current checks. Ordinary validation uses
+source/build/results attribution rather than immutable Git-index or repeated forensic preparation requirements.
 
 Under [ADR-055](docs/adr/0055-p3-implementation-closure-and-coordination.md):
 
-1. Issue #177: contracts and pure resolution.
-2. Kubernetes technical qualification: client/license/API guarantees, isolated Windows/CI runtime and pinned supported/tested versions.
-3. Placement persistence and administration.
-4. Durable multi-Provider inputs and stage checkpoints, including Workload-only empty Resource stages.
-5. Conditional Kubernetes writes and uncertain-result observation.
-6. Runtime Identity/publication/client and operator-configurable protection limits; separate mass-start qualification follows P4.
-7. Deployment submission, exact readiness and bounded product/CI batch wait.
-8. Explicit retirement and removal.
-9. Corrective generations with fenced execution and accumulated inventory.
-10. Full operator lifecycle rehearsal.
+1. Completed: #177 contracts and pure resolution ([PR #178](https://github.com/hamstix/haby/pull/178)).
+2. Completed: Kubernetes technical qualification ([PR #180](https://github.com/hamstix/haby/pull/180)).
+3. Completed: Placement persistence and administration ([PR #182](https://github.com/hamstix/haby/pull/182), [PR #184](https://github.com/hamstix/haby/pull/184)).
+4. Completed for the initial shapes: durable exact Provider inputs and stage checkpoints, including Workload-only empty ResourcesReady ([PR #186](https://github.com/hamstix/haby/pull/186), [PR #189](https://github.com/hamstix/haby/pull/189), [PR #203](https://github.com/hamstix/haby/pull/203), [PR #207](https://github.com/hamstix/haby/pull/207)).
+5. Partially completed: bounded conditional Deployment kernel and durable initial CREATE/uncertain observation are implemented; remaining supported fields/companion objects and durable UPDATE are not.
+6. Completed for the bounded initial path: runtime identity/publication/delivery/client and configurable protections; separate mass-start qualification follows P4.
+7. Partially completed: internal submission/exact readiness and operator desired-state admission are delivered. Current next slice is #229 / PR #230 operator submission, followed by public exact wait/resume, bounded product/CI batch wait and retirement-aware Applied completion. Complete the remaining supported contract and image/configuration update path through dedicated slices.
+8. Remaining: explicit retirement and removal.
+9. Remaining: corrective generations with fenced execution and accumulated inventory.
+10. Remaining: full operator lifecycle rehearsal. Separate #209 remains a pending configuration-secret contract decision, not authorized implementation.
 
 Qualification may run alongside contract work; production slices are accepted
 sequentially. The coordinator may split narrow issues and choose ordinary technical
@@ -365,7 +378,7 @@ GitHub tracking follows the delivery sequence:
 
 - [P1 - Resource provisioning pilot](https://github.com/hamstix/haby/milestone/2): closed, delivered within the documented pilot boundary.
 - [P2 - Application configuration](https://github.com/hamstix/haby/milestone/3): open administratively; bounded configuration/updates and issue #175 naming are implemented. Issue #174 required operator checkpoints passed; its private-file teardown remainder stays separately documented. P3 is the current implementation focus.
-- [P3 - Workload lifecycle](https://github.com/hamstix/haby/milestone/4): open, current contract/pure-planning work in issue #177; no executable Workload support yet.
+- [P3 - Workload lifecycle](https://github.com/hamstix/haby/milestone/4): open; bounded internal CREATE/configuration/readiness and operator desired-state admission are delivered. #229 / PR #230 operator submission is in progress; public wait/resume/batch, updates, retirement and Applied completion remain.
 - [P4 - Standard Providers](https://github.com/hamstix/haby/milestone/5): open, planned; individual needed Providers may be pulled forward.
 
 The completed [M2.1 - Manifest foundation](https://github.com/hamstix/haby/milestone/1)
@@ -376,6 +389,10 @@ delivery milestone whose observable outcome they advance.
 Issue #126 is delivered by PR #127. Issue #128 implements the Profile/assignment
 JSON boundary accepted in ADR-038. Issue #130 implements the current-alpha
 Application slot and snapshot changes. Secret declaration parsing does not authorize secret resolution or delivery.
-Continue P3 through the ADR-054 contract/pure-planning slice in issue #177, then
-deliberate Placement/durable multi-Provider/API integration slices. Preserve P2
-runtime guarantees; do not start a general SDK/UI/HA project.
+Continue P3 with [#229 / PR #230](https://github.com/hamstix/haby/pull/230), then
+public wait/resume/batch and retirement-aware completion, followed by the remaining
+supported contract, updates/removal/corrective generations and real lifecycle
+rehearsal under ADR-046/049/050/051/052/055. This documentation reconciliation is
+independent and must not block functional P3. Preserve P2 runtime guarantees;
+#209 remains a separate outstanding contract decision, and the >=150-client load
+rehearsal remains post-P4. Do not start a general SDK/UI/HA project.
