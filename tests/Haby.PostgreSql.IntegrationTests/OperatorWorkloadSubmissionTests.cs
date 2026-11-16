@@ -171,6 +171,23 @@ public sealed partial class DurableDeploymentPlanningTests
                         var authority = replay.Progress.Members.Single(x => x.Workload == "main").RuntimeAuthority;
                         diagnostic.Values(lost ? SubmissionDiagnosticValue.Revoked : configured ? SubmissionDiagnosticValue.Available : SubmissionDiagnosticValue.NotApplicable, authority);
                         Assert.Equal(lost ? "revoked" : configured ? "available" : "notApplicable", authority);
+                        var waitRequest = new GenerationWaitRequest
+                        {
+                            DeploymentId = request.DeploymentId,
+                            Generation = request.Generation,
+                            RequestId = "public-wait",
+                            Settings = new() { MaximumRounds = 1 }
+                        };
+                        var readiness = await freshClient.WaitGenerationAsync(waitRequest);
+                        Assert.Equal("observed", readiness.Outcome);
+                        Assert.Equal(!lost, readiness.CurrentReady); Assert.Equal(!lost, readiness.OriginalRequestReady);
+                        Assert.Equal(mixedRecipients ? 2 : 1, readiness.Members.Count);
+                        if (lost) Assert.Contains(readiness.Members, x => x.Outcome == "Refused" && x.Code == "runtime-authority-unavailable");
+                        else Assert.True(readiness.HasSavedReadyId);
+                        var replayWait = await freshClient.WaitGenerationAsync(waitRequest);
+                        Assert.True(replayWait.Replayed); Assert.False(replayWait.CurrentReady);
+                        Assert.Equal(readiness.OriginalRequestReady, replayWait.OriginalRequestReady);
+                        Assert.Equal(readiness.Members, replayWait.Members);
                         diagnostic.At(SubmissionCheckpoint.DeploymentWrites);
                         Assert.Equal(mixedRecipients ? 2 : 1, deployment.Writes);
                         diagnostic.At(SubmissionCheckpoint.IdentityWrites);
@@ -264,9 +281,12 @@ public sealed partial class DurableDeploymentPlanningTests
             await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
             var client = OperatorTestCredentials.Client(channel);
-            var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest { EnvironmentId = environmentKey,
+            var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest
+            {
+                EnvironmentId = environmentKey,
                 Reference = new() { ApplicationRecordId = reference.ApplicationRecordId.ToString(), RevisionNumber = reference.RevisionNumber.Value },
-                Precondition = PlanningPrecondition.ExpectedAbsence })).ChangeSet;
+                Precondition = PlanningPrecondition.ExpectedAbsence
+            })).ChangeSet;
             var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId });
             var commit = await client.CommitDesiredStateAsync(new() { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId });
             Assert.Equal(CommitStatus.Committed, commit.Status);

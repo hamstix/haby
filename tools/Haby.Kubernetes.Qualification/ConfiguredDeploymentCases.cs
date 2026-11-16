@@ -261,6 +261,10 @@ internal static class ConfiguredDeploymentCases
                 Check(rolloutReady.Ready && rolloutReady.Submitted is not null && rolloutReady.SavedReady is not null &&
                     intent.Target.MinReadySeconds == 1 && saved.Metadata.Uid == DeploymentIntents.DecodeReceipt((await actions.HistoryAsync(key, token))!.Output!.Payload).Uid,
                     "R01-controller-produced-available-minReadySeconds-exact-UID");
+                using var waited = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                    ["deployment", "generation", "wait", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
+                Check(waited.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() && deploymentWrites == 1,
+                    "R05-native-public-wait-whole-set-zero-writes");
             });
             requests.Clear(); var beforeRestart = reviews;
             await WithHost(async () =>
@@ -275,6 +279,17 @@ internal static class ConfiguredDeploymentCases
                 Check(observed.Ready && observed.SavedReady == rolloutReady!.SavedReady && observed.Members[0].Attempt == rolloutReady.Members[0].Attempt &&
                     observed.Members[0].Deadline == rolloutReady.Members[0].Deadline && deploymentWrites == 1,
                     "R02-reconstructed-observer-original-attempt-deadline-zero-writes");
+                observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
+                var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH")!;
+                var localOperator = LocalOperatorEndpoint(activeHost!.Urls.Single());
+                var credential = OperatorTestCredentials.Credential(activeHost.Urls.Single());
+                using var renewed = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                    ["deployment", "generation", "resume", scenario.Commit.DeploymentId.ToString(), scenario.Commit.Generation.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        "--member", observed.Members[0].Subject + "=" + observed.Members[0].Attempt!.Value.ToString("D")], credential: credential));
+                var renewal = renewed.RootElement.GetProperty("data"u8);
+                Check(renewed.RootElement.GetProperty("outcome"u8).GetString() == "resumed" && !renewal.GetProperty("currentReady"u8).GetBoolean() &&
+                    renewal.GetProperty("members"u8)[0].GetProperty("outcome"u8).GetString() == "NotObserved" && deploymentWrites == 1,
+                    "R06-native-public-expired-resume-observation-only");
             });
             requests.Clear(); Interlocked.Exchange(ref revokeNextRead, 1);
             await WithHost(async () =>

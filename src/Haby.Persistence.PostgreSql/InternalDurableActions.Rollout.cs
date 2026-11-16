@@ -8,7 +8,7 @@ namespace Haby.Persistence.PostgreSql;
 internal sealed partial class InternalDurableActions
 {
     private sealed record ObservationCall(SubmittedSet Set, GenerationObservationRecordRow Request, RolloutResult? Replay, int Offset);
-    private sealed record ReadReservation(Guid? Id, bool Expired, bool Recovery);
+    private sealed record ReadReservation(Guid? Id, bool Expired, bool Recovery, string? Refusal = null);
     private static DurableOperationKey RolloutKey(DurableChangeSetCommit accepted) => new(accepted.DeploymentId, accepted.Generation, OperationId.Create("rollout"));
     internal async ValueTask<RolloutResult> ObserveRolloutAsync(DurableChangeSetCommit accepted, string request,
         RolloutOptions options, CancellationToken token)
@@ -19,8 +19,14 @@ internal sealed partial class InternalDurableActions
         bounded.CancelAfter(TimeSpan.FromMilliseconds(options.RequestMilliseconds));
         return await serialization.RunAsync(RolloutKey(accepted), () => ObserveRolloutCoreAsync(accepted, request, options, started, token, bounded.Token), bounded.Token);
     }
+    // Trusted public composition supplies the original total-budget timestamp and token.
+    internal ValueTask<RolloutResult> ObserveOperatorRolloutAsync(DurableChangeSetCommit accepted, string request, string actor,
+        RolloutOptions options, long started, TimeSpan totalBudget, CancellationToken callerToken, CancellationToken token) =>
+        serialization.RunAsync(RolloutKey(accepted), () => ObserveRolloutCoreAsync(accepted, request, options, started,
+            callerToken, token, actor, true, totalBudget), token);
+
     private async ValueTask<ObservationCall> BeginObservationCallAsync(DurableChangeSetCommit accepted, string request,
-        RolloutOptions? options, RolloutResume[]? resumes, string actor, CancellationToken token)
+        RolloutOptions? options, RolloutResume[]? resumes, string actor, CancellationToken token, bool publicRequest = false)
     {
         await using var db = await contexts.CreateDbContextAsync(token);
         await using var tx = await db.Database.BeginTransactionAsync(token);
@@ -34,7 +40,7 @@ internal sealed partial class InternalDurableActions
             x.Generation == source.Generation && x.Kind == "Request" && x.Request == request, token);
         if (previous is not null)
         {
-            if (previous.InputJson != input) throw new InvalidDataException("Conflicting observation idempotency request.");
+            if (previous.InputJson != input) throw publicRequest ? new RolloutRequestConflictException() : new InvalidDataException("Conflicting observation idempotency request.");
             var saved = await SavedReadyAsync(db, set, token);
             var replay = previous.Payload is null ? Result(set, saved?.Id, RolloutStop.Interrupted, new Dictionary<string, RolloutObservation>()) : RolloutJson.Decode(previous.Payload);
             return new(set, previous, replay with { Replayed = true }, 0); // No duplicate network work, including interrupted reservations.
@@ -68,9 +74,13 @@ internal sealed partial class InternalDurableActions
         return new(set.Checkpoint is not null && members.All(x => x.Observation.Outcome == RolloutOutcome.Ready), set.Checkpoint, ready, stop, members);
     }
     private async ValueTask<RolloutResult> ObserveRolloutCoreAsync(DurableChangeSetCommit accepted, string request,
-        RolloutOptions options, long started, CancellationToken callerToken, CancellationToken callToken)
+        RolloutOptions options, long started, CancellationToken callerToken, CancellationToken callToken,
+        string actor = "observer", bool publicRequest = false, TimeSpan? totalBudget = null)
     {
-        var call = await BeginObservationCallAsync(accepted, request, options, null, "observer", callToken);
+        callToken.ThrowIfCancellationRequested();
+        var requestBudget = totalBudget ?? TimeSpan.FromMilliseconds(options.RequestMilliseconds);
+        if (clock.GetElapsedTime(started) >= requestBudget) throw new OperationCanceledException(callToken);
+        var call = await BeginObservationCallAsync(accepted, request, options, null, actor, callToken, publicRequest);
         if (call.Replay is not null) return call.Replay;
         var set = call.Set;
         var observations = new Dictionary<string, RolloutObservation>(StringComparer.Ordinal);
@@ -89,7 +99,7 @@ internal sealed partial class InternalDurableActions
                 if (finished.Contains(member.Subject)) continue;
                 if (reads >= options.MaximumCalls) break;
                 if (callToken.IsCancellationRequested) break;
-                var remainingCall = TimeSpan.FromMilliseconds(options.RequestMilliseconds) - clock.GetElapsedTime(started);
+                var remainingCall = requestBudget - clock.GetElapsedTime(started);
                 if (remainingCall <= TimeSpan.Zero) break;
                 var monotonicRemaining = remainingBudgets[member.Subject] - clock.GetElapsedTime(budgetStarted);
                 var knownExpired = expiredMembers.Contains(member.Subject);
@@ -104,12 +114,13 @@ internal sealed partial class InternalDurableActions
                 using var activeBudget = CancellationTokenSource.CreateLinkedTokenSource(readBudget.Token);
                 activeBudget.CancelAfter(activeLimit > TimeSpan.Zero ? activeLimit : TimeSpan.FromMilliseconds(1));
                 var reservation = await ReserveReadAsync(call, member, round, knownExpired, recoveryConsumed.Contains(member.Subject),
-                    monotonicRemaining > TimeSpan.Zero, callToken);
+                    monotonicRemaining > TimeSpan.Zero, callToken, publicRequest);
                 if (reservation.Expired) expiredMembers.Add(member.Subject);
                 if (reservation.Recovery) recoveryConsumed.Add(member.Subject);
                 if (reservation.Id is null)
                 {
-                    if (!observations.ContainsKey(member.Subject)) observations[member.Subject] = new(RolloutOutcome.Unavailable, "clock-budget-elapsed");
+                    if (reservation.Refusal is { } refusal) observations[member.Subject] = new(RolloutOutcome.Refused, refusal);
+                    else if (!observations.ContainsKey(member.Subject)) observations[member.Subject] = new(RolloutOutcome.Unavailable, "clock-budget-elapsed");
                     finished.Add(member.Subject); continue;
                 }
                 var readToken = reservation.Recovery ? readBudget.Token : activeBudget.Token;
@@ -140,7 +151,7 @@ internal sealed partial class InternalDurableActions
                 if (recoveryConsumed.Contains(member.Subject) || !current || observed.Code == "status-invalid" || observed.Outcome is RolloutOutcome.Conflict or RolloutOutcome.Refused ||
                     observed.Outcome == RolloutOutcome.Unavailable && !observed.Temporary) finished.Add(member.Subject);
             }
-            if (callToken.IsCancellationRequested || clock.GetElapsedTime(started) >= TimeSpan.FromMilliseconds(options.RequestMilliseconds))
+            if (callToken.IsCancellationRequested || clock.GetElapsedTime(started) >= requestBudget)
             { stop = callerToken.IsCancellationRequested ? RolloutStop.Canceled : RolloutStop.RequestDeadline; break; }
             if (reads >= options.MaximumCalls || round == options.MaximumRounds) break;
             if (ordered.All(x => finished.Contains(x.Subject))) { stop = RolloutStop.Complete; break; }
@@ -152,13 +163,24 @@ internal sealed partial class InternalDurableActions
         return await FinishObservationCallAsync(call, observations, stop, finalBudget.Token);
     }
     private async Task<ReadReservation> ReserveReadAsync(ObservationCall call, SubmittedMember member, int round,
-        bool knownExpired, bool recoveryConsumed, bool activeAllowed, CancellationToken token)
+        bool knownExpired, bool recoveryConsumed, bool activeAllowed, CancellationToken token, bool publicRequest = false)
     {
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
         await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
         var latest = await db.ObservationAttempts.AsNoTracking().Where(x => x.DeploymentId == call.Set.Source.DeploymentId &&
             x.Generation == call.Set.Source.Generation && x.Subject == member.Subject).OrderByDescending(x => x.Ordinal).FirstAsync(token);
-        if (latest.Id != member.Attempt.Id) throw new InvalidDataException("Observation attempt superseded before read.");
+        if (latest.Id != member.Attempt.Id)
+        {
+            if (publicRequest) return new(null, false, false, "attempt-superseded");
+            throw new InvalidDataException("Observation attempt superseded before read.");
+        }
+        if (publicRequest)
+        {
+            try { await RequireCurrentRuntimeAsync(db, member.Loaded.Context, token); }
+            catch (Exception error) when (error is InvalidDataException or InvalidOperationException)
+            { return new(null, false, false, "runtime-authority-unavailable"); }
+        }
+        token.ThrowIfCancellationRequested();
         var expired = await ExpireAsync(db, member.Attempt, call.Request.Request, token) || knownExpired;
         if (expired && recoveryConsumed || !expired && !activeAllowed)
         {
@@ -262,7 +284,14 @@ internal sealed partial class InternalDurableActions
             throw new InvalidDataException("Observation request already closed.");
     }
     internal ValueTask<RolloutResult> ResumeRolloutAsync(DurableChangeSetCommit accepted, string request, string actor,
-        IReadOnlyList<RolloutResume> members, CancellationToken token)
+        IReadOnlyList<RolloutResume> members, CancellationToken token) => ResumeRolloutAsync(accepted, request, actor, members, token, false);
+
+    internal ValueTask<RolloutResult> ResumeOperatorRolloutAsync(DurableChangeSetCommit accepted, string request, string actor,
+        IReadOnlyList<RolloutResume> members, long started, TimeSpan totalBudget, CancellationToken token) =>
+        ResumeRolloutAsync(accepted, request, actor, members, token, true, started, totalBudget);
+
+    private ValueTask<RolloutResult> ResumeRolloutAsync(DurableChangeSetCommit accepted, string request, string actor,
+        IReadOnlyList<RolloutResume> members, CancellationToken token, bool publicRequest, long started = 0, TimeSpan totalBudget = default)
     {
         _ = OperationId.Create(request);
         if (string.IsNullOrWhiteSpace(actor) || actor.Any(char.IsControl) || Encoding.UTF8.GetByteCount(actor) > 256 || members.Count is < 1 or > 512 ||
@@ -272,21 +301,33 @@ internal sealed partial class InternalDurableActions
             // Reserve and append resume authority atomically; never call an executor or the external API.
             await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, Guid.Parse(accepted.DeploymentId.ToString()), token);
+            if (publicRequest && clock.GetElapsedTime(started) >= totalBudget) throw new OperationCanceledException(token);
             var set = await CaptureSubmittedAsync(db, await InternalGenerationAuthority.RequireAsync(db, accepted, token), token);
             var input = RolloutJson.Encode(new RolloutRequest("Resume", actor, null, members.OrderBy(x => x.Subject, StringComparer.Ordinal).ToArray()));
             var old = await db.ObservationRecords.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == set.Source.DeploymentId &&
                 x.Generation == set.Source.Generation && x.Kind == "Request" && x.Request == request, token);
             if (old is not null)
             {
-                if (old.InputJson != input || old.Payload is null) throw new InvalidDataException("Conflicting resume request.");
+                if (old.InputJson != input || old.Payload is null) throw publicRequest ? new RolloutRequestConflictException() : new InvalidDataException("Conflicting resume request.");
                 return RolloutJson.Decode(old.Payload) with { Replayed = true };
+            }
+            if (Encoding.UTF8.GetByteCount(input) > 131072) throw new ArgumentException("Resume request too large.");
+            if (publicRequest)
+            {
+                try
+                {
+                    foreach (var member in set.Members.Where(x => members.Any(m => m.Subject == x.Subject)))
+                        await RequireCurrentRuntimeAsync(db, member.Loaded.Context, token);
+                }
+                catch (Exception error) when (error is InvalidDataException or InvalidOperationException)
+                { throw new RolloutPermissionException(); }
             }
             var next = set.Members.ToDictionary(x => x.Subject, StringComparer.Ordinal);
             foreach (var member in members)
             {
                 if (!next.TryGetValue(member.Subject, out var original) || original.Attempt.Id != member.ExpectedAttempt ||
                     !RolloutDeadlines.Expired(Now(), original.Attempt.Deadline, original.Expired))
-                    throw new InvalidDataException("Resume requires the current expired submitted attempt.");
+                    throw publicRequest ? new RolloutRequestConflictException() : new InvalidDataException("Resume requires the current expired submitted attempt.");
                 await ExpireAsync(db, original.Attempt, request, token);
                 var attempt = NewObservationAttempt(set.Source, member.Subject, original.Loaded.Intent.OperationId, RolloutJson.Encode(original.Origin),
                     checked(original.Attempt.Ordinal + 1), original.Attempt.Id, Now(), original.Attempt.BudgetSeconds, actor);
@@ -295,6 +336,8 @@ internal sealed partial class InternalDurableActions
             var saved = await SavedReadyAsync(db, set, token);
             var result = Result(set with { Members = set.Targets.Where(next.ContainsKey).Select(x => next[x]).ToArray() }, saved?.Id,
                 RolloutStop.Complete, new Dictionary<string, RolloutObservation>());
+            var payload = RolloutJson.Encode(result);
+            if (Encoding.UTF8.GetByteCount(payload) > 2097152) throw new InvalidDataException("Observation response too large.");
             db.ObservationRecords.Add(new()
             {
                 Id = Guid.CreateVersion7(),
@@ -305,7 +348,7 @@ internal sealed partial class InternalDurableActions
                 InputJson = input,
                 ReservedAt = Now(),
                 FinishedAt = Now(),
-                Payload = RolloutJson.Encode(result)
+                Payload = payload
             });
             await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None); return result;
         }, token);

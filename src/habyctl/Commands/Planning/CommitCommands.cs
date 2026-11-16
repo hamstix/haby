@@ -49,6 +49,8 @@ internal static class CommitCommands
         submit.SetAction((parse, token) => context.SubmitGenerationAsync(new GenerationRequest
         { DeploymentId = parse.GetRequiredValue(submitId), Generation = parse.GetRequiredValue(submitNumber) }, token));
         generation.Subcommands.Add(submit);
+        generation.Subcommands.Add(ObservationCommands.Wait(context));
+        generation.Subcommands.Add(ObservationCommands.Resume(context));
         group.Subcommands.Add(generation);
         return group;
     }

@@ -37,6 +37,13 @@ not full-suite success. Invalid/empty selections and empty groups must fail.
 
 ## Dependency and isolation audit
 
+Issue #233 adds 15 fast identities, four PostgreSQL functional identities and nine
+published-native identities per platform, plus native public wait/resume assertions
+in the existing configured gate. Existing submission rows now verify separate public
+wait/replay. The ledger declares 1710 fast, 1103 PostgreSQL total and 87 native rows
+per platform. These are executable obligations, not passing evidence. No consumer
+image input or infrastructure-qualification obligation changes.
+
 Issue #223 adds 55 fast rows, 12 PostgreSQL functional rows and 11 assertion
 rows in the opt-in runnable consumer gate, with no added infrastructure-qualification
 rows. Two fast identities are explicitly replaced for the new invalid intent

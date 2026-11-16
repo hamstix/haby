@@ -61,6 +61,8 @@ service ManifestOperator {
   rpc GetGeneration(GenerationRequest) returns (CommitReply);
   rpc ExecuteGeneration(GenerationRequest) returns (GenerationExecutionReply);
   rpc SubmitGeneration(GenerationRequest) returns (WorkloadSubmissionReply);
+  rpc WaitGeneration(GenerationWaitRequest) returns (GenerationReadinessReply);
+  rpc ResumeGeneration(GenerationResumeRequest) returns (GenerationReadinessReply);
   // Explicit execution only; GetOperation never dispatches or recovers.
   rpc ExecuteOperation(OperationRequest) returns (OperationReply);
   rpc GetOperation(OperationRequest) returns (OperationReply);
@@ -1042,4 +1044,50 @@ message WorkloadSubmissionReply {
   optional string subject = 4;
   optional string reason = 5;
   bool requires_inspection = 6;
+}
+
+// Readiness observation only. No submission, retirement or Applied transition.
+message GenerationObservationSettings {
+  optional int32 maximum_calls = 1;
+  optional int32 maximum_rounds = 2;
+  optional int32 read_timeout_milliseconds = 3;
+  optional int32 poll_milliseconds = 4;
+  optional int32 request_milliseconds = 5;
+}
+message GenerationWaitRequest {
+  string deployment_id = 1;
+  int64 generation = 2;
+  string request_id = 3;
+  GenerationObservationSettings settings = 4;
+}
+message GenerationResumeMember {
+  string subject = 1;
+  string expected_attempt_id = 2;
+}
+message GenerationResumeRequest {
+  string deployment_id = 1;
+  int64 generation = 2;
+  string request_id = 3;
+  repeated GenerationResumeMember members = 4;
+}
+message GenerationReadinessMember {
+  string subject = 1;
+  optional string attempt_id = 2;
+  optional string deadline_utc = 3;
+  string budget = 4;
+  string outcome = 5;
+  string code = 6;
+  bool temporary = 7;
+}
+message GenerationReadinessReply {
+  string outcome = 1;
+  string request_id = 2;
+  bool current_ready = 3;
+  bool original_request_ready = 4;
+  bool replayed = 5;
+  optional string submitted_id = 6;
+  optional string saved_ready_id = 7;
+  optional string stop = 8;
+  repeated GenerationReadinessMember members = 9;
+  int32 total = 10;
 }

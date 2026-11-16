@@ -15,6 +15,8 @@ habyctl deployment generation submit <deployment-id> <generation> -o json
 habyctl deployment generation get <deployment-id> <generation> -o json
 ```
 
+Separate [readiness wait and expired-observation resume](233-operator-readiness-observation.md) use one operator RPC each and never restart submission or advance AppliedGeneration.
+
 For the first Workload addition to a fully applied Resource-only deployment, use
 `--expected-generation <fully-applied-generation>` when creating the ChangeSet.
 Only those two #227 shapes are supported. The entire Resource set must be unchanged
