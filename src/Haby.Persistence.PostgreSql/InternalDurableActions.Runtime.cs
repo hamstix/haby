@@ -48,7 +48,8 @@ internal sealed partial class InternalDurableActions
         };
     }
 
-    // Called only inside the deployment lock/transaction before NEW work. Never gates post-dispatch observation.
+    // Current authority for new effects and fresh public readiness reads, under the deployment lock.
+    // Immutable history, replay and internal post-dispatch observation do not require current permission.
     private static async Task RequireCurrentRuntimeAsync(ManifestCatalogDbContext db, InternalActionContext context, CancellationToken token)
     {
         if (context.Runtime is not { } prepared) return;

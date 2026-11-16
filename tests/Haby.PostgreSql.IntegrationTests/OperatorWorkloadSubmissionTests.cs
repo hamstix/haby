@@ -171,6 +171,40 @@ public sealed partial class DurableDeploymentPlanningTests
                         var authority = replay.Progress.Members.Single(x => x.Workload == "main").RuntimeAuthority;
                         diagnostic.Values(lost ? SubmissionDiagnosticValue.Revoked : configured ? SubmissionDiagnosticValue.Available : SubmissionDiagnosticValue.NotApplicable, authority);
                         Assert.Equal(lost ? "revoked" : configured ? "available" : "notApplicable", authority);
+                        diagnostic.At(SubmissionCheckpoint.ReadinessReads);
+                        Assert.Equal(0, deployment.ReadinessReads);
+                        await using (var beforeWait = await factory.CreateDbContextAsync())
+                        {
+                            diagnostic.At(SubmissionCheckpoint.NoRolloutCheckpoint);
+                            Assert.Empty(await beforeWait.GenerationStageCheckpoints.AsNoTracking().Where(x =>
+                                x.DeploymentId == Guid.Parse(request.DeploymentId) && x.Generation == request.Generation && x.Stage == "RolloutReady").ToArrayAsync());
+                        }
+                        var expectedReadinessReads = lost ? 0 : mixedRecipients ? 2 : 1;
+                        diagnostic.At(SubmissionCheckpoint.ReadinessReads);
+                        var waitRequest = new GenerationWaitRequest
+                        {
+                            DeploymentId = request.DeploymentId,
+                            Generation = request.Generation,
+                            RequestId = "public-wait",
+                            Settings = new() { MaximumRounds = 1 }
+                        };
+                        var readiness = await freshClient.WaitGenerationAsync(waitRequest);
+                        Assert.Equal("observed", readiness.Outcome);
+                        Assert.Equal(!lost, readiness.CurrentReady); Assert.Equal(!lost, readiness.OriginalRequestReady);
+                        Assert.Equal(mixedRecipients ? 2 : 1, readiness.Members.Count);
+                        if (lost) Assert.Contains(readiness.Members, x => x.Outcome == "Refused" && x.Code == "runtime-authority-unavailable");
+                        else Assert.True(readiness.HasSavedReadyId);
+                        diagnostic.At(SubmissionCheckpoint.ReadinessReads);
+                        Assert.Equal(expectedReadinessReads, deployment.ReadinessReads);
+                        diagnostic.At(SubmissionCheckpoint.Replay);
+                        var readsBeforeReplay = deployment.ReadinessReads;
+                        var replayWait = await freshClient.WaitGenerationAsync(waitRequest);
+                        diagnostic.At(SubmissionCheckpoint.ReadinessReads);
+                        Assert.Equal(readsBeforeReplay, deployment.ReadinessReads);
+                        diagnostic.At(SubmissionCheckpoint.Replay);
+                        Assert.True(replayWait.Replayed); Assert.False(replayWait.CurrentReady);
+                        Assert.Equal(readiness.OriginalRequestReady, replayWait.OriginalRequestReady);
+                        Assert.Equal(readiness.Members, replayWait.Members);
                         diagnostic.At(SubmissionCheckpoint.DeploymentWrites);
                         Assert.Equal(mixedRecipients ? 2 : 1, deployment.Writes);
                         diagnostic.At(SubmissionCheckpoint.IdentityWrites);
@@ -189,7 +223,7 @@ public sealed partial class DurableDeploymentPlanningTests
                             Assert.Equal("notApplicable", plain.RuntimeAuthority);
                         }
                         diagnostic.At(SubmissionCheckpoint.ReadinessReads);
-                        Assert.Equal(0, deployment.ReadinessReads);
+                        Assert.Equal(expectedReadinessReads, deployment.ReadinessReads);
                         diagnostic.At(SubmissionCheckpoint.GenerationRead);
                         var get = await freshClient.GetGenerationAsync(request);
                         diagnostic.At(SubmissionCheckpoint.ProgressEquality);
@@ -215,8 +249,11 @@ public sealed partial class DurableDeploymentPlanningTests
                             Assert.Equal(configured ? 2 : 0, await verify.WorkloadConfigurationRecipients.CountAsync());
                             diagnostic.At(SubmissionCheckpoint.SubmittedCheckpoint);
                             Assert.Single(await verify.GenerationStageCheckpoints.AsNoTracking().Where(x => x.Generation == request.Generation && x.Stage == "WorkloadsSubmitted").ToArrayAsync());
-                            diagnostic.At(SubmissionCheckpoint.NoRolloutCheckpoint);
-                            Assert.Empty(await verify.GenerationStageCheckpoints.AsNoTracking().Where(x => x.Generation == request.Generation && x.Stage == "RolloutReady").ToArrayAsync());
+                            diagnostic.At(SubmissionCheckpoint.RolloutCheckpoint);
+                            var readyCheckpoints = await verify.GenerationStageCheckpoints.AsNoTracking().Where(x =>
+                                x.DeploymentId == Guid.Parse(request.DeploymentId) && x.Generation == request.Generation && x.Stage == "RolloutReady").ToArrayAsync();
+                            if (lost) Assert.Empty(readyCheckpoints);
+                            else Assert.Equal(Guid.Parse(readiness.SavedReadyId), Assert.Single(readyCheckpoints).Id);
                             if (lost)
                             {
                                 diagnostic.At(SubmissionCheckpoint.ObservationActor);
@@ -264,9 +301,12 @@ public sealed partial class DurableDeploymentPlanningTests
             await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
             using var channel = GrpcChannel.ForAddress(host.Urls.Single());
             var client = OperatorTestCredentials.Client(channel);
-            var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest { EnvironmentId = environmentKey,
+            var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest
+            {
+                EnvironmentId = environmentKey,
                 Reference = new() { ApplicationRecordId = reference.ApplicationRecordId.ToString(), RevisionNumber = reference.RevisionNumber.Value },
-                Precondition = PlanningPrecondition.ExpectedAbsence })).ChangeSet;
+                Precondition = PlanningPrecondition.ExpectedAbsence
+            })).ChangeSet;
             var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId });
             var commit = await client.CommitDesiredStateAsync(new() { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId });
             Assert.Equal(CommitStatus.Committed, commit.Status);
@@ -356,7 +396,7 @@ internal enum SubmissionCheckpoint
     RestartStop, RestartBuild, RestartStart, RestartChannel, Replay, ReplayOutcome, NativeRequired, NativeCli, NativeOutcome,
     RuntimeAuthority, DeploymentWrites, IdentityWrites, PlainMember, PlainDocuments, PlainIdentity, PlainPublication, PlainRuntimeAuthority,
     ReadinessReads, GenerationRead, ProgressEquality, AppliedGeneration, AuditContext, IntentRead, IntentActors, AttemptRead, AttemptActors,
-    TechnicalActor, RecipientCount, SubmittedCheckpoint, NoRolloutCheckpoint, ObservationActor, ReturnCommit, ScenarioCleanup, CommitPresent
+    TechnicalActor, RecipientCount, SubmittedCheckpoint, NoRolloutCheckpoint, RolloutCheckpoint, ObservationActor, ReturnCommit, ScenarioCleanup, CommitPresent
 }
 internal enum SubmissionDiagnosticValue { None, Submitted, Stopped, Partial, Cancelled, Unavailable, Unknown, Revoked, Available, NotApplicable, Missing, Other }
 
@@ -417,7 +457,7 @@ internal sealed class SubmissionFailureDiagnostics(bool initial, bool configured
             SubmissionCheckpoint.RestartStop or SubmissionCheckpoint.RestartBuild or SubmissionCheckpoint.RestartStart or SubmissionCheckpoint.RestartChannel or SubmissionCheckpoint.Replay or SubmissionCheckpoint.ReplayOutcome => "restart-replay",
             SubmissionCheckpoint.NativeRequired or SubmissionCheckpoint.NativeCli or SubmissionCheckpoint.NativeOutcome => "native-cli",
             SubmissionCheckpoint.RuntimeAuthority or SubmissionCheckpoint.DeploymentWrites or SubmissionCheckpoint.IdentityWrites or SubmissionCheckpoint.PlainMember or SubmissionCheckpoint.PlainDocuments or SubmissionCheckpoint.PlainIdentity or SubmissionCheckpoint.PlainPublication or SubmissionCheckpoint.PlainRuntimeAuthority or SubmissionCheckpoint.ReadinessReads or SubmissionCheckpoint.GenerationRead or SubmissionCheckpoint.ProgressEquality or SubmissionCheckpoint.AppliedGeneration => "progress-readback",
-            SubmissionCheckpoint.AuditContext or SubmissionCheckpoint.IntentRead or SubmissionCheckpoint.IntentActors or SubmissionCheckpoint.AttemptRead or SubmissionCheckpoint.AttemptActors or SubmissionCheckpoint.TechnicalActor or SubmissionCheckpoint.RecipientCount or SubmissionCheckpoint.SubmittedCheckpoint or SubmissionCheckpoint.NoRolloutCheckpoint or SubmissionCheckpoint.ObservationActor or SubmissionCheckpoint.ReturnCommit => "audit-verification",
+            SubmissionCheckpoint.AuditContext or SubmissionCheckpoint.IntentRead or SubmissionCheckpoint.IntentActors or SubmissionCheckpoint.AttemptRead or SubmissionCheckpoint.AttemptActors or SubmissionCheckpoint.TechnicalActor or SubmissionCheckpoint.RecipientCount or SubmissionCheckpoint.SubmittedCheckpoint or SubmissionCheckpoint.NoRolloutCheckpoint or SubmissionCheckpoint.RolloutCheckpoint or SubmissionCheckpoint.ObservationActor or SubmissionCheckpoint.ReturnCommit => "audit-verification",
             SubmissionCheckpoint.ScenarioCleanup => "cleanup",
             _ => "setup"
         };

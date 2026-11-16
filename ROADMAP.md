@@ -180,8 +180,10 @@ Status: in progress. Internal durable initial Deployment CREATE, runtime configu
 and exact readiness are implemented; authenticated operator Plan/Check/Commit admits
 the two supported initial shapes. Bounded public submission is delivered by
 [issue #229 / merged PR #230](https://github.com/hamstix/haby/pull/230) as of
-2026-11-16. Public wait/resume/batch, retirement and Workload AppliedGeneration
-completion remain unavailable. Goal: deploy and operate an Application using
+2026-11-16. [Issue #233](docs/development/233-operator-readiness-observation.md)
+adds bounded public readiness observation and renewal of expired observation
+attempts. General workflow wait/resume/batch, retirement and Workload
+AppliedGeneration completion remain unavailable. Goal: deploy and operate an Application using
 Haby-managed configuration and the same durable state/operation model.
 
 The checklist separates implemented bounded slices from remaining lifecycle work.
@@ -226,6 +228,7 @@ items below supersede those exclusions only for their explicitly implemented sco
 - [x] Implement bounded friend-only initial configured Deployment CREATE with frozen Placement endpoint/trust, exact non-secret bootstrap and complete owned token projection: [issue #223 guide](docs/development/223-configured-deployment-bootstrap.md). Merged [PR #224](https://github.com/hamstix/haby/pull/224). Operator submission is delivered separately by PR #230; configured updates, retirement and Applied remain unavailable. Internal readiness follows below. Executable inventory is distinct from exact-source passing evidence.
 - [x] Implement friend-only exact confirmed Deployment observation and audited expired-attempt resume: [issue #225 guide](docs/development/225-deployment-readiness.md). Merged [PR #226](https://github.com/hamstix/haby/pull/226). Per-Workload deadlines and truthful Submitted/Ready evidence persist; public wait/batch/CLI, retirement and Applied advancement remain closed. Executable coverage is distinct from exact-source passing evidence.
 - [x] Admit the two supported initial Workload desired-state shapes through authenticated operator Plan/Check/Commit ([issue #227 guide](docs/development/227-operator-workload-admission.md)). Merged [PR #228](https://github.com/hamstix/haby/pull/228). These admission calls perform no submission; explicit submission is implemented separately by PR #230 above. Public wait/resume, retirement and Applied completion remain unavailable.
+- [x] Add authenticated exact-generation readiness observation and explicit expired-observation renewal through Host/generated RPC and API-only CLI ([issue #233 guide](docs/development/233-operator-readiness-observation.md)). This staged boundary preserves historical/current authority and original deadlines; submission restart, batch, retirement and Applied completion remain separate. Exact-source passing evidence is recorded separately.
 - [x] Implement validated operator-configurable TokenReview concurrency/rate/queue/timeouts ([PR #216](https://github.com/hamstix/haby/pull/216), [Host settings](docs/development/215-runtime-tokenreview-authentication.md#host-settings)) and client startup/retry settings ([PR #222](https://github.com/hamstix/haby/pull/222), [client options](docs/development/221-runtime-startup-client.md#validated-startup-options-and-bounds)), including frozen Placement client settings in [PR #224](https://github.com/hamstix/haby/pull/224), under ADR-055. Ordinary CI covers fast deterministic correctness, cancellation/revocation/identity, token rotation and real API validation plus existing mandatory gates. Preserve bounded queue/memory/credential lifetimes, no positive cache and the total client startup deadline with backoff/jitter. Separate mass-start qualification is deferred until after P4; it does not gate P3 completion or current runtime-delivery acceptance.
 - [ ] Support image/version updates through a new accepted desired generation, with observable completion and safe failure behavior.
 - [ ] Separate desired replicas from suspend/resume and temporary operational overrides.

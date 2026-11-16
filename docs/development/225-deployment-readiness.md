@@ -5,6 +5,8 @@ after a genuinely confirmed initial Deployment CREATE. It does not register
 Host/RPC/CLI wait or batch commands, admit public Workload execution, implement
 UPDATE/retirement or advance AppliedGeneration. Resource-only completion is unchanged.
 
+The separate [issue #233 public boundary](233-operator-readiness-observation.md) now exposes authenticated readiness observation and expired-attempt renewal. Internal post-dispatch observation retains its historical-authority semantics; fresh public reads also require current permission.
+
 ## Authority and saved evidence
 
 `InternalDurableActions.ObserveRolloutAsync` accepts an exact accepted Commit and

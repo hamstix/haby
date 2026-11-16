@@ -67,6 +67,8 @@ internal interface IRegistryClient : IDisposable
     Task<CommitReply> CommitDesiredStateAsync(CommitDesiredStateRequest request, CancellationToken cancellationToken);
     Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken);
     Task<WorkloadSubmissionReply> SubmitGenerationAsync(GenerationRequest request, CancellationToken token);
+    Task<GenerationReadinessReply> WaitGenerationAsync(GenerationWaitRequest request, CancellationToken token);
+    Task<GenerationReadinessReply> ResumeGenerationAsync(GenerationResumeRequest request, CancellationToken token);
     Task<GenerationExecutionReply> ExecuteGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
     Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> CreateChangeSetAsync(CreateChangeSetRequest request, CancellationToken cancellationToken);
@@ -190,6 +192,11 @@ internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? confi
 
     public async Task<CommitReply> GetCommitAsync(ChangeSetRequest request, CancellationToken cancellationToken) =>
         await _client.GetCommitAsync(request, headers, cancellationToken: cancellationToken);
+
+    public async Task<GenerationReadinessReply> WaitGenerationAsync(GenerationWaitRequest request, CancellationToken token) =>
+        await _client.WaitGenerationAsync(request, headers, cancellationToken: token);
+    public async Task<GenerationReadinessReply> ResumeGenerationAsync(GenerationResumeRequest request, CancellationToken token) =>
+        await _client.ResumeGenerationAsync(request, headers, cancellationToken: token);
 
     public async Task<WorkloadSubmissionReply> SubmitGenerationAsync(GenerationRequest request, CancellationToken token) =>
         await _client.SubmitGenerationAsync(request, headers, cancellationToken: token);

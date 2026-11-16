@@ -73,28 +73,13 @@ internal sealed class PostgreSqlWorkloadSubmission(IDbContextFactory<ManifestCat
         private ProviderInput.Workload[] subjects = [];
         public async ValueTask<WorkloadSubmissionStep> InspectAsync(CancellationToken token)
         {
-            await using var db = await owner.Contexts.CreateDbContextAsync(token);
-            var id = Guid.Parse(deployment.ToString());
-            var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == generation.Value, token);
-            if (source is null) return new("generation-not-found");
-            var commit = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == generation.Value, token);
-            if (commit is null || !source.InternalEffects) return new("unsupported-shape");
-            accepted = new(DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()), DeploymentPlanId.Parse(commit.PlanId.ToString()), deployment, generation, commit.CommittedAt, commit.ActorId);
-            source = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
-            var selection = await owner.Configuration.SelectAsync(db, source, token);
-            await owner.Actions.RequireSubmissionSupportAsync(db, source, selection, owner.DeploymentAction, owner.Identity.ActionContract, token);
-            subjects = selection.Keys.OrderBy(x => x.Component.Value, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray();
-            // All distinct item cardinalities are known before the first NEW write.
-            if (subjects.Length is 0 or > 512 || selection.Values.Sum(x => (long)x.Count) > 512 || selection.Values.Any(x => x.Count > 64)) return new("target-bound");
-            var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
-            if (graph.Baseline is { } baseline)
-            {
-                var previous = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == baseline.Generation, token);
-                if (previous.InternalEffects || previous.Inputs().Configuration!.Manifest.Spec.Components.Values.Any(x => x.Workloads.Count > 0) || graph.ReusedResources.Any(x => x.Reintroduced))
-                    return new("unsupported-shape");
-            }
+            var inspection = await WorkloadGenerationAuthority.InspectAsync(owner.Contexts, owner.Configuration, owner.Actions,
+                owner.DeploymentAction, owner.Identity.ActionContract, deployment, generation, token);
+            if (inspection.Reason is not null) return new(inspection.Reason);
+            accepted = inspection.Accepted!; subjects = inspection.Subjects;
             return new();
         }
+
         public async ValueTask<WorkloadSubmissionStep> RecoverAsync(CancellationToken token)
         {
             // Saved immutable history is inspected before current-authority preparation.

@@ -160,6 +160,22 @@ public static class OperatorHostApplication
             p.GetRequiredService<InternalWorkloadConfiguration>(), p.GetRequiredService<InternalDurableActions>(),
             p.GetRequiredService<InternalRuntimeIdentityPreparation>(), p.GetRequiredService<InternalRuntimePublicationPreparation>(),
             p.GetRequiredService<DurableOperationSerialization>(), submitOptions, InternalDeploymentAction.Create));
+        int ObservationSetting(string name, int fallback)
+        {
+            var key = "Haby:WorkloadObservation:" + name;
+            var value = builder.Configuration[key];
+            if (value is null) return fallback;
+            if (!int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                throw new InvalidOperationException("Invalid configuration key: " + key);
+            return parsed;
+        }
+        var observationLimits = new RolloutOptions(ObservationSetting("MaximumCalls", 64), ObservationSetting("MaximumRounds", 32),
+            ObservationSetting("ReadTimeoutMilliseconds", 10000), ObservationSetting("PollMilliseconds", 1000), ObservationSetting("RequestMilliseconds", 30000));
+        observationLimits.Validate();
+        builder.Services.AddSingleton<IOperatorRolloutObservation>(p => new PostgreSqlOperatorRolloutObservation(
+            p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
+            p.GetRequiredService<InternalWorkloadConfiguration>(), p.GetRequiredService<InternalDurableActions>(), observationLimits,
+            p.GetRequiredService<TimeProvider>(), InternalDeploymentAction.Create, InternalRuntimeIdentityAction.Create));
         builder.Services.AddSingleton<IProviderAliasResolver, PostgreSqlProviderAliasResolver>();
         builder.Services.AddPostgreSqlDurableDesiredStateCommitter();
         // Explicit pilot storage choice under ADR-006: database rows and backups contain recoverable secrets.
