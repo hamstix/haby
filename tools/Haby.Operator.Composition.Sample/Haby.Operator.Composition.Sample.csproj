@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Haby.Operator.Host\Haby.Operator.Host.csproj" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+    <Protobuf Include="composition.proto" GrpcServices="Server" />
+  </ItemGroup>
+  <!-- This distribution owns appsettings.json; omit only the upstream executable's defaults. -->
+  <Target Name="ExcludeUpstreamHostSettings" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.FullPath)' == '$([MSBuild]::NormalizePath($(MSBuildProjectDirectory), ../../src/Haby.Operator.Host/appsettings.json))'" />
+    </ItemGroup>
+  </Target>
+</Project>

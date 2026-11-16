@@ -253,6 +253,13 @@ capabilities, not prerequisites for this milestone.
 
 ### Accepted P3 execution order
 
+User-approved sequencing exception after #237 / PR #238: complete the narrow
+[#239 trusted public Host composition boundary](docs/development/239-public-host-composition.md)
+before the next functional P3 slice. This permits downstream application service
+registration and protected custom gRPC mapping with the existing Host. General
+SDK/NuGet packaging, CLI command composition and Provider/catalog extension stay
+deferred; this exception does not change remaining Workload lifecycle semantics.
+
 **Historical stop-loss (accepted 2026-11-13):** the instruction was to stop new
 qualification attempts for [#191](https://github.com/hamstix/haby/issues/191) and
 [#188](https://github.com/hamstix/haby/issues/188), safely reconcile owned resources
@@ -318,8 +325,8 @@ Synthetic second-type tests alone are not production Provider support.
 
 Needed Providers may be implemented before Workload lifecycle is complete.
 Build-time trusted composition remains the supported model under ADR-003. Public
-SDK/NuGet packaging and documented downstream server/CLI extension are separate
-later work, informed by several real adapters rather than prerequisites for P4.
+SDK/NuGet packaging, general downstream server extension and CLI composition are separate
+later work (apart from the narrow #239 Host application-service boundary), informed by several real adapters rather than prerequisites for P4.
 Dynamic managed DLL loading, runtime provider protocols and WebAssembly execution
 are not introduced.
 

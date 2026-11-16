@@ -29,6 +29,7 @@
   </ItemGroup>
   <ItemGroup>
     <Protobuf Include="Checkpoint.proto" GrpcServices="Both" />
+    <Protobuf Include="..\..\tools\Haby.Operator.Composition.Sample\composition.proto" GrpcServices="Client" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Haby.Kubernetes\Haby.Kubernetes.csproj" />

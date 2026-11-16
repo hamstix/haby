@@ -38,6 +38,13 @@ try {
 function global:dotnet {
     if ($args[0] -eq '--version') { '10.0.test'; return }
     if ($args[0] -eq 'build' -and $env:HABY_TIMING_TEST_BUILD_FAILURE -eq '1') { $global:LASTEXITCODE = 23; return }
+    if ($args[0] -eq 'publish') {
+        if ($env:HABY_TIMING_TEST_PUBLICATION_FAILURE -eq '1') { $global:LASTEXITCODE = 29; return }
+        $publication = $args[[Array]::IndexOf($args, '-o') + 1]
+        [IO.Directory]::CreateDirectory($publication) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $publication 'Haby.Operator.Composition.Sample.dll'), 'fake publication for runner exit-code control only')
+        $global:LASTEXITCODE = 0; return
+    }
     if ($args[0] -eq 'test') {
         $index = [Array]::IndexOf($args, '--results-directory')
         if ($env:HABY_TIMING_TEST_VALID_TRX -eq '1') {
@@ -54,11 +61,12 @@ exit $LASTEXITCODE
 '@ | Set-Content $child
     $env:HABY_TIMING_TEST_RUNNER = Join-Path $PSScriptRoot 'test-postgresql-measured.ps1'
     $env:HABY_TIMING_TEST_TRX = $raw
-    foreach ($valid in @('1', '0', 'report-failure', 'build-failure')) {
+    foreach ($valid in @('1', '0', 'report-failure', 'build-failure', 'publication-failure')) {
         $env:HABY_TIMING_TEST_VALID_TRX = $(if ($valid -eq '0') { '0' } else { '1' })
         $env:HABY_TIMING_TEST_REPORT_FAILURE = $(if ($valid -eq 'report-failure') { '1' } else { '0' })
         $env:HABY_TIMING_TEST_BUILD_FAILURE = $(if ($valid -eq 'build-failure') { '1' } else { '0' })
-        $expectedExit = if ($valid -eq 'build-failure') { 23 } else { 17 }
+        $env:HABY_TIMING_TEST_PUBLICATION_FAILURE = $(if ($valid -eq 'publication-failure') { '1' } else { '0' })
+        $expectedExit = if ($valid -eq 'build-failure') { 23 } elseif ($valid -eq 'publication-failure') { 29 } else { 17 }
         $env:HABY_TIMING_TEST_DESTINATION = Join-Path $directory "failed-run-$valid"
         & (Join-Path $PSHOME 'pwsh') -NoProfile -File $child *> (Join-Path $directory "child-$valid.log")
         if ($LASTEXITCODE -ne $expectedExit) { throw 'Primary test/build exit code was masked by timing export.' }
@@ -67,7 +75,7 @@ exit $LASTEXITCODE
             if (Test-Path $sidecar) { throw 'Failed export published stale failure evidence.' }
             continue
         }
-        if ($valid -in @('0','build-failure') -and (Test-Path $sidecar)) { throw 'Missing/build-failed TRX fabricated failure evidence.' }
+        if ($valid -in @('0','build-failure','publication-failure') -and (Test-Path $sidecar)) { throw 'Missing/build-failed TRX fabricated failure evidence.' }
         if ($valid -eq '1') {
             $evidence = Get-Content $sidecar -Raw | ConvertFrom-Json
             if ($evidence.failedCases -ne 1 -or $evidence.emittedRecords -ne 1) { throw 'Primary failure lost its row evidence.' }
@@ -81,6 +89,7 @@ exit $LASTEXITCODE
         $metadata = Get-Content $manifest -Raw | ConvertFrom-Json
         if ($metadata.testExitCode -ne $expectedExit) { throw 'Recorded failure code changed.' }
         if ($valid -eq 'build-failure' -and $metadata.primaryPhase -ne 'build') { throw 'Unperformed test phase fabricated execution.' }
+        if ($valid -eq 'publication-failure' -and $metadata.primaryPhase -ne 'composition-publication') { throw 'Failed publication lost its phase.' }
     }
     Write-Output 'Timing exporter: redaction, distinct parameterized cases, failed outcomes and duplicate refusal passed.'
     Write-Output 'Measured runner: failing test exit survives successful and failed artifact export.'
