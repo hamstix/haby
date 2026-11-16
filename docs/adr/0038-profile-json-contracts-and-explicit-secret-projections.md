@@ -5,6 +5,10 @@
 - Scope: P2 Profile/assignment wire contracts and the current alpha Binding slot
 - Extends: ADR-006/017/020/028/029/033/036/037
 
+## Accepted execution amendment (2026-11-16)
+
+[ADR-057](0057-profile-configuration-secret-delivery.md) authorizes issue #209 after #239, defines Environment-owned Configuration secrets and exact authorized delivery, and narrowly permits secret-projection traversal through existing arrays. It supersedes the original execution deferral and object-only restriction for this projection kind only. Until implementation lands, the unsupported runtime result remains in effect.
+
 ## Decision
 
 ### One current alpha Application contract
