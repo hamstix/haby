@@ -1,8 +1,8 @@
 # Functional suites and infrastructure qualification
 
-Issue #235 adds 32 fast rows, nine functional PostgreSQL rows, seven published-native
+Issue #235 adds 32 fast rows, eighteen functional PostgreSQL rows, seven published-native
 rows per platform and four configured-consumer API rows for bounded batch readiness.
-The current ledger declares 1742 fast, 1112 PostgreSQL total, 94 native rows per
+The current ledger declares 1742 fast, 1121 PostgreSQL total, 94 native rows per
 platform and 21 configured-consumer assertions (C01-C11, R01-R06 and B01-B04).
 These are required inventories, not a transfer of historical passing evidence;
 see the [batch observation contract](235-batch-readiness-wait.md).

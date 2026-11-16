@@ -139,7 +139,7 @@ public sealed class BatchInputTests
     [InlineData("{\"members\":null}")]
     [InlineData("{\"members\":[null]}")]
     [InlineData("{\"members\":[],\"members\":[]}")]
-    [InlineData("{\"members\":[],\"unknown\":1}")]
+    [InlineData("{\"members\":[{\"deploymentId\":\"019a2b70-1234-7123-8123-123456789abc\",\"generation\":1}],\"unknown\":1}")]
     [InlineData("{\"members\":[{\"deploymentId\":\"bad\",\"generation\":1}]}")]
     [InlineData("{\"members\":[{\"deploymentId\":\"019a2b70-1234-7123-8123-123456789abc\",\"generation\":1,\"generation\":2}]}")]
     [InlineData("{\"members\":[{\"deploymentId\":\"019a2b70-1234-7123-8123-123456789abc\",\"generation\":1},{\"deploymentId\":\"019a2b70-1234-7123-8123-123456789abc\",\"generation\":1}]}")]

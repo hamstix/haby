@@ -1,6 +1,7 @@
 using Haby.Application;
 using Haby.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Text;
 
 namespace Haby.Persistence.PostgreSql;
@@ -27,7 +28,7 @@ internal sealed partial class InternalDurableActions
             callerToken, token, actor, true, totalBudget, batch), token);
 
     private async ValueTask<ObservationCall> BeginObservationCallAsync(DurableChangeSetCommit accepted, string request,
-        RolloutOptions? options, RolloutResume[]? resumes, string actor, CancellationToken token, bool publicRequest = false)
+        RolloutOptions? options, RolloutResume[]? resumes, string actor, CancellationToken token, bool publicRequest = false, BatchReadBudget? batch = null)
     {
         await using var db = await contexts.CreateDbContextAsync(token);
         await using var tx = await db.Database.BeginTransactionAsync(token);
@@ -58,7 +59,7 @@ internal sealed partial class InternalDurableActions
             ReservedAt = Now()
         };
         db.ObservationRecords.Add(row);
-        await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
+        await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await CommitRolloutAsync(tx, token, batch);
         return new(set, row, null, calls % set.Targets.Length);
     }
     private RolloutResult Result(SubmittedSet set, Guid? ready, RolloutStop stop, IReadOnlyDictionary<string, RolloutObservation> observations)
@@ -82,7 +83,7 @@ internal sealed partial class InternalDurableActions
         var requestBudget = totalBudget ?? TimeSpan.FromMilliseconds(options.RequestMilliseconds);
         if (clock.GetElapsedTime(started) >= requestBudget) throw new OperationCanceledException(callToken);
         batch?.Start();
-        var call = await BeginObservationCallAsync(accepted, request, options, null, actor, callToken, publicRequest);
+        var call = await BeginObservationCallAsync(accepted, request, options, null, actor, callToken, publicRequest, batch?.Budget);
         if (call.Replay is not null) return call.Replay;
         var set = call.Set;
         var observations = new Dictionary<string, RolloutObservation>(StringComparer.Ordinal);
@@ -116,7 +117,7 @@ internal sealed partial class InternalDurableActions
                 using var activeBudget = CancellationTokenSource.CreateLinkedTokenSource(readBudget.Token);
                 activeBudget.CancelAfter(activeLimit > TimeSpan.Zero ? activeLimit : TimeSpan.FromMilliseconds(1));
                 var reservation = await ReserveReadAsync(call, member, round, knownExpired, recoveryConsumed.Contains(member.Subject),
-                    monotonicRemaining > TimeSpan.Zero, callToken, publicRequest);
+                    monotonicRemaining > TimeSpan.Zero, callToken, publicRequest, batch?.Budget);
                 if (reservation.Expired) expiredMembers.Add(member.Subject);
                 if (reservation.Recovery) recoveryConsumed.Add(member.Subject);
                 if (reservation.Id is null)
@@ -157,7 +158,7 @@ internal sealed partial class InternalDurableActions
                 }
                 // Single-generation closure has a finite grace; batch closure retains the original deadline.
                 using var publish = ClosureBudget();
-                var publication = await PublishReadAsync(call, member, reservation.Id.Value, observed, samples, observations, publish.Token);
+                var publication = await PublishReadAsync(call, member, reservation.Id.Value, observed, samples, observations, publish.Token, batch?.Budget);
                 if (publication.Expired) expiredMembers.Add(member.Subject);
                 if (publication.Completed is not null) return publication.Completed;
                 var current = publication.Current;
@@ -175,10 +176,20 @@ internal sealed partial class InternalDurableActions
             catch (OperationCanceledException) { stop = callerToken.IsCancellationRequested ? RolloutStop.Canceled : RolloutStop.RequestDeadline; break; }
         }
         using var finalBudget = ClosureBudget();
-        return await FinishObservationCallAsync(call, observations, stop, finalBudget.Token);
+        return await FinishObservationCallAsync(call, observations, stop, finalBudget.Token, batch?.Budget);
 
         CancellationTokenSource ClosureBudget() => batch is null
             ? new CancellationTokenSource(TimeSpan.FromSeconds(10)) : CancellationTokenSource.CreateLinkedTokenSource(callToken);
+    }
+    private static async Task CommitRolloutAsync(IDbContextTransaction transaction, CancellationToken token, BatchReadBudget? batch)
+    {
+        if (batch is not null)
+        {
+            token.ThrowIfCancellationRequested();
+            if (batch.Remaining <= TimeSpan.Zero) throw new OperationCanceledException(token);
+        }
+        // Cancellation after dispatch does not establish rollback. The caller retains interrupted/unknown history.
+        await transaction.CommitAsync(batch is null ? CancellationToken.None : token);
     }
     private async ValueTask ReauthorizeReadAsync(ObservationCall call, SubmittedMember member, CancellationToken token)
     {
@@ -194,7 +205,7 @@ internal sealed partial class InternalDurableActions
         // Read-only transaction: disposal releases its lock before the admission hook invokes the API.
     }
     private async Task<ReadReservation> ReserveReadAsync(ObservationCall call, SubmittedMember member, int round,
-        bool knownExpired, bool recoveryConsumed, bool activeAllowed, CancellationToken token, bool publicRequest = false)
+        bool knownExpired, bool recoveryConsumed, bool activeAllowed, CancellationToken token, bool publicRequest = false, BatchReadBudget? batch = null)
     {
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
         await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
@@ -215,7 +226,7 @@ internal sealed partial class InternalDurableActions
         var expired = await ExpireAsync(db, member.Attempt, call.Request.Request, token) || knownExpired;
         if (expired && recoveryConsumed || !expired && !activeAllowed)
         {
-            await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
+            await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await CommitRolloutAsync(tx, token, batch);
             return new(null, expired, false);
         }
         var row = new GenerationObservationRecordRow
@@ -231,7 +242,7 @@ internal sealed partial class InternalDurableActions
             ReservedAt = Now(),
             InputJson = expired ? "recovery" : "active"
         };
-        db.ObservationRecords.Add(row); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
+        db.ObservationRecords.Add(row); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await CommitRolloutAsync(tx, token, batch);
         return new(row.Id, expired, expired);
     }
     private async Task<bool> ExpireAsync(ManifestCatalogDbContext db, GenerationObservationAttemptRow attempt, string request, CancellationToken token)
@@ -255,7 +266,7 @@ internal sealed partial class InternalDurableActions
         return true;
     }
     private async Task<(bool Current, bool Expired, RolloutResult? Completed)> PublishReadAsync(ObservationCall call, SubmittedMember member, Guid reservation,
-        RolloutObservation observation, Dictionary<string, Guid> samples, Dictionary<string, RolloutObservation> observations, CancellationToken token)
+        RolloutObservation observation, Dictionary<string, Guid> samples, Dictionary<string, RolloutObservation> observations, CancellationToken token, BatchReadBudget? batch = null)
     {
         var payload = RolloutJson.Encode(observation);
         if (Encoding.UTF8.GetByteCount(payload) > 16384) throw new InvalidDataException("Observation exceeds bound.");
@@ -273,7 +284,7 @@ internal sealed partial class InternalDurableActions
             samples[member.Subject] = reservation; observations[member.Subject] = observation;
             completed = await FinishRoundAsync(db, call, samples, observations, token);
         }
-        await db.SaveChangesAsync(token); await tx.CommitAsync(CancellationToken.None); return (latest.Id == member.Attempt.Id, expired, completed);
+        await db.SaveChangesAsync(token); await CommitRolloutAsync(tx, token, batch); return (latest.Id == member.Attempt.Id, expired, completed);
     }
     private async Task<RolloutResult?> FinishRoundAsync(ManifestCatalogDbContext db, ObservationCall call, Dictionary<string, Guid> samples,
         Dictionary<string, RolloutObservation> observations, CancellationToken token)
@@ -291,7 +302,7 @@ internal sealed partial class InternalDurableActions
         await CloseRequestAsync(db, call.Request, result, token);
         return result; // The caller commits last read closure, complete proof and request result atomically.
     }
-    private async Task<RolloutResult> FinishObservationCallAsync(ObservationCall call, Dictionary<string, RolloutObservation> observations, RolloutStop stop, CancellationToken token)
+    private async Task<RolloutResult> FinishObservationCallAsync(ObservationCall call, Dictionary<string, RolloutObservation> observations, RolloutStop stop, CancellationToken token, BatchReadBudget? batch = null)
     {
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
         await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
@@ -304,7 +315,7 @@ internal sealed partial class InternalDurableActions
         }
         var saved = await SavedReadyAsync(db, current, token);
         var result = Result(current, saved?.Id, stop, observations) with { Ready = false };
-        await CloseRequestAsync(db, call.Request, result, token); await db.SaveChangesAsync(token); await tx.CommitAsync(CancellationToken.None); return result;
+        await CloseRequestAsync(db, call.Request, result, token); await db.SaveChangesAsync(token); await CommitRolloutAsync(tx, token, batch); return result;
     }
     private async Task CloseRequestAsync(ManifestCatalogDbContext db, GenerationObservationRecordRow request, RolloutResult result, CancellationToken token)
     {

@@ -60,7 +60,11 @@ already admitted request can race revocation.
 
 The batch starts no new API/catalog mutation after budget exhaustion. Disposal and
 rollback of already-open resources still run. It does not multiply the separate
-single-generation 10-second closure grace periods. Unclosed durable request/read
+single-generation 10-second closure grace periods. Batch commits check the original
+monotonic deadline immediately before dispatch and use the linked batch cancellation
+token during commit. Cancellation after dispatch
+does not prove rollback or known completion; no hard wall-clock bound is promised
+for a driver that ignores cancellation. Unclosed durable request/read
 reservations remain partial/interrupted history. There is no detached repair or
 implicit safe retry.
 

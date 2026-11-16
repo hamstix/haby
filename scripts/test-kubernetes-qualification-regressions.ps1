@@ -286,8 +286,8 @@ try{
     Write-Output 'PASS early scenario preparation, restore, action-group and mixed-baseline boundaries (synthetic)'
 
     $deliveryIds=@('delivery-provenance-start','delivery-provenance-completed','delivery-pod-start','delivery-pod-completed','delivery-token-start','delivery-token-completed',
-        'delivery-host-first-start','delivery-host-first-started','delivery-first-request-start','delivery-first-request-completed',
-        'delivery-host-first-dispose-start','delivery-host-first-dispose-completed','delivery-host-restart-start','delivery-host-restart-started',
+        'delivery-host-first-start','delivery-host-first-built','delivery-host-first-credential-ready','delivery-host-first-started','delivery-first-request-start','delivery-first-request-completed',
+        'delivery-host-first-dispose-start','delivery-host-first-dispose-completed','delivery-host-restart-start','delivery-host-restart-built','delivery-host-restart-credential-ready','delivery-host-restart-started',
         'delivery-first-request-start','delivery-first-request-completed','delivery-host-restart-dispose-start','delivery-host-restart-dispose-completed',
         'delivery-pod-cleanup-start','delivery-pod-cleanup-completed')
     $initialDeliveryIds=$firstIds+@('initial-delivery-start')
@@ -298,6 +298,9 @@ try{
         @{Ids=($initialDeliveryIds+$deliveryIds[0..8]);Status='valid'},
         @{Ids=($initialDeliveryIds+@('delivery-pod-start'));Status='invalid'},
         @{Ids=($initialDeliveryIds+$deliveryIds[0..7]+@('delivery-host-first-start'));Status='invalid'},
+        @{Ids=($initialDeliveryIds+$deliveryIds[0..6]+@('delivery-host-first-credential-ready'));Status='invalid'},
+        @{Ids=($initialDeliveryIds+$deliveryIds[0..7]+@('delivery-host-first-started'));Status='invalid'},
+        @{Ids=($initialDeliveryIds+$deliveryIds[0..6]+@('delivery-host-restart-built'));Status='invalid'},
         @{Ids=($initialDeliveryIds+$deliveryIds+@('delivery-first-request-start'));Status='invalid'},
         @{Ids=($initialDeliveryIds+@('delivery-private-payload'));Status='invalid'}
     )){
