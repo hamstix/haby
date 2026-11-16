@@ -83,6 +83,7 @@ public sealed partial class ManifestOperatorService
             : new CommitReply
             {
                 Status = CommitStatus.Found,
+                WorkloadSubmission = await workloadSubmission.ReadAsync(id, generation, context.CancellationToken) is { } submission ? SubmissionSummary(submission) : null,
                 DesiredGeneration = await GenerationSummaryAsync(saved, context.CancellationToken),
                 WorkloadStage = await StageSummaryAsync(saved, context.CancellationToken),
                 Progress = await OperationCall(async () =>
@@ -110,14 +111,15 @@ public sealed partial class ManifestOperatorService
         var stage = value.Inputs.Providers.Entries.Keys.Any(x => x is ProviderInput.Workload)
             ? await deploymentAdmission.ReadStageAsync(value.DeploymentId, value.Generation, token) : null;
         if (stage is null) return null;
+        var submission = await workloadSubmission.ReadAsync(value.DeploymentId, value.Generation, token);
         var result = new WorkloadAcceptanceStage
         {
-            Submission = stage.Submission switch
+            Submission = submission?.Submission ?? (stage.Submission switch
             {
                 OperatorWorkloadSubmission.NotSubmitted => "notSubmitted",
                 OperatorWorkloadSubmission.Unknown => "unknown",
                 _ => throw new InvalidDataException("Unsupported submission summary.")
-            }
+            })
         };
         if (stage.AppliedGeneration is { } applied) result.AppliedGeneration = applied;
         return result;

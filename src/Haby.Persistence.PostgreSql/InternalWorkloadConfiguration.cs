@@ -92,7 +92,7 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
         return selected.Where(x => x.Value.Count > 0).Select(x => x.Key).ToArray();
     }
 
-    private async Task<IReadOnlyDictionary<ProviderInput.Workload, IReadOnlyList<ManifestLocalId>>> SelectAsync(
+    internal async Task<IReadOnlyDictionary<ProviderInput.Workload, IReadOnlyList<ManifestLocalId>>> SelectAsync(
         ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
         var version = await db.Revisions.AsNoTracking().Where(x => x.ApplicationRecordId == source.ApplicationRecordId && x.LocalRevisionNumber == source.RevisionNumber)

@@ -2,6 +2,12 @@ using System.Security.Cryptography.X509Certificates;
 using Haby.Kubernetes.Qualification;
 using k8s;
 
+if (args is ["--configured-operator-controls"])
+{
+    await ConfiguredOperatorClientControls.Run();
+    return 0;
+}
+
 if (args is ["--configured-setup-controls"])
 {
     await ConfiguredSetupControls.Run();

@@ -9,6 +9,12 @@ internal sealed record RuntimePublicationPreparation(IReadOnlyList<RuntimePublic
 /// <summary>Sequential exact accepted-generation publication; no identity/materialization repair.</summary>
 internal sealed class InternalRuntimePublicationPreparation(InternalRuntimePublication publication)
 {
+    // The trusted continuation derives the same intent; its current caller cannot rewrite original audit.
+    internal static RuntimePublicationRequest OriginalRequest(RuntimePublicationRequest requested, RuntimePublicationRequest original)
+    {
+        if (original with { Actor = requested.Actor } != requested) throw new InvalidDataException("Conflicting publication continuation.");
+        return original;
+    }
     internal static string Key(RuntimePublicationOrigin origin, Guid revision)
     {
         // Local IDs cannot contain '|'; UUIDs and the generation have canonical encodings.

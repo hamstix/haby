@@ -1,9 +1,8 @@
 # Operator Workload desired-state admission
 
 Issue #227 opens the existing authenticated ChangeSet -> Plan -> Commit path for
-two bounded Workload shapes. Commit accepts desired state only. Public Workload
-submission, execution, wait/resume, retirement and Applied completion remain
-unavailable. The existing Resource-only workflow remains supported.
+two bounded Workload shapes. Commit accepts desired state only. Explicit submission is provided by the [issue #229 path](229-operator-workload-submission.md).
+Public wait/resume, retirement and Applied completion remain unavailable. The existing Resource-only workflow remains supported.
 
 ## Supported shapes
 

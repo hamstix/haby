@@ -43,6 +43,16 @@ public sealed class RuntimePublicationTests
     }
 
     [Fact]
+    public void Trusted_continuation_retains_original_actor_but_cannot_substitute_any_intent_field()
+    {
+        var original = new RuntimePublicationRequest("publication-exact", RuntimePublicationOperation.PublishPermission,
+            Guid.NewGuid(), Guid.NewGuid(), null, "first-operator");
+        Assert.Equal(original, InternalRuntimePublicationPreparation.OriginalRequest(original with { Actor = "second-operator" }, original));
+        Assert.Throws<InvalidDataException>(() => InternalRuntimePublicationPreparation.OriginalRequest(original with { Binding = Guid.NewGuid() }, original));
+        Assert.Throws<InvalidDataException>(() => InternalRuntimePublicationPreparation.OriginalRequest(original with { ExpectedToken = Guid.NewGuid() }, original));
+    }
+
+    [Fact]
     public void Original_receipt_round_trip_does_not_serialize_computed_authority_or_lose_precondition()
     {
         var origin = new RuntimePublicationOrigin(Guid.NewGuid(), 1, Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow, "tester",

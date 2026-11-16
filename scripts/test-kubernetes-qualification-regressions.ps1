@@ -285,6 +285,29 @@ try{
     }
     Write-Output 'PASS early scenario preparation, restore, action-group and mixed-baseline boundaries (synthetic)'
 
+    $deliveryIds=@('delivery-provenance-start','delivery-provenance-completed','delivery-pod-start','delivery-pod-completed','delivery-token-start','delivery-token-completed',
+        'delivery-host-first-start','delivery-host-first-started','delivery-first-request-start','delivery-first-request-completed',
+        'delivery-host-first-dispose-start','delivery-host-first-dispose-completed','delivery-host-restart-start','delivery-host-restart-started',
+        'delivery-first-request-start','delivery-first-request-completed','delivery-host-restart-dispose-start','delivery-host-restart-dispose-completed',
+        'delivery-pod-cleanup-start','delivery-pod-cleanup-completed')
+    $initialDeliveryIds=$firstIds+@('initial-delivery-start')
+    $twoDeliveries=$initialDeliveryIds+$deliveryIds+@('runtime-auth-start','runtime-auth-completed')+$finalIds+$disposeIds+
+        @('mixed-delivery-start','mixed-preparation-completed','mixed-documents-completed','mixed-identity-completed','mixed-publication-completed')+$deliveryIds+@('mixed-delivery-completed')+$cleanupIds
+    foreach($case in @(
+        @{Ids=$twoDeliveries;Status='valid'},
+        @{Ids=($initialDeliveryIds+$deliveryIds[0..8]);Status='valid'},
+        @{Ids=($initialDeliveryIds+@('delivery-pod-start'));Status='invalid'},
+        @{Ids=($initialDeliveryIds+$deliveryIds[0..7]+@('delivery-host-first-start'));Status='invalid'},
+        @{Ids=($initialDeliveryIds+$deliveryIds+@('delivery-first-request-start'));Status='invalid'},
+        @{Ids=($initialDeliveryIds+@('delivery-private-payload'));Status='invalid'}
+    )){
+        $records=@(for($index=0;$index -lt $case.Ids.Count;$index++){($index+1).ToString()+' '+$case.Ids[$index]+' '+($index*10).ToString()})
+        [IO.File]::WriteAllText($journal,($records -join "`n")+"`n")
+        if((Read-QualificationJournal $journalRoot).Status -cne $case.Status){throw 'Finite delivery provenance, Pod/token, Host/request/disposal sequence changed'}
+    }
+    Write-Output 'PASS finite delivery boundaries distinguish outer scenarios and first/restarted Hosts without payloads (synthetic)'
+
+
     foreach($case in @(
         @{Ids=$fullIds;Status='valid';Outcome='completed'},
         @{Ids=($entryIds+@('runtime-final-revoke-start')+$disposeIds+$cleanupIds);Status='valid';Outcome='completed'},

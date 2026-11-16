@@ -495,7 +495,7 @@ internal static class DurableActionCases
                     if (candidate.Scenario != runtimeMixed.Scenario)
                     {
                         diagnostics.Mark(QualificationMilestone.InitialDeliveryStart);
-                        await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token, requests);
+                        await RuntimeDeliveryCases.Run(admin, candidate.Scenario, services, publication, requests[0], false, token, requests, diagnostics);
                     }
                     var old = (await publication.ReadAsync(requests[0].Key, token))!;
                     var revoke = requests[0] with
@@ -573,7 +573,7 @@ internal static class DurableActionCases
                 var request = (await publication.PreparationRequestsAsync(scenario.Commit, "qualifier", token)).Single();
                 await publication.ApplyAsync(request, token);
                 diagnostics.Mark(QualificationMilestone.MixedPublicationCompleted);
-                await RuntimeDeliveryCases.Run(admin, scenario, services, publication, request, true, token);
+                await RuntimeDeliveryCases.Run(admin, scenario, services, publication, request, true, token, diagnostics: diagnostics);
                 diagnostics.Mark(QualificationMilestone.MixedDeliveryCompleted);
             }
         }

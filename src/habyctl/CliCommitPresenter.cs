@@ -14,7 +14,7 @@ internal sealed record CliDesiredGeneration(string DeploymentId, long Generation
 }
 internal sealed record CliCommitData(string StateMeaning, CliCommit? Commit,
     CliDesiredGeneration? DesiredGeneration, long? ActualGeneration, CliGenerationProgress? Progress)
-{ public CliWorkloadStage? WorkloadStage { get; init; } }
+{ public CliWorkloadStage? WorkloadStage { get; init; } public CliSubmissionProgress? WorkloadSubmission { get; init; } }
 internal sealed record CliWorkloadStage(string Submission, long? AppliedGeneration);
 
 internal static class CommitPresentation
@@ -58,7 +58,7 @@ internal static class CommitPresentation
             PlanningPresentation.ProviderInputs(g.ProviderInputs), PlanningPresentation.Operations(g.Operations))
         { WorkloadDescription = PlanningPresentation.WorkloadReview(g.WorkloadDescription), ReusedResources = PlanningPresentation.Reuse(g.ReusedResources), RetainedResources = PlanningPresentation.Reuse(g.RetainedResources) },
         reply.HasActualGeneration ? reply.ActualGeneration : null, GenerationPresentation.Progress(reply.Progress))
-    { WorkloadStage = reply.WorkloadStage is { } stage ? new(stage.Submission, stage.HasAppliedGeneration ? stage.AppliedGeneration : null) : null };
+    { WorkloadSubmission = SubmissionPresentation.Progress(reply.WorkloadSubmission), WorkloadStage = reply.WorkloadStage is { } stage ? new(stage.Submission, stage.HasAppliedGeneration ? stage.AppliedGeneration : null) : null };
 }
 
 internal sealed partial class CliJsonPresenter
@@ -104,7 +104,8 @@ internal sealed partial class CliTextPresenter
             _output.WriteLine("This immutable desired snapshot does not confirm applied infrastructure.");
         }
         if (data.WorkloadStage is { } stage)
-            _output.WriteLine($"Workload submission: {stage.Submission}; AppliedGeneration: {stage.AppliedGeneration?.ToString() ?? "none"}. Readiness is not established by this snapshot; public Workload execution is unavailable.");
+            _output.WriteLine($"Workload submission: {stage.Submission}; AppliedGeneration: {stage.AppliedGeneration?.ToString() ?? "none"}. Readiness is not established by this snapshot; submission does not establish readiness.");
+        PrintSubmissionProgress(data.WorkloadSubmission);
         PrintProgress(data.Progress);
         if (data.ActualGeneration is { } actual) _output.WriteLine($"Actual desired generation: {actual}");
         return exit;

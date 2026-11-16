@@ -10,6 +10,8 @@ using Haby.Configuration.Contracts;
 using Haby.Domain;
 using Haby.Kubernetes;
 using Haby.Operator.Host;
+using Haby.Operator.Contracts;
+using Grpc.Net.Client;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql.IntegrationTests;
 using k8s;
@@ -17,10 +19,11 @@ using k8s.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 internal static class ConfiguredDeploymentCases
 {
-    private sealed class LostConfirmation : Exception;
+    private sealed class LostConfirmation : IOException;
     internal static async Task Run(Kubernetes admin, Uri api, string directory, CancellationToken token, PostgreSqlFixture? fixture = null)
     {
         var hostAddress = IPAddress.Parse((await File.ReadAllTextAsync(Path.Combine(directory, "pod-host-address"), token)).Trim());
@@ -51,7 +54,7 @@ internal static class ConfiguredDeploymentCases
             var port = ((IPEndPoint)reservation.LocalEndpoint).Port; reservation.Stop();
             var delivery = new RuntimeConfiguration($"https://{hostAddress}:{port}/", new("custom-ca", root.ExportCertificatePem()), new(TotalTimeoutSeconds: 30));
             var requests = new ConcurrentQueue<Guid>(); var reviews = 0; var revokeNextRead = 0;
-            var deploymentWrites = 0; var loseConfirmation = false;
+            var deploymentWrites = 0; var loseConfirmation = false; var loseIdentityConfirmation = false;
             ownedNamespace = await admin.CoreV1.CreateNamespaceAsync(new() { Metadata = new() { Name = ns, Labels = new Dictionary<string, string> { ["haby.dev/qualification"] = ns } } }, cancellationToken: token);
             async Task<KubernetesProviderConfiguration> Configuration(ISecretStore store, EnvironmentRecordId environment)
             {
@@ -82,7 +85,33 @@ internal static class ConfiguredDeploymentCases
                     properties["configuration"]!["documents"]![1] = "other";
                     properties["image"]!["reference"] = image; properties["containerName"] = "configured-consumer";
                     properties["overrides"] = new System.Text.Json.Nodes.JsonObject { ["minReadySeconds"] = 1 };
-                }, runtimeConfigurationJson: ConfigurationJson(delivery));
+                }, runtimeConfigurationJson: ConfigurationJson(delivery), acceptGeneration: async (composition, environment, reference) =>
+                {
+                    var factory = composition.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+                    string connection, key;
+                    await using (var db = await factory.CreateDbContextAsync(token))
+                    {
+                        connection = db.Database.GetConnectionString()!;
+                        key = (await db.Environments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(environment.ToString()), token)).EnvironmentId;
+                    }
+                    await using var admission = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);
+                    await OperatorTestCredentials.StartWithIssuedOperatorAsync(admission);
+                    using var channel = GrpcChannel.ForAddress(admission.Urls.Single());
+                    var client = OperatorTestCredentials.Client(channel);
+                    var change = (await client.CreateChangeSetAsync(new CreateChangeSetRequest
+                    {
+                        EnvironmentId = key,
+                        Reference = new() { ApplicationRecordId = reference.ApplicationRecordId.ToString(), RevisionNumber = reference.RevisionNumber.Value },
+                        Precondition = PlanningPrecondition.ExpectedAbsence
+                    }, cancellationToken: token)).ChangeSet;
+                    var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId }, cancellationToken: token);
+                    var committed = await client.CommitDesiredStateAsync(new CommitDesiredStateRequest { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId }, cancellationToken: token);
+                    if (committed.Status != CommitStatus.Committed) throw new InvalidOperationException("Operator qualification acceptance refused.");
+                    await admission.StopAsync(token);
+                    return new DurableChangeSetCommit(DeploymentChangeSetId.Parse(committed.Commit.ChangeSetId), DeploymentPlanId.Parse(committed.Commit.PlanId),
+                        ApplicationDeploymentId.Parse(committed.Commit.DeploymentId), DeploymentGeneration.Create(committed.Commit.Generation),
+                        DateTimeOffset.Parse(committed.Commit.CommittedAtUtc), committed.Commit.TechnicalActorId);
+                });
             await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
             var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
             var observationClock = new ObservationClock(services.GetRequiredService<TimeProvider>());
@@ -93,29 +122,25 @@ internal static class ConfiguredDeploymentCases
                 ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CountCreates(() => Interlocked.Increment(ref deploymentWrites))], ct)));
             InternalDurableActions CreateActions() => new(contexts, [identity, deployment], services.GetServices<IProviderConfigurationCodec>(), services.GetServices<IExternalOperationOutputContract>(),
                 services.GetRequiredService<DurableActionAdmission>(), services.GetRequiredService<DurableOperationSerialization>(), observationClock,
-                fault: point => { if (point == InternalActionFault.AfterExternalResult && loseConfirmation) { loseConfirmation = false; throw new LostConfirmation(); } },
+                fault: point =>
+                {
+                    if (point == InternalActionFault.AfterCompletionCommit && loseIdentityConfirmation) { loseIdentityConfirmation = false; throw new LostConfirmation(); }
+                    if (point == InternalActionFault.AfterExternalResult && loseConfirmation) { loseConfirmation = false; throw new LostConfirmation(); }
+                },
                 configurationPreparation: configurationPreparation);
             var actions = CreateActions();
             var subject = new ProviderInput.Workload(ManifestLocalId.Create("api"), ManifestLocalId.Create("main"));
-            var prepared = await configurationPreparation.PrepareAsync(scenario.Commit, "qualifier", token);
-            Check(prepared.Prepared.Count == 2 && prepared.Failure is null, "C01-exact-two-documents-prepared");
-            var identities = await new InternalRuntimeIdentityPreparation(contexts, configurationPreparation, actions, identity.Contract.Action).PrepareAsync(scenario.Commit, token);
-            Check(identities.Count == 1 && identities[0].Result.Outcome == InternalActionOutcome.Confirmed, "C02-confirmed-stable-identity");
+            DurableOperationKey key = null!;
+            DeploymentIntent intent = null!;
+            RuntimeBootstrap exact = null!;
+            RuntimePublicationResult later = null!;
             var publication = new InternalRuntimePublication(contexts, configurationPreparation, actions, services.GetRequiredService<TimeProvider>());
-            async Task AdmissionRefuses(string key)
+            async Task AdmissionRefuses(string request)
             {
-                try { await actions.AcceptAsync(scenario.Commit, subject, deployment.Contract.Action, key, token); }
+                try { await actions.AcceptAsync(scenario.Commit, subject, deployment.Contract.Action, request, token); }
                 catch (InvalidDataException) { return; }
                 throw new InvalidOperationException("Configured admission unexpectedly succeeded.");
             }
-            await AdmissionRefuses("missing-publication");
-            Check((await admin.AppsV1.ListNamespacedDeploymentAsync(ns, cancellationToken: token)).Items.Count == 0, "C03-missing-publication-no-Deployment");
-            var published = await new InternalRuntimePublicationPreparation(publication).PrepareAsync(scenario.Commit, "qualifier", token);
-            Check(published.Completed.Count == 2 && published.Reason is null, "C04-explicit-publication");
-            var key = await actions.AcceptAsync(scenario.Commit, subject, deployment.Contract.Action, "configured", token);
-            var intent = DeploymentIntents.Decode((await actions.HistoryAsync(key, token))!.Intent.Payload);
-            var exact = RuntimeBootstrapCodec.Decode(intent.Target.Runtime!.Bootstrap);
-            var later = published.Completed.Single(x => x.Receipt.Request.Origin!.Document == "settings");
             async Task RevokeLater()
             {
                 var current = (await publication.ReadAsync(later.Receipt.Request.Key, token))!;
@@ -127,18 +152,24 @@ internal static class ConfiguredDeploymentCases
                     Origin = null
                 }, token);
             }
+            Microsoft.AspNetCore.Builder.WebApplication? activeHost = null;
+            using var firstSubmissionAudit = new ConfiguredSubmissionProbe();
             async Task WithHost(Func<Task> work)
             {
                 await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
                     "--Haby:ListenAddress=0.0.0.0", "--Haby:Port=" + port, "--Haby:Tls:CertificatePath=" + certificatePath], collection =>
                 {
+                    firstSubmissionAudit.Register(collection);
+                    collection.AddSingleton<InternalDurableActions>(_ => actions);
                     collection.RemoveAll<IRuntimeAuthenticator>();
                     collection.AddSingleton<IRuntimeAuthenticator>(p => new KubernetesRuntimeAuthenticator(p.GetRequiredService<ISecretStore>(), (connection, handlers, ct) =>
                         KubernetesClientFactory.CreateFixture(connection, p.GetRequiredService<ISecretStore>(), [.. handlers, new CountReviews(() => Interlocked.Increment(ref reviews))], ct)));
                     collection.AddSingleton<IRuntimeConfigurationStore>(p => new DeliveryBoundary(new PostgreSqlRuntimeConfigurationStore(p.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()),
                         id => requests.Enqueue(Guid.Parse(id.ToString())), async () => { if (Interlocked.Exchange(ref revokeNextRead, 0) == 1) await RevokeLater(); }));
                 });
-                await OperatorTestCredentials.StartWithIssuedOperatorAsync(host); await work(); await host.StopAsync(token);
+                await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+                activeHost = host; await work(); activeHost = null;
+                await host.StopAsync(token);
             }
             V1Pod? currentPod = null;
             RolloutResult? rolloutReady = null;
@@ -168,10 +199,56 @@ internal static class ConfiguredDeploymentCases
             }
             await WithHost(async () =>
             {
+                var listener = activeHost!.Urls.Single();
+                var localOperator = LocalOperatorEndpoint(listener);
+                var issuedCredential = OperatorTestCredentials.Credential(listener);
+                using var channel = GrpcChannel.ForAddress(localOperator, new GrpcChannelOptions
+                { HttpHandler = new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator } });
+                var client = OperatorTestCredentials.Client(channel, issuedCredential);
+                var request = new GenerationRequest { DeploymentId = scenario.Commit.DeploymentId.ToString(), Generation = scenario.Commit.Generation.Value };
+                loseIdentityConfirmation = true;
+                WorkloadSubmissionReply partial;
+                var firstStatus = Grpc.Core.StatusCode.Unknown;
+                firstSubmissionAudit.Begin(activeHost.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LoggerFilterOptions>>());
+                try
+                {
+                    partial = await client.SubmitGenerationAsync(request, cancellationToken: token);
+                    firstStatus = Grpc.Core.StatusCode.OK;
+                }
+                catch (Grpc.Core.RpcException failure)
+                {
+                    firstSubmissionAudit.ClientFailure(failure);
+                    firstStatus = Enum.IsDefined(failure.StatusCode) ? failure.StatusCode : Grpc.Core.StatusCode.Unknown;
+                    throw;
+                }
+                finally
+                {
+                    firstSubmissionAudit.End();
+                    Console.WriteLine("Diagnostic configured first-submit-status: " + firstStatus);
+                    Console.WriteLine("Diagnostic configured first-submit-audit-started: " + (firstSubmissionAudit.Started ? "true" : "false"));
+                    firstSubmissionAudit.Write(Console.Out);
+                }
+                Check(partial.Outcome == "unavailable" && partial.Progress.Members.Single().Documents == "prepared", "C01-exact-two-documents-prepared");
+                Check(partial.Progress.Members.Single().Identity == "confirmed", "C02-confirmed-stable-identity");
+                await AdmissionRefuses("missing-publication");
+                Check((await admin.AppsV1.ListNamespacedDeploymentAsync(ns, cancellationToken: token)).Items.Count == 0, "C03-missing-publication-no-Deployment");
                 loseConfirmation = true;
-                try { await actions.ExecuteAsync(key, token); throw new InvalidOperationException("Expected interrupted confirmation."); }
-                catch (LostConfirmation) { }
-                Check((await actions.RecoverByObservationAsync(key, token)).Outcome == InternalActionOutcome.Confirmed && deploymentWrites == 1,
+                var uncertain = await client.SubmitGenerationAsync(request, cancellationToken: token);
+                Check(uncertain.Outcome == "unavailable" && uncertain.Progress.Members.Single().Publication == "published", "C04-explicit-publication");
+                await using (var db = await contexts.CreateDbContextAsync(token))
+                {
+                    var savedIntent = await db.ActionIntents.AsNoTracking().SingleAsync(x => x.ActionContract == InternalDeploymentAction.Create, token);
+                    key = new(scenario.Commit.DeploymentId, scenario.Commit.Generation, OperationId.Create(savedIntent.OperationId));
+                }
+                intent = DeploymentIntents.Decode((await actions.HistoryAsync(key, token))!.Intent.Payload);
+                exact = RuntimeBootstrapCodec.Decode(intent.Target.Runtime!.Bootstrap);
+                var requestsToPublish = await publication.PreparationRequestsAsync(scenario.Commit, "qualifier", token);
+                later = (await publication.ReadAsync(requestsToPublish.Single(x => x.Origin!.Document == "settings").Key, token))!;
+                var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
+                if (string.IsNullOrWhiteSpace(binary) || !File.Exists(binary)) throw new InvalidOperationException("Published qualification CLI is required.");
+                using var submission = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                    ["deployment", "generation", "submit", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
+                Check(submission.RootElement.GetProperty("outcome"u8).GetString() == "submitted" && deploymentWrites == 1,
                     "C05-production-generated-create-confirmed");
                 currentPod = await Startup("primary-started");
                 Check(requests.ToArray().Distinct().Order().SequenceEqual(exact.Documents.Values.Select(Guid.Parse).Order()) && reviews >= 2,
@@ -252,6 +329,14 @@ internal static class ConfiguredDeploymentCases
             catch (Exception error) { cleanup.Add(error); }
             if (cleanup.Count > 0) throw new AggregateException(primary is null ? cleanup : [primary, .. cleanup]);
         }
+    }
+    // Only this fixture's local operator clients use loopback; the listener and Pod delivery address stay unchanged.
+    internal static Uri LocalOperatorEndpoint(string listener)
+    {
+        var address = new Uri(listener);
+        if (address.Scheme != "https" || address.Host != IPAddress.Any.ToString())
+            throw new InvalidOperationException("Unexpected configured fixture listener.");
+        return new UriBuilder(address) { Host = IPAddress.Loopback.ToString() }.Uri;
     }
     private static string ConfigurationJson(RuntimeConfiguration value)
     {

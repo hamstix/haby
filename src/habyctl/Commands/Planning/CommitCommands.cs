@@ -43,6 +43,12 @@ internal static class CommitCommands
         execute.SetAction((parse, token) => context.ExecuteGenerationAsync(new GenerationRequest
         { DeploymentId = parse.GetRequiredValue(executeId), Generation = parse.GetRequiredValue(executeNumber) }, token));
         generation.Subcommands.Add(execute);
+        var submitId = new Argument<string>("deployment-id");
+        var submitNumber = new Argument<long>("generation");
+        var submit = new Command("submit", "Submit an exact accepted initial Workload generation without waiting for readiness or advancing AppliedGeneration.") { submitId, submitNumber };
+        submit.SetAction((parse, token) => context.SubmitGenerationAsync(new GenerationRequest
+        { DeploymentId = parse.GetRequiredValue(submitId), Generation = parse.GetRequiredValue(submitNumber) }, token));
+        generation.Subcommands.Add(submit);
         group.Subcommands.Add(generation);
         return group;
     }
