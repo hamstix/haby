@@ -88,11 +88,12 @@ public abstract partial class ApplicationLoginScenario : IDisposable
         return new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Database = name, Pooling = false }.ConnectionString;
     }
     private protected async Task<Scenario> Prepare(bool full = false, bool render = false, string? renderingProfile = null,
-            Action<System.Text.Json.Nodes.JsonNode>? configureManifest = null, string? namingPrefix = null)
+            Action<System.Text.Json.Nodes.JsonNode>? configureManifest = null, string? namingPrefix = null,
+            Func<IServiceProvider, EnvironmentRecordId, Task>? beforeProfile = null, IInterceptor? planningTrap = null)
     {
         var connection = _catalogPools.Register(new NpgsqlConnectionStringBuilder(await Database("login_catalog_")));
         var name = "login_target_" + Guid.NewGuid().ToString("N");
-        await using var services = Services(connection, full: full);
+        await using var services = Services(connection, full: full, queryTrap: planningTrap);
         await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         var secrets = services.GetRequiredService<ISecretStore>();
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
@@ -114,6 +115,7 @@ public abstract partial class ApplicationLoginScenario : IDisposable
             Assert.Equal(ResourceNamingOutcome.Changed, (await naming.SelectAsync(environment, ProviderAlias.Create("postgresql.primary"),
                 new(instance, ProviderConfigurationRevisionNumber.Create(1)), null, new("contour", 1), "tester", default)).Outcome);
         }
+        if (beforeProfile is not null) await beforeProfile(services, environment);
         var envelope = PostgreSqlPairPlanningTests.Example();
         envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = name;
         if (render)

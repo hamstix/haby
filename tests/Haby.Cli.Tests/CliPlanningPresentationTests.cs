@@ -7,6 +7,21 @@ namespace Haby.Cli.Tests;
 public sealed class CliPlanningPresentationTests
 {
     [Fact]
+    public void Current_secret_reference_refusal_has_safe_text_generated_JSON_and_rejection_exit()
+    {
+        var reply = new PlanningReply
+        {
+            Status = PlanningStatus.ConfigurationRefused,
+            ConfigurationErrorCodes = { "profile.secret-reference.unavailable" }
+        };
+        using var json = new StringWriter(); using var text = new StringWriter();
+        Assert.Equal(1, new CliJsonPresenter(json).PrintPlanning("plan create", reply));
+        Assert.Equal(1, new CliTextPresenter(text).PrintPlanning("plan create", reply));
+        Assert.Contains("profile.secret-reference.unavailable", json.ToString());
+        Assert.Contains("profile.secret-reference.unavailable", text.ToString());
+    }
+
+    [Fact]
     public void Producer_resolution_refusal_has_safe_text_generated_JSON_and_rejection_exit()
     {
         var reply = new PlanningReply { Status = PlanningStatus.ConfigurationRefused, ConfigurationErrorCodes = { "render.producer.unavailable" } };
@@ -224,6 +239,7 @@ public sealed class CliPlanningPresentationTests
     [InlineData("plan")]
     [InlineData("change")]
     [InlineData("unknown-code")]
+    [InlineData("obsolete-code")]
     [InlineData("wrong-outcome")]
     [InlineData("excess")]
     public void Invalid_configuration_refusal_replies_fail_before_any_output(string mode)
@@ -231,7 +247,12 @@ public sealed class CliPlanningPresentationTests
         var reply = new PlanningReply { Status = PlanningStatus.ConfigurationRefused };
         if (mode == "plan") reply.Plan = new() { TechnicalActorId = "private-value" };
         if (mode == "change") reply.ChangeSet = new() { TechnicalActorId = "private-value" };
-        reply.ConfigurationErrorCodes.Add(mode == "unknown-code" ? "private-value" : "profile.secret-projections.unsupported");
+        reply.ConfigurationErrorCodes.Add(mode switch
+        {
+            "unknown-code" => "private-value",
+            "obsolete-code" => "profile.secret-projections.unsupported",
+            _ => "profile.secret-reference.unavailable"
+        });
         if (mode == "wrong-outcome") reply.Status = PlanningStatus.Planned;
         if (mode == "excess") for (var i = 0; i < 100; i++) reply.ConfigurationErrorCodes.Add("profile.slot.not-found");
         using var json = new StringWriter(); using var text = new StringWriter();

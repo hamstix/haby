@@ -85,7 +85,7 @@ public sealed partial class DurableDeploymentPlanningTests
         await Apply(app, null);
         var refusal = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSetId });
         Assert.Equal(PlanningStatus.ConfigurationRefused, refusal.Status); Assert.Null(refusal.Plan);
-        Assert.Contains("profile.secret-projections.unsupported", refusal.ConfigurationErrorCodes);
+        Assert.Contains("profile.secret-reference.unavailable", refusal.ConfigurationErrorCodes);
         Assert.DoesNotContain("unresolved-private-selector", refusal.ToString()); Assert.DoesNotContain("private-config-value", refusal.ToString());
         await Native("configurationRefused", 1, "plan", "create", change.ChangeSetId);
         // Existing immutable Plans remain readable and carry their accepted layout after current expansion refuses.

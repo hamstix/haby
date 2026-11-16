@@ -72,7 +72,7 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.Equal($"urn:haby:{installation.Id:D}:{identity.ProviderId:D}", audience);
             Assert.Equal("Prepared", identity.Status); Assert.Single(await verify.OwnedObjects.AsNoTracking().ToArrayAsync());
             Assert.Single(await verify.ManagedWorkloads.AsNoTracking().ToArrayAsync());
-            Assert.Equal(initial ? null : (long?)1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            Assert.Equal(initial ? null : (long?)1, await verify.ApplicationDeployments.AsNoTracking().Select(x => x.AppliedGeneration).SingleAsync());
             Assert.Empty(await verify.ConfigurationAccess.AsNoTracking().ToArrayAsync());
             Assert.Single(await verify.DurableOperationAttempts.Where(x => x.Generation == scenario.Commit.Generation.Value).AsNoTracking().ToArrayAsync());
         }
@@ -180,7 +180,7 @@ public sealed partial class DurableDeploymentPlanningTests
         Assert.Equal(values[0], (await verify.InstallationIdentities.AsNoTracking().SingleAsync()).Id);
     }
     [Fact]
-    public async Task Old_Workload_intents_refuse_before_migration_and_without_initializer()
+    public async Task Old_Workload_intents_require_explicit_fresh_catalog_without_rewriting_history()
     {
         var scenario = await InternalScenarioAsync(initialOnly: true);
         await using var services = InternalServices(scenario.Connection, scenario.Time);
@@ -192,17 +192,36 @@ public sealed partial class DurableDeploymentPlanningTests
         var before = await ReadMigrationHistory(contexts);
         await Assert.ThrowsAsync<InvalidOperationException>(() => services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
         Assert.Equal(before, await ReadMigrationHistory(contexts));
-        // A current schema with privileged unbinding also refuses instead of backfilling intent identity.
-        await using (var schema = await contexts.CreateDbContextAsync()) await schema.Database.MigrateAsync();
+        await using var verify = await contexts.CreateDbContextAsync();
+        Assert.Equal(1, await verify.ActionIntents.CountAsync());
+        Assert.Equal(0, await verify.DurableOperationAttempts.CountAsync());
+    }
+    [Fact]
+    public async Task Current_schema_unbound_Workload_intent_refuses_before_external_effect()
+    {
+        var scenario = await InternalScenarioAsync(initialOnly: true);
+        await using var services = InternalServices(scenario.Connection, scenario.Time);
+        var handler = new InternalDeploymentAction(null!); var actions = Actions(services, handler);
+        var key = await actions.AcceptAsync(scenario.Commit, RuntimeSubject, handler.Contract.Action, "unbound-workload", default);
+        var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+        await using (var arrange = await contexts.CreateDbContextAsync())
+        {
+            await using var transaction = await arrange.Database.BeginTransactionAsync();
+            await arrange.Database.ExecuteSqlRawAsync("SET LOCAL session_replication_role = replica");
+            Assert.Equal(1, await arrange.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE durable_action_intents SET managed_identity = {Guid.NewGuid()} WHERE deployment_id = {Guid.Parse(scenario.Commit.DeploymentId.ToString())}"));
+            await transaction.CommitAsync();
+        }
         await Assert.ThrowsAsync<InvalidDataException>(async () => await actions.ExecuteAsync(key, default));
         await using var verify = await contexts.CreateDbContextAsync();
-        Assert.Empty(await verify.ManagedWorkloads.AsNoTracking().ToArrayAsync()); Assert.Empty(await verify.RuntimeIdentityBindings.AsNoTracking().ToArrayAsync());
         Assert.Empty(await verify.DurableOperationAttempts.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await verify.OwnedObjects.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await verify.RuntimeIdentityBindings.AsNoTracking().ToArrayAsync());
     }
     private static async Task<string[]> ReadMigrationHistory(IDbContextFactory<ManifestCatalogDbContext> contexts)
     { await using var db = await contexts.CreateDbContextAsync(); return (await db.Database.GetAppliedMigrationsAsync()).ToArray(); }
     [Fact]
-    public async Task P2_only_history_upgrades_additively_without_rewriting_applied_generation()
+    public async Task Prior_configuration_format_requires_fresh_catalog_without_rewriting_applied_generation()
     {
         var prepared = await PrepareCommitAsync(); await using var services = InternalServices(prepared.Connection, prepared.Time);
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
@@ -218,17 +237,35 @@ public sealed partial class DurableDeploymentPlanningTests
         var commit = Assert.IsType<DurableCommitResult.Committed>(await services.GetRequiredService<IDurableDesiredStateCommitter>().CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
         Assert.Null((await services.GetRequiredService<DurableGenerationRunner>().RunAsync(commit.DeploymentId, commit.Generation, default)).StopOutcome);
         string originalFingerprint;
-        await using (var original = await contexts.CreateDbContextAsync()) originalFingerprint = (await original.DeploymentGenerations.AsNoTracking().SingleAsync()).Fingerprint;
+        (Guid Id, string Operation, string? Outcome)[] originalAttempts;
+        (string Operation, string State, Guid? Attempt)[] originalStates;
+        await using (var original = await contexts.CreateDbContextAsync())
+        {
+            originalFingerprint = await original.DeploymentGenerations.AsNoTracking().Select(x => x.Fingerprint).SingleAsync();
+            originalAttempts = await original.DurableOperationAttempts.AsNoTracking().OrderBy(x => x.AttemptId)
+                .Select(x => new { x.AttemptId, x.OperationId, x.Outcome })
+                .Select(x => new ValueTuple<Guid, string, string?>(x.AttemptId, x.OperationId, x.Outcome)).ToArrayAsync();
+            originalStates = await original.DurableOperations.AsNoTracking().OrderBy(x => x.OperationId)
+                .Select(x => new { x.OperationId, x.State, x.CurrentAttemptId })
+                .Select(x => new ValueTuple<string, string, Guid?>(x.OperationId, x.State, x.CurrentAttemptId)).ToArrayAsync();
+        }
+        Assert.NotEmpty(originalAttempts);
         await using (var downgrade = await contexts.CreateDbContextAsync())
-            await downgrade.GetService<IMigrator>().MigrateAsync("20261114015351_PrepareWorkloadConfiguration");
-        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+            await downgrade.GetService<IMigrator>().MigrateAsync("20261116130234_InitialRetirementCompletion");
+        var before = await ReadMigrationHistory(contexts);
+        var refusal = await Assert.ThrowsAsync<Npgsql.PostgresException>(() => services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
+        Assert.Equal("P0001", refusal.SqlState);
         await using var verify = await contexts.CreateDbContextAsync();
-        Assert.Equal(verify.Database.GetMigrations(), await verify.Database.GetAppliedMigrationsAsync());
-        Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
-        Assert.Equal(originalFingerprint, (await verify.DeploymentGenerations.AsNoTracking().SingleAsync()).Fingerprint);
-        Assert.Single(await verify.OperationOutputs.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.ManagedWorkloads.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await verify.InstallationIdentities.AsNoTracking().ToArrayAsync());
+        Assert.Equal(before, (await verify.Database.GetAppliedMigrationsAsync()).ToArray());
+        Assert.Equal(1, await verify.ApplicationDeployments.AsNoTracking().Select(x => x.AppliedGeneration).SingleAsync());
+        Assert.Equal(originalFingerprint, await verify.DeploymentGenerations.AsNoTracking().Select(x => x.Fingerprint).SingleAsync());
+        Assert.Equal(1, await verify.OperationOutputs.CountAsync());
+        Assert.Equal(originalAttempts, await verify.DurableOperationAttempts.AsNoTracking().OrderBy(x => x.AttemptId)
+            .Select(x => new { x.AttemptId, x.OperationId, x.Outcome })
+            .Select(x => new ValueTuple<Guid, string, string?>(x.AttemptId, x.OperationId, x.Outcome)).ToArrayAsync());
+        Assert.Equal(originalStates, await verify.DurableOperations.AsNoTracking().OrderBy(x => x.OperationId)
+            .Select(x => new { x.OperationId, x.State, x.CurrentAttemptId })
+            .Select(x => new ValueTuple<string, string, Guid?>(x.OperationId, x.State, x.CurrentAttemptId)).ToArrayAsync());
     }
     [Fact]
     public async Task Concurrent_equivalent_preparation_keeps_one_identity_account_and_binding()

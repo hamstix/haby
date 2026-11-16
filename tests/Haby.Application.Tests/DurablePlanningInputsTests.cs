@@ -22,6 +22,51 @@ public sealed class DurablePlanningInputsTests
             [new(WorkloadTypeId.Create("sample.workload/v1"), "{}")], [], []))).Candidate.Declaration;
 
     [Fact]
+    public void Resource_stage_projection_preserves_frozen_configuration_secret_identity_without_material_access()
+    {
+        var manifest = MixedManifest();
+        var profile = ProfilePayloadParser.ParseProfile(Encoding.UTF8.GetBytes("""
+            {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"settings","revision":1},"spec":{
+              "documents":{"settings":{"fileName":"settings.json","format":"json","template":{}}},
+              "staticContributions":{"credentials":{"documentRef":"settings","path":"/Credentials","value":{},
+                "secretProjections":[{"path":"/Password","format":"string","secretRef":{"name":"application-password","version":2}}]}}}}
+            """)).Declaration!;
+        var revision = ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1));
+        var scopes = ConfigurationPlanningSnapshot.Targets(manifest).Select((target, index) => new ConfigurationPlanningScope(target,
+            index == 0 ? AssignmentToken.New() : null, new(target,
+                index == 0 ? [new ProfileDecision.Use(profile.Reference)] : []))).ToArray();
+        var named = new ProfileNamedSecretRef("application-password", 2);
+        var exact = new SecretRef(SecretId.New(), SecretVersionId.New());
+        var frozen = ConfigurationPlanningSnapshot.PrepareCore(revision, manifest, scopes, [profile],
+            frozenSecrets: new Dictionary<ProfileNamedSecretRef, SecretRef> { [named] = exact }).Snapshot!;
+        var environment = EnvironmentRecordId.New();
+        var resource = new ExactProviderResolution(new ProviderInput.Resource(ManifestLocalId.Create("same")), environment,
+            ProviderAlias.Create("database"), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1),
+            ProviderImplementationId.Create("sample/v1"), ResourceNamingCodec.Exact(ResourceNamingSnapshot.Default));
+        var api = new ExactProviderResolution(new ProviderInput.Workload(ManifestLocalId.Create("api"), ManifestLocalId.Create("same")),
+            environment, ProviderAlias.Create("runtime"), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1),
+            ProviderImplementationId.Create("sample/v1"));
+        var worker = api with { Input = new ProviderInput.Workload(ManifestLocalId.Create("worker"), ManifestLocalId.Create("same")) };
+        var inputs = new DurablePlanningInputs(environment, EnvironmentId.Create("pilot"), revision,
+            new ExactProviderResolutionSet(manifest, environment, [resource, api, worker]))
+        { Configuration = frozen };
+        var node = new DurableOperationNode(OperationId.Create("create"), ManifestLocalId.Create("same"),
+            new(new(ResourceTypeId.Create("sample.resource/v1"), new("sample/v1", "sample.configuration/v1", "sample/v1")),
+                OperationContractId.Create("sample.create/v1")),
+            new(environment, resource.Instance, resource.Configuration, resource.Implementation.Value), new("sample/v1", "{}"), []);
+        var graph = new DurableOperationGraph([node]);
+        var originalFingerprint = DurableOperationGraphCodec.Fingerprint(inputs, graph);
+        var complete = ConfigurationPlanningSnapshotCodec.Encode(frozen);
+        var projected = InternalResourceStage.Project(inputs);
+        Assert.Equal(exact, projected.Configuration!.FrozenSecrets[named]);
+        Assert.Equal(exact, ConfigurationPlanningSnapshotCodec.Decode(
+            ConfigurationPlanningSnapshotCodec.Encode(projected.Configuration), revision).FrozenSecrets[named]);
+        Assert.Equal(complete, ConfigurationPlanningSnapshotCodec.Encode(inputs.Configuration!));
+        Assert.Equal(manifest, inputs.Providers.Declaration);
+        Assert.Equal(originalFingerprint, DurableOperationGraphCodec.Fingerprint(inputs, graph));
+    }
+
+    [Fact]
     public void Distinct_resource_and_component_workload_keys_preserve_every_exact_input_in_the_fingerprint()
     {
         var manifest = MixedManifest();

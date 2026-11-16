@@ -307,7 +307,9 @@ public sealed partial class DurableDeploymentPlanningTests
         var result = await planner.CreatePlanAsync(change.Id, "operator", default);
         Assert.Equal(DurablePlanStatus.ConfigurationRefused, result.Status); Assert.Null(result.Plan);
         Assert.Null(result.ConfigurationReport!.Layouts);
-        Assert.Contains(result.ConfigurationReport.Diagnostics, x => x.Code == code);
+        // Keep the historical theory row identity; the current diagnostic is resolved by mode.
+        var expectedCode = mode == "secret" ? "profile.secret-reference.unavailable" : code;
+        Assert.Contains(result.ConfigurationReport.Diagnostics, x => x.Code == expectedCode);
         await using var verify = new ConfigFactory(setup.Connection).CreateDbContext();
         Assert.Empty(await verify.DurablePlans.AsNoTracking().ToArrayAsync());
         Assert.Empty(await verify.DeploymentGenerations.AsNoTracking().ToArrayAsync());
@@ -324,7 +326,13 @@ public sealed partial class DurableDeploymentPlanningTests
         await using var corrupt = new NpgsqlConnection(setup.Connection);
         await corrupt.OpenAsync();
         await new NpgsqlCommand("SET session_replication_role = replica", corrupt).ExecuteNonQueryAsync();
-        foreach (var json in new[] { "", "{}", ConfigurationPlanningSnapshotCodec.Encode(plan.Inputs.Configuration!).Replace("\"format\":2", "\"format\":999", StringComparison.Ordinal) })
+        var saved = ConfigurationPlanningSnapshotCodec.Encode(plan.Inputs.Configuration!);
+        var unsupported = JsonNode.Parse(saved)!;
+        Assert.Equal(ConfigurationPlanningSnapshotCodec.Version, (int)unsupported["format"]!);
+        unsupported["format"] = 999;
+        var invalidFormat = unsupported.ToJsonString();
+        Assert.NotEqual(saved, invalidFormat);
+        foreach (var json in new[] { "", "{}", invalidFormat })
         {
             await using var command = new NpgsqlCommand("UPDATE deployment_plans SET configuration_json = @json WHERE id = @id", corrupt);
             command.Parameters.AddWithValue("json", json); command.Parameters.AddWithValue("id", Guid.Parse(plan.Id.ToString()));

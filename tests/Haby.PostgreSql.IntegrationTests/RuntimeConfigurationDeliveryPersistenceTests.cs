@@ -21,6 +21,13 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
+    private const string RuntimeProjectedProfileText = """
+        {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"runtime-secret","revision":1},"spec":{
+          "documents":{"settings":{"fileName":"settings.json","format":"json","template":{"Mode":"frozen"}}},
+          "staticContributions":{"secrets":{"documentRef":"settings","path":"/Secrets","value":{},
+            "secretProjections":[{"path":"/Password","format":"string","secretRef":{"name":"runtime-configuration","version":1}}]}}}}
+        """;
+
     private async Task<(InternalScenario Scenario, RuntimePublicationRequest Request, RuntimePublicationResult Published, RuntimeAuthenticatedContext Identity)>
         RuntimeDeliverySetup(bool publish = true, bool shared = false, bool projected = false)
     {
@@ -33,15 +40,10 @@ public sealed partial class DurableDeploymentPlanningTests
             using var material = new SecretMaterial("projected-canary"u8.ToArray());
             Assert.Equal(SecretOutcome.Created, (await services.GetRequiredService<SecretAdministration>().CreateAsync(
                 "initial", "runtime-configuration", Guid.NewGuid(), material, "tester", default, SecretPurpose.Configuration)).Outcome);
-            var profile = """
-                {"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"runtime-secret","revision":1},"spec":{
-                  "documents":{"settings":{"fileName":"settings.json","format":"json","template":{"Mode":"frozen"}}},
-                  "staticContributions":{"secrets":{"documentRef":"settings","path":"/Secrets","value":{},
-                    "secretProjections":[{"path":"/Password","format":"string","secretRef":{"name":"runtime-configuration","version":1}}]}}}}
-                """;
+
             var imported = Assert.IsType<ImportConfigurationProfileResult.Succeeded>(await new ImportConfigurationProfile(
                 services.GetRequiredService<IConfigurationProfileImportStore>(), services.GetRequiredService<TimeProvider>())
-                .ExecuteAsync(Encoding.UTF8.GetBytes(profile), "tester"));
+                .ExecuteAsync(Encoding.UTF8.GetBytes(RuntimeProjectedProfileText), "tester"));
             var metadata = (await services.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("initial"), default))!;
             Assert.Equal(AssignmentOutcome.Created, (await services.GetRequiredService<IProfileAssignmentStore>().ApplyAsync(metadata,
                 new(new ProfileAssignmentTarget.Environment(), [new ProfileDecision.Use(imported.Revision.Reference)]),
@@ -62,6 +64,75 @@ public sealed partial class DurableDeploymentPlanningTests
         var trust = (await new PostgreSqlRuntimeIdentityStore(services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>(), IdentityActions(services, handler))
             .ReadAsync(request.Binding, default))!;
         return (scenario, request, published!, new(trust.Binding, trust.Environment, trust.ManagedWorkload, trust.Provider));
+    }
+
+    [Fact]
+    public async Task Internal_Workload_runtime_projection_retains_exact_secret_through_profile_replacement()
+    {
+        var setup = await RuntimeDeliverySetup(projected: true);
+        var commit = setup.Scenario.Commit;
+        await using var services = InternalServices(setup.Scenario.Connection, setup.Scenario.Time);
+        var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
+        var savedPlan = (await planner.FindPlanAsync(commit.PlanId, default))!;
+        var named = new ProfileNamedSecretRef("runtime-configuration", 1);
+        var exact = savedPlan.Inputs.Configuration!.FrozenSecrets[named];
+        var savedGeneration = (await services.GetRequiredService<IDurableDesiredStateCommitter>()
+            .FindGenerationAsync(commit.DeploymentId, commit.Generation, default))!;
+        Assert.Equal(exact, savedGeneration.Inputs.Configuration!.FrozenSecrets[named]);
+        var revision = ConfigurationDocumentRevisionId.Parse(setup.Request.Revision!.Value.ToString());
+        var runtimeStore = new PostgreSqlRuntimeConfigurationStore(
+            services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>());
+        var authority = await runtimeStore.AuthorizeAsync(setup.Identity, revision, default);
+        Assert.NotNull(authority);
+        var savedArtifact = await runtimeStore.ReadAsync(authority, default);
+        Assert.NotNull(savedArtifact);
+        var savedDocument = savedArtifact.Revision;
+        Assert.DoesNotContain("projected-canary", savedDocument.FrozenInputs);
+        await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
+            Assert.Null(await verify.ApplicationDeployments.AsNoTracking().Select(x => x.AppliedGeneration).SingleAsync());
+            Assert.Empty(await verify.ConfigurationAccess.AsNoTracking().ToArrayAsync());
+        }
+        await using var restarted = InternalServices(setup.Scenario.Connection, setup.Scenario.Time);
+        Assert.Equal(exact, (await restarted.GetRequiredService<IDurableDeploymentPlanner>()
+            .FindPlanAsync(commit.PlanId, default))!.Inputs.Configuration!.FrozenSecrets[named]);
+        var restartedStore = new PostgreSqlRuntimeConfigurationStore(
+            restarted.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>());
+        var restartedAuthority = await restartedStore.AuthorizeAsync(setup.Identity, revision, default);
+        Assert.NotNull(restartedAuthority);
+        var restartedArtifact = await restartedStore.ReadAsync(restartedAuthority, default);
+        Assert.NotNull(restartedArtifact);
+        Assert.Equal(savedDocument, restartedArtifact.Revision);
+        using var replacementBytes = new SecretMaterial("replacement-private"u8.ToArray());
+        var replacement = await restarted.GetRequiredService<SecretAdministration>().CreateAsync("initial", "runtime-configuration-v2",
+            Guid.NewGuid(), replacementBytes, "tester", default, SecretPurpose.Configuration);
+        Assert.Equal(SecretOutcome.Created, replacement.Outcome);
+        var nextProfile = RuntimeProjectedProfileText.Replace("\"revision\":1", "\"revision\":2", StringComparison.Ordinal)
+            .Replace("runtime-configuration", "runtime-configuration-v2", StringComparison.Ordinal);
+        var imported = Assert.IsType<ImportConfigurationProfileResult.Succeeded>(await new ImportConfigurationProfile(
+            restarted.GetRequiredService<IConfigurationProfileImportStore>(), setup.Scenario.Time)
+            .ExecuteAsync(Encoding.UTF8.GetBytes(nextProfile), "tester"));
+        var environment = (await restarted.GetRequiredService<IEnvironmentCatalog>().GetAsync(EnvironmentId.Create("initial"), default))!;
+        var assignments = restarted.GetRequiredService<IProfileAssignmentStore>();
+        var targetScope = new ProfileAssignmentTarget.Environment();
+        var prior = (await assignments.FindAsync(environment, targetScope, default))!;
+        var updated = await assignments.ApplyAsync(environment, new(targetScope, [new ProfileDecision.Use(imported.Revision.Reference)]),
+            new AssignmentPrecondition.ExpectedConcurrencyToken(prior.Token), new("tester", setup.Scenario.Time.GetUtcNow(), null), default);
+        Assert.Equal(AssignmentOutcome.Updated, updated.Outcome);
+        await using (var db = await restarted.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            var changed = (await ConfigurationPlanningCapture.CaptureAsync(db, environment, setup.Scenario.Revision,
+                savedPlan.Inputs.Configuration.Manifest, default, ConfigurationRenderingCatalog.Empty)).Snapshot!;
+            Assert.NotEqual(exact, changed.FrozenSecrets[new("runtime-configuration-v2", 1)]);
+        }
+        Assert.Equal(exact, (await restarted.GetRequiredService<IDurableDesiredStateCommitter>()
+            .FindGenerationAsync(commit.DeploymentId, commit.Generation, default))!.Inputs.Configuration!.FrozenSecrets[named]);
+        var replacementAuthority = await restartedStore.AuthorizeAsync(setup.Identity, revision, default);
+        Assert.NotNull(replacementAuthority);
+        var retainedArtifact = await restartedStore.ReadAsync(replacementAuthority, default);
+        Assert.NotNull(retainedArtifact);
+        Assert.Equal(savedDocument, retainedArtifact.Revision);
     }
 
     private sealed class RuntimeMetadataQueries : DbCommandInterceptor

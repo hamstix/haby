@@ -38,7 +38,7 @@ internal static class InternalResourceStage
         var structural = Structure(inputs);
         var frozen = inputs.Configuration ?? throw new InvalidDataException("Configuration snapshot unavailable.");
         var configuration = ConfigurationPlanningSnapshot.PrepareCore(inputs.Revision, structural.Providers.Declaration,
-            frozen.Scopes, frozen.Profiles, frozenPins: frozen.RenderPins).Snapshot
+            frozen.Scopes, frozen.Profiles, frozenPins: frozen.RenderPins, frozenSecrets: frozen.FrozenSecrets).Snapshot
             ?? throw new InvalidDataException("Resource-stage configuration unavailable.");
         return structural with { Configuration = configuration };
     }

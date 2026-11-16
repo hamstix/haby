@@ -115,7 +115,7 @@ public sealed partial class OperatorHostIntegrationTests
             var expansion = new ConfigurationProfileExpander(new([loaded!.Declaration])).Expand([], [],
                 [new(ManifestLocalId.Create("api"), exact!.Declaration.Spec.Components[ManifestLocalId.Create("api")], assignment.Declaration.Decisions)]);
             Assert.False(expansion.IsSuccess); Assert.Null(expansion.Layouts);
-            Assert.Contains(expansion.Diagnostics, x => x.Code == "profile.secret-projections.unsupported");
+            Assert.Contains(expansion.Diagnostics, x => x.Code == "profile.secret-reference.unavailable");
             // Exact read remains available despite latest revision lacking the Component.
             Assert.Equal(accepted.Assignment, (await client.GetProfileAssignmentAsync(new() { Environment = "production", Target = component })).Assignment);
             Assert.Equal(ProfileAssignmentStatus.NotFound, (await client.GetProfileAssignmentAsync(new() { Environment = "production", Target = AssignmentTarget("component", "assigned", "renamed") })).Status);
