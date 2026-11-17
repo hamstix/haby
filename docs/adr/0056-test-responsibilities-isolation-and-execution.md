@@ -70,6 +70,11 @@ changes as side effects of an ordinary test run.
 ### 6. Preserve platform coverage deliberately
 
 Windows-specific behavior and published Native AOT CLI checks remain mandatory.
+The user-accepted #253 exception permits proven ordinary documentation-only
+changes to run mandatory lightweight routing/documentation validation instead;
+the [CI-routing policy](../development/197-suite-routing.md#documentation-only-build-routing)
+defines the complete-diff allowlist, fail-closed behavior and honest skipped-suite
+evidence. Code, mixed and unknown changes retain every applicable existing gate.
 A symmetric full PostgreSQL suite on Windows is not required solely for symmetry.
 Map every existing obligation before moving gates; do not disable checks in
 anticipation of replacement coverage.
