@@ -26,6 +26,7 @@ $listCommand=if($Runtime -eq 'docker'){'ps'}else{'list'}
 $image='rancher/k3s@sha256:10464930d9bad0c06aef9830e84cd4019c24ed44d5eab594efb7416119097248'
 $record=[Collections.Generic.List[string]]::new()
 $failed=$false; $launchAttempted=$false; $privateOwned=$false
+$buildExitRecorded=$false; $harnessExitRecorded=$false
 $copyOperation=$null; $copyNativeExit=$null
 $record.Add('Evidence ID: '+$EvidenceId); $record.Add('Run ID: '+$run)
 $record.Add('Source: '+(& git rev-parse HEAD))
@@ -68,6 +69,19 @@ try {
     if($DurableActions){Initialize-QualificationJournal $private}
     $record.Add('Runtime version: '+(RuntimeCall @('--version')).Trim())
     $sdk=Call 'dotnet' @('--version'); if($sdk.ExitCode -ne 0){throw 'SDK unavailable.'}; $record.Add('SDK: '+$sdk.Output.Trim())
+    $stage='build'; $record.Add('Build: start')
+    $record.Add('Build command elapsed origin: before-process-start-through-output-drain; pre-fixture')
+    $build=Call 'dotnet' @('build','tools/Haby.Kubernetes.Qualification','--no-restore','-c','Debug') 180
+    if($build.ExitCode -isnot [int]){throw 'Build result unavailable.'}
+    $record.Add('Build exit code: '+$build.ExitCode.ToString([Globalization.CultureInfo]::InvariantCulture))
+    $buildExitRecorded=$true
+    $buildElapsed=$build.ElapsedMilliseconds
+    if($buildElapsed -is [long] -and $buildElapsed -ge 0 -and $buildElapsed -le 3600000){
+        $record.Add('Build command elapsed milliseconds: '+$buildElapsed.ToString([Globalization.CultureInfo]::InvariantCulture))
+    }else{$record.Add('Build command elapsed milliseconds: unavailable')}
+    if($build.ExitCode -ne 0){$reason='nonzero';throw 'Qualification build failed.'}
+    $record.Add('Build: PASS')
+    $stage='setup'
     if($ConfiguredDeployment){
         if($Runtime -cne 'docker' -or !$IsLinux){throw 'Configured consumer requires the existing hosted Linux Docker contour.'}
         $inputs=Get-HabyConsumerImageInputs (Split-Path $PSScriptRoot -Parent)
@@ -123,17 +137,34 @@ try {
     $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
     if((@($ProbeStockTls,$DeploymentKernel,$DurableActions,$ConfiguredDeployment) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
     [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}elseif($ConfiguredDeployment){@('--configured-deployment')}else{@()}
-    $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-restore','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
-    foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
-    if($result.ExitCode -ne 0){$reason='nonzero';throw 'Harness failed.'}
-    $record.Add('Harness command elapsed origin: before-process-start-through-output-drain; includes-build-startup')
+    $record.Add('Harness command elapsed origin: before-process-start-through-output-drain; prebuilt-output')
+    $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-build','--no-restore','-c','Debug','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
+    if($result.ExitCode -isnot [int]){throw 'Harness result unavailable.'}
+    $record.Add('Harness exit code: '+$result.ExitCode.ToString([Globalization.CultureInfo]::InvariantCulture))
+    $harnessExitRecorded=$true
     $elapsed=$result.ElapsedMilliseconds
     if($elapsed -is [long] -and $elapsed -ge 0 -and $elapsed -le 3600000){
         $record.Add('Harness command elapsed milliseconds: '+$elapsed.ToString([Globalization.CultureInfo]::InvariantCulture))
     }else{$record.Add('Harness command elapsed milliseconds: unavailable')}
+    if($result.ExitCode -ne 0){
+        if($ProbeStockTls -and $result.ExitCode -eq 1 -and $result.Error.Trim() -ceq
+            'FAIL stock SslCaCerts accepted mismatched server name; stock path is unqualified.'){
+            $record.Add('FAIL stock SslCaCerts accepted mismatched server name; stock path is unqualified.')
+        }
+        $reason='nonzero';throw 'Harness failed.'
+    }
+    foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
     $record.Add('Harness: PASS')
 } catch {
     $failed=$true
+    if($stage -ceq 'build'){
+        if(!$buildExitRecorded){$record.Add('Build exit code: unavailable')}
+        $record.Add('Build: FAIL')
+    }
+    if($stage -ceq 'harness'){
+        if(!$harnessExitRecorded){$record.Add('Harness exit code: unavailable')}
+        $record.Add('Harness: FAIL')
+    }
     # Freeze the primary copy diagnostic before cleanup can issue its own runtime calls.
     if($stage -ceq 'copy' -and $copyOperation){
         $record.Add('Copy failure: operation='+$copyOperation)
