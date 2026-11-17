@@ -40,7 +40,10 @@ public enum DurablePlanStatus
     ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape, ConfigurationRefused, PlanInputUnavailable
 }
 
-public sealed record DurablePlanResult(DurablePlanStatus Status, DurablePlan? Plan = null, ProfileExpansionResult? ConfigurationReport = null);
+public sealed record DurablePlanResult(DurablePlanStatus Status, DurablePlan? Plan = null, ProfileExpansionResult? ConfigurationReport = null)
+{
+    internal WorkloadUpdateRefusal? UpdateRefusal { get; init; }
+}
 
 public enum DurablePlanCloseStatus { Closed, AlreadyClosed, PlanNotFound }
 public enum DurablePlanCurrentStatus

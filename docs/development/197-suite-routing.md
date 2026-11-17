@@ -179,6 +179,85 @@ global timeout is increased.
 
 ## CI, qualification triggers and evidence
 
+### Documentation-only Build routing
+
+Issue #253 accepts a narrow exception to the every-change obligations below.
+Build always runs `validate`, starting with the dependency-free Node controls
+in `scripts/test-ci-change-routing.mjs` and `scripts/ci-change-routing.mjs`.
+No branch spelling is trusted. The allowlist is root `README.md`, `ROADMAP.md`,
+`CONTRIBUTING.md`, `AGENTS.md` and ordinary `docs/**/*.md`. Any `examples`,
+`schemas` or `fixtures` subtree under `docs` is excluded, including Markdown.
+Only regular non-executable files qualify. Unknown/mixed paths, scripts,
+workflows, code, examples, schemas and fixtures retain full validation.
+
+The source-consumer audit at `f12f0dd723ca699ad730815e3059ccac7b5f14f1`
+found these functional inputs under `docs`:
+
+- `docs/development/examples/106-shared-application-login.json` is embedded by
+  `Haby.PostgreSql.IntegrationTests.csproj`.
+- `docs/examples/configuration-profiles/*.json` is copied by
+  `Haby.Manifest.Tests.csproj` and read by `ProfileWireTests`.
+- `docs/development/schemas/postgresql-failure-evidence-v1.schema.json` is read
+  by `scripts/test-postgresql-failure-evidence.ps1`.
+
+No allowed Markdown input was found in source, project, test or script consumers.
+The fixed consumer image input closure excludes Markdown and includes none of
+these documentation paths. New test/runtime consumers must update the routing
+exclusions with their change. Kubernetes workflow path filters remain unchanged;
+this change does not rebuild or requalify the consumer image.
+
+Checkout fetches full history. PR routing uses the unique merge base of the event's
+base/head commits through its entire head, including every commit. Push routing
+uses the entire event `before..after` range. Git raw NUL-delimited records retain
+all filenames, deletions, file modes and both rename paths. A rename across the
+allowlist boundary takes full CI. There is no API pagination or shell evaluation
+of filenames. Missing commits, shallow history, ambiguous ancestry, malformed or
+incomplete records, invalid UTF-8, failed Git commands and exceeded output limits
+fail `validate`; no partial output can authorize skipping. An empty diff takes
+full CI. A complete reliable non-documentation classification takes full CI.
+
+Documentation checks run on every route. `git diff --check` checks added whitespace
+defects across the complete range. The link check compares all tracked Markdown
+at both endpoints, so deleting/renaming a target can fail incoming links even in
+unchanged files. It checks local inline/image links and reference definitions,
+including encoded paths and directory links. Existing unresolved links are a
+counted baseline, not new failures; new unresolved occurrences fail. Fenced and
+inline code, external URLs and fragments are ignored. This is a practical local
+path check, not a complete Markdown parser, anchor validator or network crawler.
+Run the controls locally with `node --test ./scripts/test-ci-change-routing.mjs`.
+
+Only successful routing/documentation validation emits `full=true` or `full=false`.
+On docs-only changes, `validate` skips SDK setup, restore/build, solution/fast tests,
+formatting, dependency audit and the heavy script controls; its routing controls
+and documentation checks remain mandatory. Its summary explicitly records the
+source range, route and omitted suites. PostgreSQL and the two Native AOT jobs
+use `needs: validate` and require `full == 'true'`. A failed `validate` remains
+failed even though dependent jobs skip; there is no success aggregator overriding
+it. Full changes preserve every existing applicable command, inventory and artifact.
+Dependency review retains its independent PR-only behavior and read permissions.
+
+Required names remain `validate`, `postgresql-integration`, `Native AOT (win-x64)`,
+`Native AOT (linux-x64)` and `dependency-review`; no protection settings change.
+The former native matrix is represented by two jobs with literal display names
+and shared YAML-anchored steps/defaults. Job conditions run before matrix expansion;
+fixed names preserve both platform checks even when skipped. Both platforms still
+use their original runner, RID, commands and independent failure behavior.
+GitHub supports skipped jobs as successful required checks, while failed required
+`validate` blocks merge; see the official
+[job conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions)
+and [prerequisite jobs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-jobs).
+Intentionally skipped suites earn no case, coverage or artifact credit.
+
+This workflow-change PR itself takes the full applicable path. Focused controls
+and static inspection do not prove hosted docs-only execution. A useful follow-up
+documentation PR after #253's normal merge must record its exact source/diff,
+actual `validate` and dependency-review outcomes, and actual PostgreSQL/native
+skips. That rehearsal is pending until executed; it is not merged automatically.
+Current-SHA independent review, architect approval and the existing failure STOP,
+no automatic rerun and evidence rules remain required.
+
+### Full and qualification paths
+
 Existing check names remain `validate`, `postgresql-integration`, both Native AOT
 targets and `dependency-review`. The PostgreSQL job explicitly runs `full`; this
 executes the four moved and one new qualification rows in this PR as well as all

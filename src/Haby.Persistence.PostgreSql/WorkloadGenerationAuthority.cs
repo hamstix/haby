@@ -17,7 +17,7 @@ internal static class WorkloadGenerationAuthority
         var id = Guid.Parse(deployment.ToString());
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == generation.Value, token);
         if (source is null) return new(null, [], "generation-not-found");
-        var commit = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == generation.Value, token);
+        var commit = await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.ChangeSetId == source.ChangeSetId && x.DeploymentId == id && x.Generation == generation.Value, token);
         if (commit is null || !source.InternalEffects) return new(null, [], "unsupported-shape");
         var accepted = new DurableChangeSetCommit(DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()), DeploymentPlanId.Parse(commit.PlanId.ToString()), deployment, generation, commit.CommittedAt, commit.ActorId);
         if (source.SnapshotFormatVersion != DurableInputStorage.Version || source.GraphJson.Length > 2097152) return new(null, [], "unsupported-inventory");

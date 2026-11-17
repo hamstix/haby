@@ -9,8 +9,10 @@ namespace Haby.Kubernetes;
 /// <summary>Internal durable CREATE adapter. UPDATE needs a future genuinely accepted prior
 /// Workload result and is deliberately absent from this registration.</summary>
 internal sealed class InternalDeploymentAction(ISecretStore secrets,
-    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null) : IInternalActionHandler, IInternalReadinessHandler
+    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null) : IInternalActionHandler, IInternalReadinessHandler, IInternalWorkloadUpdatePlanner
 {
+    public DurableActionPayload CaptureUpdate(InternalActionContext previous, DurablePlanningInputs target, string targetVersion, string intent, string receipt) =>
+        DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(previous, target, targetVersion, intent, receipt));
     internal const string Create = "haby.kubernetes.deployment-create/v1";
     public InternalActionContract Contract { get; } = new("kubernetes.workload/v1alpha1", KubernetesProviderConfigurationCodec.Kind,
         KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation, Create,

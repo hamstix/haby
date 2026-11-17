@@ -79,7 +79,9 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             await DurableAggregateCompletion.HasProofAsync(db, owner.Id, owner.DesiredGeneration, token);
     }
 
-    internal async ValueTask<DurablePlanCurrentStatus> CheckOperatorPlanAsync(DeploymentPlanId id, IReadOnlyList<IInternalActionHandler> handlers, CancellationToken token)
+    internal ValueTask<DurablePlanCurrentStatus> CheckOperatorPlanAsync(DeploymentPlanId id, IReadOnlyList<IInternalActionHandler> handlers, CancellationToken token) => CheckWorkloadPlanAsync(id, handlers, token, false);
+    internal ValueTask<DurablePlanCurrentStatus> CheckInternalPlanAsync(DeploymentPlanId id, IReadOnlyList<IInternalActionHandler> handlers, CancellationToken token) => CheckWorkloadPlanAsync(id, handlers, token, true);
+    private async ValueTask<DurablePlanCurrentStatus> CheckWorkloadPlanAsync(DeploymentPlanId id, IReadOnlyList<IInternalActionHandler> handlers, CancellationToken token, bool internalPlanning)
     {
         ArgumentNullException.ThrowIfNull(id);
         await using var db = await contexts.CreateDbContextAsync(token);
@@ -100,7 +102,9 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             if (change.EnvironmentRecordId != row.EnvironmentRecordId || change.ApplicationRecordId != row.ApplicationRecordId || change.RevisionNumber != row.RevisionNumber) return DurablePlanCurrentStatus.PlanInputUnavailable;
             var inputs = plan.Inputs;
             if (!await ValidateOperatorPinsAsync(db, row.Id, inputs, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
-            if (!await OperatorWorkloadShapeAsync(db, change, owner, inputs, plan.Graph, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
+            if (plan.Graph.WorkloadUpdate is not null ? !internalPlanning : !await OperatorWorkloadShapeAsync(db, change, owner, inputs, plan.Graph, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
+            if (plan.Graph.WorkloadUpdate is not null && owner is not null)
+                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {owner.Id} FOR SHARE", token);
             var revision = await revisions.FindAsync(inputs.Revision, token);
             var environment = await db.Environments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.EnvironmentRecordId, token);
             if (revision is null || environment?.EnvironmentId != inputs.EnvironmentKey.Value || !revision.Declaration.Equals(inputs.Providers.Declaration)) return DurablePlanCurrentStatus.PlanInputUnavailable;
@@ -119,7 +123,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             if (!SupportsRendering(frozen)) return DurablePlanCurrentStatus.PlanInputUnavailable;
             var capture = await ConfigurationPlanningCapture.CaptureAsync(db, new(inputs.Environment, inputs.EnvironmentKey), inputs.Revision, frozen.Manifest, token, _rendering, frozen.RenderPins);
             if (capture.Snapshot is null || !capture.Snapshot.Equals(frozen) || !await AdmitInternalWorkloadsAsync(db, inputs, revision.ApplicationVersion.Value, handlers, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
-            if (!InternalResourceStage.IsEmpty(inputs, plan.Graph))
+            if (!InternalResourceStage.IsEmpty(inputs, plan.Graph) && !(plan.Graph.WorkloadUpdate is not null && inputs.Providers.Declaration.Spec.Resources.Count == 0))
             {
                 var resource = InternalResourceStage.Project(inputs);
                 var exact = resource.Providers.RequireUniformResourceProvider();
@@ -128,10 +132,18 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                     !await ValidateGraphAsync(db, resource.Providers.Declaration.Spec, provider, resource, plan.Graph, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
             }
             var selected = await SelectInternalDocumentsAsync(db, inputs, revision.ApplicationVersion.Value, handlers, token);
-            var inventory = await InitialRetirementAuthority.CaptureAsync(db, inputs, plan.Graph, owner, selected, token);
-            if (plan.Graph.Retirement is null || !InitialRetirementAuthority.Same(inventory, plan.Graph.Retirement)) return DurablePlanCurrentStatus.PlanInputUnavailable;
+            if (plan.Graph.WorkloadUpdate is { } update)
+            {
+                if (owner is null || (await CaptureWorkloadUpdateAsync(db, owner, inputs, plan.Graph, revision.ApplicationVersion.Value, handlers, selected, token)).Fingerprint != update.Fingerprint) return DurablePlanCurrentStatus.PlanStale;
+            }
+            else
+            {
+                var inventory = await InitialRetirementAuthority.CaptureAsync(db, inputs, plan.Graph, owner, selected, token);
+                if (plan.Graph.Retirement is null || !InitialRetirementAuthority.Same(inventory, plan.Graph.Retirement)) return DurablePlanCurrentStatus.PlanInputUnavailable;
+            }
             return DurablePlanCurrentStatus.Current;
         }
+        catch (WorkloadUpdateRefusedException) { return DurablePlanCurrentStatus.PlanStale; }
         catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
     }
 }
