@@ -265,6 +265,18 @@ capabilities, not prerequisites for this milestone.
 
 ### Accepted P3 execution order
 
+Queue clarification: issue #252 is followed immediately by the accepted docs-only
+CI routing maintenance in #253, then the remaining operational ADR-058 Deployment
+update slices. Public CLI composition follows the completed Deployment update track,
+not before it, under [ADR-059](docs/adr/0059-public-cli-composition.md).
+
+- [ ] Expose public Native AOT command composition and typed context resolution;
+  keep upstream root commands and permit a downstream registry parent.
+- [ ] Add config adapters preserving downstream fields and safe views, configurable
+  paths (upstream sample ~/.haby/config.yaml), and a published external AOT example.
+- [ ] Show contextual help for bare command groups and add explicitly installed
+  Windows/Linux shell completion from the composed command tree.
+
 Accepted next priority: after #248, implement bounded ApplicationVersion/image
 updates under [ADR-058](docs/adr/0058-bounded-deployment-image-updates.md), before
 Service, headless Service and individual Ingress. Those objects remain in P3.
