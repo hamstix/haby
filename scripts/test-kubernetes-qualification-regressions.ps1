@@ -843,6 +843,7 @@ foreach($scenario in $scenarios){
                 if($scenario -cin $workloadScenarios){
                     $result.ExitCode=if($scenario -cin @('workload-invalid-success','workload-recorded-failure-success')){0}else{17}
                     $result.Output="Q243 kernel entry start`nQ243 kernel K25 failed`nQ243 kernel result NotConfirmed evidence-not-confirmed 0`nprotected-config-sentinel"
+                    $result.Output+="`nQ243 kernel k14 initial-create start`nQ243 kernel k14 initial-create result Refused connection-unavailable 0 false`nQ243 kernel k14 uid-delete start`nQ243 kernel k14 uid-delete exception null-reference unknown"
                     $result.Error='protected-JWT-sentinel'
                     if($scenario -like 'workload-invalid*'){$result.Output+="`nQ243 kernel result Confirmed protected-secret 999"}
                     if($scenario -ceq 'workload-oversized-failure'){$result.Output='Q243 kernel entry start'+('x'*1048576)}
@@ -899,6 +900,9 @@ foreach($scenario in $scenarios){
         if($safeLines -match 'protected-|JWT|config-sentinel'){throw 'Protected workload output leaked'}
         if($scenario -cin @('workload-safe-failure','workload-secret-failure') -and
             'Diagnostic workload: kernel K25 failed' -cnotin $safeLines){throw 'Finite workload record discarded on nonzero exit'}
+        if($scenario -cin @('workload-safe-failure','workload-secret-failure','workload-recorded-failure-success') -and
+            ('Diagnostic workload: kernel k14 initial-create result Refused connection-unavailable 0 false' -cnotin $safeLines -or
+             'Diagnostic workload: kernel k14 uid-delete exception null-reference unknown' -cnotin $safeLines)){throw 'K14 result/exception lost across nonzero or recorded-failure launcher closure'}
         if($scenario -like 'workload-invalid*' -and 'Diagnostic workload: invalid' -cnotin $safeLines){throw 'Invalid workload record accepted'}
         if($scenario -ceq 'workload-oversized-failure' -and 'Diagnostic workload: oversized' -cnotin $safeLines){throw 'Oversized workload record accepted'}
         if($scenario -cnotin @('workload-invalid-success','workload-recorded-failure-success') -and 'Failure: stage=harness; reason=nonzero; category=RuntimeException' -cnotin $safeLines){throw 'Primary workload failure replaced'}
@@ -1024,6 +1028,77 @@ foreach($scenario in $scenarios){
     Write-Output "PASS lifecycle $runtime $scenario (synthetic)"
 }
 }
+# Fixed K14 substep records only; neither API requests nor a cluster are involved.
+$k14Records=@(
+    'Q243 kernel k14 initial-create start',
+    'Q243 kernel k14 initial-create result Confirmed response-confirmed 1 true',
+    'Q243 kernel k14 initial-create result Refused connection-unavailable 0 false',
+    'Q243 kernel k14 old-uid-observe result NotConfirmed evidence-not-confirmed 0 false',
+    'Q243 kernel k14 old-uid-observe result unknown unknown unknown false',
+    'Q243 kernel k14 uid-delete start',
+    'Q243 kernel k14 uid-delete completed',
+    'Q243 kernel k14 absence-poll start',
+    'Q243 kernel k14 absence-poll result true 1',
+    'Q243 kernel k14 absence-poll result false 0',
+    'Q243 kernel k14 absence-poll result false 50',
+    'Q243 kernel k14 replacement-create start',
+    'Q243 kernel k14 replacement-create completed',
+    'Q243 kernel k14 old-uid-observe start',
+    'Q243 kernel k14 assertion start',
+    'Q243 kernel k14 assertion passed',
+    'Q243 kernel k14 assertion failed')
+foreach($phase in @('initial-create','uid-delete','absence-poll','replacement-create','old-uid-observe','assertion')){
+    foreach($category in @('canceled','null-reference','contract','invalid-operation','unknown')){
+        $k14Records+="Q243 kernel k14 $phase exception $category unknown"
+    }
+    foreach($status in @('100','200','404','409','422','599','unknown')){
+        $k14Records+="Q243 kernel k14 $phase exception http $status"
+    }
+}
+foreach($line in $k14Records){
+    $parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+$line) 'protected-JWT-header-body-sentinel'
+    $expected='Diagnostic workload: '+$line.Substring(5)
+    if($parsed.Status -cne 'valid' -or $expected -cnotin $parsed.Records -or ($parsed.Records -match 'protected|JWT|sentinel')){throw 'Fixed K14 record missing or arbitrary error text retained'}
+    $failure=$line.Contains(' exception ',[StringComparison]::Ordinal) -or $line.EndsWith(' assertion failed',[StringComparison]::Ordinal)
+    if($parsed.HasFailure -ne $failure){throw 'K14 exception/assertion failure did not fail closed'}
+    $wrongMode=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$line) ''
+    if($wrongMode.Status -cne 'invalid' -or @($wrongMode.Records).Count){throw 'K14 record accepted in configured mode'}
+}
+$k14Invalid=@(
+    'Q243 kernel k14 protected-JWT-name start',
+    'Q243 kernel k14 unknown start',
+    'Q243 kernel k14 uid-delete result Confirmed response-confirmed 1 true',
+    'Q243 kernel k14 initial-create completed',
+    'Q243 kernel k14 initial-create result protected response-confirmed 1 true',
+    'Q243 kernel k14 initial-create result Confirmed protected 1 true',
+    'Q243 kernel k14 initial-create result Confirmed response-confirmed 4 true',
+    'Q243 kernel k14 initial-create result Confirmed response-confirmed 1 True',
+    'Q243 kernel k14 initial-create result Confirmed response-confirmed 1 true extra',
+    'Q243 kernel k14 absence-poll result true -1',
+    'Q243 kernel k14 absence-poll result true 51',
+    'Q243 kernel k14 absence-poll result true 00',
+    'Q243 kernel k14 absence-poll result protected 1',
+    'Q243 kernel k14 absence-poll completed',
+    'Q243 kernel k14 assertion completed',
+    'Q243 kernel k14 replacement-create receipt true',
+    'Q243 kernel k14 uid-delete exception protected unknown',
+    'Q243 kernel k14 uid-delete exception http 99',
+    'Q243 kernel k14 uid-delete exception http 600',
+    'Q243 kernel k14 uid-delete exception http protected',
+    'Q243 kernel k14 uid-delete exception null-reference 404',
+    ('Q243 kernel k14 uid-delete exception http 404 '+('x'*161)))
+foreach($line in $k14Invalid){
+    $parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+$line) ''
+    if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Hostile or unknown K14 record retained'}
+}
+$parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+('Q243 kernel k14 uid-delete start'+'x'*1048576)) ''
+if($parsed.Status -cne 'oversized' -or @($parsed.Records).Count){throw 'K14 byte limit bypassed'}
+$parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+("Q243 kernel k14 uid-delete start`n"*255)) ''
+if($parsed.Status -cne 'valid' -or $parsed.Records.Count -ne 256){throw 'K14 existing record ceiling reduced'}
+$parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+("Q243 kernel k14 uid-delete start`n"*256)) ''
+if($parsed.Status -cne 'oversized' -or @($parsed.Records).Count){throw 'K14 existing record ceiling increased'}
+Write-Output 'PASS fixed K14 substeps: closed results/receipt/status/count, exception failure, hostile/unknown/mode rejection and unchanged bounds (synthetic)'
+
 # Pure parser controls for both existing workload modes, never a cluster execution.
 foreach($mode in @('kernel','configured')){
     $case=if($mode -ceq 'kernel'){'K25'}else{'C07'}
