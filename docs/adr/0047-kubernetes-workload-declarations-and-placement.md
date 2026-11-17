@@ -103,8 +103,8 @@ Inheritance is explicit, never a general JSON merge:
 - A scalar or array replaces the inherited value completely.
 - A composite object replaces the inherited object completely unless that field
   has an explicitly defined alternative rule in its contract.
-- Disabling uses an explicit value such as enabled: false, never null or a
-  special interpretation of an empty object.
+- Disabling uses an explicit value such as enabled: false, never null. The #248 port/probe group extension below explicitly
+  defines `{}` as an empty replacement for those two groups.
 
 Plan stores completely resolved effective values and exact selected inputs, with
 no remaining inherit-at-execution placeholders. Concrete schemas, field names,
@@ -117,7 +117,7 @@ Image identity never determines Kubernetes container.name or object names.
 
 ### 7. Application-owned container interface
 
-The Workload declares image, named container ports, environment variables,
+The Workload declares image, environment variables, optional named container ports,
 startup/liveness/readiness probes and required volume/mount references.
 Placement cannot replace the image or application environment variables.
 Requests/limits are operational defaults with the bounded overrides above.
@@ -142,7 +142,7 @@ not authorize operator credentials in Pods or unresolved secret material in Plan
 ### 9. Services use declared named ports
 
 Ordinary Service and headless Service are enabled independently and may coexist.
-Their targetPort references a named container port declared by the Workload;
+Their targetPort references a named effective container port after #248 resolution;
 a missing target is a planning error. The initial ordinary Service is ClusterIP.
 NodePort and LoadBalancer require demonstrated needs and explicit contracts.
 
@@ -203,3 +203,28 @@ access/distribution, readiness/wait and mandatory retirement cleanup. Detailed
 closed JSON schemas, Placement administration/CAS and concrete numeric/default
 limits require implementation-ready decisions; this ADR does not authorize an
 unbounded settings framework or replace those remaining contracts.
+
+
+## Accepted extension: Placement port and probe defaults (#248)
+
+Accepted 2026-11-17. The original Workload-owned interface above remains the
+historical first-slice scope. KubernetesPlacement may now declare optional `ports`
+and `probes` using the same closed Workload grammar, bounds and defaults.
+Resolve the two groups independently after exact scoped Placement selection:
+absent Workload property inherits the selected Placement group; present property
+replaces the whole group, including explicit `{}` to disable it. Explicit null
+is invalid. Both absent means an empty effective group. There is no key, slot or
+deep merge, automatic listener configuration or inferred health probe.
+
+Preserve authored absence versus empty through normalization, equality/hash,
+portable canonical export and stored snapshots. Import checks intrinsic shape,
+name/range/action rules. Check probe and route references against effective ports
+in pure planning: every reference must name an existing TCP port. Portable
+Placement probes may refer to ports supplied by a Workload, and Workload probes
+may refer to inherited ports. No external effect may precede that validation.
+
+Plan pins the exact selected revision and effective groups; Commit, restart,
+materialization, intent, receipt and readiness use those frozen inputs. Assignment
+edits alone change no accepted generation. Future explicit Plans select new
+defaults. Durable UPDATE and companion-object execution remain unsupported.
+See the [operator guide](../development/248-placement-ports-probes-defaults.md).

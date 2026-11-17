@@ -82,7 +82,7 @@ public static class DeploymentIntents
         string? Bound(RolloutBound? b) => b is null ? null : b.Value.ToString(CultureInfo.InvariantCulture) + (b.Percent ? "%" : "");
         return new DeploymentProjection(d.ContainerName, workload.ImageReference, s.Replicas ?? 1, strategy.Type,
             Bound(strategy.MaxSurge), Bound(strategy.MaxUnavailable), s.MinReadySeconds ?? 0, s.RolloutSeconds ?? 600,
-            p.Declaration.NodeSelector.ToImmutableSortedDictionary(StringComparer.Ordinal), p.Declaration.ImagePullSecrets.Order(StringComparer.Ordinal).ToImmutableArray(), d.Ports.ToImmutableSortedDictionary(StringComparer.Ordinal), d.Probes, Resources: s.Resources);
+            p.Declaration.NodeSelector.ToImmutableSortedDictionary(StringComparer.Ordinal), p.Declaration.ImagePullSecrets.Order(StringComparer.Ordinal).ToImmutableArray(), workload.Ports.ToImmutableSortedDictionary(StringComparer.Ordinal), workload.Probes, Resources: s.Resources);
     }
 
     // Validates every supported effective field while deliberately granting no write intent.
@@ -153,7 +153,8 @@ public static class DeploymentIntents
         DeploymentResources.Validate(p.Resources);
         Name(p.Container); Text(p.Image, 512); Need(!p.Image.Any(char.IsWhiteSpace), "image");
         // Reuse the current portable image/container grammar; a reloaded intent cannot bypass it.
-        KubernetesContract.DecodeWorkload(Encoding.UTF8.GetBytes(DeploymentPortsAndProbes.Declaration(p).ToJsonString()));
+        var declaration = KubernetesContract.DecodeWorkload(Encoding.UTF8.GetBytes(DeploymentPortsAndProbes.Declaration(p).ToJsonString()));
+        KubernetesContract.ValidateReferences(declaration.Ports, declaration.Probes, declaration.Routes);
         Need(p.Replicas is >= 1 and <= 10000 && p.MinReadySeconds is >= 0 and <= 3600 && p.ProgressDeadlineSeconds <= 86400 && p.ProgressDeadlineSeconds > p.MinReadySeconds &&
             (p.Strategy == "Recreate" && p.MaxSurge is null && p.MaxUnavailable is null ||
              p.Strategy == "RollingUpdate" && ValidBound(p.MaxSurge) && ValidBound(p.MaxUnavailable) && (p.MaxSurge != "0" && p.MaxSurge != "0%" || p.MaxUnavailable != "0" && p.MaxUnavailable != "0%")), "projection-settings");

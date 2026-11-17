@@ -40,8 +40,7 @@ public static class KubernetesContract
             parsedImage = new WorkloadImage.Complete(complete.GetString()!);
         }
         else parsedImage = new WorkloadImage.Composed(Text(image, "name")!, Text(image, "tag"), image.TryGetProperty("tagFrom"u8, out _));
-        var ports = Map(root, "ports", p => new ContainerPort(Int(p, "containerPort")!.Value, Text(p, "protocol") ?? "TCP"));
-        foreach (var name in ports.Keys) Require(name.Length <= 15 && Match(name, "[a-z][a-z0-9]*(?:-[a-z0-9]+)*"), "port.name");
+        var ports = Ports(root);
         var env = Map<EnvironmentValue>(root, "env", e => e.TryGetProperty("value"u8, out var literal)
             ? new EnvironmentValue.Literal(literal.GetString()!)
             : e.TryGetProperty("configMapKey"u8, out var cm) ? new EnvironmentValue.ConfigMap(Key(cm))
@@ -67,14 +66,14 @@ public static class KubernetesContract
         Require(mounts.Select(x => x.MountPath).Distinct(StringComparer.Ordinal).Count() == mounts.Length, "mount.duplicate");
         var routes = Items(root, "routes").Select(r => new Route(Text(r, "hostLabel")!, Text(r, "path")!, Text(r, "port")!, Text(r, "pathType") ?? "Prefix")).ToImmutableArray();
         Require(routes.Select(x => (x.HostLabel, x.Path)).Distinct().Count() == routes.Length, "route.duplicate");
-        foreach (var r in routes) { Label(r.HostLabel); Port(ports, r.Port); RoutePath(r.Path); }
-        var probes = root.TryGetProperty("probes"u8, out var ps)
-            ? new Probes(Probe(ps, "startup", ports), Probe(ps, "liveness", ports), Probe(ps, "readiness", ports)) : new Probes(null, null, null);
+        foreach (var r in routes) { Label(r.HostLabel); RoutePath(r.Path); }
+        var probes = ReadProbes(root);
         var documents = root.TryGetProperty("configuration"u8, out var config)
             ? config.GetProperty("documents"u8).EnumerateArray().Select(d => ManifestLocalId.Create(d.GetString()!)).ToImmutableArray() : [];
         var nameOverride = Text(root, "nameOverride"); if (nameOverride is not null) Dns(nameOverride);
         return new(parsedImage, Label(Text(root, "containerName") ?? "app"), nameOverride, ports, env, probes, volumes, mounts,
-            routes, documents, root.TryGetProperty("overrides"u8, out var overrides) ? Settings(overrides) : EmptySettings);
+            routes, documents, root.TryGetProperty("overrides"u8, out var overrides) ? Settings(overrides) : EmptySettings,
+            root.TryGetProperty("ports"u8, out _), root.TryGetProperty("probes"u8, out _));
     }
 
     public static KubernetesPlacement DecodePlacement(ReadOnlyMemory<byte> bytes)
@@ -93,7 +92,9 @@ public static class KubernetesContract
         var secrets = Items(spec, "imagePullSecrets").Select(x => Dns(x.GetString()!)).ToImmutableArray();
         return new(new(ManifestLocalId.Create(Text(metadata, "name")!), Int(metadata, "revision")!.Value), Label(Text(spec, "namespace")!),
             registry, Text(spec, "repositoryPrefix"), selectors, secrets, Settings(spec),
-            spec.TryGetProperty("runtimeConfiguration"u8, out var runtime) ? RuntimeBootstrapCodec.ReadConfiguration(runtime) : null);
+            spec.TryGetProperty("runtimeConfiguration"u8, out var runtime) ? RuntimeBootstrapCodec.ReadConfiguration(runtime) : null,
+            spec.TryGetProperty("ports"u8, out _) ? Ports(spec) : null,
+            spec.TryGetProperty("probes"u8, out _) ? ReadProbes(spec) : null);
     }
 
     internal static readonly OperationalSettings EmptySettings = new(null, null, null, null, null, null, null, null);
@@ -157,16 +158,32 @@ public static class KubernetesContract
         return value.ValueKind == JsonValueKind.String ? new(int.Parse(value.GetString()![..^1], CultureInfo.InvariantCulture), true)
             : new(checked((int)value.GetDecimal()), false);
     }
-    private static Probe? Probe(JsonElement root, string name, ImmutableDictionary<string, ContainerPort> ports)
+    private static Probe? Probe(JsonElement root, string name)
     {
         if (!root.TryGetProperty(name, out var p)) return null;
         var http = p.TryGetProperty("httpGet"u8, out var action); if (!http) action = p.GetProperty("tcpSocket"u8);
-        var port = Text(action, "port")!; Port(ports, port);
+        var port = Text(action, "port")!;
         var path = Text(action, "path"); if (path is not null) HttpPath(path);
         var success = Int(p, "successThreshold") ?? 1;
         Require(name == "readiness" || success == 1, "probe.success-threshold");
         return new(port, path, http ? Text(action, "scheme") ?? "HTTP" : null, Int(p, "initialDelaySeconds") ?? 0,
             Int(p, "periodSeconds") ?? 10, Int(p, "timeoutSeconds") ?? 1, success, Int(p, "failureThreshold") ?? 3);
+    }
+    private static ImmutableDictionary<string, ContainerPort> Ports(JsonElement root)
+    {
+        var ports = Map(root, "ports", p => new ContainerPort(Int(p, "containerPort")!.Value, Text(p, "protocol") ?? "TCP"));
+        foreach (var name in ports.Keys) Require(name.Length <= 15 && Match(name, "[a-z][a-z0-9]*(?:-[a-z0-9]+)*"), "port.name");
+        return ports;
+    }
+    private static Probes ReadProbes(JsonElement root) => root.TryGetProperty("probes"u8, out var ps)
+        ? new(Probe(ps, "startup"), Probe(ps, "liveness"), Probe(ps, "readiness")) : new(null, null, null);
+
+    /// <summary>Validate cross-group references only after exact Placement selection and group replacement.</summary>
+    public static void ValidateReferences(ImmutableDictionary<string, ContainerPort> ports, Probes probes, IEnumerable<Route> routes)
+    {
+        foreach (var probe in new[] { probes.Startup, probes.Liveness, probes.Readiness })
+            if (probe is not null) Port(ports, probe.Port);
+        foreach (var route in routes) Port(ports, route.Port);
     }
     private static ObjectKey Key(JsonElement key)
     {

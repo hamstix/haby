@@ -227,3 +227,28 @@ JSON, exact-number semantics, current-alpha compatibility rules, Provider-neutra
 core/storage and complete existing solution/PostgreSQL/auth/Native AOT gates. Raise
 genuine product/semantic conflicts before inventing behavior; ordinary field naming,
 finite bounds and schema encoding must be documented coherently in the contract.
+
+
+## Accepted extension: Placement port and probe defaults (#248)
+
+Accepted 2026-11-17. The original Workload-owned interface above remains the
+historical first-slice scope. KubernetesPlacement may now declare optional `ports`
+and `probes` using the same closed Workload grammar, bounds and defaults.
+Resolve the two groups independently after exact scoped Placement selection:
+absent Workload property inherits the selected Placement group; present property
+replaces the whole group, including explicit `{}` to disable it. Explicit null
+is invalid. Both absent means an empty effective group. There is no key, slot or
+deep merge, automatic listener configuration or inferred health probe.
+
+Preserve authored absence versus empty through normalization, equality/hash,
+portable canonical export and stored snapshots. Import checks intrinsic shape,
+name/range/action rules. Check probe and route references against effective ports
+in pure planning: every reference must name an existing TCP port. Portable
+Placement probes may refer to ports supplied by a Workload, and Workload probes
+may refer to inherited ports. No external effect may precede that validation.
+
+Plan pins the exact selected revision and effective groups; Commit, restart,
+materialization, intent, receipt and readiness use those frozen inputs. Assignment
+edits alone change no accepted generation. Future explicit Plans select new
+defaults. Durable UPDATE and companion-object execution remain unsupported.
+See the [operator guide](../development/248-placement-ports-probes-defaults.md).

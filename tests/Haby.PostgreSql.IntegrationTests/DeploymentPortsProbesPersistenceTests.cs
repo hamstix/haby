@@ -12,7 +12,10 @@ public sealed partial class DurableDeploymentPlanningTests
 {
     internal static void PortsAndProbes(JsonNode envelope)
     {
-        var properties = envelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!;
+        ApplyPortsAndProbes(envelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!);
+    }
+    internal static void ApplyPortsAndProbes(JsonNode properties)
+    {
         properties["ports"] = JsonNode.Parse("""{"web":{"containerPort":8080},"dns":{"containerPort":5353,"protocol":"UDP"}}"""u8);
         properties["probes"] = JsonNode.Parse("""
             {"startup":{"httpGet":{"port":"web","path":"/health"}},"liveness":{"tcpSocket":{"port":"web"}},
@@ -40,8 +43,8 @@ public sealed partial class DurableDeploymentPlanningTests
         var scenario = await InternalScenarioAsync(initialOnly: initial, configureManifest: e =>
         {
             if (configured) ConfiguredDocuments(e);
-            PortsAndProbes(e);
-        });
+            if (!initial) PortsAndProbes(e);
+        }, configurePlacement: initial ? ApplyPortsAndProbes : null);
         var deployment = new ConfiguredSubmissionFixture(); var identity = new IdentityFixture();
         string payload, output; DurableOperationKey key;
         await using (var services = InternalServices(scenario.Connection, scenario.Time))
@@ -70,4 +73,36 @@ public sealed partial class DurableDeploymentPlanningTests
         await using var verify = await restarted.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
         Assert.Equal(scenario.Commit.Generation.Value, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Explicit_empty_groups_disable_Placement_defaults_through_submission_restart_and_receipt(bool configured)
+    {
+        var scenario = await InternalScenarioAsync(initialOnly: true, configurePlacement: ApplyPortsAndProbes, configureManifest: e =>
+        {
+            if (configured) ConfiguredDocuments(e);
+            var properties = e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!;
+            properties["ports"] = new JsonObject(); properties["probes"] = new JsonObject();
+        });
+        var deployment = new ConfiguredSubmissionFixture(); var identity = new IdentityFixture();
+        DurableOperationKey key; string payload;
+        await using (var services = InternalServices(scenario.Connection, scenario.Time))
+        {
+            var actions = await PrepareRollout(services, scenario, deployment, identity, configured);
+            key = await SubmitRollout(actions, scenario, deployment);
+            payload = (await actions.HistoryAsync(key, default))!.Intent.Payload;
+        }
+        await using var restarted = InternalServices(scenario.Connection, scenario.Time);
+        var replay = ConfiguredActions(restarted, deployment, identity);
+        var saved = (await replay.HistoryAsync(key, default))!;
+        Assert.Equal(payload, saved.Intent.Payload);
+        foreach (var projection in new[] { DeploymentIntents.Decode(payload).Target, DeploymentIntents.DecodeReceipt(saved.Output!.Payload).Projection })
+        {
+            Assert.Empty(projection.Ports);
+            Assert.Equal(new Haby.Kubernetes.Contracts.Probes(null, null, null), projection.Probes);
+        }
+        Assert.Equal(InternalActionOutcome.Confirmed, (await replay.ExecuteAsync(key, default)).Outcome);
+        Assert.Equal(1, deployment.Writes);
+    }
+
 }

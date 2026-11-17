@@ -31,7 +31,8 @@ public sealed class PlacementInputs
 public sealed record ObjectName(ProviderInstanceId Provider, string Namespace, string Group, string Kind, string Name);
 public sealed record EffectiveWorkload(ProviderInput.Workload Input, ExactProviderResolution Provider,
     PlacementRevisionInput Placement, KubernetesWorkload Declaration, string ImageReference,
-    OperationalSettings Settings, ImmutableArray<ObjectName> Objects);
+    OperationalSettings Settings, ImmutableArray<ObjectName> Objects,
+    ImmutableDictionary<string, ContainerPort> Ports, Probes Probes);
 
 /// <summary>Pure immutable effective resolution; this result cannot be passed to durable Commit/Execute.</summary>
 public static class KubernetesWorkloadPlanner
@@ -74,9 +75,12 @@ public static class KubernetesWorkloadPlanner
                 var declaration = Decode(workload);
                 foreach (var document in declaration.Documents) Require(configuration is null ? component.Documents.ContainsKey(document) :
                     configuration.Layouts.Single(x => x.Component == componentId).Documents.Any(x => x.Definition.Id == document), "configuration.document-reference");
+                var ports = declaration.HasPorts ? declaration.Ports : selected.Ports ?? ImmutableDictionary<string, ContainerPort>.Empty;
+                var probes = declaration.HasProbes ? declaration.Probes : selected.Probes ?? new Probes(null, null, null);
+                ValidateReferences(ports, probes, declaration.Routes);
                 var settings = Effective(selected.Settings, declaration.Overrides);
                 Require(settings.Ingress!.Enabled == false || settings.Service == true && declaration.Routes.Length > 0, "ingress.routes-service");
-                Require(settings.Service != true && settings.HeadlessService != true || declaration.Ports.Count > 0, "service.ports");
+                Require(settings.Service != true && settings.HeadlessService != true || ports.Count > 0, "service.ports");
                 foreach (var route in declaration.Routes)
                     if (settings.Ingress.Enabled) Dns(route.HostLabel + "." + settings.Ingress.Domain);
                 var image = declaration.Image switch
@@ -100,7 +104,7 @@ public static class KubernetesWorkloadPlanner
                 if (settings.HeadlessService == true) Add("", "Service", baseName + "-headless");
                 if (settings.Ingress.Enabled) Add("networking.k8s.io", "Ingress", baseName);
                 if (!declaration.Documents.IsEmpty) Add("", "ServiceAccount", baseName + "-runtime");
-                results.Add(new(input, exact, placement, declaration, image, settings, objects.ToImmutable()));
+                results.Add(new(input, exact, placement, declaration, image, settings, objects.ToImmutable(), ports, probes));
             }
         return results.ToImmutable();
     }
