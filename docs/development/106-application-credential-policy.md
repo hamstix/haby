@@ -28,9 +28,9 @@ is executable; core/extension metadata alone does not enable effects.
 | Contract | Accepted fields and constraints |
 | --- | --- |
 | postgresql.database/v1alpha1 | Existing properties {name}; database-name syntax remains [a-z][a-z0-9_]{0,62}. |
-| postgresql.application-login/v1alpha1 | Required {databaseRef: ManifestLocalId, schema: string, privilegePolicy: string}. Same-Application databaseRef; schema follows database-name syntax and cannot start pg_ or equal public/information_schema; policy is exactly database-owner/v1. No unknown fields, password or userName. |
+| postgresql.application-login/v1alpha1 | Required {databaseRef: ManifestLocalId, schema: string, privilegePolicy: string}. Same-Application databaseRef; schema follows database-name syntax and cannot start pg_ or equal information_schema; explicit public uses the confirmed original standard schema under issue #247; policy is exactly database-owner/v1. No unknown fields, password or userName. |
 | Login binding options | Exactly {}; bindings do not independently choose credentials or broaden the declared policy. |
-| postgresql.database-output/v1alpha1 | {databaseName: string, databaseOid: uint32}, key database; output from the exact confirmed database action. OID is consistency evidence, not ownership proof. |
+| postgresql.database-output/v2 | {databaseName: string, databaseOid: uint32, publicSchemaOid: uint32}, key database; output from the exact confirmed database action. OID is consistency evidence, not ownership proof. |
 | postgresql.application-login-output/v1alpha1 | {host, port, databaseName, schema, userName, password: SecretRef}, key connection; publish only after all mandatory login work succeeds. Connection settings come from pinned typed configuration; password is an exact SecretId/SecretVersionId pair. |
 | haby.generated-credential/v1 | {reference: SecretRef}, key password; producer output, never plaintext. |
 | postgresql.role-evidence/v1 | {roleName: string, roleOid: uint32}, key role; normal success consistency evidence, not an implemented manual recovery capability. |

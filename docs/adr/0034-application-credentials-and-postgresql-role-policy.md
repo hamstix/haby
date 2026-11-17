@@ -159,13 +159,32 @@ is deferred and is not a pilot acceptance condition. Never grant Provider
 elevation automatically.
 
 Make schema/object ownership explicit:
-- The configured application schema is created with the application login as
-  owner; its application-created objects are owned by that login.
-- On the PostgreSQL 17 pilot, public schema ownership follows pg_database_owner;
+- A configured custom application schema (for example `app`) is created with the
+  application login as owner; its application-created objects are owned by that login.
+- Issue #247 accepts explicit `schema: public` under the same `database-owner/v1`
+  policy for a newly Haby-created database and confirmed Haby login. It is not a
+  default and does not admit existing-installation adoption. Use the existing
+  standard schema, preserving its `pg_database_owner` owner; never create it or
+  directly transfer its ownership. The exact original database/public-schema OIDs,
+  confirmed role OID/provenance, restricted ACLs and expected owner are required.
+  Missing, replaced, foreign-owned or conflicting state refuses without repair.
+  Database ownership provides the login's effective schema-owner privileges;
+  application-created objects still belong directly to the login. No existing
+  contained object is reassigned. Database-local search_path is `public`, creator
+  default restrictions and transactional/uncertainty rules remain unchanged.
+- Standard public schema ownership must follow pg_database_owner;
   verify that ownership and remove PUBLIC access as specified below.
 - Database ownership does not transfer ownership of pre-existing tables, schemas
   or other objects. Administrator/template-created objects are not silently
   reassigned, and blanket access to unrelated objects is not inferred.
+- Provisioning admission checks required capabilities and current state, not an
+  exclusive server-version allowlist. PostgreSQL 17 remains the pinned tested
+  integration venue. PostgreSQL 16 is not refused merely by its version; this does
+  not certify every version or promise PostgreSQL 12+ compatibility. The standard
+  public-owner semantics changed in [PostgreSQL 15](https://www.postgresql.org/docs/15/release-15.html).
+  A missing `pg_database_owner` role or incompatible owner/catalog semantics fails
+  closed through existing bounded outcomes, without adoption, repair or exception
+  detail leakage. Catalog-server and dependency guarantees are unchanged.
 - The application can create schemas and manage its own objects. Database-owner
   authority includes potentially destructive operations on its database; do not
   describe this profile as a runtime least-privilege account.
@@ -217,7 +236,7 @@ the [operation table](../development/106-application-credential-policy.md#operat
 2. Restrict PUBLIC access in that database.
 3. Ensure local generated material and publish its exact reference.
 4. Create the fixed-attribute login with its initial password and CONNECT access.
-5. Transfer database ownership, configure the application-owned schema,
+5. Transfer database ownership, configure the selected custom or standard schema,
    creator defaults and search_path, and verify the completed profile.
 
 The final external transaction includes ownership/access changes so rollback

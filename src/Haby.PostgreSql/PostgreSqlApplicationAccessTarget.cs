@@ -21,7 +21,7 @@ public interface IPostgreSqlAccessFaultHooks
 }
 public sealed class NullPostgreSqlAccessFaultHooks : IPostgreSqlAccessFaultHooks;
 
-/// <summary>PostgreSQL 17 initial owner/access policy. Never adopts or repairs an existing schema.</summary>
+/// <summary>Initial owner/access policy over confirmed PostgreSQL capabilities. Never adopts or repairs an existing schema.</summary>
 public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTarget connections, ISecretStore secrets,
     IProviderResourceReservations reservations, IPostgreSqlAccessFaultHooks hooks)
 {
@@ -103,7 +103,10 @@ public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTa
                     // Identifiers come from the exact validated graph and are always quoted.
                     await Execute(connection, transaction, $"ALTER DATABASE {database} OWNER TO {role}", token);
                     await hooks.AfterOwnershipAsync(connection, transaction, token);
-                    await Execute(connection, transaction, $"CREATE SCHEMA {schema} AUTHORIZATION {role}", token);
+                    // Standard public already exists and remains owned by pg_database_owner.
+                    // Only a new custom schema receives direct application-role ownership.
+                    if (input.Schema != "public")
+                        await Execute(connection, transaction, $"CREATE SCHEMA {schema} AUTHORIZATION {role}", token);
                     await Execute(connection, transaction, $"REVOKE ALL PRIVILEGES ON SCHEMA {schema} FROM PUBLIC", token);
                     await using (var oid = new NpgsqlCommand("SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1", connection, transaction))
                     {
@@ -156,8 +159,12 @@ public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTa
     {
         if (!await PostgreSqlApplicationLoginTarget.DatabaseEvidence(connection, transaction, input.Login, token)) return false;
         await using var command = new NpgsqlCommand("""
-            SELECT current_setting('server_version_num')::int BETWEEN 170000 AND 179999
-              AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $3)
+            SELECT pg_catalog.to_regrole('pg_database_owner') IS NOT NULL
+              AND ($3 = 'public' OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $3))
+              AND ($3 <> 'public' OR NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_namespace n,
+                  pg_catalog.aclexplode(COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))) a
+                WHERE n.nspname = 'public' AND (a.grantee <> n.nspowner OR a.grantor <> n.nspowner)))
               AND r.oid = $1 AND r.rolcanlogin AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
               AND r.rolconfig IS NULL AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member = r.oid)
               AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole = r.oid)
@@ -188,8 +195,12 @@ public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTa
               AND current_user = $6 AND (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user)
               AND r.rolcanlogin AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
               AND r.rolconfig IS NULL AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member = r.oid)
-              AND n.oid = $7 AND n.nspowner = r.oid
-              AND p.nspowner = 'pg_database_owner'::pg_catalog.regrole
+              AND n.oid = $7 AND (($3 = 'public' AND n.nspowner = pg_catalog.to_regrole('pg_database_owner'))
+                OR ($3 <> 'public' AND n.nspowner = r.oid))
+              AND p.oid = $8 AND p.nspowner = pg_catalog.to_regrole('pg_database_owner')
+              AND ($3 <> 'public' OR NOT EXISTS (
+                SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.nspacl, pg_catalog.acldefault('n', p.nspowner))) a
+                WHERE a.grantee <> p.nspowner OR a.grantor <> p.nspowner))
               AND NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(d.datacl, pg_catalog.acldefault('d', d.datdba))) a WHERE a.grantee = 0)
               AND NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.nspacl, pg_catalog.acldefault('n', p.nspowner))) a WHERE a.grantee = 0)
               AND NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))) a WHERE a.grantee = 0)
@@ -207,6 +218,7 @@ public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTa
         command.Parameters.AddWithValue(input.Login.Database.DatabaseName);
         command.Parameters.AddWithValue(input.Login.Administrator);
         command.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Oid, schemaOid);
+        command.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Oid, input.Login.Database.PublicSchemaOid);
         return await command.ExecuteScalarAsync(token) is true;
     }
 }

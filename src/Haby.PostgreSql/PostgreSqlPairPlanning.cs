@@ -14,14 +14,14 @@ public static class PostgreSqlApplicationLoginContract
 {
     public static ResourceTypeId Id { get; } = ResourceTypeId.Create("postgresql.application-login/v1alpha1");
     public const string Policy = "database-owner/v1";
-    public const string DatabaseOutput = "postgresql.database-output/v1alpha1";
+    public const string DatabaseOutput = "postgresql.database-output/v2";
     public const string RoleOutput = "postgresql.role-evidence/v1";
     public const string ConnectionOutput = "postgresql.application-login-output/v1alpha1";
     public static ResourceTypeDefinition Definition { get; } = new(Id,
         """
         {"type":"object","required":["databaseRef","schema","privilegePolicy"],"additionalProperties":false,
          "properties":{"databaseRef":{"type":"string","pattern":"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$","maxLength":63},
-         "schema":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,62}$","not":{"anyOf":[{"pattern":"^pg_"},{"enum":["public","information_schema"]}]}},
+         "schema":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,62}$","not":{"anyOf":[{"pattern":"^pg_"},{"enum":["information_schema"]}]}},
          "privilegePolicy":{"const":"database-owner/v1"}}}
         """, PostgreSqlConsumerOptions.Schema, new("databaseRef", PostgreSqlDatabaseContract.Id));
 
@@ -57,7 +57,7 @@ public static class PostgreSqlApplicationLoginContract
     internal static bool ValidSchema(string? schema) => schema is not null &&
         System.Text.RegularExpressions.Regex.IsMatch(schema, @"\A[a-z][a-z0-9_]{0,62}\z",
             System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking) &&
-        !schema.StartsWith("pg_", StringComparison.Ordinal) && schema is not ("public" or "information_schema");
+        !schema.StartsWith("pg_", StringComparison.Ordinal) && schema != "information_schema";
 }
 
 public sealed record PostgreSqlApplicationLoginProperties(string DatabaseRef, string Schema, string PrivilegePolicy);

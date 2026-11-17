@@ -401,9 +401,9 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($line.Length -gt 160){return $invalid}
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
-            if($parts[2] -ceq 'k14'){
-                $k14Phases=@('initial-create','uid-delete','absence-poll','replacement-create','old-uid-observe','assertion')
-                if($Mode -cne 'kernel' -or $parts.Count -lt 5 -or $parts[3] -cnotin $k14Phases){return $invalid}
+            if($parts[2] -cin @('k14','k24')){
+                $replacementPhases=if($parts[2] -ceq 'k14'){@('initial-create','uid-delete','absence-poll','replacement-create','old-uid-observe','assertion')}else{@('uid-delete','absence-poll','replacement-create')}
+                if($Mode -cne 'kernel' -or $parts.Count -lt 5 -or $parts[3] -cnotin $replacementPhases){return $invalid}
                 $phase=$parts[3];$state=$parts[4];$shape=$false
                 if($parts.Count -eq 5){
                     $shape=$state -ceq 'start' -or
@@ -415,7 +415,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
                         $parts[8] -cin @('true','false')
                 }elseif($parts.Count -eq 7){
                     if($phase -ceq 'absence-poll' -and $state -ceq 'result'){
-                        $shape=$parts[5] -cin @('true','false') -and $parts[6] -cmatch '^([0-9]|[1-4][0-9]|50)$'
+                        $shape=$parts[5] -cin @('true','false') -and $parts[6] -cmatch '^([0-9]|[1-9][0-9]|[1-5][0-9]{2}|60[01])$'
                     }elseif($state -ceq 'exception'){
                         $shape=$parts[5] -cin @('http','canceled','null-reference','contract','invalid-operation','unknown') -and
                             $parts[6] -cmatch '^([1-5][0-9]{2}|unknown)$' -and ($parts[5] -ceq 'http' -or $parts[6] -ceq 'unknown')

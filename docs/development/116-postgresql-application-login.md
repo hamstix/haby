@@ -143,8 +143,8 @@ assertion.
 After preflight and local reservation acceptance, the durable Dispatching barrier
 must be acknowledged before external mutation. A dedicated non-pooled connection
 rechecks name/OID, administrative database owner, pg_database_owner public-schema
-ownership, restricted PUBLIC privileges and role absence. PostgreSQL 17 SUPERUSER
-administration is supported; restricted administration remains deferred.
+ownership, restricted PUBLIC privileges and role absence. The pinned PostgreSQL 17 suite tests SUPERUSER
+administration; admission checks capabilities/state rather than a version allowlist; restricted administration remains deferred.
 
 One transaction uses `search_path = pg_catalog`, quoted identifiers, CREATE ROLE
 with LOGIN/NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOREPLICATION/NOBYPASSRLS and the
@@ -187,7 +187,7 @@ log_transaction_sample_rate=0, log_duration=off,
 log_parameter_max_length_on_error=0, log_error_verbosity=terse; debug parse/rewrite/
 plan and parser/planner/executor/statement statistics logging are off. These are
 part of opting into this adapter, never ALTER SYSTEM/ALTER ROLE changes. The
-operator must permit these session controls. The adapter checks PostgreSQL 17,
+operator must permit these session controls. The adapter checks the required standard owner role and
 logging settings, empty shared/session/local preload libraries and only plpgsql
 extensions before password SQL. Other audit/extension configurations are
 unsupported and refuse before dispatch or retain uncertainty after the marker.
