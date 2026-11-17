@@ -296,7 +296,7 @@ public sealed class ResourceRequirementsTests
         var intent = KernelTests.Intent(); return intent with { Target = intent.Target with { Resources = resources } };
     }
 
-    private static void Apply(JsonObject obj, JsonArray patch)
+    internal static void Apply(JsonObject obj, JsonArray patch)
     {
         foreach (var operation in patch)
         {

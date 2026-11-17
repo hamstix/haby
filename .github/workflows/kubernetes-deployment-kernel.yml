@@ -63,9 +63,9 @@ jobs:
           $readiness = @($lines | Where-Object { $_ -cmatch '^PASS configured-R[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(16,3) })
           $completion = @($lines | Where-Object { $_ -cmatch '^PASS configured-A[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(16,3) })
           $batch = @($lines | Where-Object { $_ -cmatch '^PASS configured-B[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(16,3) })
-          $expectedConfigured = @(1..7 | ForEach-Object { 'C{0:d2}' -f $_ }) + @('C12') + @(8..11 | ForEach-Object { 'C{0:d2}' -f $_ })
+          $expectedConfigured = @(1..6 | ForEach-Object { 'C{0:d2}' -f $_ }) + @('C13','C07','C12') + @(8..11 | ForEach-Object { 'C{0:d2}' -f $_ })
           if (($ids -join ',') -cne ($expectedConfigured -join ',') -or
-              ($readiness -join ',') -cne (@('R01','R04','R06','R05','R02','R03') -join ',') -or
+              ($readiness -join ',') -cne (@('R01','R04','R06','R05','R02','R03','R07') -join ',') -or
               ($completion -join ',') -cne (@('A01','A02','A03') -join ',') -or
               ($batch -join ',') -cne (@('B01','B02','B03','B04') -join ',') -or
               'Harness: PASS' -notin $lines -or 'PASS configured-owned-namespace-absent' -notin $lines -or
@@ -176,7 +176,7 @@ jobs:
         run: |
           $lines = @(Get-Content .artifacts/deployment-kernel/evidence.txt)
           $ids = @($lines | Where-Object { $_ -cmatch '^PASS kernel-K[0-9]{2}-[a-zA-Z0-9-]+$' } | ForEach-Object { $_.Substring(12,3) })
-          $expected = @(1..25 | ForEach-Object { 'K{0:d2}' -f $_ })
+          $expected = @('K01','K26','K29') + @(2..5 | ForEach-Object { 'K{0:d2}' -f $_ }) + @('K27','K28') + @(6..25 | ForEach-Object { 'K{0:d2}' -f $_ })
           if (($ids -join ',') -cne ($expected -join ',') -or 'Harness: PASS' -notin $lines -or
               'PASS kernel-cleanup-ownership' -notin $lines -or 'PASS kernel-namespace-absence-after-UID-delete' -notin $lines -or
               'Run-owned private directory removed.' -notin $lines -or

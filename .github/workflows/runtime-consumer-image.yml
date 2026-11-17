@@ -1,7 +1,7 @@
 name: Runtime consumer image publisher
 on:
   push:
-    branches: [main, codex/ci-223-ghcr-image, codex/ci-209-runtime-consumer]
+    branches: [main, codex/ci-223-ghcr-image, codex/ci-209-runtime-consumer, codex/feat-245-deployment-ports-probes]
     paths:
       - 'examples/Haby.RuntimeStartup.Consumer/**'
       - 'src/Haby.Configuration.Client/**'

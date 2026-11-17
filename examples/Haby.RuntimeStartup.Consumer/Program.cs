@@ -1,6 +1,7 @@
 using Grpc.Net.Client;
 using Haby.Configuration.Client;
 using Haby.Configuration.Contracts;
+using Haby.RuntimeStartup.Consumer;
 
 var stage = "args";
 try
@@ -8,17 +9,27 @@ try
     stage = "args";
     if (args.Length == 0)
     {
-        var bootstrap = RuntimeBootstrapCodec.Decode(Environment.GetEnvironmentVariable(RuntimeBootstrap.Variable)!);
-        stage = "channel";
-        using var configuredChannel = RuntimeBootstrapChannel.Create(bootstrap.Delivery);
-        stage = "fetch";
-        using var documents = await new RuntimeStartupClient(new ConfigurationDelivery.ConfigurationDeliveryClient(configuredChannel))
-            .FetchAsync(bootstrap.BindingId, bootstrap.Documents.Values.ToArray(), bootstrap.ProjectedTokenPath, RuntimeBootstrapChannel.Options(bootstrap.Delivery.Client));
-        var named = RuntimeBootstrapChannel.Map(bootstrap, documents);
-        if (named.Count != 2 || !named.ContainsKey("settings") || !named.ContainsKey("other")) throw new InvalidOperationException();
-        stage = "primary";
-        Console.WriteLine("primary-started");
-        await Task.Delay(Timeout.InfiniteTimeSpan);
+        using var lifetime = new CancellationTokenSource();
+        ConsoleCancelEventHandler canceled = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
+        Console.CancelKeyPress += canceled;
+        try
+        {
+            await using var healthEndpoint = await ConsumerHealthEndpoint.StartAfterAsync(async () =>
+            {
+                var bootstrap = RuntimeBootstrapCodec.Decode(Environment.GetEnvironmentVariable(RuntimeBootstrap.Variable)!);
+                stage = "channel";
+                using var configuredChannel = RuntimeBootstrapChannel.Create(bootstrap.Delivery);
+                stage = "fetch";
+                using var documents = await new RuntimeStartupClient(new ConfigurationDelivery.ConfigurationDeliveryClient(configuredChannel))
+                    .FetchAsync(bootstrap.BindingId, bootstrap.Documents.Values.ToArray(), bootstrap.ProjectedTokenPath, RuntimeBootstrapChannel.Options(bootstrap.Delivery.Client), lifetime.Token);
+                var named = RuntimeBootstrapChannel.Map(bootstrap, documents);
+                if (named.Count != 2 || !named.ContainsKey("settings") || !named.ContainsKey("other")) throw new InvalidOperationException();
+                stage = "primary";
+            }, 8080, lifetime.Token);
+            Console.WriteLine("primary-started");
+            await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
+        }
+        finally { Console.CancelKeyPress -= canceled; }
         return 0;
     }
     if (args.Length is not (5 or 6)) throw new InvalidOperationException();

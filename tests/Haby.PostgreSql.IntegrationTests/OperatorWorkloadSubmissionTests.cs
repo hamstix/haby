@@ -31,6 +31,7 @@ public sealed partial class DurableDeploymentPlanningTests
                 configureManifest: e =>
                 {
                     if (configured) ConfiguredDocuments(e, secondDocument: true);
+                    PortsAndProbes(e);
                     if (!initial) e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["overrides"] =
                         System.Text.Json.Nodes.JsonNode.Parse("""{"resources":{"requests":{"memory":"64Mi"},"limits":{"memory":"256Mi"}}}"""u8);
                     if (mixedRecipients)
@@ -244,6 +245,7 @@ public sealed partial class DurableDeploymentPlanningTests
                             var intents = await verify.ActionIntents.AsNoTracking().Where(x => x.Generation == request.Generation).ToArrayAsync();
                             foreach (var intent in intents.Where(x => x.ActionContract == InternalDeploymentAction.Create))
                             {
+                                ExactPortsAndProbes(DeploymentIntents.Decode(intent.Payload).Target);
                                 var requirements = DeploymentIntents.Decode(intent.Payload).Target.Resources!;
                                 Assert.Equal(initial ? "250m" : null, requirements.Requests!.Cpu);
                                 Assert.Equal(initial ? "128Mi" : "64Mi", requirements.Requests.Memory);
