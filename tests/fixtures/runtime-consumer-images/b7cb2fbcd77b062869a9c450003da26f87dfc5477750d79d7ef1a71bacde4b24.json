@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "package": "ghcr.io/hamstix/haby-runtime-consumer",
+  "inputKey": "b7cb2fbcd77b062869a9c450003da26f87dfc5477750d79d7ef1a71bacde4b24",
+  "digest": "sha256:192203c5c93a3d21989b0b7b54a1e687fa03c35ea75b14fb11018aef99fd378a",
+  "builtSource": "822822d3cf964af14ac71b62abb18b379f922ffd",
+  "publisherSource": "822822d3cf964af14ac71b62abb18b379f922ffd",
+  "publisherRunId": 44034175377,
+  "proofArtifactSha256": "d2ecc55c8a742fc10002467875ad1432d767145500dc6e235cf83bedfc64acf5"
+}
