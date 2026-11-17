@@ -94,7 +94,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             return new(DurablePlanStatus.ChangeSetStale);
         if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
             return new(DurablePlanStatus.PlanInputUnavailable);
-        if (baseline is not null && !await DurableAggregateCompletion.HasProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
+        if (baseline is not null && !await HasAppliedBaselineProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
             return new(DurablePlanStatus.PlanInputUnavailable);
         var reference = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
@@ -105,11 +105,21 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
         var internalEffects = mode == DeploymentAdmissionMode.Internal || mode == DeploymentAdmissionMode.Operator && spec.Components.Values.Any(x => x.Workloads.Count > 0);
+        var workloadUpdate = await HasWorkloadBaselineAsync(context, baseline, cancellationToken);
+        if (workloadUpdate && mode != DeploymentAdmissionMode.Internal) return new(DurablePlanStatus.UnsupportedShape);
+        if (workloadUpdate)
+        {
+            // Publication/revocation writers lock this aggregate, too. Freeze one
+            // coherent baseline inventory until the immutable Plan is stored.
+            await context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {baseline!.Id} FOR SHARE", cancellationToken);
+            baseline = await context.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == baseline.Id, cancellationToken);
+            if (!Matches(row, baseline) || baseline.AppliedGeneration != baseline.DesiredGeneration) return new(DurablePlanStatus.PlanInputUnavailable);
+        }
         if (!internalEffects && !DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
         if (internalEffects && (!spec.Components.Values.Any(x => x.Workloads.Count > 0) ||
-            baseline is null && (!row.ExpectedAbsence || spec.Resources.Count != 0) || baseline is not null && spec.Resources.Count == 0))
+            baseline is null && (!row.ExpectedAbsence || spec.Resources.Count != 0) || baseline is not null && spec.Resources.Count == 0 && !workloadUpdate))
             return new(DurablePlanStatus.UnsupportedShape);
-        var emptyStage = internalEffects && baseline is null && spec.Resources.Count == 0;
+        var emptyStage = internalEffects && spec.Resources.Count == 0;
         ProviderConfigurationRevisionRow? revisionRow = null;
         ExactProviderResolution[] resourceProviders = [];
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
@@ -176,7 +186,13 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         DurableOperationGraph graph;
         try
         {
-            graph = emptyStage ? new DurableOperationGraph([]) : baseline is null ? await PlanGraphAsync(context, resourceSpec, revisionRow!, resourceInputs, cancellationToken) :
+            if (emptyStage)
+            {
+                var previous = baseline is null ? null : await context.DeploymentGenerations.AsNoTracking()
+                    .SingleAsync(x => x.DeploymentId == baseline.Id && x.Generation == baseline.DesiredGeneration, cancellationToken);
+                graph = new([], baseline: previous is null ? null : new(ApplicationDeploymentId.Parse(previous.DeploymentId.ToString()), previous.Generation, previous.Fingerprint));
+            }
+            else graph = baseline is null ? await PlanGraphAsync(context, resourceSpec, revisionRow!, resourceInputs, cancellationToken) :
                 await ReuseGraphAsync(context, baseline, resourceSpec, revisionRow!, resourceInputs, cancellationToken)
                     ?? throw new NotSupportedException();
         }
@@ -192,8 +208,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             try
             {
                 var selected = await SelectInternalDocumentsAsync(context, inputs, revision.ApplicationVersion.Value, handlers ?? [], cancellationToken);
-                graph = graph.WithRetirement(await InitialRetirementAuthority.CaptureAsync(context, inputs, graph, baseline, selected, cancellationToken));
+                graph = workloadUpdate ? graph.WithWorkloadUpdate(await CaptureWorkloadUpdateAsync(context, baseline!, inputs, graph, revision.ApplicationVersion.Value, handlers ?? [], selected, cancellationToken)) :
+                    graph.WithRetirement(await InitialRetirementAuthority.CaptureAsync(context, inputs, graph, baseline, selected, cancellationToken));
             }
+            catch (WorkloadUpdateRefusedException error) { return new(DurablePlanStatus.UnsupportedShape) { UpdateRefusal = error.Reason }; }
             catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         }
         var id = DeploymentPlanId.New();
@@ -320,7 +338,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             return (DurablePlanStatus.ChangeSetStale, null);
         if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
             return (DurablePlanStatus.PlanInputUnavailable, null);
-        if (baseline is not null && !await DurableAggregateCompletion.HasProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
+        if (baseline is not null && !await HasAppliedBaselineProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
             return (DurablePlanStatus.PlanInputUnavailable, null);
         var revision = ManifestRevisionRef.Create(ApplicationRecordId.Parse(row.ApplicationRecordId.ToString()),
             ManifestRevisionNumber.Create(row.RevisionNumber));
@@ -489,8 +507,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             ?? throw new InvalidDataException();
         if (owner.AppliedGeneration != owner.DesiredGeneration || baseline.EnvironmentRecordId != owner.EnvironmentRecordId ||
             baseline.ApplicationRecordId != owner.ApplicationRecordId) throw new InvalidDataException();
-        if (!await DurableAggregateCompletion.HasProofAsync(db, owner.Id, baseline.Generation, token)) throw new InvalidDataException();
-        var baselineInputs = ResourceContinuity.Inputs(baseline);
+        if (!await HasAppliedBaselineProofAsync(db, owner.Id, baseline.Generation, token)) throw new InvalidDataException();
+        var baselineInputs = baseline.InternalEffects ? InternalResourceStage.Project(baseline.Inputs()) : ResourceContinuity.Inputs(baseline);
         var baselineProvider = baselineInputs.Providers.RequireUniformResourceProvider();
         var targetProvider = inputs.Providers.RequireUniformResourceProvider();
         if (Guid.Parse(baselineProvider.Instance.ToString()) != provider.ProviderInstanceId || baselineProvider.Configuration.Value != provider.RevisionNumber ||

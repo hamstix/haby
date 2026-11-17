@@ -140,7 +140,7 @@ internal static class ResourceContinuity
         var previous = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x =>
             x.DeploymentId == deployment && x.Generation == baseline.Generation, token);
         if (previous?.Fingerprint != baseline.Fingerprint) return false;
-        var accepted = Inputs(previous);
+        var accepted = previous.InternalEffects ? InternalResourceStage.Project(Inputs(previous)) : Inputs(previous);
         var previousProvider = accepted.Providers.RequireUniformResourceProvider();
         var previousGraph = DurableOperationGraphCodec.Decode(previous.GraphJson);
         var inventory = accepted.Configuration!.Manifest.Spec.Resources.Keys.Concat(previousGraph.RetainedResources.Select(x => x.Resource)).ToHashSet();
