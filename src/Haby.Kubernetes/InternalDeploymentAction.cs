@@ -6,16 +6,18 @@ using System.Collections.Immutable;
 
 namespace Haby.Kubernetes;
 
-/// <summary>Internal durable CREATE adapter. UPDATE needs a future genuinely accepted prior
-/// Workload result and is deliberately absent from this registration.</summary>
+/// <summary>Internal exact CREATE or bounded same-identity UPDATE adapter. The UPDATE
+/// registration requires catalog-verified original inputs and generation authority.</summary>
 internal sealed class InternalDeploymentAction(ISecretStore secrets,
-    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null) : IInternalActionHandler, IInternalReadinessHandler, IInternalWorkloadUpdatePlanner
+    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null, bool update = false) : IInternalActionHandler, IInternalReadinessHandler, IInternalWorkloadUpdatePlanner
 {
     public DurableActionPayload CaptureUpdate(InternalActionContext previous, DurablePlanningInputs target, string targetVersion, string intent, string receipt) =>
         DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(previous, target, targetVersion, intent, receipt));
     internal const string Create = "haby.kubernetes.deployment-create/v1";
+    internal const string Update = "haby.kubernetes.deployment-update/v1";
+    public bool UpdatesObject => update;
     public InternalActionContract Contract { get; } = new("kubernetes.workload/v1alpha1", KubernetesProviderConfigurationCodec.Kind,
-        KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation, Create,
+        KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation, update ? Update : Create,
         "haby.kubernetes.deployment-intent/v4", "haby.kubernetes.deployment-receipt/v4");
     public bool ObservationRecovery => true;
     public bool RequiresRuntimePublication => true;
@@ -47,12 +49,24 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
                 workload.Placement.Declaration.RuntimeConfiguration ?? throw new InvalidDataException("Frozen delivery unavailable."));
             runtime = new(account.Intent.Name, account.Uid, prepared.Audience, RuntimeBootstrapCodec.Encode(bootstrap));
         }
+        DeploymentReceipt? previous = null;
+        if (update)
+        {
+            var authority = context.Update ?? throw new InvalidDataException("Verified update preparation required.");
+            var captured = DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(authority.Original, context.Inputs,
+                context.ApplicationVersion, authority.Intent, authority.Receipt));
+            if (captured != authority.Delta || authority.Original.ManagedIdentity != context.ManagedIdentity ||
+                authority.Original.Key.DeploymentId != context.Key.DeploymentId || authority.Original.Key.Generation.Value + 1 != context.Key.Generation.Value)
+                throw new InvalidDataException("Frozen update delta mismatch.");
+            previous = DeploymentIntents.DecodeReceipt(authority.Receipt);
+        }
+        else if (context.Update is not null) throw new InvalidDataException("CREATE cannot consume update authority.");
         return DeploymentIntents.Encode(DeploymentIntents.Prepare(workload, Guid.Parse(context.Key.DeploymentId.ToString()),
-            context.ManagedIdentity, context.Key.Generation.Value, context.Marker, runtime: runtime));
+            context.ManagedIdentity, context.Key.Generation.Value, context.Marker, previous, runtime));
     }
     public InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt)
     {
-        if (DeploymentIntents.Decode(payload).Target.Runtime is null) return null;
+        if (!update && DeploymentIntents.Decode(payload).Target.Runtime is null) return null;
         var decoded = DeploymentIntents.DecodeReceipt(receipt);
         if (!ValidateReceipt(context, payload, receipt, decoded.Source == ConfirmationSource.Observation)) throw new InvalidDataException("Deployment receipt invalid.");
         return new("deployment", Contract.OutputContract, 4, receipt, decoded.Uid);
@@ -111,7 +125,7 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         try
         {
             var intent = DeploymentIntents.Decode(payload);
-            return intent.ExpectedUid is null && intent.LastConfirmed is null && Prepare(context) == payload;
+            return update == (intent.ExpectedUid is not null && intent.LastConfirmed is not null) && Prepare(context) == payload;
         }
         catch (Exception error) when (error is ArgumentException or InvalidDataException or InvalidOperationException) { return false; }
     }
@@ -124,6 +138,7 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
             return result.Binding == intent.Binding && result.Namespace == intent.Namespace && result.Name == intent.Name && result.Owner == intent.Owner &&
                 result.ManagedWorkload == intent.ManagedWorkload && result.TargetGeneration == intent.TargetGeneration && result.Operation == intent.Operation &&
                 result.Source == (observation ? ConfirmationSource.Observation : ConfirmationSource.Response) &&
+                (intent.ExpectedUid is null || result.Uid == intent.ExpectedUid) &&
                 DeploymentIntents.Encode(intent with { Target = result.Projection }) == payload;
         }
         catch (Exception error) when (error is ArgumentException or InvalidDataException) { return false; }

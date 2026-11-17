@@ -70,6 +70,13 @@ public sealed partial class DurableDeploymentPlanningTests
         var scenario = await InternalScenarioAsync(initialOnly: initial, twoComponents: multiple, configureManifest: e =>
         {
             if (configured) ConfiguredDocuments(e, secondDocument: true);
+            if (configured && multiple)
+            {
+                var components = e["manifest"]!["spec"]!["components"]!;
+                components["worker"]!["documents"] = components["api"]!["documents"]!.DeepClone();
+                components["worker"]!["workloads"]!["main"]!["properties"]!["configuration"] =
+                    components["api"]!["workloads"]!["main"]!["properties"]!["configuration"]!.DeepClone();
+            }
             envelope = e.DeepClone();
         });
         await using var services = InternalServices(scenario.Connection, scenario.Time);

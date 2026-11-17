@@ -5,10 +5,49 @@ using Microsoft.EntityFrameworkCore;
 namespace Haby.Persistence.PostgreSql;
 
 // Catalog identity, not stage counts or a caller-provided receipt, authorizes internal work.
-internal static class InternalGenerationAuthority
+internal static partial class InternalGenerationAuthority
 {
     internal static async Task<DeploymentGenerationRow> RequireAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
         => await RequireCoreAsync(db, accepted, false, token);
+
+    // Preparation/submission capability only. Initial retirement and public lifecycle
+    // callers deliberately keep RequireAsync, which does not admit successors.
+    internal static Task<DeploymentGenerationRow> RequireStageAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token) =>
+        WithConnectionAsync(db, () => RequireCoreAsync(db, accepted, false, token, true), token);
+
+    // Linked proof reads share one bounded catalog connection. No transaction or
+    // connection scope crosses adapter I/O; nested callers balance their own opens.
+    private static async Task<DeploymentGenerationRow> WithConnectionAsync(ManifestCatalogDbContext db,
+        Func<Task<DeploymentGenerationRow>> read, CancellationToken token)
+    {
+        await db.Database.OpenConnectionAsync(token);
+        try { return await read(); }
+        finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    internal static Task<DeploymentGenerationRow> RequireStageReadAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) =>
+        WithConnectionAsync(db, () => DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null
+            ? RequireReadAsync(db, source, token) : RequireStageAsync(db, source, token), token);
+
+    internal static async Task<DeploymentGenerationRow> RequireStageReadAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
+    {
+        var id = Guid.Parse(accepted.DeploymentId.ToString());
+        var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value, token);
+        return await WithConnectionAsync(db, () => DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null
+            ? RequireReadAsync(db, accepted, token) : RequireStageAsync(db, accepted, token), token);
+    }
+
+    internal static async Task<DeploymentGenerationRow> RequireStageAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
+    {
+        var commit = await db.ChangeSetCommits.AsNoTracking().SingleAsync(x => x.ChangeSetId == source.ChangeSetId, token);
+        var verified = await RequireStageAsync(db, new DurableChangeSetCommit(DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()),
+            DeploymentPlanId.Parse(commit.PlanId.ToString()), ApplicationDeploymentId.Parse(commit.DeploymentId.ToString()),
+            DeploymentGeneration.Create(commit.Generation), commit.CommittedAt, commit.ActorId), token);
+        if (verified.PlanId != source.PlanId || verified.Fingerprint != source.Fingerprint || verified.GraphJson != source.GraphJson ||
+            verified.ConfigurationJson != source.ConfigurationJson || verified.ProviderInputsJson != source.ProviderInputsJson || !source.InternalEffects)
+            throw new InvalidDataException("Stage source mismatch.");
+        return verified;
+    }
 
     internal static async Task<DeploymentGenerationRow> RequireReadAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
     {
@@ -30,7 +69,7 @@ internal static class InternalGenerationAuthority
         return row;
     }
 
-    private static async Task<DeploymentGenerationRow> RequireCoreAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, bool readOnly, CancellationToken token)
+    private static async Task<DeploymentGenerationRow> RequireCoreAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, bool readOnly, CancellationToken token, bool stage = false)
     {
         var deployment = Guid.Parse(accepted.DeploymentId.ToString());
         var row = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == accepted.Generation.Value, token)
@@ -41,15 +80,18 @@ internal static class InternalGenerationAuthority
         var change = await db.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.ChangeSetId, token);
         var inputs = row.Inputs();
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson); graph.ValidateReferences(inputs);
-        var retirement = graph.Retirement?.Document ?? throw new InvalidDataException("Frozen retirement authority required.");
-        var priorApplied = readOnly ? retirement.PriorApplied : owner?.AppliedGeneration;
+        if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint) throw new InvalidDataException("Accepted generation fingerprint mismatch.");
+        var update = stage ? graph.WorkloadUpdate?.Document : null;
+        var retirement = graph.Retirement?.Document;
+        if (retirement is null && update is null) throw new InvalidDataException("Frozen stage authority required.");
+        var priorApplied = readOnly ? retirement!.PriorApplied : owner?.AppliedGeneration;
         var initial = InternalResourceStage.IsEmpty(inputs, graph) && row.Generation == 1 && priorApplied is null &&
             change is { ExpectedAbsence: true, ExpectedGeneration: null };
         var mixed = graph.Baseline is not null && priorApplied is not null && priorApplied == graph.Baseline.Generation &&
             priorApplied < row.Generation && graph.Nodes.Count == 0 && graph.RetainedResources.Count == 0 &&
             graph.ReusedResources.Count == inputs.Configuration!.Manifest.Spec.Resources.Count && graph.ReusedResources.Count > 0 &&
             change is { ExpectedAbsence: false } && change.ExpectedGeneration == graph.Baseline.Generation;
-        if ((!initial && !mixed) || !row.InternalEffects || row.Presence != nameof(DesiredPresence.Present) || owner is null || (readOnly ? owner.DesiredGeneration < row.Generation : owner.DesiredGeneration != row.Generation) ||
+        if ((!initial && !mixed && update is null) || !row.InternalEffects || row.Presence != nameof(DesiredPresence.Present) || owner is null || (readOnly ? owner.DesiredGeneration < row.Generation : owner.DesiredGeneration != row.Generation) ||
             owner.EnvironmentRecordId != row.EnvironmentRecordId || owner.ApplicationRecordId != row.ApplicationRecordId ||
             plan is null || !plan.InternalEffects || plan.ChangeSetId != row.ChangeSetId || plan.EnvironmentRecordId != row.EnvironmentRecordId ||
             plan.ApplicationRecordId != row.ApplicationRecordId || plan.RevisionNumber != row.RevisionNumber || plan.EnvironmentKey != row.EnvironmentKey ||
@@ -60,6 +102,7 @@ internal static class InternalGenerationAuthority
             commit.PlanId != Guid.Parse(accepted.PlanId.ToString()) || commit.ChangeSetId != Guid.Parse(accepted.ChangeSetId.ToString()) ||
             commit.ActorId != accepted.ActorId || commit.CommittedAt != accepted.CommittedAt || row.AcceptedAt != commit.CommittedAt || row.ActorId != commit.ActorId)
             throw new InvalidDataException("Accepted internal authority mismatch.");
+        if (update is not null) await RequireUpdateBaselineAsync(db, row, owner, graph, update, token);
         var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token)
             ?? throw new InvalidDataException("Accepted declaration unavailable.");
         var manifest = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);

@@ -131,8 +131,19 @@ public static class DeploymentIntents
         Binding(i.Binding); Name(i.Namespace); Name(i.Name); Name(i.Component); Name(i.Workload); Name(i.Placement);
         Need(i.Namespace.Length <= 63 && !i.Namespace.Contains('.'), "namespace");
         Projection(i.Target); Need((i.ExpectedUid is null) == (i.LastConfirmed is null), "intent-update-pair");
-        Need(i.Target.Runtime is null || i.ExpectedUid is null && i.LastConfirmed is null, "configured-update-unsupported");
-        if (i.LastConfirmed is not null) { Text(i.ExpectedUid!, 128); Projection(i.LastConfirmed); Need(i.LastConfirmed.Container == i.Target.Container, "immutable-container"); }
+        if (i.LastConfirmed is not null)
+        {
+            Text(i.ExpectedUid!, 128); Projection(i.LastConfirmed); Need(i.LastConfirmed.Container == i.Target.Container, "immutable-container");
+            Need((i.LastConfirmed.Runtime is null) == (i.Target.Runtime is null), "immutable-runtime-mode");
+            if (i.LastConfirmed.Runtime is { } prior && i.Target.Runtime is { } next)
+            {
+                var oldBootstrap = RuntimeBootstrapCodec.Decode(prior.Bootstrap);
+                var newBootstrap = RuntimeBootstrapCodec.Decode(next.Bootstrap);
+                Need(prior.ServiceAccount == next.ServiceAccount && prior.ServiceAccountUid == next.ServiceAccountUid && prior.Audience == next.Audience &&
+                    oldBootstrap.BindingId == newBootstrap.BindingId && oldBootstrap.ProjectedTokenPath == newBootstrap.ProjectedTokenPath &&
+                    oldBootstrap.Delivery == newBootstrap.Delivery && oldBootstrap.Documents.Keys.SequenceEqual(newBootstrap.Documents.Keys), "immutable-runtime-identity");
+            }
+        }
     }
     internal static void Validate(DeploymentReceipt r)
     {

@@ -37,6 +37,8 @@ internal sealed partial class InternalDurableActions
         var matches = handlers.Where(x => x.Contract.Subject == contract && x.Contract.ProviderKind == instance.ProviderKindId &&
             x.Contract.Configuration == revision.ConfigurationShapeId && x.Contract.Implementation == revision.ImplementationId && x.Contract.Action == action).ToArray();
         if (matches is not [var handler]) throw new InvalidDataException("Exact action handler unavailable or ambiguous.");
+        if ((DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is not null) != handler.UpdatesObject)
+            throw new InvalidDataException("Action is not authorized for this generation stage.");
         var readers = typedCodecs.Where(x => x.ProviderKindId == instance.ProviderKindId && x.ShapeId == revision.ConfigurationShapeId && x.PayloadFormatVersion == revision.PayloadFormatVersion).ToArray();
         if (readers is not [var codec]) throw new InvalidDataException("Exact action configuration codec unavailable.");
         var prepared = codec.Encode(codec.Decode(revision.PayloadJson));
@@ -68,6 +70,7 @@ internal sealed partial class InternalDurableActions
         // Pure pre-acceptance shape validation has no installation authority; the final acceptance replaces this placeholder.
         var context = new InternalActionContext(key, inputs, subject, exact, prepared, manifestRow.ApplicationVersion, marker, managed, placement,
             installation == Guid.Empty && handler.EstablishesIdentity ? managed : installation);
+        context = await UpdateContextAsync(db, source, context, handler, token);
         return (await RuntimeContextAsync(db, source, context, handler, token, completedRead), handler);
     }
 
@@ -81,6 +84,13 @@ internal sealed partial class InternalDurableActions
 
     private async Task<Loaded> LoadProofAsync(ManifestCatalogDbContext db, DurableOperationKey key, OriginPurpose purpose, CancellationToken token)
     {
+        await db.Database.OpenConnectionAsync(token);
+        try { return await LoadProofCoreAsync(db, key, purpose, token); }
+        finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    private async Task<Loaded> LoadProofCoreAsync(ManifestCatalogDbContext db, DurableOperationKey key, OriginPurpose purpose, CancellationToken token)
+    {
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         var intent = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.OperationId == key.OperationId.Value, token)
             ?? throw new InvalidDataException("Immutable action intent unavailable.");
@@ -91,7 +101,7 @@ internal sealed partial class InternalDurableActions
         var receipt = new DurableChangeSetCommit(DeploymentChangeSetId.Parse(accepted.ChangeSetId.ToString()), DeploymentPlanId.Parse(accepted.PlanId.ToString()),
             key.DeploymentId, key.Generation, accepted.CommittedAt, accepted.ActorId);
         var completedRead = purpose != OriginPurpose.CompleteConfiguration;
-        generation = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, receipt, token) : await InternalGenerationAuthority.RequireAsync(db, receipt, token);
+        generation = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, receipt, token) : await InternalGenerationAuthority.RequireStageAsync(db, receipt, token);
         var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true, completedRead);
         if (intent.FormatVersion != 1 || intent.Marker == Guid.Empty || intent.ManagedIdentity == Guid.Empty || intent.InputFingerprint != generation.Fingerprint ||
             proof is null || proof.Id != intent.CheckpointId || intent.Payload.Length is 0 or > 1_048_576 || System.Text.Encoding.UTF8.GetByteCount(intent.Payload) > 1_048_576 ||

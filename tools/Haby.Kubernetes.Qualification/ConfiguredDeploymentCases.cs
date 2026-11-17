@@ -187,6 +187,8 @@ internal static class ConfiguredDeploymentCases
             }
             V1Pod? currentPod = null;
             RolloutResult? rolloutReady = null;
+            DurableChangeSetCommit updateBaseline = null!;
+            System.Text.Json.Nodes.JsonNode updateEnvelope = null!;
             async Task<V1Pod> Startup(string marker, string? excludedUid = null)
             {
                 Console.WriteLine("Q243 configured pod-startup start");
@@ -343,6 +345,11 @@ internal static class ConfiguredDeploymentCases
                 disabledProperties["ports"] = new System.Text.Json.Nodes.JsonObject();
                 disabledProperties["probes"] = new System.Text.Json.Nodes.JsonObject();
                 var peer = await DurableDeploymentPlanningTests.AcceptBatchPeerAsync(services, scenario, disabledEnvelope);
+                updateBaseline = peer;
+                updateEnvelope = disabledEnvelope.DeepClone();
+                await using (var peerRead = await contexts.CreateDbContextAsync(token))
+                    updateEnvelope["manifest"]!["metadata"]!["id"] = (await peerRead.DeploymentGenerations.AsNoTracking().SingleAsync(x =>
+                        x.DeploymentId == Guid.Parse(peer.DeploymentId.ToString()) && x.Generation == peer.Generation.Value, token)).Inputs().Providers.Declaration.ApplicationId.Value;
                 var submittedPeer = await client.SubmitGenerationAsync(new GenerationRequest { DeploymentId = peer.DeploymentId.ToString(), Generation = peer.Generation.Value }, cancellationToken: token);
                 DeploymentIntent disabledIntent;
                 await using (var read = await contexts.CreateDbContextAsync(token))
@@ -454,8 +461,13 @@ internal static class ConfiguredDeploymentCases
                         (deployment.Status.ReadyReplicas ?? 0) == 0) break;
                     await Task.Delay(100, deadline.Token);
                 }
-                var waited = await client.WaitGenerationAsync(new GenerationWaitRequest { DeploymentId = blocked.DeploymentId.ToString(), Generation = blocked.Generation.Value,
-                    RequestId = "configured-unready", Settings = new() { MaximumRounds = 1 } }, cancellationToken: token);
+                var waited = await client.WaitGenerationAsync(new GenerationWaitRequest
+                {
+                    DeploymentId = blocked.DeploymentId.ToString(),
+                    Generation = blocked.Generation.Value,
+                    RequestId = "configured-unready",
+                    Settings = new() { MaximumRounds = 1 }
+                }, cancellationToken: token);
                 await using var finalRead = await contexts.CreateDbContextAsync(token);
                 Check(!waited.CurrentReady && !waited.CurrentApplied && waited.Members.Single().Outcome == "Pending" &&
                     pod.Spec.Containers.Single(c => c.Name == "configured-consumer").ReadinessProbe.HttpGet.Path == "/unready" &&
@@ -464,6 +476,8 @@ internal static class ConfiguredDeploymentCases
                     (await finalRead.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(blocked.DeploymentId.ToString()), token)).AppliedGeneration is null &&
                     deploymentWrites == 3, "R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied");
             });
+            await WithHost(() => ConfiguredDeploymentUpdateCases.Run(admin, services, updateBaseline, updateEnvelope, image,
+                identity, deployment, configurationPreparation, requests, token));
         }
         catch (Exception error) { primary = error; throw; }
         finally

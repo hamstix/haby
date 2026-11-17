@@ -138,7 +138,7 @@ internal static class DeploymentObjects
     internal static JsonArray Patch(JsonObject obj, DeploymentIntent i)
     {
         var old = i.LastConfirmed!; var target = i.Target;
-        Need(old.Runtime is null && target.Runtime is null, "configured-update-unsupported");
+        Matches(obj, old);
         var patch = new JsonArray();
         void Add(string op, string path, JsonNode? value = null)
         {
@@ -149,29 +149,42 @@ internal static class DeploymentObjects
         var containers = At(obj, "spec", "template", "spec", "containers")!.AsArray();
         var index = Enumerable.Range(0, containers.Count).Single(n => String(containers[n]!, "name") == old.Container);
         Add("test", $"/spec/template/spec/containers/{index}/name", JsonValue.Create(old.Container));
-        Add("add", $"/spec/template/spec/containers/{index}/image", JsonValue.Create(target.Image));
+        if (old.Runtime is { } runtime && target.Runtime is { } next && runtime.Bootstrap != next.Bootstrap)
+        {
+            var variables = containers[index]!["env"]!.AsArray();
+            var variable = Enumerable.Range(0, variables.Count).Single(n => String(variables[n]!, "name") == RuntimeBootstrap.Variable);
+            var path = $"/spec/template/spec/containers/{index}/env/{variable}";
+            Add("test", path + "/name", JsonValue.Create(RuntimeBootstrap.Variable));
+            Add("test", path + "/value", JsonValue.Create(runtime.Bootstrap));
+            Add("replace", path + "/value", JsonValue.Create(next.Bootstrap));
+        }
+        if (old.Image != target.Image) Add("add", $"/spec/template/spec/containers/{index}/image", JsonValue.Create(target.Image));
         DeploymentResources.Patch(containers[index]!, old.Resources, target.Resources, $"/spec/template/spec/containers/{index}/resources", Add);
         DeploymentPortsAndProbes.Patch(containers[index]!, old, target, $"/spec/template/spec/containers/{index}", Add);
-        Add("add", "/spec/replicas", JsonValue.Create(target.Replicas));
-        Add("add", "/spec/minReadySeconds", JsonValue.Create(target.MinReadySeconds));
-        Add("add", "/spec/progressDeadlineSeconds", JsonValue.Create(target.ProgressDeadlineSeconds));
-        if (At(obj, "spec", "strategy") is null) Add("add", "/spec/strategy", new JsonObject());
-        Add("add", "/spec/strategy/type", JsonValue.Create(target.Strategy));
-        if (target.Strategy == "Recreate")
+        if (old.Replicas != target.Replicas) Add("add", "/spec/replicas", JsonValue.Create(target.Replicas));
+        if (old.MinReadySeconds != target.MinReadySeconds) Add("add", "/spec/minReadySeconds", JsonValue.Create(target.MinReadySeconds));
+        if (old.ProgressDeadlineSeconds != target.ProgressDeadlineSeconds) Add("add", "/spec/progressDeadlineSeconds", JsonValue.Create(target.ProgressDeadlineSeconds));
+        if (old.Strategy != target.Strategy || old.MaxSurge != target.MaxSurge || old.MaxUnavailable != target.MaxUnavailable)
         {
-            if (At(obj, "spec", "strategy", "rollingUpdate") is not null) Add("remove", "/spec/strategy/rollingUpdate");
-        }
-        else
-        {
-            if (At(obj, "spec", "strategy", "rollingUpdate") is null) Add("add", "/spec/strategy/rollingUpdate", new JsonObject());
-            Add("add", "/spec/strategy/rollingUpdate/maxSurge", Bound(target.MaxSurge!));
-            Add("add", "/spec/strategy/rollingUpdate/maxUnavailable", Bound(target.MaxUnavailable!));
+            if (At(obj, "spec", "strategy") is null) Add("add", "/spec/strategy", new JsonObject());
+            Add("add", "/spec/strategy/type", JsonValue.Create(target.Strategy));
+            if (target.Strategy == "Recreate")
+            {
+                if (At(obj, "spec", "strategy", "rollingUpdate") is not null) Add("remove", "/spec/strategy/rollingUpdate");
+            }
+            else
+            {
+                if (At(obj, "spec", "strategy", "rollingUpdate") is null) Add("add", "/spec/strategy/rollingUpdate", new JsonObject());
+                Add("add", "/spec/strategy/rollingUpdate/maxSurge", Bound(target.MaxSurge!));
+                Add("add", "/spec/strategy/rollingUpdate/maxUnavailable", Bound(target.MaxUnavailable!));
+            }
         }
         var nodes = At(obj, "spec", "template", "spec", "nodeSelector");
         foreach (var k in target.NodeSelector.Keys.Except(old.NodeSelector.Keys, StringComparer.Ordinal)) Need(nodes?[k] is null, "node-selector-collision");
         if (nodes is null && target.NodeSelector.Count > 0) Add("add", "/spec/template/spec/nodeSelector", new JsonObject());
         foreach (var k in old.NodeSelector.Keys.Except(target.NodeSelector.Keys, StringComparer.Ordinal)) Add("remove", "/spec/template/spec/nodeSelector/" + Pointer(k));
-        foreach (var (k, v) in target.NodeSelector) Add("add", "/spec/template/spec/nodeSelector/" + Pointer(k), JsonValue.Create(v));
+        foreach (var (k, v) in target.NodeSelector.Where(x => !old.NodeSelector.TryGetValue(x.Key, out var prior) || prior != x.Value))
+            Add("add", "/spec/template/spec/nodeSelector/" + Pointer(k), JsonValue.Create(v));
         var pulls = Pulls(obj);
         foreach (var k in target.ImagePullSecrets.Except(old.ImagePullSecrets, StringComparer.Ordinal)) Need(!pulls.Any(n => String(n!, "name") == k), "pull-secret-collision");
         var remove = Enumerable.Range(0, pulls.Count).Where(n => old.ImagePullSecrets.Contains(String(pulls[n]!, "name")!) && !target.ImagePullSecrets.Contains(String(pulls[n]!, "name")!)).OrderDescending();

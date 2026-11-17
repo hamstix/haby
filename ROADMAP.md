@@ -283,8 +283,10 @@ Service, headless Service and individual Ingress. Those objects remain in P3.
 
 - [ ] Admit and freeze image-only updates from Applied=Desired, with proven Resource
   reuse and exact prior/target inventory; no runtime UPDATE enabled by planning alone.
-- [ ] Prepare generation-specific configuration, preserve stable runtime identity,
-  publish exact revisions and durably patch the same Deployment UID conditionally.
+- [x] Implement internal generation-specific configuration, stable runtime identity
+  reuse, exact publication and durable same-UID conditional PATCH under
+  [issue #257](docs/development/257-durable-deployment-update-submission.md).
+  Confirmed submission/history only; public UPDATE and its completion remain closed.
 - [ ] Confirm target readiness and old recipients (including terminating Pods),
   retire obsolete runtime permissions and only then advance AppliedGeneration.
 - [ ] Implement ADR-052 corrective generation for incomplete rollout before declaring

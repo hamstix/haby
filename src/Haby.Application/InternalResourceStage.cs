@@ -13,7 +13,7 @@ internal static class InternalResourceStage
         configuration.Manifest.Spec.Resources.Count == 0 &&
         configuration.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count > 0) &&
         inputs.Providers.Entries.Keys.All(x => x is ProviderInput.Workload) &&
-        graph.Baseline is null && graph.Nodes.Count == 0 && graph.ReusedResources.Count == 0 && graph.RetainedResources.Count == 0;
+        (graph.Baseline is null || graph.WorkloadUpdate is not null) && graph.Nodes.Count == 0 && graph.ReusedResources.Count == 0 && graph.RetainedResources.Count == 0;
 
     internal static DurablePlanningInputs Structure(DurablePlanningInputs inputs)
     {

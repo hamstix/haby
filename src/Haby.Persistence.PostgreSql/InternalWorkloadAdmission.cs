@@ -37,7 +37,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                 x.EnvironmentRecordId == environment && x.RevisionNumber == exact.Configuration.Value && x.IsSealed, token);
             if (instance is null || revision is null || revision.ImplementationId != exact.Implementation.Value ||
                 !await CodecAvailableAsync(db, revision, token) || exact.Placement is null) throw new InvalidDataException("Internal preparation admission refused.");
-            var matches = handlers.Where(x => x.Contract.Subject == contract && x.Contract.ProviderKind == instance.ProviderKindId &&
+            var matches = handlers.Where(x => !x.UpdatesObject && !x.EstablishesIdentity && x.Contract.Subject == contract && x.Contract.ProviderKind == instance.ProviderKindId &&
                 x.Contract.Configuration == revision.ConfigurationShapeId && x.Contract.Implementation == exact.Implementation.Value).ToArray();
             if (matches is not [var handler]) throw new InvalidDataException("Internal preparation admission refused.");
             var context = new InternalActionContext(key, inputs, subject, exact, PreparedConfiguration(instance.ProviderKindId, revision),

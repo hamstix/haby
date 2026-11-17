@@ -382,6 +382,14 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS configured-C12-Pod-defaulted-resource-requests',
           'PASS configured-C13-configured-Deployment-Pod-ports-probes-defaults',
           'PASS configured-R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied',
+          'PASS configured-U01-public-update-remains-closed',
+          'PASS configured-U02-new-exact-documents-prepared',
+          'PASS configured-U03-stable-account-original-proof-new-generation-use',
+          'PASS configured-U04-new-rights-before-patch-old-rights-retained',
+          'PASS configured-U05-target-bootstrap-new-exact-revisions-stable-binding',
+          'PASS configured-U06-conditional-configured-patch-response-readback-lost-response-recovery',
+          'PASS configured-U07-sidecar-foreign-metadata-and-api-defaulting-preserved',
+          'PASS configured-U08-runtime-new-revision-delivery-old-permissions-and-Applied-boundary',
           'PASS configured-owned-namespace-absent',
           'PASS configured-owned-catalog-cleanup')
     }

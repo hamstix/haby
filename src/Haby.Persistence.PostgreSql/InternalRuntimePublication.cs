@@ -44,7 +44,7 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
         PostgreSqlDurableDeploymentPlanner.ValidateActor(actor);
         await using var db = await contexts.CreateDbContextAsync(token);
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
-        var source = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+        var source = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
         var recipients = await configuration.RequireRecipientsAsync(db, source, token);
         var result = new List<RuntimePublicationRequest>();
         foreach (var recipient in recipients.OrderBy(x => x.Workload.Component.Value, StringComparer.Ordinal)
@@ -88,7 +88,8 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
         RuntimeIdentityBindingRow binding, ManagedWorkloadRow managed, CancellationToken token)
     {
         var origin = request.Origin!;
-        var source = await InternalGenerationAuthority.RequireAsync(db, origin.Accepted, token);
+        var source = await InternalGenerationAuthority.RequireStageAsync(db, origin.Accepted, token);
+        await InternalGenerationAuthority.RequireCurrentStageAsync(db, source, token);
         var recipients = await configuration.RequireRecipientsAsync(db, source, token); // ALL subjects, inside the acceptance transaction.
         foreach (var subject in recipients.Select(x => x.Workload).Distinct())
         {

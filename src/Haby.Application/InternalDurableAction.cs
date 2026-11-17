@@ -7,7 +7,8 @@ internal sealed record InternalActionContract(string Subject, string ProviderKin
 internal sealed record InternalActionContext(DurableOperationKey Key, DurablePlanningInputs Inputs,
     ProviderInput Subject, ExactProviderResolution Provider, PreparedProviderConfiguration Configuration,
     string ApplicationVersion, Guid Marker, Guid ManagedIdentity, PlacementDeclaration? Placement, Guid InstallationId = default,
-    InternalPreparedRuntime? Runtime = null);
+    InternalPreparedRuntime? Runtime = null, InternalUpdatePreparation? Update = null);
+internal sealed record InternalUpdatePreparation(InternalActionContext Original, DurableActionPayload Delta, string Intent, string Receipt);
 internal enum InternalActionOutcome { Confirmed, Uncertain, Refused, Unavailable, NotConfirmed }
 internal sealed record InternalActionResult(InternalActionOutcome Outcome, string Code, string? Receipt = null);
 
@@ -21,6 +22,7 @@ internal interface IInternalActionHandler
     bool RequiresPreparedConfiguration => false;
     bool EstablishesIdentity => false;
     bool RequiresRuntimePublication => false;
+    bool UpdatesObject => false;
     InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt) => null;
     InternalIdentityConfirmation? IdentityConfirmation(InternalActionContext context, string payload, string receipt) => null;
     // Pure preparation admission is distinct from permission to create an executable intent.

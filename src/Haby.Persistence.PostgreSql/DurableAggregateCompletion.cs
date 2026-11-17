@@ -58,7 +58,7 @@ internal static partial class DurableAggregateCompletion
             var inputs = source.Inputs();
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
             var emptyStage = internalResourceStage && InternalResourceStage.IsEmpty(inputs, graph);
-            if (emptyStage) _ = await InternalGenerationAuthority.RequireAsync(context, source, token);
+            if (emptyStage) _ = await InternalGenerationAuthority.RequireStageAsync(context, source, token);
             if (source.Presence != nameof(DesiredPresence.Present) || inputs.Configuration is not { } configuration ||
                 !internalResourceStage && configuration.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
                 !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
@@ -72,7 +72,7 @@ internal static partial class DurableAggregateCompletion
                 graph.Baseline?.Generation != owner.AppliedGeneration) return false;
             if (prepared is null && graph.Baseline is not null) return false;
             if (prepared is not null && await InspectMetadataAsync(context, deployment, generation, contracts ?? [], codecs ?? [], token, admission, internalResourceStage: internalResourceStage) is null) return false;
-            if (graph.Baseline is not null)
+            if (graph.Baseline is not null && !emptyStage)
             {
                 if (admission is null) return false;
                 await ResourceContinuity.LockAsync(context, deployment, token);
@@ -126,7 +126,7 @@ internal static partial class DurableAggregateCompletion
         if (graph.Nodes.Count + graph.ReusedResources.Count == 0)
         {
             if (!internalResourceStage || !InternalResourceStage.IsEmpty(inputs, graph)) throw new InvalidDataException("Empty stage authority unavailable.");
-            _ = completedRead ? await InternalGenerationAuthority.RequireReadAsync(context, source, token) : await InternalGenerationAuthority.RequireAsync(context, source, token);
+            _ = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(context, source, token) : await InternalGenerationAuthority.RequireStageAsync(context, source, token);
         }
         if (!internalResourceStage && inputs.Configuration!.Manifest.Spec.Components.Values.Any(c => c.Workloads.Count != 0) ||
             !ResourceReadinessCoverage.IsComplete(inputs.Configuration!.Manifest.Spec.Resources.Keys.Select(x => x.Value),

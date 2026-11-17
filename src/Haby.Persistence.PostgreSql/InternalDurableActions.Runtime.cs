@@ -53,6 +53,14 @@ internal sealed partial class InternalDurableActions
     // Immutable history, replay and internal post-dispatch observation do not require current permission.
     private static async Task RequireCurrentRuntimeAsync(ManifestCatalogDbContext db, InternalActionContext context, CancellationToken token)
     {
+        if (context.Update is not null)
+        {
+            var deployment = Guid.Parse(context.Key.DeploymentId.ToString());
+            var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == context.Key.Generation.Value, token);
+            await InternalGenerationAuthority.RequireCurrentStageAsync(db, source, token);
+            if (await db.ManagedObjectStates.AsNoTracking().AnyAsync(x => x.ManagedWorkloadId == context.ManagedIdentity, token))
+                throw new InvalidDataException("Managed object already transitioned.");
+        }
         if (context.Runtime is not { } prepared) return;
         var binding = await db.RuntimeIdentityBindings.AsNoTracking().SingleAsync(x => x.Id == prepared.Binding, token);
         if (InternalRuntimePublication.BindingState(binding).Status != "Prepared") throw new InvalidDataException("Runtime binding revoked.");
@@ -79,6 +87,26 @@ internal sealed partial class InternalDurableActions
         var value = loaded.Handler.ObjectConfirmation(loaded.Context, loaded.Intent.Payload, receipt);
         if (value is null) return;
         Bound(value.Contract, 128); Bound(value.Role, 128); Bound(value.Payload, 1048576);
+        if (loaded.Handler.UpdatesObject)
+        {
+            var prior = loaded.Context.Update ?? throw new InvalidDataException("Original update authority required.");
+            if (value.Format <= 0 || await db.ManagedObjectStates.AnyAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity && x.Role == value.Role, token))
+                throw new InvalidDataException("Current object transition conflict.");
+            db.ManagedObjectStates.Add(new()
+            {
+                ManagedWorkloadId = loaded.Intent.ManagedIdentity,
+                Role = value.Role,
+                DeploymentId = loaded.Intent.DeploymentId,
+                OriginGeneration = prior.Original.Key.Generation.Value,
+                OriginOperation = prior.Original.Key.OperationId.Value,
+                Generation = loaded.Intent.Generation,
+                OperationId = loaded.Intent.OperationId,
+                Contract = value.Contract,
+                Format = value.Format,
+                Payload = value.Payload
+            });
+            return;
+        }
         if (value.Format <= 0 || await db.OwnedObjects.AnyAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity && x.Role == value.Role, token))
             throw new InvalidDataException("Owned object confirmation conflict.");
         db.OwnedObjects.Add(new()
@@ -97,6 +125,16 @@ internal sealed partial class InternalDurableActions
     {
         var value = loaded.Handler.ObjectConfirmation(loaded.Context, loaded.Intent.Payload, receipt);
         if (value is null) return;
+        if (loaded.Handler.UpdatesObject)
+        {
+            var prior = loaded.Context.Update ?? throw new InvalidDataException("Original update authority required.");
+            var state = await db.ManagedObjectStates.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity && x.Role == value.Role, token);
+            if (state is null || state.OriginGeneration != prior.Original.Key.Generation.Value || state.OriginOperation != prior.Original.Key.OperationId.Value ||
+                state.DeploymentId != loaded.Intent.DeploymentId || state.Generation != loaded.Intent.Generation || state.OperationId != loaded.Intent.OperationId ||
+                state.Contract != value.Contract || state.Format != value.Format || state.Payload != value.Payload)
+                throw new InvalidDataException("Confirmed current object transition mismatch.");
+            return;
+        }
         var saved = await db.OwnedObjects.AsNoTracking().SingleOrDefaultAsync(x => x.ManagedWorkloadId == loaded.Intent.ManagedIdentity && x.Role == value.Role, token);
         if (saved is null || saved.Contract != value.Contract || saved.Format != value.Format || saved.Payload != value.Payload ||
             saved.DeploymentId != loaded.Intent.DeploymentId || saved.Generation != loaded.Intent.Generation || saved.OperationId != loaded.Intent.OperationId)
