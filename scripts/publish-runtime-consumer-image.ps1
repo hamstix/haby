@@ -15,7 +15,7 @@ if($Prepare){
     return
 }
 if(!$IsLinux -or $env:GITHUB_REPOSITORY -cne 'hamstix/haby' -or $env:GITHUB_EVENT_NAME -cne 'push' -or
-    $env:GITHUB_REF -cnotin @('refs/heads/main','refs/heads/codex/ci-223-ghcr-image','refs/heads/codex/ci-209-runtime-consumer') -or $env:GITHUB_SHA -cne $source){throw 'Only the exact trusted publisher push may publish.'}
+    $env:GITHUB_REF -cnotin @('refs/heads/main','refs/heads/codex/ci-223-ghcr-image','refs/heads/codex/ci-209-runtime-consumer','refs/heads/codex/feat-245-deployment-ports-probes') -or $env:GITHUB_SHA -cne $source){throw 'Only the exact trusted publisher push may publish.'}
 $state=Get-Content -LiteralPath $StatePath -Raw|ConvertFrom-Json
 if($state.key -cne $inputs.key -or $state.authenticated -isnot [bool] -or !$state.authenticated -or $state.firstPackageConfirmed -isnot [bool]){throw 'Authenticated registry observation required.'}
 $decision=Get-HabyConsumerPublicationDecision $state.state ([bool]$accepted) ([bool]$state.firstPackageConfirmed)

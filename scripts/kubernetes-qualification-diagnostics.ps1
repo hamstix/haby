@@ -348,6 +348,10 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS kernel-K23-new-factory-custom-root-refusal',
           'PASS kernel-K24-real-UID-race-replacement-preserved',
           'PASS kernel-K25-limit-only-template-absence',
+          'PASS kernel-K26-ports-probes-API-defaults-readback',
+          'PASS kernel-K27-owned-probe-action-port-change-removal-preserves-foreign',
+          'PASS kernel-K28-uncertain-patch-observes-exact-probes-without-second-write',
+          'PASS kernel-K29-server-defaulted-protocol-and-probe-fields-confirm',
           'PASS kernel-cleanup-ownership',
           'PASS kernel-namespace-absence-after-UID-delete')
     }else{
@@ -376,6 +380,8 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS configured-C11-Applied-preserves-publications-and-stable-identities',
           'PASS configured-A03-revocation-keeps-historical-completion-without-regrant',
           'PASS configured-C12-Pod-defaulted-resource-requests',
+          'PASS configured-C13-configured-Deployment-Pod-ports-probes-defaults',
+          'PASS configured-R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied',
           'PASS configured-owned-namespace-absent',
           'PASS configured-owned-catalog-cleanup')
     }
@@ -400,7 +406,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
                 $records.Add('Diagnostic workload: configured rpc '+$parts[3])
             }elseif($parts.Count -eq 4){
                 $stage=$parts[2];$state=$parts[3]
-                $case=if($Mode -ceq 'kernel'){$stage -cmatch '^K(0[1-9]|1[0-9]|2[0-5])$'}else{$stage -cmatch '^(C(0[1-9]|1[0-2])|R0[1-6]|B0[1-4]|A0[1-3])$'}
+                $case=if($Mode -ceq 'kernel'){$stage -cmatch '^K(0[1-9]|1[0-9]|2[0-9])$'}else{$stage -cmatch '^(C(0[1-9]|1[0-3])|R0[1-7]|B0[1-4]|A0[1-3])$'}
                 if(($stage -cnotin $stages -and !$case) -or $state -cnotin @('start','passed','failed','completed','skipped')){return $invalid}
                 if($stage -ceq 'entry' -and $state -ceq 'start'){$entry=$true}
                 if($state -ceq 'failed'){$hasFailure=$true}

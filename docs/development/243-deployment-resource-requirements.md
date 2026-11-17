@@ -91,8 +91,8 @@ objects retain their existing refusals.
 
 ## Current alpha format and validation
 
-Deployment intent/receipt payloads and their contracts are **v3**, including the
-configured owned-object receipt format. Formats 1/2 refuse; there is no old reader,
+Deployment intent/receipt payloads and their contracts were introduced as **v3** and are now **v4** under [issue #245](245-deployment-ports-probes.md), including the
+configured owned-object receipt format. Formats 1/2/3 refuse; there is no old reader,
 conversion, reset or successful-proof backfill. Catalogs with superseded Deployment
 intents/receipts require explicit fresh initialization under ADR-033 before
 using the new executor. A reset does not remove external resources. Shared catalog

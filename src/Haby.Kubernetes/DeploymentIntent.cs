@@ -15,7 +15,7 @@ namespace Haby.Kubernetes;
 public sealed record KubernetesBinding(string Environment, string Provider, long Configuration, string Implementation);
 public sealed record DeploymentProjection(string Container, string Image, int Replicas, string Strategy,
     string? MaxSurge, string? MaxUnavailable, int MinReadySeconds, int ProgressDeadlineSeconds,
-    ImmutableSortedDictionary<string, string> NodeSelector, ImmutableArray<string> ImagePullSecrets, DeploymentRuntime? Runtime = null, ResourceRequirements? Resources = null);
+    ImmutableSortedDictionary<string, string> NodeSelector, ImmutableArray<string> ImagePullSecrets, ImmutableSortedDictionary<string, ContainerPort> Ports, Probes Probes, DeploymentRuntime? Runtime = null, ResourceRequirements? Resources = null);
 public sealed record DeploymentRuntime(string ServiceAccount, string ServiceAccountUid, string Audience, string Bootstrap);
 public sealed record DeploymentIntent(int Format, KubernetesBinding Binding, string Component, string Workload,
     string Placement, int PlacementRevision, string Namespace, string Name, Guid Owner, Guid ManagedWorkload,
@@ -62,7 +62,7 @@ public static class DeploymentIntents
                 previous.Owner == owner && previous.ManagedWorkload == managedWorkload && previous.Projection.Container == target.Container,
                 "immutable-identity");
         }
-        var intent = new DeploymentIntent(3, binding, workload.Input.Component.Value, workload.Input.Id.Value,
+        var intent = new DeploymentIntent(4, binding, workload.Input.Component.Value, workload.Input.Id.Value,
             p.Declaration.Reference.Name.Value, p.Declaration.Reference.Revision, obj.Namespace, obj.Name, owner,
             managedWorkload, generation, operation, target, previous?.Uid, previous?.Projection);
         Validate(intent); return intent;
@@ -82,7 +82,7 @@ public static class DeploymentIntents
         string? Bound(RolloutBound? b) => b is null ? null : b.Value.ToString(CultureInfo.InvariantCulture) + (b.Percent ? "%" : "");
         return new DeploymentProjection(d.ContainerName, workload.ImageReference, s.Replicas ?? 1, strategy.Type,
             Bound(strategy.MaxSurge), Bound(strategy.MaxUnavailable), s.MinReadySeconds ?? 0, s.RolloutSeconds ?? 600,
-            p.Declaration.NodeSelector.ToImmutableSortedDictionary(StringComparer.Ordinal), p.Declaration.ImagePullSecrets.Order(StringComparer.Ordinal).ToImmutableArray(), Resources: s.Resources);
+            p.Declaration.NodeSelector.ToImmutableSortedDictionary(StringComparer.Ordinal), p.Declaration.ImagePullSecrets.Order(StringComparer.Ordinal).ToImmutableArray(), d.Ports.ToImmutableSortedDictionary(StringComparer.Ordinal), d.Probes, Resources: s.Resources);
     }
 
     // Validates every supported effective field while deliberately granting no write intent.
@@ -90,8 +90,8 @@ public static class DeploymentIntents
     {
         var d = workload.Declaration; var s = workload.Settings; var p = workload.Placement;
         Projection(ProjectionFor(workload));
-        Need(d.Environment.Count == 0 && d.Ports.Count == 0 && d.Volumes.Count == 0 && d.Mounts.IsEmpty &&
-            d.Routes.IsEmpty && d.Probes == new Probes(null, null, null) &&
+        Need(d.Environment.Count == 0 && d.Volumes.Count == 0 && d.Mounts.IsEmpty &&
+            d.Routes.IsEmpty &&
             s.Service != true && s.HeadlessService != true && s.Ingress?.Enabled != true,
             "unsupported-fields");
         Need(workload.Objects.Length == (d.Documents.IsEmpty ? 1 : 2), "unsupported-objects");
@@ -126,7 +126,7 @@ public static class DeploymentIntents
     }
     internal static void Validate(DeploymentIntent i)
     {
-        Need(i is { Format: 3, Binding: not null, Target: not null } && i.Owner != Guid.Empty && i.ManagedWorkload != Guid.Empty &&
+        Need(i is { Format: 4, Binding: not null, Target: not null } && i.Owner != Guid.Empty && i.ManagedWorkload != Guid.Empty &&
             i.Operation != Guid.Empty && i.TargetGeneration > 0 && i.PlacementRevision > 0, "intent-format");
         Binding(i.Binding); Name(i.Namespace); Name(i.Name); Name(i.Component); Name(i.Workload); Name(i.Placement);
         Need(i.Namespace.Length <= 63 && !i.Namespace.Contains('.'), "namespace");
@@ -136,7 +136,7 @@ public static class DeploymentIntents
     }
     internal static void Validate(DeploymentReceipt r)
     {
-        Need(r is { Format: 3, Binding: not null, Projection: not null } && r.Owner != Guid.Empty && r.ManagedWorkload != Guid.Empty &&
+        Need(r is { Format: 4, Binding: not null, Projection: not null } && r.Owner != Guid.Empty && r.ManagedWorkload != Guid.Empty &&
             r.Operation != Guid.Empty && r.TargetGeneration > 0 && r.KubernetesGeneration > 0 && Enum.IsDefined(r.Source), "receipt-format");
         Binding(r.Binding); Name(r.Namespace); Name(r.Name); Text(r.Uid, 128); Projection(r.Projection);
     }
@@ -153,11 +153,7 @@ public static class DeploymentIntents
         DeploymentResources.Validate(p.Resources);
         Name(p.Container); Text(p.Image, 512); Need(!p.Image.Any(char.IsWhiteSpace), "image");
         // Reuse the current portable image/container grammar; a reloaded intent cannot bypass it.
-        KubernetesContract.DecodeWorkload(Encoding.UTF8.GetBytes(new JsonObject
-        {
-            ["containerName"] = p.Container,
-            ["image"] = new JsonObject { ["reference"] = p.Image }
-        }.ToJsonString()));
+        KubernetesContract.DecodeWorkload(Encoding.UTF8.GetBytes(DeploymentPortsAndProbes.Declaration(p).ToJsonString()));
         Need(p.Replicas is >= 1 and <= 10000 && p.MinReadySeconds is >= 0 and <= 3600 && p.ProgressDeadlineSeconds <= 86400 && p.ProgressDeadlineSeconds > p.MinReadySeconds &&
             (p.Strategy == "Recreate" && p.MaxSurge is null && p.MaxUnavailable is null ||
              p.Strategy == "RollingUpdate" && ValidBound(p.MaxSurge) && ValidBound(p.MaxUnavailable) && (p.MaxSurge != "0" && p.MaxSurge != "0%" || p.MaxUnavailable != "0" && p.MaxUnavailable != "0%")), "projection-settings");

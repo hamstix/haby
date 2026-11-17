@@ -14,7 +14,7 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
     internal const string Create = "haby.kubernetes.deployment-create/v1";
     public InternalActionContract Contract { get; } = new("kubernetes.workload/v1alpha1", KubernetesProviderConfigurationCodec.Kind,
         KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation, Create,
-        "haby.kubernetes.deployment-intent/v3", "haby.kubernetes.deployment-receipt/v3");
+        "haby.kubernetes.deployment-intent/v4", "haby.kubernetes.deployment-receipt/v4");
     public bool ObservationRecovery => true;
     public bool RequiresRuntimePublication => true;
     public int ObservationSeconds(string intent, string receipt) => DeploymentReadiness.Budget(intent, receipt);
@@ -53,7 +53,7 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         if (DeploymentIntents.Decode(payload).Target.Runtime is null) return null;
         var decoded = DeploymentIntents.DecodeReceipt(receipt);
         if (!ValidateReceipt(context, payload, receipt, decoded.Source == ConfirmationSource.Observation)) throw new InvalidDataException("Deployment receipt invalid.");
-        return new("deployment", Contract.OutputContract, 3, receipt, decoded.Uid);
+        return new("deployment", Contract.OutputContract, 4, receipt, decoded.Uid);
     }
 
     public IReadOnlyList<ManifestLocalId> PreparationDocuments(InternalActionContext context)

@@ -90,6 +90,7 @@ internal static class ConfiguredDeploymentCases
                     component["documents"]!["other"] = component["documents"]!["z-last"]!.DeepClone(); component["documents"]!.AsObject().Remove("z-last");
                     var properties = component["workloads"]!["main"]!["properties"]!;
                     properties["configuration"]!["documents"]![1] = "other";
+                    DurableDeploymentPlanningTests.PortsAndProbes(envelope);
                     properties["image"]!["reference"] = image; properties["containerName"] = "configured-consumer";
                     properties["overrides"] = System.Text.Json.Nodes.JsonNode.Parse("""{"minReadySeconds":1,"resources":{"requests":{"memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}}"""u8);
                     configuredEnvelope = envelope.DeepClone();
@@ -280,6 +281,16 @@ internal static class ConfiguredDeploymentCases
                 var saved = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, ns, cancellationToken: token);
                 DeploymentObjects.Receipt(DeploymentObjects.Read(saved), intent, ConfirmationSource.Observation);
                 var actualResources = saved.Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer").Resources;
+                var actualMain = saved.Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer");
+                var podMain = currentPod.Spec.Containers.Single(c => c.Name == "configured-consumer");
+                Check(actualMain.Ports.Count == 2 && actualMain.Ports.Single(p => p.Name == "web").ContainerPort == 8080 &&
+                    actualMain.Ports.Single(p => p.Name == "web").Protocol == "TCP" && actualMain.Ports.Single(p => p.Name == "dns").Protocol == "UDP" &&
+                    actualMain.StartupProbe.HttpGet.Port.Value == "web" && actualMain.StartupProbe.HttpGet.Path == "/health" &&
+                    actualMain.StartupProbe.HttpGet.Scheme == "HTTP" && actualMain.StartupProbe.PeriodSeconds == 10 &&
+                    actualMain.LivenessProbe.TcpSocket.Port.Value == "web" && actualMain.LivenessProbe.TimeoutSeconds == 1 &&
+                    actualMain.ReadinessProbe.HttpGet.Path == "/health" && actualMain.ReadinessProbe.PeriodSeconds == 1 &&
+                    podMain.StartupProbe.HttpGet.Scheme == "HTTP" && podMain.ReadinessProbe.SuccessThreshold == 1 &&
+                    podMain.ReadinessProbe.FailureThreshold == 1, "C13-configured-Deployment-Pod-ports-probes-defaults");
                 Check(saved.Spec.Template.Spec.ServiceAccountName == intent.Target.Runtime.ServiceAccount && currentPod.Spec.AutomountServiceAccountToken == false &&
                     intent.Target.Resources!.Requests!.Cpu is null &&
                     !actualResources.Requests.ContainsKey("cpu") &&
@@ -399,6 +410,43 @@ internal static class ConfiguredDeploymentCases
                 await verify.RuntimeIdentityBindings.CountAsync(token) == expectedDeploymentWrites && !await verify.ConfigurationAccess.AnyAsync(token), "C11-Applied-preserves-publications-and-stable-identities");
             Check(await verify.GenerationStageCheckpoints.CountAsync(x => x.Stage == "RetirementCompleted", token) == expectedDeploymentWrites,
                 "A03-revocation-keeps-historical-completion-without-regrant");
+            // A separate accepted configured Application has a listening healthy process but an
+            // intentionally failing readiness endpoint. No desired-state UPDATE or probe repair.
+            await WithHost(async () =>
+            {
+                var blockedEnvelope = configuredEnvelope.DeepClone();
+                blockedEnvelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["probes"]!["readiness"]!["httpGet"]!["path"] = "/unready";
+                var blocked = await DurableDeploymentPlanningTests.AcceptBatchPeerAsync(services, scenario, blockedEnvelope);
+                using var channel = GrpcChannel.ForAddress(LocalOperatorEndpoint(activeHost!.Urls.Single()), new GrpcChannelOptions
+                { HttpHandler = new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator } });
+                var client = OperatorTestCredentials.Client(channel, OperatorTestCredentials.Credential(activeHost.Urls.Single()));
+                var submitted = await client.SubmitGenerationAsync(new GenerationRequest { DeploymentId = blocked.DeploymentId.ToString(), Generation = blocked.Generation.Value }, cancellationToken: token);
+                if (submitted.Outcome != "submitted") throw new InvalidOperationException("Configured negative readiness submission failed.");
+                await using (var read = await contexts.CreateDbContextAsync(token))
+                {
+                    var row = await read.ActionIntents.AsNoTracking().SingleAsync(x => x.DeploymentId == Guid.Parse(blocked.DeploymentId.ToString()) && x.ActionContract == InternalDeploymentAction.Create, token);
+                    intent = DeploymentIntents.Decode(row.Payload);
+                }
+                var pod = await Startup("primary-started");
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(30));
+                while (true)
+                {
+                    pod = await admin.CoreV1.ReadNamespacedPodAsync(pod.Metadata.Name, ns, cancellationToken: deadline.Token);
+                    var state = pod.Status.ContainerStatuses?.SingleOrDefault(x => x.Name == "configured-consumer");
+                    var deployment = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, ns, cancellationToken: deadline.Token);
+                    if (state is { Started: true, Ready: false, State.Running: not null } &&
+                        deployment.Status.ObservedGeneration >= deployment.Metadata.Generation && deployment.Status.UpdatedReplicas == 1 &&
+                        (deployment.Status.ReadyReplicas ?? 0) == 0) break;
+                    await Task.Delay(100, deadline.Token);
+                }
+                var waited = await client.WaitGenerationAsync(new GenerationWaitRequest { DeploymentId = blocked.DeploymentId.ToString(), Generation = blocked.Generation.Value,
+                    RequestId = "configured-unready", Settings = new() { MaximumRounds = 1 } }, cancellationToken: token);
+                await using var finalRead = await contexts.CreateDbContextAsync(token);
+                Check(!waited.CurrentReady && !waited.CurrentApplied && waited.Members.Single().Outcome == "Pending" &&
+                    pod.Spec.Containers.Single(c => c.Name == "configured-consumer").ReadinessProbe.HttpGet.Path == "/unready" &&
+                    (await finalRead.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(blocked.DeploymentId.ToString()), token)).AppliedGeneration is null &&
+                    deploymentWrites == 3, "R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied");
+            });
         }
         catch (Exception error) { primary = error; throw; }
         finally
@@ -454,7 +502,7 @@ internal static class ConfiguredDeploymentCases
     private static void Check(bool value, string id)
     {
         var prefix = id.Split('-')[0];
-        var stage = prefix is "C01" or "C02" or "C03" or "C04" or "C05" or "C06" or "C07" or "C08" or "C09" or "C10" or "C11" or "C12" or "R01" or "R02" or "R03" or "R04" or "R05" or "R06" or "B01" or "B02" or "B03" or "B04" or "A01" or "A02" or "A03" ? prefix : "unknown";
+        var stage = prefix is "C01" or "C02" or "C03" or "C04" or "C05" or "C06" or "C07" or "C08" or "C09" or "C10" or "C11" or "C12" or "C13" or "R01" or "R02" or "R03" or "R04" or "R05" or "R06" or "R07" or "B01" or "B02" or "B03" or "B04" or "A01" or "A02" or "A03" ? prefix : "unknown";
         Console.WriteLine($"Q243 configured {stage} {(value ? "passed" : "failed")}");
         if (!value) throw new InvalidOperationException("Configured Deployment case failed: " + id);
         Console.WriteLine("PASS configured-" + id);

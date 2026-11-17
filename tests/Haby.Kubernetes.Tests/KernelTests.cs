@@ -16,11 +16,11 @@ namespace Haby.Kubernetes.Tests;
 
 public sealed class KernelTests
 {
-    internal static DeploymentIntent Intent() => new(3,
+    internal static DeploymentIntent Intent() => new(4,
         new(EnvironmentRecordId.New().ToString(), ProviderInstanceId.New().ToString(), 3, "haby.kubernetes/v1"),
         "api", "main", "standard", 1, "test", "orders-api-main", Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(),
         new("app", "registry.example/app:v1", 1, "RollingUpdate", "25%", "25%", 0, 600,
-            ImmutableSortedDictionary<string, string>.Empty.Add("disk", "ssd"), ["registry"]), null, null);
+            ImmutableSortedDictionary<string, string>.Empty.Add("disk", "ssd"), ["registry"], ImmutableSortedDictionary<string, ContainerPort>.Empty, new(null, null, null)), null, null);
     internal static JsonObject Object(DeploymentIntent i, string uid = "saved-uid", string rv = "19")
     {
         var obj = DeploymentObjects.Read(DeploymentObjects.Create(i));

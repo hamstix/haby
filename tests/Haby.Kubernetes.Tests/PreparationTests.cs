@@ -39,8 +39,6 @@ public sealed class PreparationTests
     }
     [Theory]
     [InlineData("\"env\":{\"MODE\":{\"value\":\"requested\"}}")]
-    [InlineData("\"ports\":{\"http\":{\"containerPort\":8080}}")]
-    [InlineData("\"ports\":{\"http\":{\"containerPort\":8080}},\"probes\":{\"readiness\":{\"tcpSocket\":{\"port\":\"http\"}}}")]
     [InlineData("\"volumes\":{\"data\":{\"secret\":{\"name\":\"settings\"}}}")]
     [InlineData("\"volumes\":{\"data\":{\"configMap\":{\"name\":\"settings\"}}},\"mounts\":[{\"volume\":\"data\",\"mountPath\":\"/data\"}]")]
     [InlineData("\"ports\":{\"http\":{\"containerPort\":8080}},\"routes\":[{\"hostLabel\":\"orders\",\"path\":\"/\",\"port\":\"http\"}]")]

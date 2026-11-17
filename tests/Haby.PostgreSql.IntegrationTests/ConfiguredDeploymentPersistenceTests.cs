@@ -44,7 +44,7 @@ public sealed partial class DurableDeploymentPlanningTests
         private static InternalActionResult Confirm(string payload, bool observation)
         {
             var i = DeploymentIntents.Decode(payload);
-            return new(InternalActionOutcome.Confirmed, "fixture-confirmed", DeploymentIntents.Encode(new DeploymentReceipt(3,
+            return new(InternalActionOutcome.Confirmed, "fixture-confirmed", DeploymentIntents.Encode(new DeploymentReceipt(4,
                 i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload, i.TargetGeneration, i.Operation, "deployment-uid", 1, i.Target,
                 observation ? ConfirmationSource.Observation : ConfirmationSource.Response)));
         }
@@ -66,6 +66,7 @@ public sealed partial class DurableDeploymentPlanningTests
         var scenario = await InternalScenarioAsync(initialOnly: initial, configureManifest: e =>
         {
             ConfiguredDocuments(e, secondDocument: true);
+            PortsAndProbes(e);
             if (!initial) e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["overrides"] =
                 System.Text.Json.Nodes.JsonNode.Parse("""{"resources":{"requests":{"memory":"64Mi"},"limits":{"memory":"256Mi"}}}"""u8);
         }, resourcesJson: """{"requests":{"cpu":"250m","memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}""");
@@ -81,6 +82,7 @@ public sealed partial class DurableDeploymentPlanningTests
             key = await actions.AcceptAsync(scenario.Commit, RuntimeSubject, deployment.Contract.Action, "configured", default);
             payload = (await actions.HistoryAsync(key, default))!.Intent.Payload;
             var projection = DeploymentIntents.Decode(payload).Target;
+            ExactPortsAndProbes(projection);
             Assert.Equal(initial ? "250m" : null, projection.Resources!.Requests!.Cpu);
             Assert.Equal(initial ? "128Mi" : "64Mi", projection.Resources.Requests.Memory);
             var runtime = projection.Runtime!;
@@ -105,6 +107,7 @@ public sealed partial class DurableDeploymentPlanningTests
         Assert.Equal(payload, (await replay.HistoryAsync(key, default))!.Intent.Payload);
         var confirmed = DeploymentIntents.DecodeReceipt((await replay.HistoryAsync(key, default))!.Output!.Payload);
         Assert.Equal(DeploymentIntents.Decode(payload).Target.Resources, confirmed.Projection.Resources);
+        ExactPortsAndProbes(confirmed.Projection);
         Assert.Equal(InternalActionOutcome.Confirmed, (await replay.ExecuteAsync(key, default)).Outcome);
         Assert.Equal(1, deployment.Writes); Assert.Equal(1, deployment.Reads); Assert.Equal(1, identity.Writes);
         await using var verify = await restarted.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
