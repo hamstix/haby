@@ -2,12 +2,52 @@ using Haby.Application;
 using Haby.Kubernetes;
 using Haby.Domain;
 using System.Text.Json.Nodes;
+using System.Text.Json;
+using System.Text;
+using Haby.Manifest;
 using Xunit;
 
 namespace Haby.Kubernetes.Tests;
 
 public sealed class DeploymentImageUpdateTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Accepted_deep_Profile_compares_image_updates_and_refuses_changed_nested_values(bool changed)
+    {
+        static ConfigurationProfileRevision Profile(string leaf)
+        {
+            var payload = Encoding.UTF8.GetBytes("""{"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"deep","revision":1},"spec":{"documents":{"deep-settings":{"fileName":"deep.json","format":"json","template":""" + new string('[', 60) + leaf + new string(']', 60) + "}}}}");
+            var accepted = ProfilePayloadParser.ParseProfile(payload);
+            Assert.True(accepted.IsSuccess, string.Join(",", accepted.Diagnostics.Select(x => x.Code)));
+            return accepted.Declaration!;
+        }
+        var token = AssignmentToken.New();
+        DurablePlanningInputs Selected(DurablePlanningInputs inputs, ConfigurationProfileRevision profile)
+        {
+            var scopes = ConfigurationPlanningSnapshot.Targets(inputs.Providers.Declaration).Select(t =>
+                new ConfigurationPlanningScope(t, t is ProfileAssignmentTarget.Environment ? token : null,
+                    new(t, t is ProfileAssignmentTarget.Environment ? [new ProfileDecision.Use(profile.Reference)] : [])));
+            var prepared = ConfigurationPlanningSnapshot.Prepare(inputs.Revision, inputs.Providers.Declaration, scopes, [profile]);
+            Assert.True(prepared.Expansion.IsSuccess);
+            return inputs with { Configuration = prepared.Snapshot! };
+        }
+        var context = InternalDeploymentPlacementTests.Contexts(false)[0];
+        var baseline = Selected(context.Inputs, Profile("0"));
+        var target = Selected(Target(context, root => Properties(root)["image"]!["members"]!["reference"] = Value("registry.example/app:v2")), Profile(changed ? "1" : "0"));
+        var snapshot = ConfigurationPlanningSnapshotCodec.Encode(baseline.Configuration!);
+        using var document = JsonDocument.Parse(snapshot, new JsonDocumentOptions { MaxDepth = 160 });
+        static int Depth(JsonElement value) => value.ValueKind switch
+        {
+            JsonValueKind.Object => 1 + value.EnumerateObject().Select(x => Depth(x.Value)).DefaultIfEmpty().Max(),
+            JsonValueKind.Array => 1 + value.EnumerateArray().Select(Depth).DefaultIfEmpty().Max(),
+            _ => 0
+        };
+        Assert.InRange(Depth(document.RootElement), 65, 160);
+        Assert.Equal(baseline.Configuration, ConfigurationPlanningSnapshotCodec.Decode(snapshot, baseline.Revision));
+        Assert.Equal(!changed, WorkloadUpdateInputs.Same(baseline, target));
+    }
     [Fact]
     public void Reordered_maps_and_a_new_source_revision_preserve_semantic_inputs()
     {

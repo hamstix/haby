@@ -15,6 +15,55 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
+    [Fact]
+    public async Task Update_plan_roundtrips_an_accepted_deep_Profile_from_a_fully_Applied_baseline()
+    {
+        JsonNode? envelope = null;
+        var payload = Encoding.UTF8.GetBytes("""{"apiVersion":"haby.dev/v1alpha1","kind":"ConfigurationProfile","metadata":{"id":"deep","revision":1},"spec":{"documents":{"deep-settings":{"fileName":"deep.json","format":"json","template":""" + new string('[', 60) + "0" + new string(']', 60) + "}}}}");
+        Assert.True(ProfilePayloadParser.ParseProfile(payload).IsSuccess);
+        var scenario = await InternalScenarioAsync(initialOnly: true, configureManifest: e =>
+        {
+            e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["configuration"] =
+                JsonNode.Parse("""{"documents":["deep-settings"]}"""u8);
+            envelope = e.DeepClone();
+        }, acceptGeneration: async (services, environment, revision) =>
+        {
+            var imported = Assert.IsType<ImportConfigurationProfileResult.Succeeded>(await new ImportConfigurationProfile(
+                services.GetRequiredService<IConfigurationProfileImportStore>(), services.GetRequiredService<TimeProvider>()).ExecuteAsync(payload, "tester"));
+            var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+            Assert.Equal(AssignmentOutcome.Created, (await new PostgreSqlProfileAssignmentStore(contexts).ApplyAsync(
+                new(environment, EnvironmentId.Create("initial")), new(new ProfileAssignmentTarget.Environment(), [new ProfileDecision.Use(imported.Revision.Reference)]),
+                new AssignmentPrecondition.ExpectedAbsence(), new("tester", services.GetRequiredService<TimeProvider>().GetUtcNow(), null), default)).Outcome);
+            return await new InternalAcceptedGenerationBuilder(services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(),
+                (PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>(), services.GetServices<IInternalActionHandler>().ToArray())
+                .AcceptForEffectAsync(environment, revision.ApplicationRecordId, revision, new DeploymentPrecondition.ExpectedAbsence(), "tester", default);
+        });
+        await using var services = InternalServices(scenario.Connection, scenario.Time);
+        var deployment = new ConfiguredSubmissionFixture(); var identity = new IdentityFixture();
+        var actions = await PrepareRollout(services, scenario, deployment, identity);
+        await SubmitRollout(actions, scenario, deployment);
+        var ready = await BatchFacade(services, scenario, actions, deployment, identity).WaitAsync(scenario.Commit.DeploymentId,
+            scenario.Commit.Generation, "deep-applied-baseline", "operator", new(MaximumRounds: 1), null, default);
+        Assert.True(ready.CurrentApplied, ready.CompletionReason);
+        envelope!["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["image"]!["reference"] = "registry.example/app:v2";
+        var reference = await ImportUpdate(services, envelope);
+        var change = await UpdateChange(services, scenario, reference);
+        var handlers = services.GetServices<IInternalActionHandler>().ToArray();
+        var planner = services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>();
+        var result = await planner.CreateInternalPlanAsync(change.Id, "tester", default, handlers);
+        Assert.Equal(DurablePlanStatus.Planned, result.Status);
+        var plan = result.Plan!;
+        Assert.Single(plan.Inputs.Configuration!.Profiles);
+        Assert.Equal("deep", plan.Inputs.Configuration.Profiles[0].Reference.ProfileId.Value);
+        Assert.Contains("registry.example/app:v2", Assert.Single(plan.Graph.WorkloadUpdate!.Document.Members).Delta.Json);
+        Assert.Equal(new[] { "deep-settings" }, Assert.Single(plan.Graph.WorkloadUpdate.Document.Members).PrepareDocuments);
+        await using var restarted = InternalServices(scenario.Connection, scenario.Time);
+        var loaded = (await restarted.GetRequiredService<PostgreSqlDurableDeploymentPlanner>().FindPlanAsync(plan.Id, default))!;
+        Assert.Equal(ConfigurationPlanningSnapshotCodec.Encode(plan.Inputs.Configuration), ConfigurationPlanningSnapshotCodec.Encode(loaded.Inputs.Configuration!));
+        Assert.Equal(plan.Graph.WorkloadUpdate.Fingerprint, loaded.Graph.WorkloadUpdate!.Fingerprint);
+        Assert.Equal(DurablePlanCurrentStatus.Current, await restarted.GetRequiredService<PostgreSqlDurableDeploymentPlanner>().CheckInternalPlanAsync(plan.Id, handlers, default));
+        Assert.Equal(DurablePlanStatus.UnsupportedShape, (await planner.CreateOperatorPlanAsync(change.Id, "operator", default, handlers)).Status);
+    }
     private async Task<(InternalScenario Scenario, JsonNode Envelope)> AppliedUpdateBaseline(bool initial, bool configured, bool multiple = false)
     {
         JsonNode? envelope = null;

@@ -23,7 +23,8 @@ internal static class WorkloadUpdateInputs
 
     private static string Semantic(string json)
     {
-        var root = JsonNode.Parse(json)!.AsObject();
+        // Match ConfigurationPlanningSnapshotCodec: accepted Profile wrappers can exceed the default depth.
+        var root = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions { MaxDepth = 160 })!.AsObject();
         root.Remove("revision");
         var manifest = root["manifest"]!;
         foreach (var component in manifest["spec"]!["components"]!.AsObject())

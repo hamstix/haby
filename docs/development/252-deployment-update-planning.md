@@ -44,6 +44,10 @@ Resource reuse continues through the existing adapter compatibility and original
 proof paths. Original credentials, outputs, attempts and generation provenance are
 not relabeled. Original identity and Deployment receipts likewise remain unchanged.
 
+Semantic input comparison preserves accepted deep Profile documents using the
+snapshot codec's depth limit of 160. Image-only changes compare equal; meaningful
+nested configuration changes refuse update admission. Malformed JSON fails closed.
+
 ## Check, Commit and request semantics
 
 Internal Check revalidates the baseline, immutable evidence and current selected

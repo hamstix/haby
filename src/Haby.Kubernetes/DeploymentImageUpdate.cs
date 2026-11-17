@@ -39,7 +39,7 @@ internal static class DeploymentImageUpdate
             return new(1, old.ImageReference == next.ImageReference ? "UnchangedImage" : "ImageChanged",
                 old.ImageReference, next.ImageReference, receipt.Uid, intentJson, receiptJson);
         }
-        catch (WorkloadContractException) { throw new InvalidDataException("Deployment update shape or proof refused."); }
+        catch (Exception exception) when (exception is WorkloadContractException or JsonException) { throw new InvalidDataException("Deployment update shape or proof refused."); }
     }
     internal static DurableActionPayload Payload(DeploymentImageUpdateDocument document) =>
         new(Format, JsonSerializer.Serialize(document, DeploymentUpdateMetadata.Default.DeploymentImageUpdateDocument));
