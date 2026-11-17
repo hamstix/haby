@@ -264,6 +264,25 @@ capabilities, not prerequisites for this milestone.
 
 ### Accepted P3 execution order
 
+Accepted next priority: after #248, implement bounded ApplicationVersion/image
+updates under [ADR-058](docs/adr/0058-bounded-deployment-image-updates.md), before
+Service, headless Service and individual Ingress. Those objects remain in P3.
+
+- [ ] Admit and freeze image-only updates from Applied=Desired, with proven Resource
+  reuse and exact prior/target inventory; no runtime UPDATE enabled by planning alone.
+- [ ] Prepare generation-specific configuration, preserve stable runtime identity,
+  publish exact revisions and durably patch the same Deployment UID conditionally.
+- [ ] Confirm target readiness and old recipients (including terminating Pods),
+  retire obsolete runtime permissions and only then advance AppliedGeneration.
+- [ ] Implement ADR-052 corrective generation for incomplete rollout before declaring
+  the update workflow operationally ready; no rollback or automatic adoption.
+- [ ] Rehearse the real update/correction lifecycle, stable Resources/credentials,
+  configuration coexistence/retirement and restart/lost-response handling.
+
+These are accepted future slices, not delivered capabilities. Changed Profile or
+Placement inputs are refused by this bounded path. Static delivery grants remain
+independent; load qualification remains post-P4.
+
 Completed user-approved sequencing exception after #237 / PR #238: the narrow
 [#239 trusted public Host composition boundary](docs/development/239-public-host-composition.md)
 was delivered by [PR #240](https://github.com/hamstix/haby/pull/240) before #209 / PR #242. It permits downstream application service
