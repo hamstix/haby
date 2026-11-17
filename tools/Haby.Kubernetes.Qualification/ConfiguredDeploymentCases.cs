@@ -86,7 +86,7 @@ internal static class ConfiguredDeploymentCases
                     var properties = component["workloads"]!["main"]!["properties"]!;
                     properties["configuration"]!["documents"]![1] = "other";
                     properties["image"]!["reference"] = image; properties["containerName"] = "configured-consumer";
-                    properties["overrides"] = new System.Text.Json.Nodes.JsonObject { ["minReadySeconds"] = 1 };
+                    properties["overrides"] = System.Text.Json.Nodes.JsonNode.Parse("""{"minReadySeconds":1,"resources":{"requests":{"memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}}"""u8);
                     configuredEnvelope = envelope.DeepClone();
                 }, runtimeConfigurationJson: ConfigurationJson(delivery), acceptGeneration: async (composition, environment, reference) =>
                 {
@@ -259,7 +259,13 @@ internal static class ConfiguredDeploymentCases
                     "C06-real-projected-token-HTTPS-two-exact-documents-primary");
                 var saved = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, ns, cancellationToken: token);
                 DeploymentObjects.Receipt(DeploymentObjects.Read(saved), intent, ConfirmationSource.Observation);
-                Check(saved.Spec.Template.Spec.ServiceAccountName == intent.Target.Runtime.ServiceAccount && currentPod.Spec.AutomountServiceAccountToken == false,
+                var actualResources = saved.Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer").Resources;
+                Check(saved.Spec.Template.Spec.ServiceAccountName == intent.Target.Runtime.ServiceAccount && currentPod.Spec.AutomountServiceAccountToken == false &&
+                    intent.Target.Resources!.Requests!.Cpu is null &&
+                    DeploymentResources.Equivalent("1", actualResources.Requests["cpu"].ToString()) &&
+                    DeploymentResources.Equivalent("128Mi", actualResources.Requests["memory"].ToString()) &&
+                    DeploymentResources.Equivalent("1", actualResources.Limits["cpu"].ToString()) &&
+                    DeploymentResources.Equivalent("512Mi", actualResources.Limits["memory"].ToString()),
                     "C07-complete-saved-projection-and-Pod-identity");
                 rolloutReady = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-ready", new(RequestMilliseconds: 30000), token);
                 Check(rolloutReady.Ready && rolloutReady.Submitted is not null && rolloutReady.SavedReady is not null &&

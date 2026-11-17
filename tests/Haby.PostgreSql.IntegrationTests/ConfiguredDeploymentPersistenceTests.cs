@@ -44,7 +44,7 @@ public sealed partial class DurableDeploymentPlanningTests
         private static InternalActionResult Confirm(string payload, bool observation)
         {
             var i = DeploymentIntents.Decode(payload);
-            return new(InternalActionOutcome.Confirmed, "fixture-confirmed", DeploymentIntents.Encode(new DeploymentReceipt(2,
+            return new(InternalActionOutcome.Confirmed, "fixture-confirmed", DeploymentIntents.Encode(new DeploymentReceipt(3,
                 i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload, i.TargetGeneration, i.Operation, "deployment-uid", 1, i.Target,
                 observation ? ConfirmationSource.Observation : ConfirmationSource.Response)));
         }
@@ -63,7 +63,12 @@ public sealed partial class DurableDeploymentPlanningTests
     [InlineData(false)]
     public async Task Configured_submission_consumes_exact_preparation_and_restores_same_intent_inventory_without_Applied(bool initial)
     {
-        var scenario = await InternalScenarioAsync(initialOnly: initial, configureManifest: e => ConfiguredDocuments(e, secondDocument: true));
+        var scenario = await InternalScenarioAsync(initialOnly: initial, configureManifest: e =>
+        {
+            ConfiguredDocuments(e, secondDocument: true);
+            if (!initial) e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["overrides"] =
+                System.Text.Json.Nodes.JsonNode.Parse("""{"resources":{"requests":{"memory":"64Mi"},"limits":{"memory":"256Mi"}}}"""u8);
+        }, resourcesJson: """{"requests":{"cpu":"250m","memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}""");
         var identity = new IdentityFixture(); var deployment = new ConfiguredSubmissionFixture(); DurableOperationKey key; string payload;
         Guid binding;
         await using (var services = InternalServices(scenario.Connection, scenario.Time))
@@ -75,7 +80,10 @@ public sealed partial class DurableDeploymentPlanningTests
             var actions = ConfiguredActions(services, deployment, identity);
             key = await actions.AcceptAsync(scenario.Commit, RuntimeSubject, deployment.Contract.Action, "configured", default);
             payload = (await actions.HistoryAsync(key, default))!.Intent.Payload;
-            var runtime = DeploymentIntents.Decode(payload).Target.Runtime!;
+            var projection = DeploymentIntents.Decode(payload).Target;
+            Assert.Equal(initial ? "250m" : null, projection.Resources!.Requests!.Cpu);
+            Assert.Equal(initial ? "128Mi" : "64Mi", projection.Resources.Requests.Memory);
+            var runtime = projection.Runtime!;
             var bootstrap = Haby.Configuration.Contracts.RuntimeBootstrapCodec.Decode(runtime.Bootstrap);
             Assert.Equal(binding.ToString("D"), bootstrap.BindingId);
             Assert.Equal(new[] { "settings", "z-last" }, bootstrap.Documents.Keys);
@@ -95,6 +103,8 @@ public sealed partial class DurableDeploymentPlanningTests
         var replay = ConfiguredActions(restarted, deployment, identity);
         Assert.Equal(key, await replay.AcceptAsync(scenario.Commit, RuntimeSubject, deployment.Contract.Action, "configured", default));
         Assert.Equal(payload, (await replay.HistoryAsync(key, default))!.Intent.Payload);
+        var confirmed = DeploymentIntents.DecodeReceipt((await replay.HistoryAsync(key, default))!.Output!.Payload);
+        Assert.Equal(DeploymentIntents.Decode(payload).Target.Resources, confirmed.Projection.Resources);
         Assert.Equal(InternalActionOutcome.Confirmed, (await replay.ExecuteAsync(key, default)).Outcome);
         Assert.Equal(1, deployment.Writes); Assert.Equal(1, deployment.Reads); Assert.Equal(1, identity.Writes);
         await using var verify = await restarted.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();

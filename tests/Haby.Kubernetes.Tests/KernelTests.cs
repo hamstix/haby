@@ -16,7 +16,7 @@ namespace Haby.Kubernetes.Tests;
 
 public sealed class KernelTests
 {
-    internal static DeploymentIntent Intent() => new(2,
+    internal static DeploymentIntent Intent() => new(3,
         new(EnvironmentRecordId.New().ToString(), ProviderInstanceId.New().ToString(), 3, "haby.kubernetes/v1"),
         "api", "main", "standard", 1, "test", "orders-api-main", Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(),
         new("app", "registry.example/app:v1", 1, "RollingUpdate", "25%", "25%", 0, 600,
@@ -350,8 +350,8 @@ public sealed class KernelTests
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(2));
     }
-    private static HttpResponseMessage Reply(int status, JsonObject? body = null) => new((HttpStatusCode)status) { Content = new StringContent(body?.ToJsonString() ?? $$"""{"apiVersion":"v1","kind":"Status","status":"Failure","reason":"Unknown","code":{{status}}}""", Encoding.UTF8, "application/json") };
-    private sealed class FakeApi(Func<HttpRequestMessage, int, HttpResponseMessage> reply) : DelegatingHandler
+    internal static HttpResponseMessage Reply(int status, JsonObject? body = null) => new((HttpStatusCode)status) { Content = new StringContent(body?.ToJsonString() ?? $$"""{"apiVersion":"v1","kind":"Status","status":"Failure","reason":"Unknown","code":{{status}}}""", Encoding.UTF8, "application/json") };
+    internal sealed class FakeApi(Func<HttpRequestMessage, int, HttpResponseMessage> reply) : DelegatingHandler
     {
         internal List<string> Methods { get; } = []; internal List<string> Bodies { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

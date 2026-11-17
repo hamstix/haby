@@ -28,17 +28,18 @@ public sealed partial class DurableDeploymentPlanningTests
             var identity = new IdentityFixture();
             var mixedRecipients = initial && configured && !lost && !concurrent;
             var scenario = await InternalScenarioAsync(initialOnly: initial,
-                configureManifest: configured ? e =>
+                configureManifest: e =>
                 {
-                    ConfiguredDocuments(e, secondDocument: true);
+                    if (configured) ConfiguredDocuments(e, secondDocument: true);
+                    if (!initial) e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["overrides"] =
+                        System.Text.Json.Nodes.JsonNode.Parse("""{"resources":{"requests":{"memory":"64Mi"},"limits":{"memory":"256Mi"}}}"""u8);
                     if (mixedRecipients)
                     {
                         var workloads = e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!;
                         workloads["z-plain"] = workloads["main"]!.DeepClone();
                         workloads["z-plain"]!["properties"]!.AsObject().Remove("configuration");
                     }
-                }
-            : null,
+                }, resourcesJson: """{"requests":{"cpu":"250m","memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}""",
                 acceptGeneration: async (services, environment, reference) =>
                 {
                     DurableChangeSetCommit? accepted = null;
@@ -80,6 +81,7 @@ public sealed partial class DurableDeploymentPlanningTests
                         var plan = await client.CreatePlanAsync(new ChangeSetRequest { ChangeSetId = change.ChangeSetId });
                         diagnostic.At(SubmissionCheckpoint.PlanStatus);
                         Assert.Equal(PlanningStatus.Planned, plan.Status);
+                        Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new PlanRequest { PlanId = plan.Plan.PlanId })).Status);
                         diagnostic.At(SubmissionCheckpoint.Commit);
                         var commit = await client.CommitDesiredStateAsync(new() { ChangeSetId = change.ChangeSetId, PlanId = plan.Plan.PlanId });
                         diagnostic.At(SubmissionCheckpoint.CommitStatus);
@@ -240,6 +242,12 @@ public sealed partial class DurableDeploymentPlanningTests
                             release(verify.DisposeAsync);
                             diagnostic.At(SubmissionCheckpoint.IntentRead);
                             var intents = await verify.ActionIntents.AsNoTracking().Where(x => x.Generation == request.Generation).ToArrayAsync();
+                            foreach (var intent in intents.Where(x => x.ActionContract == InternalDeploymentAction.Create))
+                            {
+                                var requirements = DeploymentIntents.Decode(intent.Payload).Target.Resources!;
+                                Assert.Equal(initial ? "250m" : null, requirements.Requests!.Cpu);
+                                Assert.Equal(initial ? "128Mi" : "64Mi", requirements.Requests.Memory);
+                            }
                             diagnostic.At(SubmissionCheckpoint.IntentActors);
                             Assert.All(intents, x => Assert.Equal(OperatorCredential.Actor(created.Grant.Id), x.Actor));
                             diagnostic.At(SubmissionCheckpoint.AttemptRead);

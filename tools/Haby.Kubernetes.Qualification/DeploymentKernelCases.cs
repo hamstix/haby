@@ -27,15 +27,22 @@ internal static class DeploymentKernelCases
             var key = secrets.Add(File.ReadAllBytes(Path.Combine(directory, "admin.key")));
             var connection = new KubernetesConnection(binding, endpoint, File.ReadAllText(Path.Combine(directory, "ca.crt")), null, cert, key);
             DeploymentKernel Kernel(KubernetesConnection? c = null, params DelegatingHandler[] handlers) => new(binding, ct => KubernetesClientFactory.CreateFixture(c ?? connection, secrets, handlers, ct));
-            DeploymentIntent Intent(string objectName) => new(2, binding, "api", "main", "standard", 1, name, objectName,
+            DeploymentIntent Intent(string objectName) => new(3, binding, "api", "main", "standard", 1, name, objectName,
                 Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(),
                 new("app", "registry.k8s.io/pause:3.10", 1, "RollingUpdate", "25%", "25%", 0, 600,
-                    ImmutableSortedDictionary<string, string>.Empty.Add("pool.example/role", "api"), ["registry"]), null, null);
+                    ImmutableSortedDictionary<string, string>.Empty.Add("pool.example/role", "api"), ["registry"],
+                    Resources: new(new("0.250", "134217728"), new("1", "1Gi"))), null, null);
             async Task<V1Deployment> Read(DeploymentIntent i) => await admin.AppsV1.ReadNamespacedDeploymentAsync(i.Name, name, cancellationToken: token);
             async Task Mutate(DeploymentIntent i, string patch) => await admin.AppsV1.PatchNamespacedDeploymentAsync(new V1Patch(patch, V1Patch.PatchType.JsonPatch), i.Name, name, cancellationToken: token);
             var i = Intent("target");
             var created = await Kernel().ExecuteAsync(i, token);
             Check(created is { Outcome: KernelOutcome.Confirmed, WriteDispatches: 1, Receipt.Source: ConfirmationSource.Response }, "K01-create-mtls");
+            var resourceReadback = (await Read(i)).Spec.Template.Spec.Containers.Single(c => c.Name == "app").Resources;
+            if (!DeploymentResources.Equivalent("250m", resourceReadback.Requests["cpu"].ToString()) ||
+                !DeploymentResources.Equivalent("128Mi", resourceReadback.Requests["memory"].ToString()) ||
+                !DeploymentResources.Equivalent("1", resourceReadback.Limits["cpu"].ToString()) ||
+                !DeploymentResources.Equivalent("1Gi", resourceReadback.Limits["memory"].ToString()))
+                throw new InvalidOperationException("Exact resource readback failed.");
             var occupied = await Kernel().ExecuteAsync(i, token);
             Check(occupied is { Outcome: KernelOutcome.Conflict, WriteDispatches: 0 }, "K02-occupied-no-adoption");
             var foreign = i with { Owner = Guid.NewGuid() };
@@ -57,7 +64,7 @@ internal static class DeploymentKernelCases
                 LastConfirmed = i.Target,
                 TargetGeneration = 2,
                 Operation = Guid.NewGuid(),
-                Target = i.Target with { Image = "registry.k8s.io/pause:3.9", Replicas = 2, NodeSelector = ImmutableSortedDictionary<string, string>.Empty, ImagePullSecrets = [] }
+                Target = i.Target with { Image = "registry.k8s.io/pause:3.9", Replicas = 2, NodeSelector = ImmutableSortedDictionary<string, string>.Empty, ImagePullSecrets = [], Resources = null }
             };
             var updated = await Kernel().ExecuteAsync(update, token); var live = await Read(i);
             Console.WriteLine($"Kernel K04 result: outcome={updated.Outcome}; code={updated.Code}; dispatches={updated.WriteDispatches}; uid-preserved={live.Metadata.Uid == created.Receipt.Uid}; paused-preserved={live.Spec.Paused == true}; containers={live.Spec.Template.Spec.Containers.Count}; nodes={live.Spec.Template.Spec.NodeSelector?.Count ?? 0}; pulls={live.Spec.Template.Spec.ImagePullSecrets?.Count ?? 0}");
@@ -144,7 +151,17 @@ internal static class DeploymentKernelCases
             Check(uidRaced is { Outcome: KernelOutcome.Conflict, WriteDispatches: 1 } && uidRace.Dispatches == 1 &&
                 afterUidRace.Metadata.Uid != created.Receipt.Uid && afterUidRace.Spec.Replicas == next.Target.Replicas &&
                 (await Kernel().ObserveAsync(next, token)) is { Outcome: KernelOutcome.NotConfirmed, WriteDispatches: 0 }, "K24-real-UID-race-replacement-preserved");
-            Console.WriteLine("Kernel cases: 24; stateless API object evidence only; no durable recovery or readiness.");
+            var onlyLimit = Intent("limit-only");
+            onlyLimit = onlyLimit with { Target = onlyLimit.Target with { Resources = new(null, new("1", "1Gi")) } };
+            var limitResult = await Kernel().ExecuteAsync(onlyLimit, token);
+            var limitReadback = (await Read(onlyLimit)).Spec.Template.Spec.Containers.Single(c => c.Name == "app").Resources;
+            Check(limitResult is { Outcome: KernelOutcome.Confirmed, WriteDispatches: 1 } &&
+                limitResult.Receipt!.Projection.Resources!.Requests is null &&
+                DeploymentResources.Equivalent("1", limitReadback.Requests["cpu"].ToString()) &&
+                DeploymentResources.Equivalent("1Gi", limitReadback.Requests["memory"].ToString()) &&
+                DeploymentResources.Equivalent("1", limitReadback.Limits["cpu"].ToString()) &&
+                DeploymentResources.Equivalent("1Gi", limitReadback.Limits["memory"].ToString()), "K25-limit-only-defaulted-requests");
+            Console.WriteLine("Kernel cases: 25; stateless API object evidence only; no durable recovery or readiness.");
         }
         finally
         {
