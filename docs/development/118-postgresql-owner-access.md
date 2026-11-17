@@ -40,7 +40,7 @@ refuses multi-node graphs. No success placeholder is registered.
 
 ## External transaction and verification
 
-Before dispatch the target checks PostgreSQL 17, the exact database name/OID,
+Before dispatch the target checks required owner-policy capabilities, the exact database name/OID,
 non-template status, expected administrative SUPERUSER owner, pg_database_owner
 public-schema ownership and revoked PUBLIC database/public privileges. It checks
 the created role name/OID, LOGIN and all negative cluster flags, no memberships,

@@ -21,7 +21,7 @@ public interface IPostgreSqlAccessFaultHooks
 }
 public sealed class NullPostgreSqlAccessFaultHooks : IPostgreSqlAccessFaultHooks;
 
-/// <summary>PostgreSQL 17 initial owner/access policy. Never adopts or repairs an existing schema.</summary>
+/// <summary>Initial owner/access policy over confirmed PostgreSQL capabilities. Never adopts or repairs an existing schema.</summary>
 public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTarget connections, ISecretStore secrets,
     IProviderResourceReservations reservations, IPostgreSqlAccessFaultHooks hooks)
 {
@@ -159,7 +159,7 @@ public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTa
     {
         if (!await PostgreSqlApplicationLoginTarget.DatabaseEvidence(connection, transaction, input.Login, token)) return false;
         await using var command = new NpgsqlCommand("""
-            SELECT current_setting('server_version_num')::int BETWEEN 170000 AND 179999
+            SELECT pg_catalog.to_regrole('pg_database_owner') IS NOT NULL
               AND ($3 = 'public' OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $3))
               AND ($3 <> 'public' OR NOT EXISTS (
                 SELECT 1 FROM pg_catalog.pg_namespace n,
@@ -195,9 +195,9 @@ public sealed class PostgreSqlApplicationAccessTarget(PostgreSqlDatabaseCreateTa
               AND current_user = $6 AND (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user)
               AND r.rolcanlogin AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
               AND r.rolconfig IS NULL AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member = r.oid)
-              AND n.oid = $7 AND (($3 = 'public' AND n.nspowner = 'pg_database_owner'::pg_catalog.regrole)
+              AND n.oid = $7 AND (($3 = 'public' AND n.nspowner = pg_catalog.to_regrole('pg_database_owner'))
                 OR ($3 <> 'public' AND n.nspowner = r.oid))
-              AND p.oid = $8 AND p.nspowner = 'pg_database_owner'::pg_catalog.regrole
+              AND p.oid = $8 AND p.nspowner = pg_catalog.to_regrole('pg_database_owner')
               AND ($3 <> 'public' OR NOT EXISTS (
                 SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.nspacl, pg_catalog.acldefault('n', p.nspowner))) a
                 WHERE a.grantee <> p.nspowner OR a.grantor <> p.nspowner))

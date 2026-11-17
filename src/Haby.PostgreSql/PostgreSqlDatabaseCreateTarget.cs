@@ -86,7 +86,7 @@ public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore r
             await target.OpenAsync(cancellationToken);
             await using var schema = new NpgsqlCommand("""
                 SELECT n.oid FROM pg_catalog.pg_namespace n CROSS JOIN pg_catalog.pg_database d
-                WHERE n.nspname = 'public' AND n.nspowner = 'pg_database_owner'::pg_catalog.regrole
+                WHERE n.nspname = 'public' AND n.nspowner = pg_catalog.to_regrole('pg_database_owner')
                   AND d.datname = pg_catalog.current_database() AND d.oid = $1
                 """, target);
             schema.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Oid, oid);

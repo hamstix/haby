@@ -19,6 +19,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
     [InlineData("database-oid")]
     [InlineData("role-oid")]
     [InlineData("schema-oid")]
+    [InlineData("role-flags")]
     public async Task Explicit_public_refuses_inexact_identity_owner_or_acl_without_mutation(string mode)
     {
         var scenario = await Prepare(full: true, configureManifest: envelope =>
@@ -31,6 +32,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
             "foreign-owner" => "ALTER SCHEMA public OWNER TO postgres",
             "public-acl" => "GRANT USAGE ON SCHEMA public TO PUBLIC",
             "foreign-acl" => "GRANT USAGE ON SCHEMA public TO pg_read_all_data",
+            "role-flags" => $"ALTER ROLE \"{scenario.Role}\" CREATEDB",
             _ => "SELECT 1"
         };
         await Sql(AdministrativeTarget(scenario), sql);

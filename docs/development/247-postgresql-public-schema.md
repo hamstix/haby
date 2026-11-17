@@ -36,6 +36,20 @@ restart/repeat cannot regenerate credentials or redispatch uncertain writes.
 Successful nodes and immutable outputs are reused without touching existing data.
 No role/access recovery, deletion or retention policy changes are included.
 
+## Capability boundary and tested venue
+
+Provisioning admission validates required capabilities and exact current state;
+it does not impose a PostgreSQL-17-only version allowlist. PostgreSQL 16 is not
+rejected merely by version. The existing pinned PostgreSQL 17 integration venue
+is unchanged; this slice neither certifies every version nor promises PostgreSQL
+12+ compatibility. Standard public ownership changed in PostgreSQL 15, and this
+policy still requires `pg_database_owner` and its expected schema ownership.
+Nullable role lookups refuse a missing role safely; incompatible catalog/privilege
+semantics retain existing bounded refusal/uncertainty outcomes. This does not alter
+Haby catalog-server/dependency guarantees. No multi-version matrix or additional
+compatibility rehearsal is introduced. User-reported trials are not independently
+verified whole-path evidence and do not authorize access to an installation.
+
 ## Development catalog boundary
 
 The adapter-owned database output is now `postgresql.database-output/v2` with

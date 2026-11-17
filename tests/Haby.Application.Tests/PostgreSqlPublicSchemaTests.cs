@@ -14,4 +14,17 @@ public sealed class PostgreSqlPublicSchemaTests
         Assert.NotNull(properties);
         Assert.Equal("public", properties.Schema);
     }
+    [Theory]
+    [InlineData("PostgreSqlApplicationLoginTarget.cs")]
+    [InlineData("PostgreSqlApplicationAccessTarget.cs")]
+    [InlineData("PostgreSqlDatabaseCreateTarget.cs")]
+    [InlineData("PostgreSqlDatabaseRestrictTarget.cs")]
+    public void Provisioning_admission_cannot_use_an_exclusive_version_allowlist_or_throwing_optional_role_lookup(string file)
+    {
+        // This source boundary protects the accepted admission policy. Real fixture
+        // tests separately prove compatible state and refusal of foreign owner/ACLs.
+        var source = File.ReadAllText(Path.Combine(Haby.Tests.TestPaths.SourceRoot, "src", "Haby.PostgreSql", file));
+        Assert.DoesNotContain("server_version_num", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("'pg_database_owner'::pg_catalog.regrole", source, StringComparison.Ordinal);
+    }
 }
