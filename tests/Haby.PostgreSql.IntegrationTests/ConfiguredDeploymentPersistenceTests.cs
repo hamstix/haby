@@ -66,10 +66,10 @@ public sealed partial class DurableDeploymentPlanningTests
         var scenario = await InternalScenarioAsync(initialOnly: initial, configureManifest: e =>
         {
             ConfiguredDocuments(e, secondDocument: true);
-            PortsAndProbes(e);
+            if (!initial) PortsAndProbes(e);
             if (!initial) e["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["overrides"] =
                 System.Text.Json.Nodes.JsonNode.Parse("""{"resources":{"requests":{"memory":"64Mi"},"limits":{"memory":"256Mi"}}}"""u8);
-        }, resourcesJson: """{"requests":{"cpu":"250m","memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}""");
+        }, resourcesJson: """{"requests":{"cpu":"250m","memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}""", configurePlacement: ApplyPortsAndProbes);
         var identity = new IdentityFixture(); var deployment = new ConfiguredSubmissionFixture(); DurableOperationKey key; string payload;
         Guid binding;
         await using (var services = InternalServices(scenario.Connection, scenario.Time))

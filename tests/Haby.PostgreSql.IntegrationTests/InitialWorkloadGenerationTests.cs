@@ -98,7 +98,7 @@ public sealed partial class DurableDeploymentPlanningTests
             var change = (await planner.CreateChangeSetAsync(environment, revision.ApplicationRecordId, revision, new DeploymentPrecondition.ExpectedAbsence(), "freshness", default)).ChangeSet!;
             var stale = (await planner.CreateInternalPlanAsync(change.Id, "freshness", default, handlers)).Plan!;
             var codec = new KubernetesPlacementCodec();
-            var later = codec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"later","revision":1},"spec":{"namespace":"later"}}"""u8.ToArray());
+            var later = codec.Decode("""{"apiVersion":"haby.dev/v1alpha1","kind":"KubernetesPlacement","metadata":{"name":"later","revision":1},"spec":{"namespace":"later","ports":{"http":{"containerPort":9090}},"probes":{"readiness":{"tcpSocket":{"port":"http"}}}}}"""u8.ToArray());
             var alias = ProviderAlias.Create("kubernetes.primary");
             var reference = new PlacementRevisionKey(environment, alias, later.Name, later.Revision);
             await new PostgreSqlPlacementRevisionStore(factory, codec).CompareAndCreateAsync(reference, later, new("tester", DateTimeOffset.UtcNow), default);
@@ -109,7 +109,7 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.IsType<DurableCommitResult.PlanInputUnavailable>(await committer.CommitInternalAsync(change.Id, stale.Id, "stale", default, handlers));
             var fresh = (await planner.CreateInternalPlanAsync(change.Id, "freshness", default, handlers)).Plan!;
             return Assert.IsType<DurableCommitResult.Committed>(await committer.CommitInternalAsync(change.Id, fresh.Id, "freshness", default, handlers)).Commit;
-        });
+        }, configurePlacement: ApplyPortsAndProbes);
         await using var services = InternalServices(scenario.Connection, scenario.Time);
         var factory = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         var codec = new KubernetesPlacementCodec();
@@ -120,7 +120,13 @@ public sealed partial class DurableDeploymentPlanningTests
             new PlacementSelectionPrecondition.ExpectedToken(current.Token), new("tester", DateTimeOffset.UtcNow, null), default);
         var actions = Actions(services, new InternalDeploymentAction(services.GetRequiredService<ISecretStore>()));
         var key = await actions.AcceptAsync(scenario.Commit, InitialSubject, InternalDeploymentAction.Create, "frozen", default);
-        Assert.Equal("later", DeploymentIntents.Decode((await actions.HistoryAsync(key, default))!.Intent.Payload).Namespace);
+        var frozen = DeploymentIntents.Decode((await actions.HistoryAsync(key, default))!.Intent.Payload);
+        Assert.Equal("later", frozen.Namespace);
+        Assert.Equal(9090, frozen.Target.Ports["http"].Number);
+        Assert.Single(frozen.Target.Ports);
+        Assert.NotNull(frozen.Target.Probes.Readiness);
+        Assert.Null(frozen.Target.Probes.Startup);
+        Assert.Null(frozen.Target.Probes.Liveness);
         Guid? placement;
         await using (var read = await factory.CreateDbContextAsync())
         {

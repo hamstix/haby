@@ -36,6 +36,7 @@ public sealed class PreparationTests
         Assert.Equal("orders-api-main", i.Name); Assert.Equal("app", i.Target.Container); Assert.Equal("test", i.Namespace);
         Assert.Equal(1, i.Target.Replicas); Assert.Equal(600, i.Target.ProgressDeadlineSeconds); Assert.Equal("25%", i.Target.MaxSurge);
         Assert.Empty(i.Target.NodeSelector); Assert.Empty(i.Target.ImagePullSecrets);
+        Assert.Empty(i.Target.Ports); Assert.Equal(new Probes(null, null, null), i.Target.Probes);
     }
     [Theory]
     [InlineData("\"env\":{\"MODE\":{\"value\":\"requested\"}}")]

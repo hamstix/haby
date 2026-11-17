@@ -35,18 +35,21 @@ public sealed record OperationalSettings(int? Replicas, RolloutStrategy? Strateg
 public sealed record KubernetesWorkload(WorkloadImage Image, string ContainerName, string? NameOverride,
     ImmutableDictionary<string, ContainerPort> Ports, ImmutableDictionary<string, EnvironmentValue> Environment,
     Probes Probes, ImmutableDictionary<string, ExistingVolume> Volumes, ImmutableArray<VolumeMount> Mounts,
-    ImmutableArray<Route> Routes, ImmutableArray<ManifestLocalId> Documents, OperationalSettings Overrides);
+    ImmutableArray<Route> Routes, ImmutableArray<ManifestLocalId> Documents, OperationalSettings Overrides, bool HasPorts = true, bool HasProbes = true);
 public sealed record PlacementReference(ManifestLocalId Name, int Revision);
 public sealed class KubernetesPlacement
 {
     internal KubernetesPlacement(PlacementReference reference, string @namespace, string? registry,
         string? repositoryPrefix, ImmutableDictionary<string, string> nodeSelector,
-        ImmutableArray<string> imagePullSecrets, OperationalSettings settings, RuntimeConfiguration? runtimeConfiguration = null)
+        ImmutableArray<string> imagePullSecrets, OperationalSettings settings, RuntimeConfiguration? runtimeConfiguration = null,
+        ImmutableDictionary<string, ContainerPort>? ports = null, Probes? probes = null)
     {
         Reference = reference; Namespace = @namespace; Registry = registry; RepositoryPrefix = repositoryPrefix;
         NodeSelector = nodeSelector; ImagePullSecrets = imagePullSecrets; Settings = settings;
-        RuntimeConfiguration = runtimeConfiguration;
+        RuntimeConfiguration = runtimeConfiguration; Ports = ports; Probes = probes;
     }
+    public ImmutableDictionary<string, ContainerPort>? Ports { get; }
+    public Probes? Probes { get; }
     public PlacementReference Reference { get; }
     public string Namespace { get; }
     public string? Registry { get; }

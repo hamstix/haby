@@ -96,6 +96,39 @@
           },
           "maxProperties": 64
         },
+        "ports": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "containerPort": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "protocol": {
+                "enum": [
+                  "TCP",
+                  "UDP"
+                ]
+              }
+            },
+            "required": [
+              "containerPort"
+            ],
+            "additionalProperties": false
+          },
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 15,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "maxProperties": 32
+        },
+        "probes": {
+          "$ref": "#/$defs/probes"
+        },
         "imagePullSecrets": {
           "type": "array",
           "items": {

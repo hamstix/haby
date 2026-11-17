@@ -95,4 +95,49 @@ public sealed class PlacementRevisionTests
         var error = Assert.Throws<InvalidDataException>(() => codec.Read(contract, version, payload));
         Assert.Equal("Stored Placement revision is unavailable.", error.Message);
     }
+
+    [Theory]
+    [InlineData("ports")]
+    [InlineData("probes")]
+    public void Group_presence_survives_portable_canonical_read_export_and_reimport(string group)
+    {
+        var absent = codec.Decode(Encoding.UTF8.GetBytes(PlacementSamples.Minimal));
+        var empty = codec.Decode(Encoding.UTF8.GetBytes(PlacementSamples.Minimal.Replace("\"namespace\":", "\"" + group + "\":{},\"namespace\":")));
+        Assert.NotEqual(absent, empty);
+        Assert.Equal(2, new HashSet<PlacementDeclaration> { absent, empty }.Count);
+        foreach (var declaration in new[] { absent, empty })
+        {
+            var read = codec.Read(declaration.Contract, declaration.FormatVersion, declaration.Payload);
+            Assert.Equal(declaration, read); Assert.Equal(declaration.GetHashCode(), read.GetHashCode());
+            Assert.Equal(declaration, codec.Decode(Encoding.UTF8.GetBytes(read.Payload)));
+            var typed = KubernetesPlacementCodec.ToTyped(read);
+            Assert.Equal(declaration == empty, group == "ports" ? typed.Ports is not null : typed.Probes is not null);
+        }
+    }
+
+    [Theory]
+    [InlineData("\"ports\":null")]
+    [InlineData("\"probes\":null")]
+    [InlineData("\"ports\":{\"http\":{\"containerPort\":0}}")]
+    [InlineData("\"ports\":{\"http\":{\"containerPort\":8080,\"unknown\":true}}")]
+    [InlineData("\"probes\":{\"unknown\":{}}")]
+    [InlineData("\"probes\":{\"startup\":{\"tcpSocket\":{\"port\":\"http\"},\"successThreshold\":2}}")]
+    [InlineData("\"probes\":{\"readiness\":{\"httpGet\":{\"port\":\"http\",\"path\":\"/\"},\"tcpSocket\":{\"port\":\"http\"}}}")]
+    public void Invalid_group_shapes_refuse_import_and_strict_stored_read(string group)
+    {
+        var source = PlacementSamples.Minimal.Replace("\"namespace\":", group + ",\"namespace\":");
+        Assert.Throws<PlacementDeclarationException>(() => codec.Decode(Encoding.UTF8.GetBytes(source)));
+        Assert.Throws<InvalidDataException>(() => codec.Read(KubernetesPlacementCodec.Contract, KubernetesPlacementCodec.FormatVersion, source));
+    }
+
+    [Fact]
+    public void Reordering_port_maps_preserves_canonical_declaration_equality_and_hash()
+    {
+        const string first = """{"ports":{"http":{"containerPort":8080},"metrics":{"containerPort":9090}},"probes":{"readiness":{"tcpSocket":{"port":"http"}}},"namespace":"apps"}""";
+        const string second = """{"namespace":"apps","probes":{"readiness":{"tcpSocket":{"port":"http"}}},"ports":{"metrics":{"containerPort":9090},"http":{"containerPort":8080}}}""";
+        var a = codec.Decode(Encoding.UTF8.GetBytes(PlacementSamples.Minimal.Replace("{\"namespace\":\"apps\"}", first)));
+        var b = codec.Decode(Encoding.UTF8.GetBytes(PlacementSamples.Minimal.Replace("{\"namespace\":\"apps\"}", second)));
+        Assert.Equal(a, b); Assert.Equal(a.GetHashCode(), b.GetHashCode());
+    }
+
 }

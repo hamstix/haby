@@ -1,9 +1,9 @@
 # Kubernetes Workload and Placement v1alpha1
 
-Issue #177, ADR-046/047/049/054/055. This matrix precedes implementation.
-Contracts and pure resolution do not enable durable Workload execution. Every
-Kubernetes effect, Placement selection administration, publication, readiness, retirement
-and corrective generation remains a later slice.
+Issue #177, ADR-046/047/049/054/055, extended by #248. The original pure-contract
+scope is retained in historical sections below. The bounded initial Deployment
+executor supports effective ports/probes; durable UPDATE, companion objects and
+complete retirement/corrective lifecycle remain separate capabilities.
 
 ## Closed field matrix
 
@@ -22,23 +22,23 @@ Strings are ordinal, without trimming, expansion, templating or conversion.
 | image complete | reference (1..512) | Exclusive with name/tag/tagFrom; explicit registry/path and tag or sha256 digest required. |
 | containerName | DNS label, 1..63 | Independent of image and object name; future managed rename refuses. |
 | nameOverride | DNS subdomain, 1..253 | Replaces applicationId-componentId-workloadId completely; no truncation/hash/random fallback. Validate every selected kind separately. |
-| ports | map, 0..32 named entries | Names 1..15 lower-case labels starting with a letter, without adjacent hyphens; each port has containerPort integer 1..65535 and optional protocol TCP/UDP (default TCP). |
+| Workload properties.ports / Placement spec.ports | map, 0..32 named entries | Names 1..15 lower-case labels starting with a letter, without adjacent hyphens; each port has containerPort integer 1..65535 and optional protocol TCP/UDP (default TCP). |
 | env | map, 0..128 variable names | Name [A-Za-z_][A-Za-z0-9_]*, max 128. Each value is exactly one of value string (0..4096), configMapKey or secretKey. |
 | key reference | name, key, optional | Existing DNS-subdomain name; key 1..253 [A-Za-z0-9._-], excluding dot, dot-dot and every leading double dot; optional boolean defaults false. No ownership or envFrom. |
-| probes | startup, liveness, readiness | Optional individual probe objects. Absent probes stay absent. |
+| Workload properties.probes / Placement spec.probes | startup, liveness, readiness | Independent whole-group inheritance/replacement under #248; explicit `{}` disables. Missing slots in an explicit group stay absent. |
 | probe | httpGet or tcpSocket; initialDelaySeconds, periodSeconds, timeoutSeconds, successThreshold, failureThreshold | Exactly one action. Delay 0..3600 default 0; period 1..3600 default 10; timeout 1..3600 default 1; success 1..100 default 1; failure 1..100 default 3. Startup/liveness success must be 1. |
-| httpGet | port, path, scheme | Named declared TCP port; absolute path 1..2048; scheme HTTP/HTTPS default HTTP. No arbitrary headers. |
-| tcpSocket | port | Named declared TCP port. |
+| httpGet | port, path, scheme | Named effective TCP port; absolute path 1..2048; scheme HTTP/HTTPS default HTTP. No arbitrary headers. |
+| tcpSocket | port | Named effective TCP port. |
 | volumes | map, 0..32 DNS-label entries | Each exactly one of configMap, secret, persistentVolumeClaim. |
 | ConfigMap/Secret volume | name, optional | Existing DNS-subdomain name; optional defaults false. Entire referenced object mounted; no ownership. |
 | PVC volume | name, readOnly | Existing claim; readOnly defaults false. |
 | mounts | array, 0..64 | volume, mountPath required; readOnly defaults true for ConfigMap/Secret, false for PVC; optional subPath. Unique mountPath. |
 | mount paths | mountPath 1..1024; subPath 1..1024 | Absolute normalized Linux mountPath other than /; relative subPath; no empty/dot/dot-dot segments, backslash or NUL. ConfigMap/Secret cannot be writable; readOnly PVC cannot be mounted writable. Haby runtime-token mounts are not user declarations. |
-| routes | array, 0..32 | Unique (hostLabel,path); hostLabel DNS label; path absolute 1..2048, forbidding //, /./, /../, %2f/%2F and trailing /. or /..; port references declared TCP port; pathType Exact/Prefix defaults Prefix. |
+| routes | array, 0..32 | Unique (hostLabel,path); hostLabel DNS label; path absolute 1..2048, forbidding //, /./, /../, %2f/%2F and trailing /. or /..; port references effective TCP port; pathType Exact/Prefix defaults Prefix. |
 | configuration | documents | Required nonempty unique array 1..128 Component-local IDs. No body, bearer credential, merge order or implicit all-documents. Absent block means no Haby retrieval/binding/token projection. |
 | overrides | replicas, strategy, minReadySeconds, rolloutSeconds, resources, service, headlessService, ingress | Only these operational fields; no Provider, namespace, image, env or nodeSelector override. |
 | Placement envelope | apiVersion, kind, metadata, spec | apiVersion haby.dev/v1alpha1, kind KubernetesPlacement; metadata name local ID and revision positive integer <=2147483647. Portable content carries no internal UUID. |
-| Placement spec | namespace, registry, repositoryPrefix, nodeSelector, imagePullSecrets, replicas, strategy, minReadySeconds, rolloutSeconds, resources, service, headlessService, ingress | namespace required DNS label; no default namespace. Exact Environment/Provider binding supplied separately to pure resolution. |
+| Placement spec | namespace, registry, repositoryPrefix, nodeSelector, imagePullSecrets, ports, probes, replicas, strategy, minReadySeconds, rolloutSeconds, resources, service, headlessService, ingress | namespace required DNS label; no default namespace. Exact Environment/Provider binding supplied separately to pure resolution. |
 | Placement runtimeConfiguration | endpoint, tls, client | Optional closed block; required for configured executable preparation. Endpoint/trust/settings freeze from the exact revision. See the [complete #223 field/range and bootstrap contract](../development/223-configured-deployment-bootstrap.md). No Workload override, Host fallback or credentials. |
 | registry | address string 1..253 | Required for composed image only. Unambiguous lower-case dotted hostname/IP, localhost, or single-label host with explicit decimal port 1..65535. No URL scheme, path, credentials or implicit Docker Hub. |
 | repositoryPrefix | string 1..128 | Lower-case repository path, optional; no leading/trailing slash. |
@@ -52,7 +52,7 @@ Strings are ordinal, without trimming, expansion, templating or conversion.
 | resources | requests, limits | Optional whole objects; each optional cpu and memory strings. At least one field in each present object; requests <= limits for each shared dimension. |
 | cpu | decimal cores or integer millicores | Positive <=10000 cores; at most three fractional core digits; no exponent or rounding. |
 | memory | positive integer with optional Ki/Mi/Gi/Ti suffix | <= 1 PiB exact bytes; no decimal/double rounding. |
-| service/headlessService | enabled boolean | Default disabled independently; if enabled use all declared named ports, service port equals containerPort. Ordinary Service is ClusterIP. Both may coexist. |
+| service/headlessService | enabled boolean | Default disabled independently; if enabled use all effective named ports, service port equals containerPort. Ordinary Service is ClusterIP. Both may coexist. |
 | ingress | enabled, className, domain, tlsSecret | enabled required; disabled forbids other fields. Enabled requires className DNS-subdomain and domain DNS hostname; optional existing TLS Secret. Whole policy replacement. Requires ordinary Service and nonempty valid routes; host = hostLabel.domain. No wildcard/template/annotations/shared routing. |
 
 ## Exact selection, identities and results
@@ -175,3 +175,28 @@ These lexical restrictions follow upstream [registry recognition](https://github
 [port/selector-key validation](https://github.com/kubernetes/apimachinery/blob/master/pkg/util/validation/validation.go)
 and [Ingress path validation](https://github.com/kubernetes/kubernetes/blob/master/pkg/apis/networking/validation/validation.go).
 They are pure contract checks, not real API or registry-access evidence.
+
+
+## Accepted extension: Placement port and probe defaults (#248)
+
+Accepted 2026-11-17. The original Workload-owned interface above remains the
+historical first-slice scope. KubernetesPlacement may now declare optional `ports`
+and `probes` using the same closed Workload grammar, bounds and defaults.
+Resolve the two groups independently after exact scoped Placement selection:
+absent Workload property inherits the selected Placement group; present property
+replaces the whole group, including explicit `{}` to disable it. Explicit null
+is invalid. Both absent means an empty effective group. There is no key, slot or
+deep merge, automatic listener configuration or inferred health probe.
+
+Preserve authored absence versus empty through normalization, equality/hash,
+portable canonical export and stored snapshots. Import checks intrinsic shape,
+name/range/action rules. Check probe and route references against effective ports
+in pure planning: every reference must name an existing TCP port. Portable
+Placement probes may refer to ports supplied by a Workload, and Workload probes
+may refer to inherited ports. No external effect may precede that validation.
+
+Plan pins the exact selected revision and effective groups; Commit, restart,
+materialization, intent, receipt and readiness use those frozen inputs. Assignment
+edits alone change no accepted generation. Future explicit Plans select new
+defaults. Durable UPDATE and companion-object execution remain unsupported.
+See the [operator guide](../development/248-placement-ports-probes-defaults.md).
