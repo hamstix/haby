@@ -90,11 +90,11 @@ internal static class ConfiguredDeploymentCases
                     component["documents"]!["other"] = component["documents"]!["z-last"]!.DeepClone(); component["documents"]!.AsObject().Remove("z-last");
                     var properties = component["workloads"]!["main"]!["properties"]!;
                     properties["configuration"]!["documents"]![1] = "other";
-                    DurableDeploymentPlanningTests.PortsAndProbes(envelope);
                     properties["image"]!["reference"] = image; properties["containerName"] = "configured-consumer";
                     properties["overrides"] = System.Text.Json.Nodes.JsonNode.Parse("""{"minReadySeconds":1,"resources":{"requests":{"memory":"128Mi"},"limits":{"cpu":"1","memory":"512Mi"}}}"""u8);
                     configuredEnvelope = envelope.DeepClone();
-                }, runtimeConfigurationJson: ConfigurationJson(delivery), acceptGeneration: async (composition, environment, reference) =>
+                }, configurePlacement: DurableDeploymentPlanningTests.ApplyPortsAndProbes,
+                runtimeConfigurationJson: ConfigurationJson(delivery), acceptGeneration: async (composition, environment, reference) =>
                 {
                     var factory = composition.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
                     string connection, key;
@@ -338,9 +338,22 @@ internal static class ConfiguredDeploymentCases
                     Check((await completed.ApplicationDeployments.AsNoTracking().SingleAsync(token)).AppliedGeneration == source.Generation &&
                         proof.FreshReady.Members.Length == 1 && proof.Publications.Length == 2, "A01-native-wait-exact-retirement-proof-and-Applied");
                 }
-                var peer = await DurableDeploymentPlanningTests.AcceptBatchPeerAsync(services, scenario, configuredEnvelope);
+                var disabledEnvelope = configuredEnvelope.DeepClone();
+                var disabledProperties = disabledEnvelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!;
+                disabledProperties["ports"] = new System.Text.Json.Nodes.JsonObject();
+                disabledProperties["probes"] = new System.Text.Json.Nodes.JsonObject();
+                var peer = await DurableDeploymentPlanningTests.AcceptBatchPeerAsync(services, scenario, disabledEnvelope);
                 var submittedPeer = await client.SubmitGenerationAsync(new GenerationRequest { DeploymentId = peer.DeploymentId.ToString(), Generation = peer.Generation.Value }, cancellationToken: token);
-                Check(submittedPeer.Outcome == "submitted" && deploymentWrites == 2, "B01-second-exact-configured-generation-submitted");
+                DeploymentIntent disabledIntent;
+                await using (var read = await contexts.CreateDbContextAsync(token))
+                    disabledIntent = DeploymentIntents.Decode((await read.ActionIntents.AsNoTracking().SingleAsync(x =>
+                        x.DeploymentId == Guid.Parse(peer.DeploymentId.ToString()) && x.ActionContract == InternalDeploymentAction.Create, token)).Payload);
+                var disabledMain = (await admin.AppsV1.ReadNamespacedDeploymentAsync(disabledIntent.Name, ns, cancellationToken: token))
+                    .Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer");
+                Check(submittedPeer.Outcome == "submitted" && deploymentWrites == 2 && disabledIntent.Target.Ports.Count == 0 &&
+                    disabledMain.Ports is null or { Count: 0 } && disabledMain.StartupProbe is null &&
+                    disabledMain.LivenessProbe is null && disabledMain.ReadinessProbe is null,
+                    "B01-second-exact-configured-generation-submitted");
                 expectedDeploymentWrites = 2;
                 var path = Path.Combine(directory, "batch-members.json");
                 async Task WriteBatch(params BatchQualificationMember[] members) => await File.WriteAllTextAsync(path,
@@ -415,7 +428,9 @@ internal static class ConfiguredDeploymentCases
             await WithHost(async () =>
             {
                 var blockedEnvelope = configuredEnvelope.DeepClone();
+                DurableDeploymentPlanningTests.PortsAndProbes(blockedEnvelope);
                 blockedEnvelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["probes"]!["readiness"]!["httpGet"]!["path"] = "/unready";
+                blockedEnvelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["ports"]!.AsObject().Remove("dns");
                 var blocked = await DurableDeploymentPlanningTests.AcceptBatchPeerAsync(services, scenario, blockedEnvelope);
                 using var channel = GrpcChannel.ForAddress(LocalOperatorEndpoint(activeHost!.Urls.Single()), new GrpcChannelOptions
                 { HttpHandler = new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator } });
@@ -444,6 +459,8 @@ internal static class ConfiguredDeploymentCases
                 await using var finalRead = await contexts.CreateDbContextAsync(token);
                 Check(!waited.CurrentReady && !waited.CurrentApplied && waited.Members.Single().Outcome == "Pending" &&
                     pod.Spec.Containers.Single(c => c.Name == "configured-consumer").ReadinessProbe.HttpGet.Path == "/unready" &&
+                    pod.Spec.Containers.Single(c => c.Name == "configured-consumer").Ports.Count == 1 &&
+                    intent.Target.Ports.Count == 1 && intent.Target.Probes.Readiness!.Path == "/unready" &&
                     (await finalRead.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(blocked.DeploymentId.ToString()), token)).AppliedGeneration is null &&
                     deploymentWrites == 3, "R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied");
             });

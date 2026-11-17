@@ -503,4 +503,23 @@ public sealed class KubernetesPlanningTests
         Assert.Throws<WorkloadContractException>(() => Resolve(envelope, Inputs(placement)));
     }
 
+
+    [Theory]
+    [InlineData("ports")]
+    [InlineData("probes")]
+    public void Authored_absence_and_empty_survive_normalized_snapshot_equality_hash_and_roundtrip(string group)
+    {
+        var absent = Parse(Envelope());
+        var envelope = Envelope(); Workload(envelope)["properties"]![group] = new JsonObject();
+        var empty = Parse(envelope);
+        Assert.NotEqual(absent, empty);
+        Assert.Equal(2, new HashSet<NormalizedApplicationManifest> { absent, empty }.Count);
+        var absentWorkload = KubernetesContract.Decode(absent.Spec.Components[Id("api")].Workloads[Id("main")]);
+        var emptyWorkload = KubernetesContract.Decode(empty.Spec.Components[Id("api")].Workloads[Id("main")]);
+        Assert.False(group == "ports" ? absentWorkload.HasPorts : absentWorkload.HasProbes);
+        Assert.True(group == "ports" ? emptyWorkload.HasPorts : emptyWorkload.HasProbes);
+        Assert.False(absent.Spec.Components[Id("api")].Workloads[Id("main")].Properties.Members.ContainsKey(group));
+        Assert.True(empty.Spec.Components[Id("api")].Workloads[Id("main")].Properties.Members.ContainsKey(group));
+    }
+
 }
