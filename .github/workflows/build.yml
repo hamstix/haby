@@ -15,34 +15,49 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.routing.outputs.full }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify fail-closed CI routing and documentation controls
+        run: node --test ./scripts/test-ci-change-routing.mjs
+
+      - name: Classify complete change and validate documentation
+        id: routing
+        run: node ./scripts/ci-change-routing.mjs
 
       - name: Set up .NET SDK
+        if: steps.routing.outputs.full == 'true'
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
       - name: Restore
+        if: steps.routing.outputs.full == 'true'
         run: dotnet restore ./HamstixHaby.slnx --artifacts-path ./.artifacts
 
       - name: Build
+        if: steps.routing.outputs.full == 'true'
         run: dotnet build ./HamstixHaby.slnx --no-restore --artifacts-path ./.artifacts
 
       - name: Test
+        if: steps.routing.outputs.full == 'true'
         run: dotnet test ./HamstixHaby.slnx --no-build --artifacts-path ./.artifacts --logger trx --results-directory ./.artifacts/fast/private
 
       - name: Verify fast case and parameter gate inventory
-        if: always()
+        if: always() && steps.routing.outputs.full == 'true'
         shell: pwsh
         run: |
           $trx = @(Get-ChildItem ./.artifacts/fast/private -Filter *.trx -File).FullName
           ./scripts/export-test-gate.ps1 -TrxPath $trx -OutputDirectory ./.artifacts/fast/safe -Gate validate -Suite fast
 
       - name: Publish allowlisted fast inventory
-        if: always()
+        if: always() && steps.routing.outputs.full == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fast-inventory-${{ github.sha }}-${{ github.run_attempt }}
@@ -56,14 +71,17 @@ jobs:
           retention-days: 14
 
       - name: Verify PostgreSQL timing artifact safety and failure propagation
+        if: steps.routing.outputs.full == 'true'
         shell: pwsh
         run: ./scripts/test-postgresql-timing-export.ps1
 
       - name: Verify bounded failure evidence and adversarial publication controls
+        if: steps.routing.outputs.full == 'true'
         shell: pwsh
         run: ./scripts/test-postgresql-failure-evidence.ps1
 
       - name: Verify fixed consumer image identity and publication controls
+        if: steps.routing.outputs.full == 'true'
         shell: pwsh
         run: |
           ./scripts/test-runtime-consumer-image.ps1
@@ -71,48 +89,51 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Registry adapter controls failed.' }
 
       - name: Verify hosted entrypoint ownership, coverage and failure propagation
+        if: steps.routing.outputs.full == 'true'
         shell: pwsh
         run: ./scripts/test-postgresql-entrypoint.ps1
 
       - name: Verify explicit suite selection and aggregate accounting
+        if: steps.routing.outputs.full == 'true'
         shell: pwsh
         run: ./scripts/test-postgresql-suites.ps1
 
       - name: Verify named reflection precheck stops full execution on failure
+        if: steps.routing.outputs.full == 'true'
         shell: pwsh
         run: ./scripts/test-anonymous-reflection-precheck.ps1
 
       - name: Verify Native AOT prerequisite fallback and failure propagation
+        if: steps.routing.outputs.full == 'true'
         run: bash ./scripts/test-native-aot-prerequisites.sh
 
       - name: Audit vulnerable dependencies
+        if: steps.routing.outputs.full == 'true'
         run: |
           dotnet package list --project ./HamstixHaby.slnx --vulnerable --include-transitive --format json > dependency-audit.json
           jq -e '[.. | objects | select(has("severity"))] | length == 0' dependency-audit.json
 
       - name: Verify formatting
+        if: steps.routing.outputs.full == 'true'
         run: dotnet format ./HamstixHaby.slnx --verify-no-changes --severity warn
 
       - name: Verify generated diff
+        if: steps.routing.outputs.full == 'true'
         run: git diff --check --exit-code
 
-  native-aot:
-    name: Native AOT (${{ matrix.rid }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            rid: win-x64
-            executable: habyctl.exe
-          - os: ubuntu-latest
-            rid: linux-x64
-            executable: habyctl
-    defaults:
+  # Fixed names exist even when job conditions skip before matrix expansion.
+  native-aot-windows:
+    needs: validate
+    if: needs.validate.outputs.full == 'true'
+    name: Native AOT (win-x64)
+    runs-on: windows-latest
+    env:
+      HABY_NATIVE_RID: win-x64
+      HABY_NATIVE_EXECUTABLE: habyctl.exe
+    defaults: &native-defaults
       run:
         shell: pwsh
-    steps:
+    steps: &native-steps
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Set up .NET SDK
@@ -130,13 +151,13 @@ jobs:
             if (-not $env:HABY_AOT_C_COMPILER) { throw 'Validated Native AOT compiler is missing.' }
             $toolchain = @("-p:CppCompilerAndLinker=$env:HABY_AOT_C_COMPILER", '-p:LinkerFlavor=bfd')
           }
-          dotnet publish ./src/habyctl/habyctl.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/aot/${{ matrix.rid }}
+          dotnet publish ./src/habyctl/habyctl.csproj -c Release -r ${{ env.HABY_NATIVE_RID }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/aot/${{ env.HABY_NATIVE_RID }}
           if ($LASTEXITCODE -ne 0) { throw "Native AOT publish failed: $LASTEXITCODE" }
-          dotnet publish ./examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/runtime-consumer/${{ matrix.rid }}
+          dotnet publish ./examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj -c Release -r ${{ env.HABY_NATIVE_RID }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/runtime-consumer/${{ env.HABY_NATIVE_RID }}
           if ($LASTEXITCODE -ne 0) { throw "Runtime consumer Native AOT publish failed: $LASTEXITCODE" }
       - name: Record actual patched Native AOT compiler selection
         run: |
-          $rid = '${{ matrix.rid }}'
+          $rid = '${{ env.HABY_NATIVE_RID }}'
           $projects = @('src/habyctl', 'examples/Haby.RuntimeStartup.Consumer')
           $packs = @(foreach ($project in $projects) {
             $assets = Get-Content "$project/obj/project.assets.json" -Raw | ConvertFrom-Json
@@ -154,7 +175,7 @@ jobs:
             ConvertTo-Json -Depth 5 | Set-Content "$directory/compiler.json" -Encoding utf8
       - name: Execute published help and version
         run: |
-          $cli = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
+          $cli = (Resolve-Path ./.artifacts/aot/${{ env.HABY_NATIVE_RID }}/${{ env.HABY_NATIVE_EXECUTABLE }}).Path
           & $cli --help
           if ($LASTEXITCODE -ne 0) { throw "Native AOT help failed: $LASTEXITCODE" }
           & $cli --version
@@ -162,34 +183,45 @@ jobs:
       - name: Test published binary against disposable loopback hosts
         run: |
           $env:HABY_AOT_CLI_REQUIRED = '1'
-          $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
+          $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ env.HABY_NATIVE_RID }}/${{ env.HABY_NATIVE_EXECUTABLE }}).Path
           $consumer = if ($IsWindows) { 'Haby.RuntimeStartup.Consumer.exe' } else { 'Haby.RuntimeStartup.Consumer' }
-          $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ matrix.rid }}/$consumer).Path
-          dotnet test ./tests/Haby.Cli.Tests/Haby.Cli.Tests.csproj -c Release --filter FullyQualifiedName~CliLoopbackTests -p:TreatWarningsAsErrors=true --logger trx --results-directory ./.artifacts/native-results/${{ matrix.rid }}/private
+          $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ env.HABY_NATIVE_RID }}/$consumer).Path
+          dotnet test ./tests/Haby.Cli.Tests/Haby.Cli.Tests.csproj -c Release --filter FullyQualifiedName~CliLoopbackTests -p:TreatWarningsAsErrors=true --logger trx --results-directory ./.artifacts/native-results/${{ env.HABY_NATIVE_RID }}/private
           if ($LASTEXITCODE -ne 0) { throw "Native AOT loopback tests failed: $LASTEXITCODE" }
       - name: Verify published-native case and parameter gate inventory
         if: always()
         run: |
           $env:HABY_AOT_CLI_REQUIRED = '1'
-          $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ matrix.rid }}/${{ matrix.executable }}).Path
+          $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ env.HABY_NATIVE_RID }}/${{ env.HABY_NATIVE_EXECUTABLE }}).Path
           $consumer = if ($IsWindows) { 'Haby.RuntimeStartup.Consumer.exe' } else { 'Haby.RuntimeStartup.Consumer' }
-          $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ matrix.rid }}/$consumer).Path
-          $trx = @(Get-ChildItem ./.artifacts/native-results/${{ matrix.rid }}/private -Filter *.trx -File).FullName
-          ./scripts/export-test-gate.ps1 -TrxPath $trx -OutputDirectory ./.artifacts/native-results/${{ matrix.rid }}/safe -Gate 'Native AOT (${{ matrix.rid }})' -Suite published-native
+          $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ env.HABY_NATIVE_RID }}/$consumer).Path
+          $trx = @(Get-ChildItem ./.artifacts/native-results/${{ env.HABY_NATIVE_RID }}/private -Filter *.trx -File).FullName
+          ./scripts/export-test-gate.ps1 -TrxPath $trx -OutputDirectory ./.artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe -Gate 'Native AOT (${{ env.HABY_NATIVE_RID }})' -Suite published-native
       - name: Publish allowlisted native inventory
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-inventory-${{ matrix.rid }}-${{ github.sha }}-${{ github.run_attempt }}
+          name: native-inventory-${{ env.HABY_NATIVE_RID }}-${{ github.sha }}-${{ github.run_attempt }}
           path: |
-            .artifacts/native-results/${{ matrix.rid }}/compiler.json
-            .artifacts/native-results/${{ matrix.rid }}/safe/gate.json
-            .artifacts/native-results/${{ matrix.rid }}/safe/cases.json
-            .artifacts/native-results/${{ matrix.rid }}/safe/counts.json
-            .artifacts/native-results/${{ matrix.rid }}/safe/failure-evidence.json
-            .artifacts/native-results/${{ matrix.rid }}/safe/results.trx
+            .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/compiler.json
+            .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe/gate.json
+            .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe/cases.json
+            .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe/counts.json
+            .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe/failure-evidence.json
+            .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe/results.trx
           if-no-files-found: error
           retention-days: 14
+
+  native-aot-linux:
+    needs: validate
+    if: needs.validate.outputs.full == 'true'
+    name: Native AOT (linux-x64)
+    runs-on: ubuntu-latest
+    env:
+      HABY_NATIVE_RID: linux-x64
+      HABY_NATIVE_EXECUTABLE: habyctl
+    defaults: *native-defaults
+    steps: *native-steps
 
   dependency-review:
     if: github.event_name == 'pull_request'
@@ -206,6 +238,8 @@ jobs:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-1.0, AGPL-3.0
 
   postgresql-integration:
+    needs: validate
+    if: needs.validate.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

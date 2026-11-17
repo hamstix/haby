@@ -25,6 +25,10 @@ build/dotnet-10-migration
 fix/42-scope-variable-deletion
 feat/57-plugin-manifest
 refactor/remove-private-dependencies
+codex/docs-ci-routing
+codex/feat-252-image-update-planning
+codex/fix-123-retry-boundary
+codex/ci-253-docs-only-routing
 ```
 
 Recommended branch types:
@@ -39,6 +43,9 @@ Recommended branch types:
 - `chore/` for repository maintenance that fits no narrower type.
 
 Do not create milestone-sized branches such as `develop`, `rewrite` or `oss-revival`.
+Coding-agent branches conventionally use `codex/docs-<topic>`,
+`codex/feat-<issue>-<topic>`, `codex/fix-<issue>-<topic>` or
+`codex/ci-<issue>-<topic>`. Branch spelling never authorizes skipping checks.
 
 ## Development workflow
 
@@ -79,7 +86,15 @@ test assets instead of searching output ancestors. See the
 [suite/gate and qualification guide](docs/development/197-suite-routing.md) for
 `full`/`functional`/`infrastructure-qualification`, Host group limits, complete
 accounting and the Windows-to-hosted workflow. Regular Build keeps both PostgreSQL
-suites and both published Native AOT targets mandatory.
+suites and both published Native AOT targets mandatory for code, mixed and unknown
+changes. The accepted #253 exception routes proven ordinary documentation through
+mandatory lightweight `validate`: routing controls, added whitespace checks and
+practical local Markdown link validation, without SDK setup or solution execution.
+The explicit allowlist is root `README.md`, `ROADMAP.md`, `CONTRIBUTING.md`,
+`AGENTS.md` and `docs/**/*.md`, excluding example/schema/fixture subtrees and any
+functional inputs. Complete PR and push ranges determine routing; branch names
+do not. Failed or incomplete classification fails `validate`. See the
+[routing policy and evidence limits](docs/development/197-suite-routing.md#documentation-only-build-routing).
 
 Run narrower project or filtered tests first when that gives faster feedback, but do not substitute them for applicable solution validation in the final report.
 
