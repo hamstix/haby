@@ -29,7 +29,6 @@ public sealed class PostgreSqlApplicationAccessContractTests
         {
             node.Input.Json[..^1] + ",\"isOwner\":true}",
             node.Input.Json.Replace("database-owner/v1", "runtime/v1", StringComparison.Ordinal),
-            node.Input.Json.Replace("\"schema\":\"app\"", "\"schema\":\"public\"", StringComparison.Ordinal),
             node.Input.Json.Replace("\"schema\":\"app\"", "\"schema\":null", StringComparison.Ordinal),
             node.Input.Json.Replace("\"schema\":\"app\"", "\"schema\":\"pg_private\"", StringComparison.Ordinal),
             node.Input.Json.Replace("db-create", "db-restrict", StringComparison.Ordinal),
@@ -54,7 +53,7 @@ public sealed class PostgreSqlApplicationAccessContractTests
         foreach (var invalid in new[]
         {
             value with { Host = "" }, value with { Port = 0 }, value with { Port = 65536 }, value with { DatabaseName = "unsafe;" },
-            value with { Schema = "public" }, value with { Schema = "pg_catalog" }, value with { UserName = "postgres" }
+            value with { Schema = "pg_catalog" }, value with { UserName = "postgres" }
         }) Assert.Null(PostgreSqlApplicationConnectionContract.Decode(PostgreSqlApplicationConnectionContract.Encode(invalid)));
         Assert.Null(PostgreSqlApplicationConnectionContract.Decode(encoded with { Contract = "unknown/v1" }));
         Assert.Null(PostgreSqlApplicationConnectionContract.Decode(encoded with { Key = "other" }));

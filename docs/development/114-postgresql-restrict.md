@@ -16,10 +16,15 @@ entry refuses multi-node graphs. No placeholder login/access executor is supplie
 
 ## Exact CREATE evidence
 
+Issue #247 extends the receipt with the original standard public-schema OID.
+The new contract requires an explicitly fresh development catalog; subsequent
+restriction/login/access checks retain this exact identity without backfill. See
+[the explicit public-schema boundary](247-postgresql-public-schema.md).
+
 After an acknowledged CREATE DATABASE, a separate non-pooled session reads the
 new non-template database's OID. The adapter encodes the strict generated payload
-`{databaseName: string, databaseOid: uint32}` under
-`postgresql.database-output/v1alpha1`, key `database`. Zero OIDs, invalid names,
+`{databaseName: string, databaseOid: uint32, publicSchemaOid: uint32}` under
+`postgresql.database-output/v2`, key `database`. Zero OIDs, invalid names,
 unknown fields and incompatible payloads are refused. An OID is consistency
 evidence; it does not authenticate provenance or ownership against privileged
 external replacement.

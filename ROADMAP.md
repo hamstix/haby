@@ -108,6 +108,15 @@ authentication and explicit local issuance are implemented in issue #150 below.
 - [x] Add Profile discovery and exact Profile revision-history listing; preserve exact assignment/planning references: [issue #154](https://github.com/hamstix/haby/issues/154), [operator runbook](docs/development/134-profile-operator-path.md).
 - [x] Add one-request materialization of all Component documents for one server-selected Application generation, preserving per-document atomicity, idempotency and a truthful committed prefix on failure: [issue #156 operator path and bounds](docs/development/146-configuration-materialization-preview.md#explicit-application-materialization). Invocation remains explicit; batch access issuance and automatic Workload credential distribution are deferred.
 
+### Bounded adoption prerequisites before the next P3 slice
+
+- [x] Support explicit PostgreSQL `public` for a newly managed database/login pair
+  under the existing owner policy, preserving standard schema ownership and exact
+  evidence ([issue #247](docs/development/247-postgresql-public-schema.md)). This
+  requires a fresh development catalog; it does not adopt an existing installation.
+- [ ] Complete the separately accepted #248 prerequisite after #247; no Redis or
+  broader Provider/lifecycle scope is included in this slice.
+
 ### Limited Application updates before P3
 
 After the current P2 runtime/diagnostic, Profile discovery and Application-wide

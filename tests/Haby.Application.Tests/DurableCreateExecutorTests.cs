@@ -750,7 +750,7 @@ public sealed class DurableCreateExecutorTests
     private sealed class FakeTarget(List<string> log) : IPostgreSqlDatabaseCreateTarget
     {
         public async ValueTask<PostgreSqlDatabaseOutput?> ReadDatabaseEvidenceAsync(PostgreSqlDatabaseCreateInput input, CancellationToken token) =>
-            await CheckDatabaseAbsentAsync(input, token) == PostgreSqlDatabaseAbsenceOutcome.Present ? new(input.DatabaseName, 42) : null;
+            await CheckDatabaseAbsentAsync(input, token) == PostgreSqlDatabaseAbsenceOutcome.Present ? new(input.DatabaseName, 42, 2200) : null;
 
         public List<PostgreSqlDatabaseCreateInput> Inputs { get; } = [];
         public PostgreSqlDatabaseAbsenceOutcome Absence { get; init; } = PostgreSqlDatabaseAbsenceOutcome.Absent;

@@ -159,8 +159,19 @@ is deferred and is not a pilot acceptance condition. Never grant Provider
 elevation automatically.
 
 Make schema/object ownership explicit:
-- The configured application schema is created with the application login as
-  owner; its application-created objects are owned by that login.
+- A configured custom application schema (for example `app`) is created with the
+  application login as owner; its application-created objects are owned by that login.
+- Issue #247 accepts explicit `schema: public` under the same `database-owner/v1`
+  policy for a newly Haby-created database and confirmed Haby login. It is not a
+  default and does not admit existing-installation adoption. Use the existing
+  standard schema, preserving its `pg_database_owner` owner; never create it or
+  directly transfer its ownership. The exact original database/public-schema OIDs,
+  confirmed role OID/provenance, restricted ACLs and expected owner are required.
+  Missing, replaced, foreign-owned or conflicting state refuses without repair.
+  Database ownership provides the login's effective schema-owner privileges;
+  application-created objects still belong directly to the login. No existing
+  contained object is reassigned. Database-local search_path is `public`, creator
+  default restrictions and transactional/uncertainty rules remain unchanged.
 - On the PostgreSQL 17 pilot, public schema ownership follows pg_database_owner;
   verify that ownership and remove PUBLIC access as specified below.
 - Database ownership does not transfer ownership of pre-existing tables, schemas
@@ -217,7 +228,7 @@ the [operation table](../development/106-application-credential-policy.md#operat
 2. Restrict PUBLIC access in that database.
 3. Ensure local generated material and publish its exact reference.
 4. Create the fixed-attribute login with its initial password and CONNECT access.
-5. Transfer database ownership, configure the application-owned schema,
+5. Transfer database ownership, configure the selected custom or standard schema,
    creator defaults and search_path, and verify the completed profile.
 
 The final external transaction includes ownership/access changes so rollback

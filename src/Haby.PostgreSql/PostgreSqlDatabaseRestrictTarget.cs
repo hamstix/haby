@@ -102,7 +102,7 @@ public sealed class PostgreSqlDatabaseRestrictTarget(PostgreSqlDatabaseCreateTar
         await using var command = new NpgsqlCommand("""
             SELECT d.oid = $1 AND d.datname = $2 AND NOT d.datistemplate
               AND d.datallowconn AND owner.rolname = $3 AND current_user = $3
-              AND n.nspowner = 'pg_database_owner'::pg_catalog.regrole
+              AND n.oid = $5 AND n.nspowner = 'pg_database_owner'::pg_catalog.regrole
               AND (NOT $4 OR (
                 NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(d.datacl, pg_catalog.acldefault('d', d.datdba))) a WHERE a.grantee = 0)
                 AND NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))) a
@@ -116,6 +116,7 @@ public sealed class PostgreSqlDatabaseRestrictTarget(PostgreSqlDatabaseCreateTar
         command.Parameters.AddWithValue(input.Database.DatabaseName);
         command.Parameters.AddWithValue(input.ExpectedOwnerUserName);
         command.Parameters.AddWithValue(acl);
+        command.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Oid, input.Database.PublicSchemaOid);
         return await command.ExecuteScalarAsync(token) is true;
     }
 

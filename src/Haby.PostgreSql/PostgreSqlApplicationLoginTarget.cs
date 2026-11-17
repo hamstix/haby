@@ -220,7 +220,7 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
         await using var command = new NpgsqlCommand("""
             SELECT d.oid = $1 AND d.datname = $2 AND NOT d.datistemplate AND d.datallowconn
               AND owner.rolname = $3 AND current_user = $3 AND owner.rolsuper
-              AND n.nspowner = 'pg_database_owner'::pg_catalog.regrole
+              AND n.oid = $4 AND n.nspowner = 'pg_database_owner'::pg_catalog.regrole
               AND NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(d.datacl, pg_catalog.acldefault('d', d.datdba))) a WHERE a.grantee = 0)
               AND NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))) a
                 WHERE a.grantee = 0 AND a.privilege_type IN ('USAGE', 'CREATE'))
@@ -230,6 +230,7 @@ public sealed class PostgreSqlApplicationLoginTarget(PostgreSqlDatabaseCreateTar
             """, connection, transaction);
         command.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Oid, input.Database.DatabaseOid);
         command.Parameters.AddWithValue(input.Database.DatabaseName); command.Parameters.AddWithValue(input.Administrator);
+        command.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Oid, input.Database.PublicSchemaOid);
         return await command.ExecuteScalarAsync(token) is true;
     }
     private static async Task<bool> RoleAbsent(NpgsqlConnection connection, NpgsqlTransaction? transaction, string role, CancellationToken token)

@@ -80,7 +80,18 @@ public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore r
             // PostgreSQL catalog/OID inspection is an adapter capability, not name-based adoption.
             await using var command = new NpgsqlCommand("SELECT oid FROM pg_catalog.pg_database WHERE datname = $1 AND NOT datistemplate", connection);
             command.Parameters.AddWithValue(input.DatabaseName);
-            return await command.ExecuteScalarAsync(cancellationToken) is uint oid && oid != 0 ? new(input.DatabaseName, oid) : null;
+            if (await command.ExecuteScalarAsync(cancellationToken) is not uint oid || oid == 0) return null;
+            resolution.Builder.Database = input.DatabaseName;
+            await using var target = new NpgsqlConnection(resolution.Builder.ConnectionString);
+            await target.OpenAsync(cancellationToken);
+            await using var schema = new NpgsqlCommand("""
+                SELECT n.oid FROM pg_catalog.pg_namespace n CROSS JOIN pg_catalog.pg_database d
+                WHERE n.nspname = 'public' AND n.nspowner = 'pg_database_owner'::pg_catalog.regrole
+                  AND d.datname = pg_catalog.current_database() AND d.oid = $1
+                """, target);
+            schema.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Oid, oid);
+            return await schema.ExecuteScalarAsync(cancellationToken) is uint publicOid && publicOid != 0
+                ? new(input.DatabaseName, oid, publicOid) : null;
         }
         finally { Clear(resolution.Builder); }
     }

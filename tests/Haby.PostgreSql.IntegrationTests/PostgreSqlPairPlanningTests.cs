@@ -234,10 +234,16 @@ public sealed class PostgreSqlPairPlanningTests
     [InlineData("password", "forbidden")]
     [InlineData("unknown", "forbidden")]
     [InlineData("databaseRef", null)]
-    public void Invalid_properties_are_refused_by_metadata_or_adapter(string property, string? value)
+    public void Properties_are_validated_by_metadata_and_adapter(string property, string? value)
     {
         var envelope = Example(); var props = envelope["manifest"]!["spec"]!["resources"]!["app-login"]!["properties"]!.AsObject();
         if (value is null) props.Remove(property); else props[property] = value;
+        if (property == "schema" && value == "public")
+        {
+            Assert.NotNull(PostgreSqlApplicationLoginContract.ParseJson(props.ToJsonString()));
+            Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(Bytes(envelope), Catalog));
+            return;
+        }
         if (property != "databaseRef" || value is null || value.Contains('/', StringComparison.Ordinal))
             Assert.Null(PostgreSqlApplicationLoginContract.ParseJson(props.ToJsonString()));
         var result = ManifestCandidatePipeline.Prepare(Bytes(envelope), Catalog);

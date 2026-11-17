@@ -91,3 +91,90 @@ internal static class OwnerMigrationEvidence
         await using (var verify = new OwnerMigrationContext(options)) Assert.Empty(await verify.Items.AsNoTracking().ToArrayAsync());
     }
 }
+
+// Test-only EF migration fixtures. Runtime migration discovery is EF-owned reflection;
+// no application production assembly discovers or activates types by reflection.
+public sealed class PublicMigrationContext(DbContextOptions<PublicMigrationContext> options) : DbContext(options)
+{
+    public DbSet<PublicMigrationItem> Items => Set<PublicMigrationItem>();
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.HasDefaultSchema("public");
+        modelBuilder.HasSequence<long>("item_sequence");
+        modelBuilder.Entity<PublicMigrationItem>(b =>
+        {
+            b.ToTable("items"); b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasDefaultValueSql("nextval('public.item_sequence')");
+            b.Property(x => x.Name).IsRequired(); b.HasIndex(x => x.Name).IsUnique();
+            b.Property(x => x.Revision).HasDefaultValue(0);
+        });
+    }
+}
+public sealed class PublicMigrationItem
+{
+    public long Id { get; set; }
+    public string Name { get; set; } = "";
+    public int Revision { get; set; }
+}
+
+[DbContext(typeof(PublicMigrationContext))]
+[Migration("20261103000100_PublicInitial")]
+public sealed class PublicInitialMigration : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.EnsureSchema("public");
+        migrationBuilder.CreateSequence<long>("item_sequence", "public");
+        migrationBuilder.CreateTable("items", schema: "public", columns: table => new
+        {
+            Id = table.Column<long>(nullable: false, defaultValueSql: "nextval('public.item_sequence')"),
+            Name = table.Column<string>(nullable: false)
+        }, constraints: table => table.PrimaryKey("PK_items", x => x.Id));
+        migrationBuilder.CreateIndex("IX_items_Name", "items", "Name", "public", unique: true);
+    }
+    protected override void Down(MigrationBuilder migrationBuilder) => throw new NotSupportedException();
+}
+[DbContext(typeof(PublicMigrationContext))]
+[Migration("20261103000200_PublicRevision")]
+public sealed class PublicRevisionMigration : Migration
+{
+    protected override void Up(MigrationBuilder migrationBuilder) =>
+        migrationBuilder.AddColumn<int>("Revision", "items", schema: "public", nullable: false, defaultValue: 0);
+    protected override void Down(MigrationBuilder migrationBuilder) => throw new NotSupportedException();
+}
+
+internal static class PublicMigrationEvidence
+{
+    internal static async Task RunAsync(string connection)
+    {
+        var options = new DbContextOptionsBuilder<PublicMigrationContext>().UseNpgsql(connection,
+            p => p.MigrationsHistoryTable("__EFMigrationsHistory", "public")).Options;
+        await using (var first = new PublicMigrationContext(options))
+        {
+            await first.GetService<IMigrator>().MigrateAsync("20261103000100_PublicInitial");
+            Assert.Single(await first.Database.GetAppliedMigrationsAsync());
+        }
+        await using (var second = new PublicMigrationContext(options))
+        {
+            await second.Database.MigrateAsync();
+            Assert.Equal(2, (await second.Database.GetAppliedMigrationsAsync()).Count());
+        }
+        long id;
+        await using (var insert = new PublicMigrationContext(options))
+        {
+            var item = new PublicMigrationItem { Name = "inserted" }; insert.Items.Add(item);
+            await insert.SaveChangesAsync(); id = item.Id; Assert.True(id > 0);
+        }
+        await using (var read = new PublicMigrationContext(options))
+            Assert.Equal("inserted", (await read.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Name);
+        await using (var update = new PublicMigrationContext(options))
+            Assert.Equal(1, await update.Items.Where(x => x.Id == id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Name, "updated").SetProperty(x => x.Revision, 2)));
+        await using (var verify = new PublicMigrationContext(options))
+        {
+            var item = await verify.Items.AsNoTracking().SingleAsync(); Assert.Equal("updated", item.Name); Assert.Equal(2, item.Revision);
+        }
+        await using (var delete = new PublicMigrationContext(options))
+            Assert.Equal(1, await delete.Items.Where(x => x.Id == id).ExecuteDeleteAsync());
+        await using (var verify = new PublicMigrationContext(options)) Assert.Empty(await verify.Items.AsNoTracking().ToArrayAsync());
+    }
+}
