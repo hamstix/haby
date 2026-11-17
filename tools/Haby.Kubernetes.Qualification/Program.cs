@@ -26,6 +26,7 @@ try
     var directory = Path.GetFullPath(args[1]);
     if (args.Length == 3 && args[2] == "--configured-deployment")
     {
+        Console.WriteLine("Q243 configured entry start");
         using var bootstrap = ClientFactory.Create(endpoint, directory);
         using var configuredDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
         await ConfiguredDeploymentCases.Run(bootstrap, endpoint, directory, configuredDeadline.Token);
@@ -56,6 +57,7 @@ try
     }
     if (args.Length == 3 && args[2] == "--deployment-kernel")
     {
+        Console.WriteLine("Q243 kernel entry start");
         using var bootstrap = ClientFactory.Create(endpoint, directory);
         using var kernelDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
         await DeploymentKernelCases.Run(bootstrap, endpoint, directory, kernelDeadline.Token);

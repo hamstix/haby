@@ -158,7 +158,7 @@ public sealed class ResourceRequirementsTests
     }
 
     [Fact]
-    public void Removing_explicit_request_with_retained_limit_requires_the_API_default_value()
+    public void Removing_explicit_request_with_retained_limit_allows_absent_template_request()
     {
         var old = WithResources(new(new("250m", null), new("1", null)));
         var update = old with
@@ -172,11 +172,123 @@ public sealed class ResourceRequirementsTests
         Apply(obj, DeploymentObjects.Patch(obj, update));
         var requests = obj["spec"]!["template"]!["spec"]!["containers"]![0]!["resources"]!["requests"]!;
         Assert.Null(requests["cpu"]);
-        Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Receipt(obj, update, ConfirmationSource.Response));
+        Assert.NotNull(DeploymentObjects.Receipt(obj, update, ConfirmationSource.Response));
         requests["cpu"] = "1";
         Assert.NotNull(DeploymentObjects.Receipt(obj, update, ConfirmationSource.Response));
         requests["cpu"] = "250m";
         Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Receipt(obj, update, ConfirmationSource.Observation));
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("1", true)]
+    [InlineData("1000m", true)]
+    [InlineData("999m", false)]
+    public void Limit_only_Deployment_template_preserves_absence_and_checks_any_present_default(string? observedRequest, bool matches)
+    {
+        var intent = WithResources(new(null, new("1", "1Gi")));
+        var obj = KernelTests.Object(intent);
+        if (observedRequest is not null)
+            obj["spec"]!["template"]!["spec"]!["containers"]![0]!["resources"]!["requests"] = new JsonObject { ["cpu"] = observedRequest };
+        if (matches)
+        {
+            var receipt = DeploymentObjects.Receipt(obj, intent, ConfirmationSource.Response);
+            Assert.Null(receipt.Projection.Resources!.Requests);
+            Assert.Null(DeploymentIntents.DecodeReceipt(DeploymentIntents.Encode(receipt)).Projection.Resources!.Requests);
+        }
+        else Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Receipt(obj, intent, ConfirmationSource.Response));
+    }
+
+    [Fact]
+    public void Observed_default_is_not_authority_to_acquire_or_remove_an_unowned_request()
+    {
+        var old = WithResources(new(null, new("1", null))); var obj = KernelTests.Object(old);
+        var main = obj["spec"]!["template"]!["spec"]!["containers"]![0]!;
+        main["resources"]!["requests"] = new JsonObject { ["cpu"] = "1", ["example.test/device"] = "1" };
+        DeploymentObjects.Matches(obj, old.Target);
+        var acquire = old with
+        {
+            ExpectedUid = "saved-uid",
+            LastConfirmed = old.Target,
+            Target = old.Target with { Resources = new(new("1", null), new("1", null)) }
+        };
+        Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Patch(obj, acquire));
+        var removeLimit = old with { ExpectedUid = "saved-uid", LastConfirmed = old.Target, Target = old.Target with { Resources = null } };
+        Apply(obj, DeploymentObjects.Patch(obj, removeLimit));
+        Assert.Equal("1", main["resources"]!["requests"]!["cpu"]!.GetValue<string>());
+        Assert.Equal("1", main["resources"]!["requests"]!["example.test/device"]!.GetValue<string>());
+        Assert.NotNull(DeploymentObjects.Receipt(obj, removeLimit, ConfirmationSource.Response));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Limit_change_preserves_explicit_requests_but_cannot_overwrite_an_observed_default(bool explicitRequest)
+    {
+        var old = WithResources(new(explicitRequest ? new("250m", null) : null, new("1", null)));
+        var obj = KernelTests.Object(old); var main = obj["spec"]!["template"]!["spec"]!["containers"]![0]!;
+        if (!explicitRequest) main["resources"]!["requests"] = new JsonObject { ["cpu"] = "1" };
+        var update = old with
+        {
+            ExpectedUid = "saved-uid",
+            LastConfirmed = old.Target,
+            Target = old.Target with { Resources = new(old.Target.Resources!.Requests, new("2", null)) }
+        };
+        DeploymentObjects.Matches(obj, old.Target);
+        if (explicitRequest)
+        {
+            Apply(obj, DeploymentObjects.Patch(obj, update));
+            Assert.Equal("250m", main["resources"]!["requests"]!["cpu"]!.GetValue<string>());
+            Assert.NotNull(DeploymentObjects.Receipt(obj, update, ConfirmationSource.Response));
+        }
+        else Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Patch(obj, update));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Limit_removal_preserves_explicit_request_and_does_not_invent_an_absent_request(bool explicitRequest)
+    {
+        var requirements = new ResourceRequirements(explicitRequest ? new("250m", null) : null, new("1", null));
+        var old = WithResources(requirements); var obj = KernelTests.Object(old);
+        var update = old with
+        {
+            ExpectedUid = "saved-uid",
+            LastConfirmed = old.Target,
+            Target = old.Target with { Resources = explicitRequest ? new(requirements.Requests, null) : null }
+        };
+        DeploymentObjects.Matches(obj, old.Target);
+        Apply(obj, DeploymentObjects.Patch(obj, update));
+        var main = obj["spec"]!["template"]!["spec"]!["containers"]![0]!;
+        Assert.Null(main["resources"]!["limits"]!["cpu"]);
+        Assert.Equal(explicitRequest ? "250m" : null, main["resources"]!["requests"]?["cpu"]?.GetValue<string>());
+        Assert.NotNull(DeploymentObjects.Receipt(obj, update, ConfirmationSource.Response));
+        main["resources"]!["limits"]!["cpu"] = "1";
+        Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Receipt(obj, update, ConfirmationSource.Observation));
+    }
+
+    [Fact]
+    public void Present_null_leaf_is_not_absence_default_or_acquisition_authority()
+    {
+        foreach (var dimension in new[] { "cpu", "memory" })
+        {
+            var implicitRequest = WithResources(new(null, new("1", "1Gi")));
+            var obj = KernelTests.Object(implicitRequest);
+            var main = obj["spec"]!["template"]!["spec"]!["containers"]![0]!;
+            main["resources"]!["requests"] = new JsonObject { [dimension] = null };
+            Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Receipt(obj, implicitRequest, ConfirmationSource.Response));
+            var plain = KernelTests.Intent();
+            var acquire = plain with { LastConfirmed = plain.Target, ExpectedUid = "saved-uid", Target = implicitRequest.Target with { Resources = new(new("1", "1Gi"), null) } };
+            Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Patch(obj, acquire));
+            var removed = implicitRequest with
+            {
+                LastConfirmed = implicitRequest.Target with { Resources = new(new("1", "1Gi"), null) },
+                ExpectedUid = "saved-uid",
+                Target = implicitRequest.Target with { Resources = null }
+            };
+            main["resources"]!.AsObject().Remove("limits");
+            Assert.Throws<WorkloadContractException>(() => DeploymentObjects.Receipt(obj, removed, ConfirmationSource.Observation));
+        }
     }
 
     private static DeploymentIntent WithResources(ResourceRequirements resources)

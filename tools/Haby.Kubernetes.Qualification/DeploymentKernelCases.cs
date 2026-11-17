@@ -19,7 +19,9 @@ internal static class DeploymentKernelCases
         var environment = EnvironmentRecordId.New();
         var binding = new KubernetesBinding(environment.ToString(), ProviderInstanceId.New().ToString(), 1, "haby.kubernetes/v1");
         var name = "haby200-" + Guid.NewGuid().ToString("N")[..12];
+        Console.WriteLine("Q243 kernel namespace-create start");
         var ns = await admin.CoreV1.CreateNamespaceAsync(new V1Namespace { Metadata = new() { Name = name, Labels = new Dictionary<string, string> { ["haby.dev/qualification"] = name } } }, cancellationToken: token);
+        Console.WriteLine("Q243 kernel namespace-created completed");
         try
         {
             using var secrets = new FixtureSecrets(environment);
@@ -35,14 +37,18 @@ internal static class DeploymentKernelCases
             async Task<V1Deployment> Read(DeploymentIntent i) => await admin.AppsV1.ReadNamespacedDeploymentAsync(i.Name, name, cancellationToken: token);
             async Task Mutate(DeploymentIntent i, string patch) => await admin.AppsV1.PatchNamespacedDeploymentAsync(new V1Patch(patch, V1Patch.PatchType.JsonPatch), i.Name, name, cancellationToken: token);
             var i = Intent("target");
+            Console.WriteLine("Q243 kernel K01 start");
             var created = await Kernel().ExecuteAsync(i, token);
+            ResultEvidence(created);
             Check(created is { Outcome: KernelOutcome.Confirmed, WriteDispatches: 1, Receipt.Source: ConfirmationSource.Response }, "K01-create-mtls");
+            Console.WriteLine("Q243 kernel readback start");
             var resourceReadback = (await Read(i)).Spec.Template.Spec.Containers.Single(c => c.Name == "app").Resources;
             if (!DeploymentResources.Equivalent("250m", resourceReadback.Requests["cpu"].ToString()) ||
                 !DeploymentResources.Equivalent("128Mi", resourceReadback.Requests["memory"].ToString()) ||
                 !DeploymentResources.Equivalent("1", resourceReadback.Limits["cpu"].ToString()) ||
                 !DeploymentResources.Equivalent("1Gi", resourceReadback.Limits["memory"].ToString()))
                 throw new InvalidOperationException("Exact resource readback failed.");
+            Console.WriteLine("Q243 kernel readback completed");
             var occupied = await Kernel().ExecuteAsync(i, token);
             Check(occupied is { Outcome: KernelOutcome.Conflict, WriteDispatches: 0 }, "K02-occupied-no-adoption");
             var foreign = i with { Owner = Guid.NewGuid() };
@@ -66,7 +72,7 @@ internal static class DeploymentKernelCases
                 Operation = Guid.NewGuid(),
                 Target = i.Target with { Image = "registry.k8s.io/pause:3.9", Replicas = 2, NodeSelector = ImmutableSortedDictionary<string, string>.Empty, ImagePullSecrets = [], Resources = null }
             };
-            var updated = await Kernel().ExecuteAsync(update, token); var live = await Read(i);
+            var updated = await Kernel().ExecuteAsync(update, token); ResultEvidence(updated); var live = await Read(i);
             Console.WriteLine($"Kernel K04 result: outcome={updated.Outcome}; code={updated.Code}; dispatches={updated.WriteDispatches}; uid-preserved={live.Metadata.Uid == created.Receipt.Uid}; paused-preserved={live.Spec.Paused == true}; containers={live.Spec.Template.Spec.Containers.Count}; nodes={live.Spec.Template.Spec.NodeSelector?.Count ?? 0}; pulls={live.Spec.Template.Spec.ImagePullSecrets?.Count ?? 0}");
             Check(updated is { Outcome: KernelOutcome.Confirmed, WriteDispatches: 1 } && updated.Receipt!.Uid == created.Receipt.Uid &&
                 live.Spec.Template.Spec.Containers.Single(c => c.Name == "app").Image == update.Target.Image &&
@@ -151,20 +157,22 @@ internal static class DeploymentKernelCases
             Check(uidRaced is { Outcome: KernelOutcome.Conflict, WriteDispatches: 1 } && uidRace.Dispatches == 1 &&
                 afterUidRace.Metadata.Uid != created.Receipt.Uid && afterUidRace.Spec.Replicas == next.Target.Replicas &&
                 (await Kernel().ObserveAsync(next, token)) is { Outcome: KernelOutcome.NotConfirmed, WriteDispatches: 0 }, "K24-real-UID-race-replacement-preserved");
+            Console.WriteLine("Q243 kernel K25 start");
             var onlyLimit = Intent("limit-only");
             onlyLimit = onlyLimit with { Target = onlyLimit.Target with { Resources = new(null, new("1", "1Gi")) } };
             var limitResult = await Kernel().ExecuteAsync(onlyLimit, token);
+            ResultEvidence(limitResult);
             var limitReadback = (await Read(onlyLimit)).Spec.Template.Spec.Containers.Single(c => c.Name == "app").Resources;
             Check(limitResult is { Outcome: KernelOutcome.Confirmed, WriteDispatches: 1 } &&
                 limitResult.Receipt!.Projection.Resources!.Requests is null &&
-                DeploymentResources.Equivalent("1", limitReadback.Requests["cpu"].ToString()) &&
-                DeploymentResources.Equivalent("1Gi", limitReadback.Requests["memory"].ToString()) &&
+                (limitReadback.Requests is null || !limitReadback.Requests.ContainsKey("cpu") && !limitReadback.Requests.ContainsKey("memory")) &&
                 DeploymentResources.Equivalent("1", limitReadback.Limits["cpu"].ToString()) &&
-                DeploymentResources.Equivalent("1Gi", limitReadback.Limits["memory"].ToString()), "K25-limit-only-defaulted-requests");
+                DeploymentResources.Equivalent("1Gi", limitReadback.Limits["memory"].ToString()), "K25-limit-only-template-absence");
             Console.WriteLine("Kernel cases: 25; stateless API object evidence only; no durable recovery or readiness.");
         }
         finally
         {
+            Console.WriteLine("Q243 kernel cleanup-namespace start");
             using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var current = await admin.CoreV1.ReadNamespaceAsync(name, cancellationToken: cleanup.Token);
             Check(current.Metadata.Uid == ns.Metadata.Uid && current.Metadata.Labels["haby.dev/qualification"] == name, "cleanup-ownership");
@@ -181,7 +189,25 @@ internal static class DeploymentKernelCases
     }
     private static void Check(bool value, string id)
     {
+        var prefix = id.Split('-')[0];
+        var stage = id switch
+        {
+            "cleanup-ownership" => "cleanup-ownership",
+            "namespace-absence-after-UID-delete" => "cleanup-namespace",
+            _ => prefix is "K01" or "K02" or "K03" or "K04" or "K05" or "K06" or "K07" or "K08" or "K09" or "K10" or "K11" or "K12" or "K13" or "K14" or "K15" or "K16" or "K17" or "K18" or "K19" or "K20" or "K21" or "K22" or "K23" or "K24" or "K25" ? prefix : "unknown"
+        };
+        Console.WriteLine($"Q243 kernel {stage} {(value ? "passed" : "failed")}");
         Console.WriteLine((value ? "PASS " : "FAIL ") + "kernel-" + id); if (!value) throw new InvalidOperationException("Kernel assertion failed.");
+    }
+    private static void ResultEvidence(KernelResult result)
+    {
+        string[] codes = ["response-confirmed", "observation-confirmed", "evidence-not-confirmed", "response-unconfirmed", "invalid-input",
+            "connection-unavailable", "dispatch-uncertain", "occupied-name", "owned-state-conflict", "uid-conflict", "api-conflict",
+            "api-access-denied", "managed-object-missing", "action-budget", "action-canceled", "precondition-limit", "object-absent", "observation-unavailable"];
+        var outcome = Enum.IsDefined(result.Outcome) ? result.Outcome.ToString() : "unknown";
+        var code = codes.Contains(result.Code, StringComparer.Ordinal) ? result.Code : "unknown";
+        var writes = result.WriteDispatches is >= 0 and <= 3 ? result.WriteDispatches.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unknown";
+        Console.WriteLine($"Q243 kernel result {outcome} {code} {writes}");
     }
     private sealed class CountHandler : DelegatingHandler
     {

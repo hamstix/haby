@@ -61,18 +61,25 @@ resources map during an update.
 
 Readback compares exact quantities, using integer/rational arithmetic rather than
 raw spelling or double conversion: `250m` equals `0.25`, and `128Mi` equals
-`134217728`. Kubernetes may default an omitted request to its supplied limit.
-Confirmation requires that effective default while preserving the original absent
-request in the accepted projection. A missing owned value, unsupported observed
-shape or admission mutation of an explicit accepted value cannot confirm success.
+`134217728`. Kubernetes defaults requests from limits on created Pods, not on the
+Deployment template. An absent accepted request permits absence in that template;
+a present default must equal the corresponding limit exactly. The accepted
+projection/receipt retains absence. Explicit requests and limits must always
+match exactly. Missing explicit values, unsupported shapes and admission mutation
+of explicit values cannot confirm success. Real API evidence inspects template
+absence and the Pod's defaulted request separately.
 
 The stateless conditional kernel may add/change/remove the owned leaves. It first
 checks previously confirmed state and writes UID/resourceVersion and keyed
 container-name tests. An existing unowned CPU/memory leaf cannot be claimed through
 an update, even if equal. Removal deletes only previously owned leaves. Removing
-an explicit request while retaining its limit permits the API-defaulted request
-equal to that limit; removing the dimension completely requires absence. Restored
-removed values cannot confirm a write. Manual drift conflicts before dispatch.
+an explicit request while retaining its limit permits template absence or a
+present default exactly equal to that limit. Removing a formerly explicit leaf
+without a corresponding limit requires absence. Observing a default does not
+acquire that request leaf: a later limit removal preserves the unowned request,
+and a new explicit request colliding with it refuses even if equal. Changing a
+limit cannot overwrite/remove an unowned request to make it match. Restored removed
+owned values cannot confirm a write. Manual drift conflicts before dispatch.
 This kernel capability does not expose durable UPDATE admission; configured kernel
 UPDATE also remains unsupported.
 
@@ -104,3 +111,16 @@ The consumer image graph is unchanged; ordinary qualification reuses its reviewe
 content-addressed binding. Full solution, PostgreSQL, API, generated-client/native,
 dependency and formatting gates remain required. No load qualification or full P3
 completion is claimed.
+
+## Bounded failure evidence
+
+The existing kernel/configured launcher retains only a finite allowlist on both
+zero and nonzero harness exits: fixed case/stage IDs, closed outcome/reason and gRPC status values,
+0..3 or unknown dispatch counts, known PASS spellings and cleanup states. Other
+stdout/stderr is omitted. Unrecognized/malformed records are rejected; writers may
+use a fixed unknown marker. Input is bounded to 1,048,576 characters and 256 retained
+records. Invalid/oversized evidence and recorded case/cleanup failures cannot
+become success, even if a child returns zero. Primary nonzero attribution and
+independent outer cleanup remain.
+This channel locates new failures without diagnosing the original c246d56 runs:
+those original unknown causes and missing inner cleanup proofs remain separate.

@@ -9,7 +9,7 @@ using static Haby.Kubernetes.DeploymentIntents;
 namespace Haby.Kubernetes;
 
 /// <summary>Ownership is per CPU/memory leaf of the named main container. API-defaulted
-/// requests follow limits only when the accepted request was absent; evidence retains absence.</summary>
+/// requests may be absent in a Deployment template; present defaults must match the limit.</summary>
 internal static class DeploymentResources
 {
     private static readonly string[] Groups = ["requests", "limits"];
@@ -46,8 +46,6 @@ internal static class DeploymentResources
         var quantities = group == "requests" ? resources?.Requests : resources?.Limits;
         return dimension == "cpu" ? quantities?.Cpu : quantities?.Memory;
     }
-    private static string? Effective(ResourceRequirements? resources, string group, string dimension) =>
-        Input(resources, group, dimension) ?? (group == "requests" ? Input(resources, "limits", dimension) : null);
 
     private static JsonObject? Observed(JsonNode main)
     {
@@ -57,17 +55,23 @@ internal static class DeploymentResources
         return resources;
     }
 
+    private static bool HasLeaf(JsonObject? observed, string group, string dimension) =>
+        observed?[group] is JsonObject quantities && quantities.ContainsKey(dimension);
+
     internal static void Matches(JsonNode main, ResourceRequirements? requirements)
     {
         var observed = Observed(main);
         foreach (var group in Groups)
             foreach (var dimension in Dimensions)
-                if (Effective(requirements, group, dimension) is { } expected)
-                {
-                    var value = observed?[group]?[dimension];
-                    Need(value is JsonValue text && text.TryGetValue<string>(out var quantity) &&
-                        Equivalent(expected, quantity), "resource-drift");
-                }
+            {
+                var explicitValue = Input(requirements, group, dimension);
+                var expected = explicitValue ?? (group == "requests" ? Input(requirements, "limits", dimension) : null);
+                var value = observed?[group]?[dimension];
+                // Pod defaulting does not require a request in the Deployment template.
+                if (expected is null || explicitValue is null && !HasLeaf(observed, group, dimension)) continue;
+                Need(value is JsonValue text && text.TryGetValue<string>(out var quantity) &&
+                    Equivalent(expected, quantity), "resource-drift");
+            }
     }
 
     internal static void Removed(JsonNode main, ResourceRequirements? previous, ResourceRequirements? target)
@@ -75,8 +79,9 @@ internal static class DeploymentResources
         var observed = Observed(main);
         foreach (var group in Groups)
             foreach (var dimension in Dimensions)
-                if (Effective(previous, group, dimension) is not null && Effective(target, group, dimension) is null)
-                    Need(observed?[group]?[dimension] is null, "removed-resource-present");
+                if (Input(previous, group, dimension) is not null && Input(target, group, dimension) is null &&
+                    (group != "requests" || Input(target, "limits", dimension) is null))
+                    Need(!HasLeaf(observed, group, dimension), "removed-resource-present");
     }
 
     internal static void Patch(JsonNode main, ResourceRequirements? previous, ResourceRequirements? target,
@@ -90,11 +95,14 @@ internal static class DeploymentResources
             if (observed?[group] is null && writes.Length > 0) add("add", path + "/" + group, new JsonObject());
             foreach (var dimension in Dimensions)
             {
-                var old = Effective(previous, group, dimension);
-                var next = Effective(target, group, dimension);
+                var old = Input(previous, group, dimension);
+                var next = Input(target, group, dimension);
                 var live = observed?[group]?[dimension];
+                var present = HasLeaf(observed, group, dimension);
                 // A new owned leaf cannot take an existing injected value, even if equivalent.
-                Need(old is not null || next is null || live is null, "resource-collision");
+                Need(old is not null || next is null || !present, "resource-collision");
+                if (group == "requests" && old is null && next is null && present && Input(target, "limits", dimension) is { } limit)
+                    Need(live is JsonValue text && text.TryGetValue<string>(out var quantity) && Equivalent(limit, quantity), "resource-collision");
                 var leaf = path + "/" + group + "/" + dimension;
                 if (Input(target, group, dimension) is { } value) add("add", leaf, JsonValue.Create(value));
                 else if (old is not null && live is not null) add("remove", leaf, null);

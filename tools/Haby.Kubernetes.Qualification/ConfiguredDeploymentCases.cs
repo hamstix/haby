@@ -32,7 +32,9 @@ internal static class ConfiguredDeploymentCases
         var postgres = fixture ?? new PostgreSqlFixture();
         V1Namespace? ownedNamespace = null;
         Exception? primary = null;
+        Console.WriteLine("Q243 configured catalog-init start");
         await ((Xunit.IAsyncLifetime)postgres).InitializeAsync();
+        Console.WriteLine("Q243 configured catalog-init completed");
         try
         {
             using var rootKey = RSA.Create(2048);
@@ -57,7 +59,9 @@ internal static class ConfiguredDeploymentCases
             var deploymentWrites = 0; var loseConfirmation = false; var loseIdentityConfirmation = false;
             var expectedDeploymentWrites = 1;
             System.Text.Json.Nodes.JsonNode configuredEnvelope = null!;
+            Console.WriteLine("Q243 configured namespace-create start");
             ownedNamespace = await admin.CoreV1.CreateNamespaceAsync(new() { Metadata = new() { Name = ns, Labels = new Dictionary<string, string> { ["haby.dev/qualification"] = ns } } }, cancellationToken: token);
+            Console.WriteLine("Q243 configured namespace-created completed");
             async Task<KubernetesProviderConfiguration> Configuration(ISecretStore store, EnvironmentRecordId environment)
             {
                 async Task<SecretRef> Save(string file)
@@ -77,6 +81,7 @@ internal static class ConfiguredDeploymentCases
                     (scope, exact, cancellation) => KubernetesClientFactory.CreateFixture(new(new(scope.ToString(), binding.InstanceId.ToString(), binding.RevisionNumber.Value,
                         KubernetesProviderConfigurationCodec.Implementation), exact.Endpoint, exact.ServerCaPem, exact.BearerToken, exact.ClientCertificate, exact.ClientPrivateKey), store, [], cancellation))
                     .CheckTypedAsync(environment, configuration, ct);
+            Console.WriteLine("Q243 configured accepted-plan start");
             var scenario = await new DurableDeploymentPlanningTests(postgres).InternalScenarioAsync(Configuration, ns, actualKubernetesProbe: Preflight, initialOnly: true,
                 configureManifest: envelope =>
                 {
@@ -115,6 +120,7 @@ internal static class ConfiguredDeploymentCases
                         ApplicationDeploymentId.Parse(committed.Commit.DeploymentId), DeploymentGeneration.Create(committed.Commit.Generation),
                         DateTimeOffset.Parse(committed.Commit.CommittedAtUtc), committed.Commit.TechnicalActorId);
                 });
+            Console.WriteLine("Q243 configured accepted-plan completed");
             await using var services = DurableDeploymentPlanningTests.InternalServices(scenario.Connection, scenario.Time);
             var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
             var observationClock = new ObservationClock(services.GetRequiredService<TimeProvider>());
@@ -159,6 +165,7 @@ internal static class ConfiguredDeploymentCases
             using var firstSubmissionAudit = new ConfiguredSubmissionProbe();
             async Task WithHost(Func<Task> work)
             {
+                Console.WriteLine("Q243 configured host-build start");
                 await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
                     "--Haby:ListenAddress=0.0.0.0", "--Haby:Port=" + port, "--Haby:Tls:CertificatePath=" + certificatePath], collection =>
                 {
@@ -170,7 +177,10 @@ internal static class ConfiguredDeploymentCases
                     collection.AddSingleton<IRuntimeConfigurationStore>(p => new DeliveryBoundary(new PostgreSqlRuntimeConfigurationStore(p.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>()),
                         id => requests.Enqueue(Guid.Parse(id.ToString())), async () => { if (Interlocked.Exchange(ref revokeNextRead, 0) == 1) await RevokeLater(); }));
                 });
+                Console.WriteLine("Q243 configured host-build completed");
+                Console.WriteLine("Q243 configured host-start start");
                 await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+                Console.WriteLine("Q243 configured host-start completed");
                 activeHost = host; await work(); activeHost = null;
                 await host.StopAsync(token);
             }
@@ -178,6 +188,7 @@ internal static class ConfiguredDeploymentCases
             RolloutResult? rolloutReady = null;
             async Task<V1Pod> Startup(string marker, string? excludedUid = null)
             {
+                Console.WriteLine("Q243 configured pod-startup start");
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(token); wait.CancelAfter(TimeSpan.FromSeconds(35));
                 while (true)
                 {
@@ -195,6 +206,7 @@ internal static class ConfiguredDeploymentCases
                         if (log.Contains(marker, StringComparison.Ordinal))
                         {
                             if (marker != "primary-started" && log.Contains("primary-started", StringComparison.Ordinal)) throw new InvalidOperationException("Primary work bypassed mandatory retrieval.");
+                            Console.WriteLine("Q243 configured pod-startup completed");
                             return pod;
                         }
                     }
@@ -216,7 +228,9 @@ internal static class ConfiguredDeploymentCases
                 firstSubmissionAudit.Begin(activeHost.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LoggerFilterOptions>>());
                 try
                 {
+                    Console.WriteLine("Q243 configured first-submit start");
                     partial = await client.SubmitGenerationAsync(request, cancellationToken: token);
+                    Console.WriteLine("Q243 configured first-submit completed");
                     firstStatus = Grpc.Core.StatusCode.OK;
                 }
                 catch (Grpc.Core.RpcException failure)
@@ -228,6 +242,7 @@ internal static class ConfiguredDeploymentCases
                 finally
                 {
                     firstSubmissionAudit.End();
+                    Console.WriteLine("Q243 configured rpc " + (Enum.IsDefined(firstStatus) ? firstStatus.ToString() : "unknown"));
                     Console.WriteLine("Diagnostic configured first-submit-status: " + firstStatus);
                     Console.WriteLine("Diagnostic configured first-submit-audit-started: " + (firstSubmissionAudit.Started ? "true" : "false"));
                     firstSubmissionAudit.Write(Console.Out);
@@ -237,7 +252,9 @@ internal static class ConfiguredDeploymentCases
                 await AdmissionRefuses("missing-publication");
                 Check((await admin.AppsV1.ListNamespacedDeploymentAsync(ns, cancellationToken: token)).Items.Count == 0, "C03-missing-publication-no-Deployment");
                 loseConfirmation = true;
+                Console.WriteLine("Q243 configured uncertain-submit start");
                 var uncertain = await client.SubmitGenerationAsync(request, cancellationToken: token);
+                Console.WriteLine("Q243 configured uncertain-submit completed");
                 Check(uncertain.Outcome == "unavailable" && uncertain.Progress.Members.Single().Publication == "published", "C04-explicit-publication");
                 await using (var db = await contexts.CreateDbContextAsync(token))
                 {
@@ -250,23 +267,32 @@ internal static class ConfiguredDeploymentCases
                 later = (await publication.ReadAsync(requestsToPublish.Single(x => x.Origin!.Document == "settings").Key, token))!;
                 var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
                 if (string.IsNullOrWhiteSpace(binary) || !File.Exists(binary)) throw new InvalidOperationException("Published qualification CLI is required.");
+                Console.WriteLine("Q243 configured cli-submit start");
                 using var submission = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
                     ["deployment", "generation", "submit", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
+                Console.WriteLine("Q243 configured cli-submit completed");
                 Check(submission.RootElement.GetProperty("outcome"u8).GetString() == "submitted" && deploymentWrites == 1,
                     "C05-production-generated-create-confirmed");
                 currentPod = await Startup("primary-started");
                 Check(requests.ToArray().Distinct().Order().SequenceEqual(exact.Documents.Values.Select(Guid.Parse).Order()) && reviews >= 2,
                     "C06-real-projected-token-HTTPS-two-exact-documents-primary");
+                Console.WriteLine("Q243 configured readback start");
                 var saved = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, ns, cancellationToken: token);
                 DeploymentObjects.Receipt(DeploymentObjects.Read(saved), intent, ConfirmationSource.Observation);
                 var actualResources = saved.Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer").Resources;
                 Check(saved.Spec.Template.Spec.ServiceAccountName == intent.Target.Runtime.ServiceAccount && currentPod.Spec.AutomountServiceAccountToken == false &&
                     intent.Target.Resources!.Requests!.Cpu is null &&
-                    DeploymentResources.Equivalent("1", actualResources.Requests["cpu"].ToString()) &&
+                    !actualResources.Requests.ContainsKey("cpu") &&
                     DeploymentResources.Equivalent("128Mi", actualResources.Requests["memory"].ToString()) &&
                     DeploymentResources.Equivalent("1", actualResources.Limits["cpu"].ToString()) &&
                     DeploymentResources.Equivalent("512Mi", actualResources.Limits["memory"].ToString()),
                     "C07-complete-saved-projection-and-Pod-identity");
+                Console.WriteLine("Q243 configured readback completed");
+                var podResources = currentPod.Spec.Containers.Single(c => c.Name == "configured-consumer").Resources;
+                Check(DeploymentResources.Equivalent("1", podResources.Requests["cpu"].ToString()) &&
+                    DeploymentResources.Equivalent("128Mi", podResources.Requests["memory"].ToString()) &&
+                    DeploymentResources.Equivalent("1", podResources.Limits["cpu"].ToString()) &&
+                    DeploymentResources.Equivalent("512Mi", podResources.Limits["memory"].ToString()), "C12-Pod-defaulted-resource-requests");
                 rolloutReady = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-ready", new(RequestMilliseconds: 30000), token);
                 Check(rolloutReady.Ready && rolloutReady.Submitted is not null && rolloutReady.SavedReady is not null &&
                     intent.Target.MinReadySeconds == 1 && saved.Metadata.Uid == DeploymentIntents.DecodeReceipt((await actions.HistoryAsync(key, token))!.Output!.Payload).Uid,
@@ -382,6 +408,7 @@ internal static class ConfiguredDeploymentCases
             {
                 try
                 {
+                    Console.WriteLine("Q243 configured cleanup-namespace start");
                     using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                     await admin.CoreV1.DeleteNamespaceAsync(ns, new V1DeleteOptions { Preconditions = new() { Uid = ownedNamespace.Metadata.Uid } }, cancellationToken: budget.Token);
                     while (true)
@@ -390,12 +417,14 @@ internal static class ConfiguredDeploymentCases
                         catch (k8s.Autorest.HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.NotFound) { break; }
                         await Task.Delay(100, budget.Token);
                     }
+                    Console.WriteLine("Q243 configured cleanup-namespace completed");
                     Console.WriteLine("PASS configured-owned-namespace-absent");
                 }
-                catch (Exception error) { cleanup.Add(error); }
+                catch (Exception error) { Console.WriteLine("Q243 configured cleanup-namespace failed"); cleanup.Add(error); }
             }
-            try { await ((Xunit.IAsyncLifetime)postgres).DisposeAsync(); Console.WriteLine("PASS configured-owned-catalog-cleanup"); }
-            catch (Exception error) { cleanup.Add(error); }
+            Console.WriteLine("Q243 configured cleanup-catalog start");
+            try { await ((Xunit.IAsyncLifetime)postgres).DisposeAsync(); Console.WriteLine("Q243 configured cleanup-catalog completed"); Console.WriteLine("PASS configured-owned-catalog-cleanup"); }
+            catch (Exception error) { Console.WriteLine("Q243 configured cleanup-catalog failed"); cleanup.Add(error); }
             if (cleanup.Count > 0) throw new AggregateException(primary is null ? cleanup : [primary, .. cleanup]);
         }
     }
@@ -422,7 +451,14 @@ internal static class ConfiguredDeploymentCases
         public override DateTimeOffset GetUtcNow() => source.GetUtcNow() + offset;
         internal void Advance(TimeSpan value) => offset += value;
     }
-    private static void Check(bool value, string id) { if (!value) throw new InvalidOperationException("Configured Deployment case failed: " + id); Console.WriteLine("PASS configured-" + id); }
+    private static void Check(bool value, string id)
+    {
+        var prefix = id.Split('-')[0];
+        var stage = prefix is "C01" or "C02" or "C03" or "C04" or "C05" or "C06" or "C07" or "C08" or "C09" or "C10" or "C11" or "C12" or "R01" or "R02" or "R03" or "R04" or "R05" or "R06" or "B01" or "B02" or "B03" or "B04" or "A01" or "A02" or "A03" ? prefix : "unknown";
+        Console.WriteLine($"Q243 configured {stage} {(value ? "passed" : "failed")}");
+        if (!value) throw new InvalidOperationException("Configured Deployment case failed: " + id);
+        Console.WriteLine("PASS configured-" + id);
+    }
     private sealed class CountReviews(Action count) : DelegatingHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)

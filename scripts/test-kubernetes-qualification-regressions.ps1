@@ -1,4 +1,5 @@
 # Synthetic lifecycle controls only. Real API/storage evidence is separate.
+param([switch]$WorkloadEvidenceOnly)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-evidence.ps1')
@@ -815,7 +816,9 @@ public static class DiagnosticWriterControls
 
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
-foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','build-failure','harness-nonzero','stock-marker','build-timeout','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')){
+$workloadScenarios=@('workload-safe-failure','workload-secret-failure','workload-invalid-failure','workload-oversized-failure','workload-invalid-success','workload-recorded-failure-success')
+$scenarios=if($WorkloadEvidenceOnly){$workloadScenarios}else{@('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','build-failure','harness-nonzero','stock-marker','build-timeout','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')+$workloadScenarios}
+foreach($scenario in $scenarios){
     $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@();TimedCalls=@();CopyCalls=0}
     $syntheticTimeout=$null
     $copyTimeout=if($scenario -ceq 'copy-timeout'){New-QualificationProcessFailure 'command-deadline' 42L}else{$null}
@@ -837,6 +840,13 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
                 if($scenario -eq 'build-timeout'){throw $buildTimeout}
             }
             if($arguments[0] -eq 'run'){
+                if($scenario -cin $workloadScenarios){
+                    $result.ExitCode=if($scenario -cin @('workload-invalid-success','workload-recorded-failure-success')){0}else{17}
+                    $result.Output="Q243 kernel entry start`nQ243 kernel K25 failed`nQ243 kernel result NotConfirmed evidence-not-confirmed 0`nprotected-config-sentinel"
+                    $result.Error='protected-JWT-sentinel'
+                    if($scenario -like 'workload-invalid*'){$result.Output+="`nQ243 kernel result Confirmed protected-secret 999"}
+                    if($scenario -ceq 'workload-oversized-failure'){$result.Output='Q243 kernel entry start'+('x'*1048576)}
+                }
                 if($scenario -eq 'harness-nonzero'){$result.ExitCode=17;$result.Output='protected-raw-harness-sentinel';$result.Error='protected-raw-harness-sentinel'}
                 if($scenario -eq 'stock-marker'){$result.ExitCode=1;$result.Error='FAIL stock SslCaCerts accepted mismatched server name; stock path is unqualified.'}
                 if($scenario -eq 'elapsed-missing'){$result.PSObject.Properties.Remove('ElapsedMilliseconds')}
@@ -849,7 +859,7 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
                 if($scenario -in @('harness-timeout','journal-partial-timeout')){throw $syntheticTimeout}
                 if($scenario -cin @('journal-invalid-primary','journal-partial-primary')){$result.ExitCode=17}
             }
-            $result.Output='synthetic-sdk/harness';return $result
+            if($scenario -cnotin $workloadScenarios){$result.Output='synthetic-sdk/harness'};return $result
         }
         switch($arguments[0]){
             '--version' {$result.Output='synthetic-runtime'}
@@ -881,7 +891,18 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     if($scenario -eq 'evidence-failure'){$evidence=((Get-Process -Id $PID).Path+[IO.Path]::DirectorySeparatorChar+[Guid]::NewGuid().ToString('N'))}
     $caught=$false
     $diagnosticMode=$scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')
-    try{& $launcher -Runtime $runtime -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence -DurableActions:$diagnosticMode -ProbeStockTls:($scenario -eq 'stock-marker') | Out-Null}catch{$caught=$true}
+    try{& $launcher -Runtime $runtime -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence -DurableActions:$diagnosticMode -ProbeStockTls:($scenario -eq 'stock-marker') -DeploymentKernel:($scenario -cin $workloadScenarios) | Out-Null}catch{$caught=$true}
+    if($scenario -cin $workloadScenarios){
+        $safeLines=@(Get-Content $evidence)
+        if(!$caught -or 'Harness: FAIL' -cnotin $safeLines -or 'Run-owned private directory removed.' -cnotin $safeLines -or
+            @($safeLines | Where-Object {$_ -cmatch '^Run-owned container and [0-9]+ anonymous volumes absent\.$'}).Count -ne 1){throw 'Workload failure/cleanup attribution lost'}
+        if($safeLines -match 'protected-|JWT|config-sentinel'){throw 'Protected workload output leaked'}
+        if($scenario -cin @('workload-safe-failure','workload-secret-failure') -and
+            'Diagnostic workload: kernel K25 failed' -cnotin $safeLines){throw 'Finite workload record discarded on nonzero exit'}
+        if($scenario -like 'workload-invalid*' -and 'Diagnostic workload: invalid' -cnotin $safeLines){throw 'Invalid workload record accepted'}
+        if($scenario -ceq 'workload-oversized-failure' -and 'Diagnostic workload: oversized' -cnotin $safeLines){throw 'Oversized workload record accepted'}
+        if($scenario -cnotin @('workload-invalid-success','workload-recorded-failure-success') -and 'Failure: stage=harness; reason=nonzero; category=RuntimeException' -cnotin $safeLines){throw 'Primary workload failure replaced'}
+    }
     if($caught -ne ($scenario -cnotin @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range'))){throw "Wrong exit: $scenario"}
     $buildCalls=@($state.Calls | Where-Object {$_[0] -ceq 'build'})
     $harnessCalls=@($state.Calls | Where-Object {$_[0] -ceq 'run' -and '--project' -cin $_})
@@ -1003,6 +1024,28 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     Write-Output "PASS lifecycle $runtime $scenario (synthetic)"
 }
 }
+# Pure parser controls for both existing workload modes, never a cluster execution.
+foreach($mode in @('kernel','configured')){
+    $case=if($mode -ceq 'kernel'){'K25'}else{'C07'}
+    $valid="Q243 $mode entry start`nQ243 $mode $case failed"
+    $parsed=Read-QualificationWorkloadEvidence $mode $valid 'protected-JWT-sentinel'
+    if($parsed.Status -cne 'valid' -or !$parsed.HasFailure -or "Diagnostic workload: $mode $case failed" -cnotin $parsed.Records -or ($parsed.Records -match 'JWT|protected')){throw 'Closed workload parser lost mode or leaked arbitrary text'}
+    if($mode -ceq 'configured'){
+        $rpc=Read-QualificationWorkloadEvidence $mode ($valid+"`nQ243 configured rpc Unavailable") ''
+        if($rpc.Status -cne 'valid' -or 'Diagnostic workload: configured rpc Unavailable' -cnotin $rpc.Records){throw 'Configured closed RPC status not retained'}
+        $rpc=Read-QualificationWorkloadEvidence $mode ($valid+"`nQ243 configured rpc protected-secret") ''
+        if($rpc.Status -cne 'invalid' -or @($rpc.Records).Count){throw 'Unrecognized RPC status published'}
+    }
+    foreach($invalid in @("Q243 $mode protected-secret passed","Q243 $mode result Confirmed response-confirmed 4","Q243 $mode result Invalid protected-secret 0")){
+        $parsed=Read-QualificationWorkloadEvidence $mode ($valid+"`n"+$invalid) ''
+        if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Invalid workload record was published'}
+    }
+    $parsed=Read-QualificationWorkloadEvidence $mode (("Q243 $mode entry start`n")*257) ''
+    if($parsed.Status -cne 'oversized' -or @($parsed.Records).Count){throw 'Workload record cap bypassed'}
+}
+Write-Output 'PASS closed workload failure channel: both modes, nonzero primary/cleanup, secret rejection and bounds (synthetic)'
+if($WorkloadEvidenceOnly){return}
+
 # Keep configured bridge/certificate controls with an isolated synthetic binding;
 # the fixture copy can never become an accepted repository/public image mapping.
 if($IsLinux){
@@ -1016,12 +1059,22 @@ if($IsLinux){
         $binding=Join-Path $fixture ('tests/fixtures/runtime-consumer-images/'+$inputModel.key+'.json')
         New-Item -ItemType Directory -Force ([IO.Path]::GetDirectoryName($binding))|Out-Null
         [ordered]@{format=1;package=$HabyConsumerPackage;inputKey=$inputModel.key;digest=('sha256:'+('a'*64));builtSource=('b'*40);publisherSource=('c'*40);publisherRunId=1;proofArtifactSha256=('d'*64)}|ConvertTo-Json|Set-Content -LiteralPath $binding -Encoding utf8
-        foreach($operation in @('none','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address')){
+        foreach($operation in @('none','inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address','harness-failure','harness-invalid','harness-oversized','harness-recorded-failure-success')){
             $state=@{Name='';Private='';Removed=$false;Volumes=$true;NetworkInspected=$false}
             $runner={param($file,$arguments,$seconds)
                 $result=[pscustomobject]@{ExitCode=0;Output='';Error='';ElapsedMilliseconds=42L}
                 if($file -ceq 'chmod'){$state.Private=$arguments[1];return $result}
-                if($file -ceq 'dotnet'){$result.Output='synthetic-sdk/harness';return $result}
+                if($file -ceq 'dotnet'){
+                    $result.Output='synthetic-sdk/harness'
+                    if($arguments[0] -ceq 'run'){
+                        $result.Output=if($operation -ceq 'none'){"Q243 configured entry start`nQ243 configured completed completed"}else{"Q243 configured entry start`nQ243 configured C07 failed"}
+                        $result.Error='protected-child-sentinel'
+                        if($operation -ceq 'harness-failure'){$result.ExitCode=17}
+                        if($operation -ceq 'harness-invalid'){$result.Output+="`nQ243 configured protected-child-sentinel passed"}
+                        if($operation -ceq 'harness-oversized'){$result.Output='Q243 configured entry start'+('x'*1048576)}
+                    }
+                    return $result
+                }
                 switch($arguments[0]){
                     '--version' {$result.Output='synthetic-runtime'}
                     'run' {$state.Name=$arguments[[Array]::IndexOf($arguments,'--name')+1]}
@@ -1046,7 +1099,15 @@ if($IsLinux){
             try{& (Join-Path $fixture 'scripts/run-kubernetes-qualification.ps1') -Runtime docker -ConfiguredDeployment -CommandRunner $runner -EvidencePath $evidence|Out-Null}catch{$caught=$true}
             $lines=@(Get-Content -LiteralPath $evidence)
             if($caught -ne ($operation -cne 'none') -or !$state.Removed -or $state.Volumes -or (Test-Path -LiteralPath $state.Private) -or $lines -match 'protected-.*-sentinel'){throw 'Configured bridge or cleanup control failed'}
-            if($operation -cne 'none' -and ('Stage: harness-start' -cin $lines -or ('Copy failure: operation='+$operation) -cnotin $lines)){throw 'Configured primary failure lost'}
+            if($operation -cin @('inspect-bridge-gateway','validate-bridge-gateway','write-bridge-address') -and
+                ('Stage: harness-start' -cin $lines -or ('Copy failure: operation='+$operation) -cnotin $lines)){throw 'Configured primary failure lost'}
+            if($operation -ceq 'harness-failure' -and ('Diagnostic workload: configured C07 failed' -cnotin $lines -or
+                'Harness exit code: 17' -cnotin $lines -or 'Failure: stage=harness; reason=nonzero; category=RuntimeException' -cnotin $lines)){throw 'Configured nonzero evidence or primary failure lost'}
+            if($operation -ceq 'harness-recorded-failure-success' -and ('Harness exit code: 0' -cnotin $lines -or
+                'Diagnostic workload: configured C07 failed' -cnotin $lines -or 'Harness: FAIL' -cnotin $lines -or
+                'Failure: stage=harness; reason=diagnostic-failed; category=RuntimeException' -cnotin $lines)){throw 'Configured zero-exit failure evidence or primary failure lost'}
+            if($operation -ceq 'harness-invalid' -and 'Diagnostic workload: invalid' -cnotin $lines){throw 'Configured malformed evidence accepted'}
+            if($operation -ceq 'harness-oversized' -and 'Diagnostic workload: oversized' -cnotin $lines){throw 'Configured oversized evidence accepted'}
             Write-Output ('PASS configured bridge '+$operation+' (synthetic; no registry/image operation)')
         }
     }finally{Set-Location (Split-Path $PSScriptRoot -Parent);Remove-Item -LiteralPath $fixture -Recurse -Force}
