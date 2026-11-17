@@ -157,27 +157,16 @@ internal static class DeploymentKernelCases
             await Mutate(uncertainIntent, """[{"op":"add","path":"/metadata/annotations/haby.dev~1write-operation","value":"foreign"}]""");
             Check((await Kernel().ObserveAsync(reloaded, token)) is { Outcome: KernelOutcome.NotConfirmed, WriteDispatches: 0 }, "K12-wrong-marker-no-success");
             Check((await Kernel().ObserveAsync(Intent("absent"), token)) is { Outcome: KernelOutcome.NotConfirmed, WriteDispatches: 0 }, "K13-absence-no-replay");
-            var replacementPhase = "initial-create"; var absenceAttempts = 0; var observedAbsent = false;
+            var replacementPhase = "initial-create";
             try
             {
                 K14Phase(replacementPhase, "start");
                 var replacementIntent = Intent("replacement"); var replacement = await Kernel().ExecuteAsync(replacementIntent, token);
                 ResultEvidence(replacement, replacementPhase);
-                replacementPhase = "uid-delete"; K14Phase(replacementPhase, "start");
-                await admin.AppsV1.DeleteNamespacedDeploymentAsync(replacementIntent.Name, name, new V1DeleteOptions { Preconditions = new() { Uid = replacement.Receipt!.Uid }, PropagationPolicy = "Orphan" }, cancellationToken: token);
-                K14Phase(replacementPhase, "completed");
-                replacementPhase = "absence-poll"; K14Phase(replacementPhase, "start");
-                for (var n = 0; n < 50; n++)
-                {
-                    absenceAttempts++;
-                    try { await Read(replacementIntent); await Task.Delay(100, token); }
-                    catch (HttpOperationException e) when (e.Response.StatusCode == HttpStatusCode.NotFound) { observedAbsent = true; break; }
-                }
-                K14Poll(observedAbsent, absenceAttempts);
                 // An administrator replacement has identical markers/projection but a different UID.
-                replacementPhase = "replacement-create"; K14Phase(replacementPhase, "start");
-                await admin.AppsV1.CreateNamespacedDeploymentAsync(DeploymentObjects.Create(replacementIntent), name, cancellationToken: token);
-                K14Phase(replacementPhase, "completed");
+                await DeploymentKernelReplacement.RunAsync(admin, name, replacementIntent.Name, replacement.Receipt!.Uid,
+                    DeploymentObjects.Create(replacementIntent), token,
+                    (phase, state) => { replacementPhase = phase; K14Phase(phase, state); }, K14Poll);
                 replacementPhase = "old-uid-observe"; K14Phase(replacementPhase, "start");
                 var replacementUpdate = replacementIntent with { ExpectedUid = replacement.Receipt.Uid, LastConfirmed = replacementIntent.Target };
                 var replacementObservation = await Kernel().ObserveAsync(replacementUpdate, token);
@@ -192,7 +181,6 @@ internal static class DeploymentKernelCases
                 // A diagnostic writer failure cannot replace the original K14 exception.
                 try
                 {
-                    if (replacementPhase == "absence-poll") K14Poll(observedAbsent, absenceAttempts);
                     K14Failure(replacementPhase, failure);
                 }
                 catch { }
@@ -228,13 +216,19 @@ internal static class DeploymentKernelCases
             Check((await Kernel(connection with { ServerCaPem = otherRoot.ExportCertificatePem() }).ExecuteAsync(Intent("foreign-root"), token)) is { Outcome: KernelOutcome.Refused, WriteDispatches: 0 }, "K23-new-factory-custom-root-refusal");
             using var uidRace = new RaceHandler(async () =>
             {
-                await admin.AppsV1.DeleteNamespacedDeploymentAsync(i.Name, name, new V1DeleteOptions { Preconditions = new() { Uid = created.Receipt.Uid }, PropagationPolicy = "Orphan" }, cancellationToken: token);
-                for (var n = 0; n < 50; n++)
+                var phase = "uid-delete";
+                try
                 {
-                    try { await Read(i); await Task.Delay(100, token); }
-                    catch (HttpOperationException e) when (e.Response.StatusCode == HttpStatusCode.NotFound) { break; }
+                    await DeploymentKernelReplacement.RunAsync(admin, name, i.Name, created.Receipt.Uid,
+                        DeploymentObjects.Create(next), token,
+                        (step, state) => { phase = step; ReplacementPhase("k24", step, state); },
+                        (absent, attempts) => ReplacementPoll("k24", absent, attempts));
                 }
-                await admin.AppsV1.CreateNamespacedDeploymentAsync(DeploymentObjects.Create(next), name, cancellationToken: token);
+                catch (Exception failure)
+                {
+                    try { ReplacementFailure("k24", phase, failure); } catch { }
+                    throw;
+                }
             });
             var uidRaced = await Kernel(null, uidRace).ExecuteAsync(next, token);
             var afterUidRace = await Read(i);
@@ -283,24 +277,14 @@ internal static class DeploymentKernelCases
         Console.WriteLine($"Q243 kernel {stage} {(value ? "passed" : "failed")}");
         Console.WriteLine((value ? "PASS " : "FAIL ") + "kernel-" + id); if (!value) throw new InvalidOperationException("Kernel assertion failed.");
     }
-    private static void K14Phase(string phase, string state) => Console.WriteLine($"Q243 kernel k14 {phase} {state}");
-    private static void K14Poll(bool observedAbsent, int attempts) =>
-        Console.WriteLine($"Q243 kernel k14 absence-poll result {(observedAbsent ? "true" : "false")} {attempts.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
-    private static void K14Failure(string phase, Exception failure)
-    {
-        var category = failure switch
-        {
-            HttpOperationException => "http",
-            OperationCanceledException => "canceled",
-            NullReferenceException => "null-reference",
-            Haby.Kubernetes.Contracts.WorkloadContractException => "contract",
-            InvalidOperationException => "invalid-operation",
-            _ => "unknown"
-        };
-        var status = failure is HttpOperationException http ? (int?)http.Response?.StatusCode : null;
-        var safeStatus = status is >= 100 and <= 599 ? status.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unknown";
-        Console.WriteLine($"Q243 kernel k14 {phase} exception {category} {safeStatus}");
-    }
+    private static void K14Phase(string phase, string state) => ReplacementPhase("k14", phase, state);
+    private static void K14Poll(bool observedAbsent, int attempts) => ReplacementPoll("k14", observedAbsent, attempts);
+    private static void K14Failure(string phase, Exception failure) => ReplacementFailure("k14", phase, failure);
+    private static void ReplacementPhase(string fixture, string phase, string state) => Console.WriteLine($"Q243 kernel {fixture} {phase} {state}");
+    private static void ReplacementPoll(string fixture, bool observedAbsent, int attempts) =>
+        Console.WriteLine($"Q243 kernel {fixture} absence-poll result {(observedAbsent ? "true" : "false")} {attempts.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+    private static void ReplacementFailure(string fixture, string phase, Exception failure) =>
+        Console.WriteLine(DeploymentKernelReplacement.FailureEvidence(fixture, phase, failure));
     private static void ResultEvidence(KernelResult result, string? replacementPhase = null)
     {
         string[] codes = ["response-confirmed", "observation-confirmed", "evidence-not-confirmed", "response-unconfirmed", "invalid-input",

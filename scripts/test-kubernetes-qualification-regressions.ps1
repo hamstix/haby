@@ -1041,6 +1041,9 @@ $k14Records=@(
     'Q243 kernel k14 absence-poll result true 1',
     'Q243 kernel k14 absence-poll result false 0',
     'Q243 kernel k14 absence-poll result false 50',
+    'Q243 kernel k14 absence-poll result true 53',
+    'Q243 kernel k14 absence-poll result false 600',
+    'Q243 kernel k14 absence-poll result false 601',
     'Q243 kernel k14 replacement-create start',
     'Q243 kernel k14 replacement-create completed',
     'Q243 kernel k14 old-uid-observe start',
@@ -1075,7 +1078,7 @@ $k14Invalid=@(
     'Q243 kernel k14 initial-create result Confirmed response-confirmed 1 True',
     'Q243 kernel k14 initial-create result Confirmed response-confirmed 1 true extra',
     'Q243 kernel k14 absence-poll result true -1',
-    'Q243 kernel k14 absence-poll result true 51',
+    'Q243 kernel k14 absence-poll result true 602',
     'Q243 kernel k14 absence-poll result true 00',
     'Q243 kernel k14 absence-poll result protected 1',
     'Q243 kernel k14 absence-poll completed',
@@ -1097,6 +1100,22 @@ $parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+(
 if($parsed.Status -cne 'valid' -or $parsed.Records.Count -ne 256){throw 'K14 existing record ceiling reduced'}
 $parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+("Q243 kernel k14 uid-delete start`n"*256)) ''
 if($parsed.Status -cne 'oversized' -or @($parsed.Records).Count){throw 'K14 existing record ceiling increased'}
+foreach($line in @(
+    'Q243 kernel k24 uid-delete start', 'Q243 kernel k24 uid-delete completed',
+    'Q243 kernel k24 absence-poll start', 'Q243 kernel k24 absence-poll result true 53',
+    'Q243 kernel k24 absence-poll result false 601', 'Q243 kernel k24 absence-poll exception canceled unknown',
+    'Q243 kernel k24 absence-poll exception http 409', 'Q243 kernel k24 replacement-create start',
+    'Q243 kernel k24 replacement-create completed')){
+    $parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+$line) 'protected-error-sentinel'
+    if($parsed.Status -cne 'valid' -or ('Diagnostic workload: '+$line.Substring(5)) -cnotin $parsed.Records){throw 'Fixed K24 replacement record missing'}
+}
+foreach($line in @('Q243 kernel k24 initial-create start','Q243 kernel k24 old-uid-observe start',
+    'Q243 kernel k24 absence-poll result false 602','Q243 kernel k24 absence-poll result false 0601',
+    'Q243 kernel k24 absence-poll result false 1000000','Q243 kernel k24 absence-poll exception protected unknown')){
+    $parsed=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+$line) ''
+    if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Unknown or unbounded K24 replacement record retained'}
+}
+Write-Output 'PASS kernel K24 replacement phases and finite 601-read evidence; unknown/over-bound records rejected (synthetic)'
 Write-Output 'PASS fixed K14 substeps: closed results/receipt/status/count, exception failure, hostile/unknown/mode rejection and unchanged bounds (synthetic)'
 
 # Pure parser controls for both existing workload modes, never a cluster execution.
