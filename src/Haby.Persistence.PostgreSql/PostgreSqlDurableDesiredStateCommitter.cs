@@ -53,6 +53,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         if (prior is not null)
         {
             var accepted = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == prior.DeploymentId && x.Generation == prior.Generation, cancellationToken);
+            if (mode == DeploymentAdmissionMode.Operator && DurableOperationGraphCodec.Decode(accepted.GraphJson).WorkloadUpdate is not null) return new DurableCommitResult.UnsupportedShape();
             if (mode == DeploymentAdmissionMode.Operator)
             {
                 var original = await context.DurablePlans.AsNoTracking().SingleOrDefaultAsync(x => x.Id == prior.PlanId, cancellationToken);
@@ -83,10 +84,11 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             return new DurableCommitResult.ChangeSetStale(actual is null ? null : DeploymentGeneration.Create(actual.DesiredGeneration));
         if (actual is not null)
         {
+            if (mode != DeploymentAdmissionMode.Internal && await PostgreSqlDurableDeploymentPlanner.HasWorkloadBaselineAsync(context, actual, cancellationToken)) return new DurableCommitResult.UnsupportedShape();
             await context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {actual.Id} FOR UPDATE", cancellationToken);
             actual = await context.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == actual.Id, cancellationToken);
             if (actual.AppliedGeneration != actual.DesiredGeneration) return new DurableCommitResult.PlanInputUnavailable();
-            if (!await DurableAggregateCompletion.HasProofAsync(context, actual.Id, actual.DesiredGeneration, cancellationToken))
+            if (!await PostgreSqlDurableDeploymentPlanner.HasAppliedBaselineProofAsync(context, actual.Id, actual.DesiredGeneration, cancellationToken))
                 return new DurableCommitResult.PlanInputUnavailable();
             await ResourceContinuity.LockAsync(context, actual.Id, cancellationToken);
         }
@@ -98,6 +100,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         {
             inputs = plan.Inputs();
             graph = DurableOperationGraphCodec.Decode(plan.GraphJson);
+            if (graph.WorkloadUpdate is not null && mode != DeploymentAdmissionMode.Internal) return new DurableCommitResult.UnsupportedShape();
             var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(x =>
                 x.Id == change.EnvironmentRecordId, cancellationToken);
             if (environment is null || environment.EnvironmentId != inputs.EnvironmentKey.Value)
@@ -137,8 +140,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             }
         }
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
-        var emptyStage = internalEffects && actual is null && change.ExpectedAbsence && change.ExpectedGeneration is null &&
-            InternalResourceStage.IsEmpty(inputs, graph);
+        var emptyStage = internalEffects && (actual is null && change.ExpectedAbsence && change.ExpectedGeneration is null && InternalResourceStage.IsEmpty(inputs, graph) ||
+            graph.WorkloadUpdate is not null && inputs.Providers.Declaration.Spec.Resources.Count == 0);
         if (revision is null && !emptyStage) return new DurableCommitResult.UnsupportedShape();
         if (actual is null ? graph.Baseline is not null : graph.Baseline is not { } baseline ||
             baseline.Deployment.ToString() != actual.Id.ToString() || baseline.Generation != actual.DesiredGeneration)
@@ -211,9 +214,17 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             try
             {
                 var selected = await planner.SelectInternalDocumentsAsync(context, inputs, manifestRow.ApplicationVersion, handlers ?? [], cancellationToken);
-                var inventory = await InitialRetirementAuthority.CaptureAsync(context, inputs, graph, actual, selected, cancellationToken);
-                if (graph.Retirement is null || !InitialRetirementAuthority.Same(inventory, graph.Retirement)) return new DurableCommitResult.PlanInputUnavailable();
+                if (graph.WorkloadUpdate is { } update)
+                {
+                    if (actual is null || (await planner.CaptureWorkloadUpdateAsync(context, actual, inputs, graph, manifestRow.ApplicationVersion, handlers ?? [], selected, cancellationToken)).Fingerprint != update.Fingerprint) return new DurableCommitResult.PlanStale();
+                }
+                else
+                {
+                    var inventory = await InitialRetirementAuthority.CaptureAsync(context, inputs, graph, actual, selected, cancellationToken);
+                    if (graph.Retirement is null || !InitialRetirementAuthority.Same(inventory, graph.Retirement)) return new DurableCommitResult.PlanInputUnavailable();
+                }
             }
+            catch (WorkloadUpdateRefusedException) { return new DurableCommitResult.PlanStale(); }
             catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
         }
         cancellationToken.ThrowIfCancellationRequested();
