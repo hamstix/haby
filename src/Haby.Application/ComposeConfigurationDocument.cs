@@ -21,9 +21,11 @@ public sealed class ComposeConfigurationDocument(ConfigurationRenderingCatalog r
         ConfigurationDocumentCodec.ValidateTree(document.Template);
         foreach (var contribution in layout.Contributions.Where(x => x.Contribution.Document == target.Document))
         {
-            if (contribution.Contribution.SecretProjections.Count != 0 || !Static(contribution.Contribution.Value)) return null;
+            if (!Static(contribution.Contribution.Value)) return null;
             ConfigurationDocumentCodec.ValidateTree(contribution.Contribution.Value);
-            projections.Add(new(contribution.Contribution.Path, new(contribution.Contribution.Value), contribution.Origin.Source));
+            var projected = ProfileSecretInsertion.Apply(contribution.Contribution.Value,
+                contribution.Contribution.SecretProjections, frozen.FrozenSecrets, contribution.Contribution.Path);
+            projections.Add(new(contribution.Contribution.Path, new(projected), contribution.Origin.Source));
         }
         for (var i = 0; i < layout.BindingRequests.Count; i++)
         {
@@ -54,7 +56,7 @@ public sealed class ComposeConfigurationDocument(ConfigurationRenderingCatalog r
         ConfigurationString s => !s.Value.Contains("{{", StringComparison.Ordinal) && !s.Value.Contains("{%", StringComparison.Ordinal),
         ConfigurationArray a => a.Items.All(Static),
         ConfigurationObject o => o.Members.Values.All(Static),
-        ConfigurationSecretReference or ConfigurationDeferredValue => false,
+        ConfigurationSecretReference or ConfigurationDeferredValue or ConfigurationProjectedSecret => false,
         _ => true
     };
 }

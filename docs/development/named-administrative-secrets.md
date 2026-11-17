@@ -93,6 +93,7 @@ The CLI fetches one page; the caller explicitly follows `nextCursor`.
 habyctl environment create staging
 habyctl secret create pg-admin --environment staging
 habyctl secret create pg-admin --environment staging --stdin --request-id <uuid>
+habyctl secret create logging-password --environment staging --purpose configuration
 habyctl secret get pg-admin --environment staging
 habyctl secret get --id <secret-id> --environment staging
 habyctl secret list --environment staging --page-size 50 --output json
@@ -100,6 +101,11 @@ habyctl secret list --environment staging --page-size 50 --output json
 
 `--environment` overrides the selected context's logical Environment. Neither
 context selection nor secret creation implicitly creates an Environment.
+The omitted purpose remains ProviderAdministrator. `--purpose configuration`
+creates an Environment-owned Configuration secret under the same unique name
+namespace. A same-name different-purpose request conflicts; exact RequestId,
+purpose and bytes must be reused after an uncertain response. Safe get/list
+metadata reports the purpose and numbered version, never material.
 No literal secret argument is accepted. Interactive input uses the testable
 `ISecretTerminal` abstraction over hidden character reads, UTF-8 encoding and
 Enter exclusion. Explicit `--stdin` reads exact bytes to EOF, including BOM,

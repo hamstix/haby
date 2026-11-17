@@ -22,6 +22,20 @@ public sealed partial class CliLoopbackTests
             Assert.Equal("pilot", request.Environment);
             Assert.True(Guid.TryParse(request.RequestId, out _));
             Assert.True(request.Material.Span.SequenceEqual(new byte[] { 0xef, 0xbb, 0xbf, 65, 13, 10 }), "Transport must preserve exact input bytes.");
+            Assert.Equal(request.Name == "config" ? "Configuration" : "ProviderAdministrator", request.Purpose);
+            if (request.Name == "config") return Task.FromResult(new SecretReply
+            {
+                Status = SecretStatus.Created,
+                RequestId = request.RequestId,
+                Secret = new SecretMetadata
+                {
+                    Name = "config",
+                    EnvironmentRecordId = "019d03cf-a000-7000-8000-000000000001",
+                    SecretId = "019d03cf-a000-7000-8000-000000000002",
+                    Purpose = "Configuration",
+                    Versions = { new SecretVersionMetadata { VersionId = "019d03cf-a000-7000-8000-000000000003", Number = 1 } }
+                }
+            });
             if (request.Name == "uncertain") throw new RpcException(new Status(StatusCode.Unavailable, "unsafe-detail"));
             if (request.Name == "unknown") return Task.FromResult(new SecretReply());
             if (request.Name == "missing-secret") return Task.FromResult(new SecretReply { Status = SecretStatus.Created, RequestId = request.RequestId });
@@ -106,7 +120,7 @@ public sealed partial class CliLoopbackTests
                     {
                         Assert.Empty(stdout);
                         Assert.Contains(requestId, stderr);
-                        Assert.Contains("same Environment, name, exact input", stderr);
+                        Assert.Contains("same Environment, name, purpose, exact input", stderr);
                     }
                     else if (format == "json")
                     {
@@ -123,6 +137,38 @@ public sealed partial class CliLoopbackTests
                     }
                 }
             }
+        foreach (var native in new[] { false, true })
+        {
+            if (native && binary is null) continue;
+            var args = new[] { "secret", "create", "config", "--environment", "pilot", "--purpose", "configuration", "--stdin", "-o", "json" };
+            if (!native)
+            {
+                using var stdout = new StringWriter(); using var stderr = new StringWriter();
+                var cli = new CliApplication(new FixedEndpoint(endpoint), new GrpcRegistryClientFactory(), stdout, stderr,
+                    secretTerminal: new SecretInputTests.Terminal(bytes));
+                Assert.Equal(0, await cli.RunAsync(args));
+                Assert.Contains("Configuration", stdout.ToString());
+            }
+            else
+            {
+                var start = new ProcessStartInfo(binary!)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                foreach (var arg in args) start.ArgumentList.Add(arg);
+                start.Environment["HABY_OPERATOR_URL"] = endpoint;
+                using var process = Process.Start(start)!;
+                var stdout = process.StandardOutput.ReadToEndAsync();
+                await process.StandardInput.BaseStream.WriteAsync(bytes);
+                process.StandardInput.Close();
+                await process.WaitForExitAsync();
+                Assert.Equal(0, process.ExitCode);
+                Assert.Contains("Configuration", await stdout);
+            }
+        }
         using var invalidOutput = new StringWriter();
         using var invalidError = new StringWriter();
         var rejected = new CliApplication(new FixedEndpoint(endpoint), new GrpcRegistryClientFactory(), invalidOutput, invalidError,
@@ -131,6 +177,7 @@ public sealed partial class CliLoopbackTests
         Assert.Empty(invalidOutput.ToString());
         Assert.Equal(2, await rejected.RunAsync(["secret", "create", "admin", "literal", "--environment", "pilot"]));
         Assert.Equal(2, await rejected.RunAsync(["secret", "create", "admin", "--stdin", "--environment", "pilot", "--request-id", "invalid"]));
+        Assert.Equal(2, await rejected.RunAsync(["secret", "create", "admin", "--stdin", "--environment", "pilot", "--purpose", "application-login"]));
         using var generatedOutput = new StringWriter();
         using var generatedError = new StringWriter();
         var generated = new CliApplication(new FixedEndpoint(endpoint), new GrpcRegistryClientFactory(), generatedOutput, generatedError,

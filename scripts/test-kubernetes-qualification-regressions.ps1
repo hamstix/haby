@@ -815,10 +815,11 @@ public static class DiagnosticWriterControls
 
 $launcher=Join-Path $PSScriptRoot 'run-kubernetes-qualification.ps1'
 foreach($runtime in @('wslc','docker')){
-foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')){
-    $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@();CopyCalls=0}
+foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','build-failure','harness-nonzero','stock-marker','build-timeout','inspect-failure','stop-failure','remove-failure','foreign','evidence-failure','partial-launch','absent-launch','readiness-deadline','acl-failure','copy-failure','copy-ca-failure','copy-certificate-failure','copy-key-failure','copy-managed-failure','copy-invalid-exit','copy-primary-cleanup-failure','copy-timeout','harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')){
+    $state=@{Name='';Private='';Removed=$false;Volumes=$true;Created=$false;Calls=@();TimedCalls=@();CopyCalls=0}
     $syntheticTimeout=$null
     $copyTimeout=if($scenario -ceq 'copy-timeout'){New-QualificationProcessFailure 'command-deadline' 42L}else{$null}
+    $buildTimeout=if($scenario -ceq 'build-timeout'){New-QualificationProcessFailure 'command-deadline' 180001L}else{$null}
     if($scenario -in @('harness-timeout','journal-partial-timeout')){
         $syntheticTimeout=New-QualificationProcessFailure 'command-deadline' 180001
         $syntheticTimeoutDiagnostic=Get-QualificationProcessDiagnostic $syntheticTimeout
@@ -827,10 +828,17 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     }
     $runner={param($file,$arguments,$seconds)
         $state.Calls+=,$arguments
+        if($file -ceq 'dotnet' -and $arguments[0] -cin @('build','run')){$state.TimedCalls+=,[pscustomobject]@{Arguments=$arguments;Seconds=$seconds}}
         $result=[pscustomobject]@{ExitCode=0;Output='';Error='';ElapsedMilliseconds=42L}
         if($file -in @('icacls','chmod')){$state.Private=$arguments[0];if($file -eq 'chmod'){$state.Private=$arguments[1]};[IO.File]::WriteAllText((Join-Path $state.Private 'sentinel'),'harmless');if($scenario -eq 'acl-failure'){$result.ExitCode=17};return $result}
         if($file -eq 'dotnet'){
+            if($arguments[0] -eq 'build'){
+                if($scenario -eq 'build-failure'){$result.ExitCode=17;$result.Output='protected-raw-build-sentinel';$result.Error='protected-raw-build-sentinel'}
+                if($scenario -eq 'build-timeout'){throw $buildTimeout}
+            }
             if($arguments[0] -eq 'run'){
+                if($scenario -eq 'harness-nonzero'){$result.ExitCode=17;$result.Output='protected-raw-harness-sentinel';$result.Error='protected-raw-harness-sentinel'}
+                if($scenario -eq 'stock-marker'){$result.ExitCode=1;$result.Error='FAIL stock SslCaCerts accepted mismatched server name; stock path is unqualified.'}
                 if($scenario -eq 'elapsed-missing'){$result.PSObject.Properties.Remove('ElapsedMilliseconds')}
                 if($scenario -eq 'elapsed-malformed'){$result.ElapsedMilliseconds='protected-raw-sentinel'}
                 if($scenario -eq 'elapsed-out-of-range'){$result.ElapsedMilliseconds=3600001L}
@@ -873,12 +881,51 @@ foreach($scenario in @('success','elapsed-missing','elapsed-malformed','elapsed-
     if($scenario -eq 'evidence-failure'){$evidence=((Get-Process -Id $PID).Path+[IO.Path]::DirectorySeparatorChar+[Guid]::NewGuid().ToString('N'))}
     $caught=$false
     $diagnosticMode=$scenario -in @('harness-timeout','journal-invalid','journal-invalid-primary','journal-partial','journal-partial-primary','journal-partial-timeout')
-    try{& $launcher -Runtime $runtime -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence -DurableActions:$diagnosticMode | Out-Null}catch{$caught=$true}
+    try{& $launcher -Runtime $runtime -CommandRunner $runner -CommandTimeoutSeconds 1 -ReadinessTimeoutSeconds 1 -EvidencePath $evidence -DurableActions:$diagnosticMode -ProbeStockTls:($scenario -eq 'stock-marker') | Out-Null}catch{$caught=$true}
     if($caught -ne ($scenario -cnotin @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range'))){throw "Wrong exit: $scenario"}
+    $buildCalls=@($state.Calls | Where-Object {$_[0] -ceq 'build'})
+    $harnessCalls=@($state.Calls | Where-Object {$_[0] -ceq 'run' -and '--project' -cin $_})
+    $fixtureCalls=@($state.Calls | Where-Object {$_[0] -ceq 'run' -and '--name' -cin $_})
+    $buildBounds=@($state.TimedCalls | Where-Object {$_.Arguments[0] -ceq 'build'})
+    $harnessBounds=@($state.TimedCalls | Where-Object {$_.Arguments[0] -ceq 'run'})
+    if($scenario -ceq 'acl-failure' -and $buildCalls.Count -ne 0){throw 'Build ran after private-directory setup failure'}
+    if($scenario -cne 'acl-failure' -and ($buildCalls.Count -ne 1 -or $buildCalls[0] -cnotcontains '--no-restore' -or $buildCalls[0] -cnotcontains 'Debug' -or
+        $buildCalls[0] -cnotcontains 'tools/Haby.Kubernetes.Qualification' -or $buildBounds.Count -ne 1 -or $buildBounds[0].Seconds -ne 180)){throw "Explicit bounded same-output build missing: $scenario"}
+    if($harnessBounds.Count -ne $harnessCalls.Count -or @($harnessBounds | Where-Object {$_.Seconds -ne 180}).Count -ne 0){throw "Harness execution bound changed: $scenario"}
+    if($scenario -in @('build-failure','build-timeout')){
+        $lines=@(Get-Content $evidence)
+        if($harnessCalls.Count -ne 0 -or @($state.Calls | Where-Object {$_[0] -ceq 'run'}).Count -ne 0 -or
+            'Stage: launch-start' -cin $lines -or 'Harness: PASS' -cin $lines -or
+            'Failure: stage=build; reason='+$(if($scenario -eq 'build-failure'){'nonzero; category=RuntimeException'}else{'command; category=TimeoutException'}) -cnotin $lines -or
+            $lines -match 'protected-raw-build-sentinel' -or (Test-Path -LiteralPath $state.Private)){throw "Build failure reached external fixture or leaked output: $scenario"}
+        if($scenario -eq 'build-timeout' -and 'Diagnostic process: command-deadline; elapsed-ms=180001' -cnotin $lines){throw 'Build timeout attribution lost'}
+        if($scenario -eq 'build-failure' -and 'Build exit code: 17' -cnotin $lines){throw 'Build nonzero exit lost'}
+        if($scenario -eq 'build-timeout' -and 'Build exit code: unavailable' -cnotin $lines){throw 'Build timeout invented an exit code'}
+    }elseif($scenario -eq 'stock-marker'){
+        $lines=@(Get-Content $evidence)
+        if($harnessCalls.Count -ne 1 -or 'FAIL stock SslCaCerts accepted mismatched server name; stock path is unqualified.' -cnotin $lines -or
+            'Harness exit code: 1' -cnotin $lines -or 'Harness: FAIL' -cnotin $lines -or !$state.Removed -or $state.Volumes -or
+            (Test-Path -LiteralPath $state.Private)){throw 'Stock probe marker or cleanup lost'}
+    }elseif($scenario -eq 'harness-nonzero'){
+        $lines=@(Get-Content $evidence)
+        if($harnessCalls.Count -ne 1 -or 'Harness exit code: 17' -cnotin $lines -or
+            'Harness command elapsed origin: before-process-start-through-output-drain; prebuilt-output' -cnotin $lines -or
+            'Harness: FAIL' -cnotin $lines -or $lines -match 'protected-raw-harness-sentinel' -or
+            !$state.Removed -or $state.Volumes -or (Test-Path -LiteralPath $state.Private)){throw 'Nonzero harness exposed output or lost cleanup'}
+    }elseif($scenario -in @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range','harness-timeout')){
+        if($harnessCalls.Count -ne 1 -or $harnessCalls[0] -cnotcontains '--no-build' -or $harnessCalls[0] -cnotcontains '--no-restore' -or
+            $harnessCalls[0] -cnotcontains 'Debug' -or $harnessCalls[0] -cnotcontains 'tools/Haby.Kubernetes.Qualification' -or
+            $fixtureCalls.Count -ne 1 -or
+            [Array]::IndexOf($state.Calls,$buildCalls[0]) -ge [Array]::IndexOf($state.Calls,$fixtureCalls[0]) -or
+            [Array]::IndexOf($state.Calls,$buildCalls[0]) -ge [Array]::IndexOf($state.Calls,$harnessCalls[0])){throw "Prebuilt execution ordering or bound changed: $scenario"}
+    }
     if($scenario -cin @('success','elapsed-missing','elapsed-malformed','elapsed-out-of-range')){
         $lines=Get-Content $evidence
         $expectedElapsed=if($scenario -ceq 'success'){'Harness command elapsed milliseconds: 42'}else{'Harness command elapsed milliseconds: unavailable'}
-        if($expectedElapsed -notin $lines -or 'Harness command elapsed origin: before-process-start-through-output-drain; includes-build-startup' -notin $lines -or
+        if($expectedElapsed -notin $lines -or 'Build command elapsed milliseconds: 42' -notin $lines -or
+            'Build command elapsed origin: before-process-start-through-output-drain; pre-fixture' -notin $lines -or
+            'Harness command elapsed origin: before-process-start-through-output-drain; prebuilt-output' -notin $lines -or
+            'Build: PASS' -notin $lines -or
             'Harness: PASS' -notin $lines -or $lines -match 'protected-raw-sentinel|3600001'){throw 'Unsafe or missing successful command timing'}
     }
     if(Test-Path -LiteralPath $state.Private){throw "Private leak: $scenario"}

@@ -124,6 +124,13 @@ internal static class ProfileSecretPaths
             var current = value;
             for (var i = 0; i < parts.Length; i++)
             {
+                if (current is ConfigurationArray array)
+                {
+                    if (i == parts.Length - 1 || !CanonicalIndex(parts[i], array.Items.Count, out var index))
+                        throw new ArgumentException("Secret projection insertion is blocked.");
+                    current = array.Items[index];
+                    continue;
+                }
                 if (current is not ConfigurationObject obj) throw new ArgumentException("Secret projection insertion is blocked.");
                 if (!obj.Members.TryGetValue(parts[i], out var next)) break;
                 if (i == parts.Length - 1) throw new ArgumentException("Secret projection insertion is blocked.");
@@ -135,6 +142,9 @@ internal static class ProfileSecretPaths
                 if (Prefix(paths[i], paths[j]) || Prefix(paths[j], paths[i])) throw new ArgumentException("Secret projection paths conflict.");
     }
     private static bool Prefix(string[] a, string[] b) => a.Length <= b.Length && a.SequenceEqual(b.Take(a.Length), StringComparer.Ordinal);
+    internal static bool CanonicalIndex(string part, int length, out int index) =>
+        int.TryParse(part, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out index) &&
+        part == index.ToString(System.Globalization.CultureInfo.InvariantCulture) && index < length;
 }
 
 /// <summary>Portable target identity. The trusted Environment context is deliberately absent.</summary>

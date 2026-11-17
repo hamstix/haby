@@ -32,7 +32,7 @@ public static class ConfigurationApplicationLimits
     public static bool SafeText(string text, int maximum) => text.Length is > 0 && text.Length <= maximum && !text.Any(char.IsControl);
     public static bool Bounded(ConfigurationDocumentMetadata metadata) => SafeText(metadata.FileName, 255) &&
         metadata.FileName.IndexOfAny(['/', '\\']) < 0 && SafeText(metadata.Actor, 256) && metadata.Format == "json" &&
-        metadata.Serializer == ConfigurationJson.Profile && metadata.Fingerprint.Length == 97 && metadata.Fingerprint.StartsWith("sha256:configuration-revision-v1:", StringComparison.Ordinal) &&
+        metadata.Serializer == ConfigurationJson.Profile && metadata.Fingerprint.Length == 97 && metadata.Fingerprint.StartsWith("sha256:configuration-revision-v2:", StringComparison.Ordinal) &&
         Hex(metadata.Fingerprint[33..]) && metadata.FrozenInputFingerprint.Length == 64 && Hex(metadata.FrozenInputFingerprint) &&
         metadata.CreatedAt.Offset == TimeSpan.Zero;
     private static bool Hex(string text) => text.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');

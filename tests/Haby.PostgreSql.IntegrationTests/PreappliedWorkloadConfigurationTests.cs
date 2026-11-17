@@ -168,7 +168,7 @@ public sealed partial class DurableDeploymentPlanningTests
     }
 
     [Fact]
-    public async Task Effective_Profile_static_secret_projection_refuses_before_preparation_or_named_secret_resolution()
+    public async Task Effective_Profile_with_unresolved_static_secret_refuses_before_preparation_or_material_read()
     {
         await Assert.ThrowsAsync<InvalidDataException>(async () => await InternalScenarioAsync(initialOnly: true,
             configureManifest: e => { ConfiguredDocuments(e); e["manifest"]!["spec"]!["components"]!["api"]!.AsObject().Remove("documents"); }, acceptGeneration: async (services, environment, revision) =>
@@ -179,12 +179,12 @@ public sealed partial class DurableDeploymentPlanningTests
                     new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).ChangeSet!;
                 var planned = await planner.CreateInternalPlanAsync(change.Id, "tester", default, services.GetServices<IInternalActionHandler>().ToArray());
                 Assert.Equal(DurablePlanStatus.ConfigurationRefused, planned.Status);
-                Assert.Contains(planned.ConfigurationReport!.Diagnostics, d => d.Code == "profile.secret-projections.unsupported");
+                Assert.Contains(planned.ConfigurationReport!.Diagnostics, d => d.Code == "profile.secret-reference.unavailable");
                 await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
                 Assert.Empty(await verify.DeploymentGenerations.AsNoTracking().ToArrayAsync());
                 Assert.Empty(await verify.ConfigurationDocuments.AsNoTracking().ToArrayAsync());
                 Assert.Empty(await verify.WorkloadConfigurationRecipients.AsNoTracking().ToArrayAsync());
-                throw new InvalidDataException("Expected unsupported Profile projection.");
+                throw new InvalidDataException("Expected unresolved Profile secret reference.");
             }));
     }
 

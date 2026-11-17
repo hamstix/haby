@@ -11,7 +11,7 @@ public abstract record SecretOwner
     public sealed record Resource(ManagedResourceKey Key) : SecretOwner;
 }
 
-public enum SecretPurpose { ProviderAdministrator, ApplicationLogin }
+public enum SecretPurpose { ProviderAdministrator, ApplicationLogin, Configuration }
 
 /// <summary>Explicit producer metadata. Both supported purposes use Managed Credential octet streams.</summary>
 public sealed record SecretDefinition(SecretOwner Owner, SecretPurpose Purpose)
@@ -26,6 +26,7 @@ public sealed record SecretDefinition(SecretOwner Owner, SecretPurpose Purpose)
     public bool IsSupported => (Owner, Purpose) switch
     {
         (SecretOwner.Environment { Id: not null }, SecretPurpose.ProviderAdministrator) => true,
+        (SecretOwner.Environment { Id: not null }, SecretPurpose.Configuration) => true,
         (SecretOwner.Resource { Key: { EnvironmentRecordId: not null, ApplicationRecordId: not null, ResourceLocalId: not null } },
             SecretPurpose.ApplicationLogin) => true,
         _ => false

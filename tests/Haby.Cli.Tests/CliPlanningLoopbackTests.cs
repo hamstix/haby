@@ -123,7 +123,7 @@ public sealed partial class CliLoopbackTests
             if (request.ChangeSetId == "refused")
             {
                 var refusal = new PlanningReply { Status = PlanningStatus.ConfigurationRefused };
-                refusal.ConfigurationErrorCodes.AddRange(new[] { "profile.secret-projections.unsupported", "render.renderer.unknown",
+                refusal.ConfigurationErrorCodes.AddRange(new[] { "profile.secret-reference.unavailable", "render.renderer.unknown",
                     "render.renderer.unavailable", "render.formatter.unavailable", "render.output.incompatible", "render.producer.unavailable", "render.options.invalid" });
                 return Task.FromResult(refusal);
             }

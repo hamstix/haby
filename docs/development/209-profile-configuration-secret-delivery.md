@@ -16,7 +16,7 @@ Read AGENTS.md, CONTRIBUTING.md, ROADMAP P3, ADR-028/029/033/035/038/039/040/041
 - Ordinary static contribution secret projections, strict string/JSON formats, existing-array traversal and missing-object-property insertion per ADR-057.
 - No-material preview with whole-node redaction and final redactedPaths.
 - Authorized all-or-nothing delivery through existing static grants AND Kubernetes runtime identity, with existing bounds.
-- Exact-version reference retention/CleanUp integration and current operator documentation/examples.
+- Exact-version reference retention and current operator documentation/examples; secret deletion and receipt CleanUp remain deferred.
 
 ## Excluded scope
 
@@ -31,9 +31,32 @@ No Provider-specific tables/columns, fake Resources/Bindings, new Provider/OTEL 
 5. Preview performs zero material reads, redacts the entire inserted JSON/string node and reports final paths, including nested array indices.
 6. Valid static and runtime recipients obtain complete correctly escaped JSON with exact strings/types/numbers. Unauthorized/revoked/wrong-document recipients cannot cause secret material reads. Generated ApplicationLogin Binding delivery and existing document routes remain correct.
 7. Malformed UTF-8, duplicate JSON members, comments, trailing input, missing versions, wrong purpose/scope and every supported size/depth failure return safe bounded failures and NO partial document or secret-bearing diagnostic. Count expanded size/escaping/depth, not only input size.
-8. Exact secret references participate in existing retention and deletion/CleanUp guards for Plans, generations and documents. Prove retained references cannot be deleted and eligible unreferenced data follows existing cleanup policy.
+8. Preserve exact-version references in accepted Plans, generations and documents and existing immutable/restrict relationships. Secret/version deletion and receipt CleanUp remain deferred under ADR-029; add no deletion policy or API. Prove versions remain resolvable across restart, assignment replacement and new-name replacement, and test applicable persisted restrictions. Future cleanup must account for these dependencies.
 9. Public generic examples demonstrate logging-array and telemetry-header use, metadata-only Profile discovery, new-name replacement and plaintext-at-rest limitations without private names/endpoints/material.
 10. No reflection serialization fallback; source-generated DTO roots, provider-neutral models and Native AOT CLI remain intact.
+
+## Operator sequence and limits
+
+Create a named Configuration secret using hidden input or exact `--stdin` bytes:
+
+```text
+habyctl secret create logging-password --environment staging --purpose configuration
+habyctl secret get logging-password --environment staging -o json
+```
+
+Then import the [generic logging and telemetry Profile](../examples/configuration-profiles/secret-projection.json)
+and assign its exact revision. Import/read is portable and metadata-only; planning
+requires each referenced name and numbered version in the target Environment.
+Use a new secret name, Profile revision and configuration-only generation for
+replacement. Existing Plans, generations and documents keep their frozen refs.
+The plaintext catalog and its backups still contain secret bytes; this feature
+does not encrypt storage. Only authorized exact-document recipients receive
+material, and preview redacts whole inserted nodes.
+
+The current-alpha planning format is v3 and document codec/fingerprint is v2.
+An existing catalog from the prior
+format needs an explicit fresh catalog under ADR-033; Haby never resets it
+automatically. Secret/version deletion and receipt cleanup remain deferred.
 
 ## Required validation
 

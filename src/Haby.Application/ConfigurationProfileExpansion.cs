@@ -124,7 +124,7 @@ public sealed class ConfigurationProfileExpander(ConfigurationProfileCatalog cat
 {
     private readonly ConfigurationProfileCatalog _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
     public ProfileExpansionResult Expand(IEnumerable<ProfileDecision> environment, IEnumerable<ProfileDecision> application,
-        IEnumerable<ProfileComponentInput> components)
+        IEnumerable<ProfileComponentInput> components, IReadOnlyDictionary<ProfileNamedSecretRef, SecretRef>? frozenSecrets = null)
     {
         var environmentInputs = environment.ToImmutableArray();
         var applicationInputs = application.ToImmutableArray();
@@ -190,8 +190,9 @@ public sealed class ConfigurationProfileExpander(ConfigurationProfileCatalog cat
             foreach (var contribution in contributions)
             {
                 if (!Ordinary(contribution.Contribution.Value)) Error("profile.value.unsupported", contribution.Contribution.Document.Value, source: Source(contribution.Origin));
-                if (contribution.Contribution.SecretProjections.Count != 0)
-                    Error("profile.secret-projections.unsupported", contribution.Contribution.Document.Value, source: Source(contribution.Origin));
+                foreach (var projection in contribution.Contribution.SecretProjections)
+                    if (frozenSecrets is null || !frozenSecrets.ContainsKey(projection.SecretRef))
+                        Error("profile.secret-reference.unavailable", contribution.Contribution.Document.Value, projection.Path, Source(contribution.Origin));
             }
             foreach (var slot in input.Component.Bindings.Where(x => x.Value.ConfigurationSlot is not null)
                 .GroupBy(x => x.Value.ConfigurationSlot!))

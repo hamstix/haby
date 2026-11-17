@@ -12,7 +12,7 @@ public static class ConfigurationDocumentCodec
     public const int MaxBytes = 4 * 1024 * 1024;
     public const int MaxContainers = 64;
     public const int CodecDepth = 512;
-    public const string Version = "haby.configuration-revision/v1";
+    public const string Version = "haby.configuration-revision/v2";
 
     public static string Encode(ConfigurationDocumentRevision revision)
     {
@@ -33,7 +33,7 @@ public static class ConfigurationDocumentCodec
         });
     }
 
-    public static string Fingerprint(string payload) => "sha256:configuration-revision-v1:" +
+    public static string Fingerprint(string payload) => "sha256:configuration-revision-v2:" +
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
 
     public static ConfigurationDocumentRevision Decode(string payload, string fingerprint)
@@ -105,6 +105,9 @@ public static class ConfigurationDocumentCodec
             case ConfigurationNumber n: w.WriteStringValue("number"u8); w.WriteStringValue(n.CanonicalText); break;
             case ConfigurationSecretReference s:
                 w.WriteStringValue("secret"u8); w.WriteStringValue(s.Reference.SecretId.ToString()); w.WriteStringValue(s.Reference.SecretVersionId.ToString()); break;
+            case ConfigurationProjectedSecret s:
+                w.WriteStringValue("projected-secret"u8); w.WriteStringValue(s.Reference.SecretId.ToString());
+                w.WriteStringValue(s.Reference.SecretVersionId.ToString()); w.WriteStringValue(s.Format.ToString()); break;
             case ConfigurationDeferredValue d:
                 w.WriteStringValue("deferred"u8); w.WriteStringValue(d.Formatter.Value); WriteNode(w, d.Arguments); break;
             case ConfigurationArray a:
@@ -120,7 +123,7 @@ public static class ConfigurationDocumentCodec
 
     private static ConfigurationValue ReadNode(JsonElement a)
     {
-        if (a.ValueKind != JsonValueKind.Array || a.GetArrayLength() is < 1 or > 3) throw new InvalidDataException();
+        if (a.ValueKind != JsonValueKind.Array || a.GetArrayLength() is < 1 or > 4) throw new InvalidDataException();
         var count = a.GetArrayLength();
         return (a[0].GetString(), count) switch
         {
@@ -129,6 +132,8 @@ public static class ConfigurationDocumentCodec
             ("string", 2) => new ConfigurationString(a[1].GetString()!),
             ("number", 2) => ConfigurationNumber.Parse(a[1].GetString()!),
             ("secret", 3) => new ConfigurationSecretReference(new(SecretId.Parse(a[1].GetString()!), SecretVersionId.Parse(a[2].GetString()!))),
+            ("projected-secret", 4) => new ConfigurationProjectedSecret(new(SecretId.Parse(a[1].GetString()!),
+                SecretVersionId.Parse(a[2].GetString()!)), Enum.Parse<ProfileSecretFormat>(a[3].GetString()!, false)),
             ("deferred", 3) => new ConfigurationDeferredValue(ConfigurationFormatterId.Create(a[1].GetString()!), ReadNode(a[2]) as ConfigurationObject ?? throw new InvalidDataException()),
             ("array", 2) => new ConfigurationArray(a[1].EnumerateArray().Select(ReadNode)),
             ("object", 2) => new ConfigurationObject(a[1].EnumerateObject().Select(p => KeyValuePair.Create(p.Name, ReadNode(p.Value)))),

@@ -138,7 +138,7 @@ public sealed partial class OperatorHostIntegrationTests
             var expanded = new ConfigurationProfileExpander(new([accepted!.Declaration])).Expand(
                 [new ProfileDecision.Use(accepted.Reference)], [], [new(ManifestLocalId.Create("api"), component, [])]);
             Assert.Null(expanded.Layouts);
-            Assert.Contains(expanded.Diagnostics, x => x.Code == "profile.secret-projections.unsupported");
+            Assert.Contains(expanded.Diagnostics, x => x.Code == "profile.secret-reference.unavailable");
             await ProfileNative(host, source, "existingEquivalent");
             await ProfileState(connection, Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH") is null ? 2 : 3);
             // Privileged corruption uses its own context; neither get nor reimport may hide or repair it.

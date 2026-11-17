@@ -196,7 +196,7 @@ public sealed class RuntimeStartupClient
         check();
         if (reply.CalculateSize() > MaximumResponseBytes || reply.Json.Length > MaximumJsonBytes || reply.Json.Length > remainingBytes)
             throw Failure(RuntimeStartupFailure.OutputLimit);
-        const string prefix = "sha256:configuration-revision-v1:";
+        const string prefix = "sha256:configuration-revision-v2:";
         if (reply.RevisionId != revision || !reply.SourceFingerprint.StartsWith(prefix, StringComparison.Ordinal) ||
             reply.SourceFingerprint.Length != prefix.Length + 64 || reply.SourceFingerprint.AsSpan(prefix.Length).IndexOfAnyExcept("0123456789abcdef") >= 0 ||
             reply.Json.IsEmpty) throw Failure(RuntimeStartupFailure.InvalidResponse);

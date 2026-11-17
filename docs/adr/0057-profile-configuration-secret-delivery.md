@@ -64,9 +64,11 @@ support must not be mistaken for implemented delivery support.
 14. Preserve ADR-042 bounds: each source secret at most 64 KiB; final JSON at most
     4 MiB UTF-8 and 64 container levels; complete RPC at most 8 MiB. Measure the
     actual expanded result. Do not introduce cross-request secret-material caches.
-15. Extend existing reference retention and CleanUp checks for Plans, generations
-    and documents to these exact versions. No automatic rotation or new secret
-    revocation command. Initially replace a secret through a new name, new Profile
+15. Preserve exact-version references in accepted Plans, generations and documents
+    and the catalog's immutable/restrict relationships. Secret/version deletion,
+    receipt CleanUp, name reuse and revocation remain deferred under ADR-029; a
+    future cleanup policy must account for these exact dependencies. No automatic
+    rotation or new secret revocation command. Initially replace a secret through a new name, new Profile
     revision and configuration-only generation; existing documents retain their
     exact references. Plaintext storage remains supported: projections prevent
     embedding material in Profiles/documents but do not encrypt the catalog or
@@ -110,7 +112,9 @@ an assertion that delivery is already implemented. Update current-alpha codecs
 and explicitly document any fresh-catalog requirement under ADR-033; never reset
 or backfill authority silently. Common persistence stays Provider-neutral.
 
-Tests must prove no material reads before authorized delivery, exact references
+Current-alpha planning and document codecs require a fresh catalog after this
+change under ADR-033; no catalog is reset or silently backfilled. Tests must prove
+no material reads before authorized delivery, exact references
 across restart, whole-document failure, whole-node preview redaction, both delivery
 authorization paths, retention, and array-boundary rejection. Source-generated
 serialization and published Native AOT CLI behavior remain required.

@@ -17,7 +17,7 @@ public sealed class RuntimeStartupClientTests
 {
     private static readonly string Binding = Guid.NewGuid().ToString();
     private static string Revision() => Guid.CreateVersion7().ToString();
-    private const string Fingerprint = "sha256:configuration-revision-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    private const string Fingerprint = "sha256:configuration-revision-v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private static DeliverConfigurationReply Reply(string revision, string json = "{\"number\":123456789012345678901234567890.00001}") =>
         new() { RevisionId = revision, SourceFingerprint = Fingerprint, Json = ByteString.CopyFromUtf8(json) };
     private static RpcException Refused(StatusCode code, params string[] reasons)

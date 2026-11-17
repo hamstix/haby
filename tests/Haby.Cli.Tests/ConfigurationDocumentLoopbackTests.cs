@@ -46,7 +46,7 @@ public sealed partial class CliLoopbackTests
                     FileName = "appsettings.json",
                     Format = "json",
                     Serializer = "haby.configuration-json/v1",
-                    Fingerprint = "sha256:configuration-revision-v1:" + new string('a', 64),
+                    Fingerprint = "sha256:configuration-revision-v2:" + new string('a', 64),
                     FrozenInputFingerprint = new string('b', 64),
                     TechnicalActorId = "original-actor",
                     CreatedAtUtc = DateTimeOffset.UnixEpoch.ToString("O")

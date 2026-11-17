@@ -49,7 +49,7 @@ public sealed partial class ConfigurationProfilePersistenceTests(CatalogServerFi
             var expanded = new ConfigurationProfileExpander(new([repeat.Revision.Declaration])).Expand(
                 [new ProfileDecision.Use(expected.Reference)], [], [new(ManifestLocalId.Create("api"), component, [])]);
             Assert.Null(expanded.Layouts);
-            Assert.Contains(expanded.Diagnostics, x => x.Code == "profile.secret-projections.unsupported");
+            Assert.Contains(expanded.Diagnostics, x => x.Code == "profile.secret-reference.unavailable");
         }
         await using var check = Context(connection);
         var row = await check.ProfileRevisions.AsNoTracking().SingleAsync();

@@ -72,7 +72,7 @@ complete protobuf response at most 8 MiB, and JSON depth at most 64 containers.
 The aggregate limit covers accepted raw JSON, not every library/transport copy.
 Aggregate checks subtract before copying so byte addition cannot overflow.
 Replies must match the requested revision exactly, contain a nonempty source
-fingerprint in the current `sha256:configuration-revision-v1:` plus 64 lowercase
+fingerprint in the current `sha256:configuration-revision-v2:` plus 64 lowercase
 hex format, and contain complete strictly encoded UTF-8 JSON. Comments, trailing
 commas, malformed/trailing documents and invalid depth/size are refused.
 

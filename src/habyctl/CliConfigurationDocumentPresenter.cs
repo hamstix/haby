@@ -39,7 +39,7 @@ internal static class ConfigurationDocumentPresentation
             if (!Equals(a.Target, reply.Target) || a.Environment != request.Environment || a.ApplicationId != request.ApplicationId ||
                 !Uuid(a.RevisionId) || !Uuid(a.PlanId) || a.SourceRevision is not { } r || !Uuid(r.ApplicationRecordId) || r.RevisionNumber <= 0 ||
                 a.Format != "json" || a.Serializer != "haby.configuration-json/v1" || !Safe(a.FileName, 255) || a.FileName.IndexOfAny(['/', '\\']) >= 0 ||
-                !Safe(a.TechnicalActorId, 256) || !a.Fingerprint.StartsWith("sha256:configuration-revision-v1:", StringComparison.Ordinal) ||
+                !Safe(a.TechnicalActorId, 256) || !a.Fingerprint.StartsWith("sha256:configuration-revision-v2:", StringComparison.Ordinal) ||
                 a.Fingerprint.Length != 97 || a.FrozenInputFingerprint.Length != 64 || !Hex(a.FrozenInputFingerprint) || !Hex(a.Fingerprint[33..]) ||
                 !DateTimeOffset.TryParseExact(a.CreatedAtUtc, "O", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time) || time.Offset != TimeSpan.Zero)
                 throw new InvalidDataException("Invalid configuration artifact.");

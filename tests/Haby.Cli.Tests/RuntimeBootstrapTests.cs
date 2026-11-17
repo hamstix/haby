@@ -62,7 +62,7 @@ public sealed class RuntimeBootstrapTests
     {
         var bootstrap = Bootstrap();
         var result = new RuntimeStartupDocuments(bootstrap.Documents.Values.Reverse().Select(x => new RuntimeStartupDocument(x,
-            "sha256:configuration-revision-v1:" + new string('a', 64), "{}"u8.ToArray())).ToArray());
+            "sha256:configuration-revision-v2:" + new string('a', 64), "{}"u8.ToArray())).ToArray());
         using (result)
         {
             var map = RuntimeBootstrapChannel.Map(bootstrap, result);
