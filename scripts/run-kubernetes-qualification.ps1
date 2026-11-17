@@ -146,6 +146,13 @@ try {
     if($elapsed -is [long] -and $elapsed -ge 0 -and $elapsed -le 3600000){
         $record.Add('Harness command elapsed milliseconds: '+$elapsed.ToString([Globalization.CultureInfo]::InvariantCulture))
     }else{$record.Add('Harness command elapsed milliseconds: unavailable')}
+    if($DeploymentKernel -or $ConfiguredDeployment){
+        $mode=if($DeploymentKernel){'kernel'}else{'configured'}
+        $workloadEvidence=Read-QualificationWorkloadEvidence $mode $result.Output $result.Error
+        foreach($line in $workloadEvidence.Records){$record.Add($line)}
+        $record.Add('Diagnostic workload: '+$workloadEvidence.Status)
+        if($workloadEvidence.Status -cne 'valid' -or $workloadEvidence.HasFailure){$failed=$true}
+    }
     if($result.ExitCode -ne 0){
         if($ProbeStockTls -and $result.ExitCode -eq 1 -and $result.Error.Trim() -ceq
             'FAIL stock SslCaCerts accepted mismatched server name; stock path is unqualified.'){
@@ -153,7 +160,12 @@ try {
         }
         $reason='nonzero';throw 'Harness failed.'
     }
-    foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
+    if($DeploymentKernel -or $ConfiguredDeployment){
+        if($workloadEvidence.Status -cne 'valid'){$reason='diagnostic-invalid';throw 'Workload evidence invalid.'}
+        if($workloadEvidence.HasFailure){$reason='diagnostic-failed';throw 'Workload failure record present.'}
+    }else{
+        foreach($line in (($result.Output+"`n"+$result.Error) -split "`r?`n")){if($line){$record.Add($line)}}
+    }
     $record.Add('Harness: PASS')
 } catch {
     $failed=$true

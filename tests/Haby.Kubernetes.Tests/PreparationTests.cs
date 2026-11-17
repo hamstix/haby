@@ -45,7 +45,6 @@ public sealed class PreparationTests
     [InlineData("\"volumes\":{\"data\":{\"configMap\":{\"name\":\"settings\"}}},\"mounts\":[{\"volume\":\"data\",\"mountPath\":\"/data\"}]")]
     [InlineData("\"ports\":{\"http\":{\"containerPort\":8080}},\"routes\":[{\"hostLabel\":\"orders\",\"path\":\"/\",\"port\":\"http\"}]")]
     [InlineData("\"configuration\":{\"documents\":[\"settings\"]}")]
-    [InlineData("\"overrides\":{\"resources\":{\"requests\":{\"cpu\":\"1\"}}}")]
     public void Unsupported_requested_fields_refuse_before_any_adapter_can_execute(string extra)
     {
         var workload = Resolve("{\"image\":{\"reference\":\"registry.example/app:v1\"}," + extra + "}");
@@ -54,7 +53,6 @@ public sealed class PreparationTests
     [Theory]
     [InlineData("\"service\":{\"enabled\":true}")]
     [InlineData("\"headlessService\":{\"enabled\":true}")]
-    [InlineData("\"resources\":{\"requests\":{\"memory\":\"64Mi\"}}")]
     [InlineData("\"ingress\":{\"enabled\":true,\"domain\":\"example.test\",\"className\":\"ingress\"}")]
     public void Unsupported_effective_Placement_defaults_refuse(string defaults)
     {

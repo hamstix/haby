@@ -315,3 +315,103 @@ function Format-QualificationJournal($Journal) {
     'Diagnostic inner catalog: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ catalog-dispose-completed [0-9]{1,7}$'){'confirmed'}else{'unknown'})
     'Diagnostic inner cleanup outcome: '+$(if($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ inner-cleanup-completed [0-9]{1,7}$'){'completed'}elseif($Journal.Status -ceq 'valid' -and $Journal.Records -cmatch '^[0-9]+ inner-cleanup-failed [0-9]{1,7}$'){'failed'}else{'unknown'})
 }
+
+# Only this finite workload channel is retained from child output, including on nonzero exit.
+function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[string]$ErrorOutput) {
+    $invalid=[pscustomobject]@{Status='invalid';Records=@()}
+    $oversized=[pscustomobject]@{Status='oversized';Records=@()}
+    if($Mode -cnotin @('kernel','configured')){return $invalid}
+    if($Output.Length+$ErrorOutput.Length -gt 1048576){return $oversized}
+    $passes=if($Mode -ceq 'kernel'){
+        @('PASS kernel-K01-create-mtls',
+          'PASS kernel-K02-occupied-no-adoption',
+          'PASS kernel-K03-foreign-owner',
+          'PASS kernel-K04-keyed-update-preservation-removal',
+          'PASS kernel-K05-no-attempt-template-annotation',
+          'PASS kernel-K06-owned-drift',
+          'PASS kernel-K07-real-RV-race-ambiguous-422-no-retry',
+          'PASS kernel-K08-saved-UID-refusal',
+          'PASS kernel-K09-one-accepted-response-loss',
+          'PASS kernel-K10-stateless-reload-observe-zero-writes',
+          'PASS kernel-K11-missing-marker-no-success',
+          'PASS kernel-K12-wrong-marker-no-success',
+          'PASS kernel-K13-absence-no-replay',
+          'PASS kernel-K14-replacement-UID-no-success',
+          'PASS kernel-K15-unavailable-not-nonexecution',
+          'PASS kernel-K16-create-bearer',
+          'PASS kernel-K17-invalid-bearer',
+          'PASS kernel-K18-production-Online-revocation-no-fallback',
+          'PASS kernel-K19-production-system-trust-refusal',
+          'PASS kernel-K20-client-key-mismatch',
+          'PASS kernel-K21-scoped-secret-exclusion',
+          'PASS kernel-K22-new-factory-hostname-refusal',
+          'PASS kernel-K23-new-factory-custom-root-refusal',
+          'PASS kernel-K24-real-UID-race-replacement-preserved',
+          'PASS kernel-K25-limit-only-template-absence',
+          'PASS kernel-cleanup-ownership',
+          'PASS kernel-namespace-absence-after-UID-delete')
+    }else{
+        @('PASS configured-C01-exact-two-documents-prepared',
+          'PASS configured-C02-confirmed-stable-identity',
+          'PASS configured-C03-missing-publication-no-Deployment',
+          'PASS configured-C04-explicit-publication',
+          'PASS configured-C05-production-generated-create-confirmed',
+          'PASS configured-C06-real-projected-token-HTTPS-two-exact-documents-primary',
+          'PASS configured-C07-complete-saved-projection-and-Pod-identity',
+          'PASS configured-R01-controller-produced-available-minReadySeconds-exact-UID',
+          'PASS configured-R04-audited-resume-renews-observation-only',
+          'PASS configured-R06-native-public-expired-resume-observation-only',
+          'PASS configured-R05-native-public-wait-whole-set-zero-writes',
+          'PASS configured-A01-native-wait-exact-retirement-proof-and-Applied',
+          'PASS configured-B01-second-exact-configured-generation-submitted',
+          'PASS configured-B02-native-batch-failure-preserves-another-fresh-success',
+          'PASS configured-B03-native-batch-complete-fresh-exact-generations-zero-extra-writes',
+          'PASS configured-B04-native-batch-replay-history-is-not-fresh-ready',
+          'PASS configured-C08-restarted-Host-fresh-Pod-same-bootstrap',
+          'PASS configured-A02-runtime-retrieval-after-Applied-and-Host-restart',
+          'PASS configured-R02-reconstructed-observer-original-attempt-deadline-zero-writes',
+          'PASS configured-C09-later-document-revoke-no-primary',
+          'PASS configured-R03-startup-refusal-is-current-incomplete-despite-historical-Ready',
+          'PASS configured-C10-revoked-admission-and-no-publication-repair',
+          'PASS configured-C11-Applied-preserves-publications-and-stable-identities',
+          'PASS configured-A03-revocation-keeps-historical-completion-without-regrant',
+          'PASS configured-C12-Pod-defaulted-resource-requests',
+          'PASS configured-owned-namespace-absent',
+          'PASS configured-owned-catalog-cleanup')
+    }
+    $stages=@('entry','namespace-create','namespace-created','catalog-init','accepted-plan','host-build','host-start',
+        'first-submit','uncertain-submit','cli-submit','pod-startup','readback','prepare-update','cleanup-ownership',
+        'cleanup-namespace','cleanup-catalog','completed','unknown')
+    $outcomes=@('Confirmed','Refused','Conflict','Uncertain','CanceledBeforeDispatch','ObservationUnavailable','NotConfirmed','unknown')
+    $codes=@('response-confirmed','observation-confirmed','evidence-not-confirmed','response-unconfirmed','invalid-input',
+        'connection-unavailable','dispatch-uncertain','occupied-name','owned-state-conflict','uid-conflict','api-conflict',
+        'api-access-denied','action-canceled','managed-object-missing','action-budget','precondition-limit','object-absent','observation-unavailable','unknown')
+    $rpcCodes=@('OK','Cancelled','Unknown','InvalidArgument','DeadlineExceeded','NotFound','AlreadyExists','PermissionDenied',
+        'ResourceExhausted','FailedPrecondition','Aborted','OutOfRange','Unimplemented','Internal','Unavailable','DataLoss','Unauthenticated','unknown')
+    $records=[Collections.Generic.List[string]]::new();$entry=$false;$hasFailure=$false
+    foreach($line in (($Output+"`n"+$ErrorOutput) -split "`r?`n")){
+        if($line -cin $passes){$records.Add($line)}
+        elseif($line.StartsWith('Q243 ',[StringComparison]::Ordinal)){
+            if($line.Length -gt 160){return $invalid}
+            $parts=$line.Split(' ')
+            if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
+            if($parts.Count -eq 4 -and $Mode -ceq 'configured' -and $parts[2] -ceq 'rpc'){
+                if($parts[3] -cnotin $rpcCodes){return $invalid}
+                $records.Add('Diagnostic workload: configured rpc '+$parts[3])
+            }elseif($parts.Count -eq 4){
+                $stage=$parts[2];$state=$parts[3]
+                $case=if($Mode -ceq 'kernel'){$stage -cmatch '^K(0[1-9]|1[0-9]|2[0-5])$'}else{$stage -cmatch '^(C(0[1-9]|1[0-2])|R0[1-6]|B0[1-4]|A0[1-3])$'}
+                if(($stage -cnotin $stages -and !$case) -or $state -cnotin @('start','passed','failed','completed','skipped')){return $invalid}
+                if($stage -ceq 'entry' -and $state -ceq 'start'){$entry=$true}
+                if($state -ceq 'failed'){$hasFailure=$true}
+                $records.Add('Diagnostic workload: '+$Mode+' '+$stage+' '+$state)
+            }elseif($parts.Count -eq 6 -and $parts[2] -ceq 'result'){
+                if($parts[3] -cnotin $outcomes -or $parts[4] -cnotin $codes -or $parts[5] -cnotmatch '^([0-3]|unknown)$'){return $invalid}
+                $records.Add('Diagnostic workload: '+$Mode+' result '+$parts[3]+' '+$parts[4]+' '+$parts[5])
+            }else{return $invalid}
+        }
+        if($records.Count -gt 256){return $oversized}
+    }
+    if(!$entry){return [pscustomobject]@{Status='missing';Records=@()}}
+    return [pscustomobject]@{Status='valid';Records=@($records.ToArray());HasFailure=$hasFailure}
+}

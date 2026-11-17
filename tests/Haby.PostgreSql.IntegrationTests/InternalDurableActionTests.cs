@@ -21,7 +21,7 @@ public sealed partial class DurableDeploymentPlanningTests
     internal async Task<InternalScenario> InternalScenarioAsync(Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? suppliedConfiguration = null, string namespaceName = "test", bool subMicrosecondCommit = false,
         Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualKubernetesProbe = null, bool twoComponents = false, bool distinctPlacements = false, bool initialOnly = false, bool invalidSecondWorkload = false,
         Func<ServiceProvider, EnvironmentRecordId, ManifestRevisionRef, Task<DurableChangeSetCommit>>? acceptGeneration = null,
-        Action<JsonNode>? configureManifest = null, string? runtimeConfigurationJson = null)
+        Action<JsonNode>? configureManifest = null, string? runtimeConfigurationJson = null, string? resourcesJson = null)
     {
         var prepared = initialOnly ? ((string Connection, AdjustableTimeProvider Time, EnvironmentRecordId Environment, ManifestRevisionRef Revision, ProviderAliasBinding First, ProviderAliasBinding Second, string Password)?)null : await PrepareCommitAsync();
         var connection = prepared?.Connection ?? await NewDatabaseAsync();
@@ -68,6 +68,12 @@ public sealed partial class DurableDeploymentPlanningTests
         {
             var portable = JsonNode.Parse(placement.Payload)!;
             portable["spec"]!["runtimeConfiguration"] = JsonNode.Parse(runtimeConfigurationJson ?? """{"endpoint":"https://configuration.example/","tls":{"mode":"system"}}""");
+            placement = placementCodec.Decode(Encoding.UTF8.GetBytes(portable.ToJsonString()));
+        }
+        if (resourcesJson is not null)
+        {
+            var portable = JsonNode.Parse(placement.Payload)!;
+            portable["spec"]!["resources"] = JsonNode.Parse(resourcesJson);
             placement = placementCodec.Decode(Encoding.UTF8.GetBytes(portable.ToJsonString()));
         }
         placement = placementCodec.Decode(Encoding.UTF8.GetBytes(placement.Payload.Replace("\"test\"", "\"" + namespaceName + "\"", StringComparison.Ordinal)));

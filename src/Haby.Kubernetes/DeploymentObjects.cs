@@ -41,6 +41,8 @@ internal static class DeploymentObjects
                 },
             },
         };
+        if (p.Resources is not null)
+            body["spec"]!["template"]!["spec"]!["containers"]![0]!["resources"] = DeploymentResources.Json(p.Resources);
         if (p.Runtime is { } runtime)
         {
             var spec = body["spec"]!["template"]!["spec"]!;
@@ -73,6 +75,7 @@ internal static class DeploymentObjects
         Need(containers.All(c => c is JsonObject && !string.IsNullOrEmpty(String(c!, "name"))) && containers.Select(c => String(c!, "name")).Distinct(StringComparer.Ordinal).Count() == containers.Count, "container-identity");
         var found = containers.Where(c => String(c!, "name") == p.Container).ToArray();
         Need(found.Length == 1 && String(found[0]!, "image") == p.Image, "container-drift");
+        DeploymentResources.Matches(found[0]!, p.Resources);
         Need(Number(At(obj, "spec", "replicas"), 1) == p.Replicas && Number(At(obj, "spec", "minReadySeconds"), 0) == p.MinReadySeconds &&
             Number(At(obj, "spec", "progressDeadlineSeconds"), 600) == p.ProgressDeadlineSeconds, "scalar-drift");
         var strategy = At(obj, "spec", "strategy"); var kind = strategy?["type"]?.GetValue<string>() ?? "RollingUpdate";
@@ -145,6 +148,7 @@ internal static class DeploymentObjects
         var index = Enumerable.Range(0, containers.Count).Single(n => String(containers[n]!, "name") == old.Container);
         Add("test", $"/spec/template/spec/containers/{index}/name", JsonValue.Create(old.Container));
         Add("add", $"/spec/template/spec/containers/{index}/image", JsonValue.Create(target.Image));
+        DeploymentResources.Patch(containers[index]!, old.Resources, target.Resources, $"/spec/template/spec/containers/{index}/resources", Add);
         Add("add", "/spec/replicas", JsonValue.Create(target.Replicas));
         Add("add", "/spec/minReadySeconds", JsonValue.Create(target.MinReadySeconds));
         Add("add", "/spec/progressDeadlineSeconds", JsonValue.Create(target.ProgressDeadlineSeconds));
@@ -183,7 +187,7 @@ internal static class DeploymentObjects
     internal static DeploymentReceipt Receipt(JsonObject obj, DeploymentIntent i, ConfirmationSource source)
     {
         Ownership(obj, i); MatchesTarget(obj, i); Need(HasMarkers(obj, i), "operation-marker");
-        var result = new DeploymentReceipt(2, i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload,
+        var result = new DeploymentReceipt(3, i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload,
             i.TargetGeneration, i.Operation, String(obj, "metadata", "uid")!, long.Parse(At(obj, "metadata", "generation")?.ToJsonString() ?? "0", CultureInfo.InvariantCulture), i.Target, source);
         Validate(result); return result;
     }
@@ -193,6 +197,8 @@ internal static class DeploymentObjects
         if (intent.LastConfirmed is not { } previous) return;
         // Target membership alone cannot prove a requested removal. Only previously owned
         // entries participate; unrelated injected keys/names remain outside Haby ownership.
+        var main = At(obj, "spec", "template", "spec", "containers")!.AsArray().Single(c => String(c!, "name") == intent.Target.Container)!;
+        DeploymentResources.Removed(main, previous.Resources, intent.Target.Resources);
         var nodes = At(obj, "spec", "template", "spec", "nodeSelector")?.AsObject();
         foreach (var key in previous.NodeSelector.Keys.Except(intent.Target.NodeSelector.Keys, StringComparer.Ordinal))
             Need(nodes is null || !nodes.ContainsKey(key), "removed-node-selector-present");
