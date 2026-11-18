@@ -1,5 +1,7 @@
 # ADR-035: Provider-neutral persistence and resource name reservations
 
+> Accepted extension: [ADR-062](0062-existing-resource-import-and-attachment.md) adds explicit existing Resource import with Imported provenance and use-and-retain authority. The earlier no-adoption rule still governs CREATE collision handling; import never fabricates CREATE evidence or mutates external state to fit.
+
 - Status: Accepted
 - Date: 2026-11-03
 - Scope: Provider persistence, including the application-login implementation in issue [#116](https://github.com/hamstix/haby/issues/116)
