@@ -11,7 +11,7 @@ public sealed partial class ManifestCatalogDbContext
     {
         if (ChangeTracker.Entries<DurableOperationAttemptRow>().Any(x => x.State == EntityState.Modified && x.Property(p => p.Actor).IsModified))
             throw new InvalidOperationException("Action audit is immutable.");
-        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or RuntimePublicationReceiptRow &&
+        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or ManagedObjectStateRow or RuntimePublicationReceiptRow &&
             x.State is EntityState.Modified or EntityState.Deleted)) throw new InvalidOperationException("Action history is immutable.");
         foreach (var entry in ChangeTracker.Entries<RuntimeIdentityBindingRow>())
         {

@@ -127,10 +127,11 @@ public sealed class ConfiguredDeploymentTests(Xunit.Abstractions.ITestOutputHelp
     }
 
     [Fact]
-    public void Configured_update_and_superseded_format_refuse_but_absent_configuration_has_no_runtime_fields()
+    public void Changed_runtime_identity_and_superseded_format_refuse_but_absent_configuration_has_no_runtime_fields()
     {
         var configured = Intent();
-        Assert.Throws<WorkloadContractException>(() => DeploymentIntents.Encode(configured with { ExpectedUid = "saved-uid", LastConfirmed = configured.Target }));
+        Assert.Throws<WorkloadContractException>(() => DeploymentIntents.Encode(configured with
+        { ExpectedUid = "saved-uid", LastConfirmed = configured.Target with { Runtime = configured.Target.Runtime! with { ServiceAccountUid = "replacement" } } }));
         Assert.Throws<WorkloadContractException>(() => DeploymentIntents.Encode(configured with { Format = 1 }));
         var plain = KernelTests.Object(KernelTests.Intent()); var spec = plain["spec"]!["template"]!["spec"]!;
         Assert.Null(spec["serviceAccountName"]); Assert.Null(spec["automountServiceAccountToken"]); Assert.Null(spec["volumes"]);

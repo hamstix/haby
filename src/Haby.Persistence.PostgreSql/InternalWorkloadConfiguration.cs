@@ -22,7 +22,7 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
         IReadOnlyDictionary<ProviderInput.Workload, IReadOnlyList<ManifestLocalId>> selection;
         await using (var db = await contexts.CreateDbContextAsync(token))
         {
-            var source = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+            var source = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
             selection = await SelectAsync(db, source, token); // Validate ALL subjects before preparing any document.
             if (await DurableAggregateCompletion.ReadAsync(db, source, token, true) is null)
             {
@@ -33,7 +33,7 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
                     ?? throw new InvalidDataException("Resource-stage evidence unavailable.");
                 await using var transaction = await db.Database.BeginTransactionAsync(token);
                 await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
-                source = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+                source = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
                 if (await DurableAggregateCompletion.ReadAsync(db, source, token, true) is null &&
                     (await db.WorkloadConfigurationRecipients.AnyAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token) ||
                     await db.ConfigurationDocuments.AnyAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token) ||
@@ -67,7 +67,14 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
     // Read-only downstream authority: a partial PrepareAsync result never authorizes effects.
     internal async Task<ProviderInput.Workload[]> RequireCompleteAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token, bool completedRead = false)
     {
-        source = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, source, token) : await InternalGenerationAuthority.RequireAsync(db, source, token);
+        await db.Database.OpenConnectionAsync(token);
+        try { return await RequireCompleteCoreAsync(db, source, token, completedRead); }
+        finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    private async Task<ProviderInput.Workload[]> RequireCompleteCoreAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token, bool completedRead)
+    {
+        source = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, source, token) : await InternalGenerationAuthority.RequireStageAsync(db, source, token);
         var selected = await SelectAsync(db, source, token);
         var proof = await DurableAggregateCompletion.ReadAsync(db, source, token, true, completedRead)
             ?? throw new InvalidDataException("Resource-stage proof unavailable.");
@@ -123,7 +130,8 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
         internal async Task<(ResourcesReadyCheckpoint Proof, ProviderInput.Workload[] Recipients)> RequireAsync(
             ManifestCatalogDbContext db, DeploymentGenerationRow source, ConfigurationDocumentTarget target, CancellationToken token)
         {
-            var exact = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+            var exact = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
+            await InternalGenerationAuthority.RequireCurrentStageAsync(db, exact, token);
             if (source.DeploymentId != exact.DeploymentId || source.Generation != exact.Generation || source.Fingerprint != exact.Fingerprint ||
                 target.Deployment != accepted.DeploymentId || target.Generation != accepted.Generation)
                 throw new InvalidDataException("Preparation source mismatch.");

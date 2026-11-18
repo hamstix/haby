@@ -133,7 +133,7 @@ internal static class InitialRetirementCompletion
     {
         var deployment = source.DeploymentId;
         var generation = source.Generation;
-        var characters = await db.ActionIntents.Where(x => x.DeploymentId == deployment).SumAsync(x => (long)x.Payload.Length, token) +
+        var characters = await db.ActionIntents.Where(x => x.DeploymentId == deployment && x.Generation == generation).SumAsync(x => (long)x.Payload.Length, token) +
             await db.OwnedObjects.Where(x => x.DeploymentId == deployment).SumAsync(x => (long)x.Payload.Length, token) +
             await db.OperationOutputs.Where(x => x.DeploymentId == deployment && x.Generation == generation).SumAsync(x => (long)x.Payload.Length, token) +
             await db.ManagedWorkloads.Where(x => x.DeploymentId == deployment).SumAsync(x => (long)x.TargetPayload.Length, token) +
@@ -142,7 +142,9 @@ internal static class InitialRetirementCompletion
                    where w.DeploymentId == deployment
                    select (long)b.ValidationPayload.Length).SumAsync(token);
         if (characters > 2097152) throw new InvalidDataException("Completion prerequisite text exceeds bound.");
-        var intents = await db.ActionIntents.AsNoTracking().Where(x => x.DeploymentId == deployment).OrderBy(x => x.OperationId).Take(1025).ToArrayAsync(token);
+        // Completion proves this immutable generation. Accepted successor actions do
+        // not rewrite or invalidate its original proof; current rights are separate.
+        var intents = await db.ActionIntents.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation).OrderBy(x => x.OperationId).Take(1025).ToArrayAsync(token);
         if (intents.Length > 1024 || intents.Any(x => x.Generation != generation || x.SubjectKind != "Workload" || x.InputFingerprint != source.Fingerprint || x.Payload.Length > 1048576))
             throw new InvalidDataException("Unexpected action inventory.");
         var actions = new List<CompletedActionEvidence>();

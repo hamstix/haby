@@ -143,7 +143,7 @@ internal sealed partial class InternalDurableActions
         var key = new DurableOperationKey(ApplicationDeploymentId.Parse(inventory.DeploymentId.ToString()),
             DeploymentGeneration.Create(inventory.Generation), OperationId.Create(inventory.OperationId));
         var loaded = purpose == OriginPurpose.AuthenticationIdentity
-            ? await LoadAuthenticationIdentityAsync(db, key, token) : purpose == OriginPurpose.HistoricalRead ? await LoadReadAsync(db, key, token) : await LoadAsync(db, key, token);
+            ? await LoadAuthenticationIdentityAsync(db, key, token) : await LoadReadAsync(db, key, token);
         if (loaded.Operation.State != nameof(DurableOperationState.Succeeded) || loaded.Intent.ManagedIdentity != binding.ManagedWorkloadId ||
             !loaded.Handler.EstablishesIdentity) throw new InvalidDataException("Confirmed identity origin unavailable.");
         await TerminalAsync(db, loaded, token);

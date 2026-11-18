@@ -62,7 +62,7 @@ a fictional transition. Exact already accepted inputs are a no-op at their exist
 generation, with no preparation/retirement obligations and retained publications.
 Retrying the same accepted ChangeSet returns its original commit receipt.
 
-## Execution remains closed
+## Public execution remains closed
 
 Production operator admission returns typed `UnsupportedShape` for a Workload
 update. Operator Check/Commit cannot promote an internally saved successor Plan;
@@ -70,10 +70,11 @@ operator replay cannot expose an internally committed update. No RPC switch,
 public test hook or new friend assembly is introduced. Existing initial CREATE
 and Resource-only supported paths retain their boundaries.
 
-The internal execution authority requires an initial retirement inventory. An
-update inventory cannot enter CREATE, configuration/identity preparation, initial
-empty-retirement completion or Applied advancement. Internally committed successor
-state is intended only for foundation tests, not normal operator use.
+The original internal execution authority requires an initial retirement inventory.
+An update inventory cannot enter CREATE, initial empty-retirement completion or
+Applied advancement. [Issue #257](257-durable-deployment-update-submission.md) adds
+a distinct internal preparation/publication/conditional submission capability,
+without opening normal operator UPDATE or completing its lifecycle.
 
 ## Catalog boundary
 
@@ -100,8 +101,9 @@ JSON metadata; no Provider-specific table or column is added.
 Test inventories are not passing execution evidence. Exact commands, results and
 current-SHA CI belong in the author report and pull request.
 
-Remaining ADR-058 slices must implement generation-specific preparation/publication,
-stable identity authorized-use evidence, conditional same-UID configured UPDATE,
-new readiness, old-recipient observation, bounded permission retirement and Applied
+Issue #257 supplies internal generation-specific preparation/publication, stable
+identity authorized-use evidence and conditional same-UID configured UPDATE.
+Remaining ADR-058 slices must implement new readiness, old-recipient observation,
+bounded permission retirement and Applied
 completion, ADR-052 forward correction, and the real integrated rehearsal. No
 operational UPDATE promise follows from this planning foundation.

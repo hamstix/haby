@@ -45,7 +45,7 @@ internal sealed partial class InternalDurableActions(
         // Metadata and exact handler checks precede Resource material preflight.
         await using (var preflight = await contexts.CreateDbContextAsync(token))
         {
-            var source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
+            var source = await InternalGenerationAuthority.RequireStageAsync(preflight, accepted, token);
             var candidate = await ContextAsync(preflight, source, key, subject, action, Guid.CreateVersion7(), Guid.CreateVersion7(), token);
             if (candidate.Handler.RequiresPreparedConfiguration)
                 await RequireConfigurationAsync(preflight, source, token);
@@ -59,7 +59,7 @@ internal sealed partial class InternalDurableActions(
                     ?? throw new InvalidDataException("Resource-stage evidence unavailable.");
                 await using var tx = await preflight.Database.BeginTransactionAsync(token);
                 await DurableAggregateCompletion.LockAsync(preflight, source.DeploymentId, token);
-                source = await InternalGenerationAuthority.RequireAsync(preflight, accepted, token);
+                source = await InternalGenerationAuthority.RequireStageAsync(preflight, accepted, token);
                 if (!await DurableAggregateCompletion.TryAdvanceAsync(preflight, source.DeploymentId, source.Generation, token,
                     resourceOutputs, resourceAdmission, typedCodecs, prepared, internalResourceStage: true)) throw new InvalidDataException("Resource-stage proof refused.");
                 token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
@@ -69,7 +69,7 @@ internal sealed partial class InternalDurableActions(
         await using var transaction = await db.Database.BeginTransactionAsync(token);
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         await DurableAggregateCompletion.LockAsync(db, deployment, token);
-        var generation = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+        var generation = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
         var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true)
             ?? throw new InvalidDataException("Resource-stage proof unavailable.");
         var old = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.RequestId == request, token);
@@ -80,6 +80,10 @@ internal sealed partial class InternalDurableActions(
             _ = await LoadAsync(db, key, token);
             return key;
         }
+        if (DurableOperationGraphCodec.Decode(generation.GraphJson).WorkloadUpdate is not null &&
+            await db.ActionIntents.AsNoTracking().AnyAsync(x => x.DeploymentId == deployment && x.Generation == generation.Generation &&
+                x.SubjectKind == "Workload" && subject is ProviderInput.Workload && x.Component == ((ProviderInput.Workload)subject).Component.Value && x.LocalId == ((ProviderInput.Workload)subject).Id.Value, token))
+            throw new InvalidDataException("An update action already owns this generation target.");
         var marker = Guid.CreateVersion7(); var managed = Guid.CreateVersion7();
         var exact = await ContextAsync(db, generation, key, subject, action, marker, managed, token);
         await RequireCurrentRuntimeAsync(db, exact.Context, token);
@@ -267,7 +271,7 @@ internal sealed partial class InternalDurableActions(
             });
         }
         await db.SaveChangesAsync(token);
-        if (confirmed && loaded.Handler is IInternalReadinessHandler)
+        if (confirmed && loaded.Handler is IInternalReadinessHandler && !loaded.Handler.UpdatesObject)
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == loaded.Intent.DeploymentId && x.Generation == key.Generation.Value, token);
             _ = await CaptureSubmittedAsync(db, source, token);

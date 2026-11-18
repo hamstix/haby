@@ -1210,6 +1210,70 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.ToTable("internal_plan_inputs", (string)null);
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ManagedObjectStateRow", b =>
+                {
+                    b.Property<Guid>("ManagedWorkloadId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("managed_workload_id");
+
+                    b.Property<string>("Role")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("role");
+
+                    b.Property<string>("Contract")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("contract");
+
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<int>("Format")
+                        .HasColumnType("integer")
+                        .HasColumnName("format");
+
+                    b.Property<long>("Generation")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.Property<string>("OperationId")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("operation_id");
+
+                    b.Property<long>("OriginGeneration")
+                        .HasColumnType("bigint")
+                        .HasColumnName("origin_generation");
+
+                    b.Property<string>("OriginOperation")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("origin_operation");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload");
+
+                    b.HasKey("ManagedWorkloadId", "Role");
+
+                    b.HasIndex("DeploymentId", "Generation", "OperationId");
+
+                    b.HasIndex("DeploymentId", "OriginGeneration", "OriginOperation");
+
+                    b.ToTable("managed_object_states", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_managed_object_state", "format > 0 AND generation > origin_generation AND octet_length(payload) BETWEEN 1 AND 1048576");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ManagedWorkloadRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2946,6 +3010,28 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasForeignKey("ProviderId", "ConfigurationRevision")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ManagedObjectStateRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ManagedWorkloadRow", null)
+                        .WithMany()
+                        .HasForeignKey("ManagedWorkloadId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableActionIntentRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "Generation", "OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableActionIntentRow", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId", "OriginGeneration", "OriginOperation")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_managed_object_states_durable_action_intents_deployment_id~1");
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ManagedWorkloadRow", b =>

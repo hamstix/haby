@@ -30,7 +30,7 @@ internal sealed class InternalRuntimeIdentityPreparation(IDbContextFactory<Manif
         ProviderInput.Workload[] subjects;
         await using (var db = await contexts.CreateDbContextAsync(token))
         {
-            var source = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+            var source = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
             subjects = await configuration.RequireCompleteAsync(db, source, token);
             // Inspect every existing binding before any account action. A revoked binding
             // is authentic retained history, never an invitation to create a replacement.
@@ -49,6 +49,13 @@ internal sealed class InternalRuntimeIdentityPreparation(IDbContextFactory<Manif
         var results = new List<PreparedRuntimeIdentity>();
         foreach (var subject in subjects.OrderBy(x => x.Component.Value, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal))
         {
+            var retained = await actions.ObserveRetainedIdentityAsync(accepted, subject, token);
+            if (retained is not null)
+            {
+                results.Add(retained);
+                if (retained.Result.Outcome != InternalActionOutcome.Confirmed) break;
+                continue;
+            }
             var request = "runtime-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(subject.Component.Value + "/" + subject.Id.Value)));
             var key = await accept(subject, request, token);
             var result = await execute(key, token);
@@ -57,7 +64,7 @@ internal sealed class InternalRuntimeIdentityPreparation(IDbContextFactory<Manif
             if (result.Outcome == InternalActionOutcome.Confirmed)
             {
                 await using var db = await contexts.CreateDbContextAsync(token);
-                var source = await InternalGenerationAuthority.RequireAsync(db, accepted, token);
+                var source = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
                 await configuration.RequireCompleteAsync(db, source, token);
                 var saved = await (from row in db.RuntimeIdentityBindings.AsNoTracking()
                                    join workload in db.ManagedWorkloads on row.ManagedWorkloadId equals workload.Id

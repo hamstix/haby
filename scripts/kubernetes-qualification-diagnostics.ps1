@@ -382,18 +382,42 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS configured-C12-Pod-defaulted-resource-requests',
           'PASS configured-C13-configured-Deployment-Pod-ports-probes-defaults',
           'PASS configured-R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied',
+          'PASS configured-U01-public-update-remains-closed',
+          'PASS configured-U02-new-exact-documents-prepared',
+          'PASS configured-U03-stable-account-original-proof-new-generation-use',
+          'PASS configured-U04-new-rights-before-patch-old-rights-retained',
+          'PASS configured-U05-target-bootstrap-new-exact-revisions-stable-binding',
+          'PASS configured-U06-conditional-configured-patch-response-readback-lost-response-recovery',
+          'PASS configured-U07-sidecar-foreign-metadata-and-api-defaulting-preserved',
+          'PASS configured-U08-runtime-new-revision-delivery-old-permissions-and-Applied-boundary',
           'PASS configured-owned-namespace-absent',
           'PASS configured-owned-catalog-cleanup')
     }
     $stages=@('entry','namespace-create','namespace-created','catalog-init','accepted-plan','host-build','host-start',
         'first-submit','uncertain-submit','cli-submit','pod-startup','readback','prepare-update','cleanup-ownership',
         'cleanup-namespace','cleanup-catalog','completed','unknown')
+    if($Mode -ceq 'configured'){$stages+=@('update-target-envelope','update-import','update-image-baseline','update-plan')}
     $outcomes=@('Confirmed','Refused','Conflict','Uncertain','CanceledBeforeDispatch','ObservationUnavailable','NotConfirmed','unknown')
     $codes=@('response-confirmed','observation-confirmed','evidence-not-confirmed','response-unconfirmed','invalid-input',
         'connection-unavailable','dispatch-uncertain','occupied-name','owned-state-conflict','uid-conflict','api-conflict',
         'api-access-denied','action-canceled','managed-object-missing','action-budget','precondition-limit','object-absent','observation-unavailable','unknown')
     $rpcCodes=@('OK','Cancelled','Unknown','InvalidArgument','DeadlineExceeded','NotFound','AlreadyExists','PermissionDenied',
         'ResourceExhausted','FailedPrecondition','Aborted','OutOfRange','Unimplemented','Internal','Unavailable','DataLoss','Unauthenticated','unknown')
+    $updateOperations=@('Execute','ExpectedLoss','Recover','ReceiptDecode','Readback','Projection','ObservationReceipt','ApiResponseReceipt',
+        'DelegateExecute','DelegateObserve','ProofRuntimeAccount')
+    $updateConditions=@('ReceiptPresence','ApiResponsePresence','U06Outcome','U06Source','U06PatchCount','U06SavedUid',
+        'U06TargetImage','U06PatchPresence','U06ResourceVersion','U06PatchUid','U06ResponseUid','U06ResponseGeneration')
+    $updateCodes=$codes+@('confirmed','not-dispatched','manual-recovery-required','terminal-failure','managed-identity-conflict','managed-object-conflict','intent-invalid',
+        'retained-identity-confirmed','retained-identity-unconfirmed')
+    $updatePredicates=@('Intent','Readback','Ownership','Uid','Baseline','Target','Marker','Receipt','ResponseReceipt','RuntimeAccount')
+    $updateProofCodes=@('intent-format','intent-update-pair','immutable-container','immutable-runtime-mode','immutable-runtime-identity',
+        'binding','namespace','name','value','projection','image','runtime-projection','receipt-format','object-identity','ownership',
+        'reserved-location','selector-drift','uid-conflict','container-identity','container-drift','resource-shape','resource-drift',
+        'scalar-drift','strategy-drift','node-selector-drift','pull-secret-shape','pull-secret-identity','pull-secret-drift',
+        'runtime-account-drift','runtime-list-shape','runtime-list-identity','runtime-bootstrap-drift','runtime-volume-drift',
+        'runtime-mount-drift','runtime-mount-collision','runtime-token-injection','ports-shape','port-shape','port-identity',
+        'port-drift','probe-drift','removed-resource-present','removed-port-present','removed-probe-present',
+        'removed-node-selector-present','removed-pull-secret-present','operation-marker','unknown')
     $records=[Collections.Generic.List[string]]::new();$entry=$false;$hasFailure=$false
     foreach($line in (($Output+"`n"+$ErrorOutput) -split "`r?`n")){
         if($line -cin $passes){$records.Add($line)}
@@ -401,7 +425,52 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($line.Length -gt 160){return $invalid}
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
-            if($parts[2] -cin @('k14','k24')){
+            if($parts[2] -ceq 'update'){
+                if($Mode -cne 'configured' -or $parts.Count -lt 5){return $invalid}
+                $phase=$parts[3];$state=$parts[4];$shape=$false
+                if($phase -ceq 'rejection'){
+                    if($parts.Count -eq 6){
+                        $shape=($state -ceq 'Status' -and $parts[5] -cin @('Invalid','BadRequest','Conflict','Forbidden','NotFound','Unauthorized','unknown')) -or
+                            ($state -ceq 'RvClassifier' -and $parts[5] -cin @('true','false')) -or
+                            ($state -ceq 'Shape' -and $parts[5] -cin @('oversized','unknown'))
+                    }elseif($parts.Count -eq 7){
+                        $shape=($state -ceq 'Cause' -and
+                            $parts[5] -cin @('FieldValueInvalid','FieldValueRequired','FieldValueForbidden','FieldValueNotSupported','FieldValueDuplicate','FieldValueNotFound','UnexpectedServerResponse','unknown') -and
+                            $parts[6] -cin @('UidTest','ResourceVersionTest','ContainerNameTest','BootstrapNameTest','BootstrapValueTest','OtherGeneratedTest','PatchField','ImageField','EnvironmentValueField','unknown')) -or
+                            ($state -ceq 'Probe' -and $parts[5] -cin @('Control','BootstrapValueTest') -and $parts[6] -cmatch '^([1-5][0-9]{2}|unknown)$')
+                    }
+                }elseif($phase -ceq 'wire'){
+                    $shape=$parts.Count -eq 8 -and $state -ceq 'status' -and $parts[6] -cmatch '^([0-3]|unknown)$' -and
+                        (($parts[5] -cmatch '^[1-5][0-9]{2}$' -and $parts[7] -ceq 'true') -or
+                         ($parts[5] -ceq 'no-response' -and $parts[7] -ceq 'false') -or
+                         ($parts[5] -ceq 'unknown' -and $parts[7] -ceq 'true'))
+                }elseif($phase -ceq 'proof'){
+                    $shape=$parts.Count -eq 7 -and $state -cin $updatePredicates -and
+                        (($parts[5] -ceq 'passed' -and $parts[6] -ceq 'confirmed') -or
+                         ($parts[5] -ceq 'failed' -and $parts[6] -cin $updateProofCodes))
+                    if($shape -and $parts[5] -ceq 'failed'){$hasFailure=$true}
+                }elseif($phase -cnotin ($updateOperations+$updateConditions)){return $invalid}
+                elseif($parts.Count -eq 5){
+                    $shape=($phase -cin $updateConditions -and $state -cin @('Start','Passed','Failed')) -or
+                        ($phase -cin $updateOperations -and $state -cin @('Start','Completed')) -or
+                        ($phase -ceq 'Execute' -and $state -ceq 'Returned') -or
+                        ($phase -ceq 'ExpectedLoss' -and $state -cin @('Observed','Failed'))
+                }elseif($parts.Count -eq 7){
+                    $shape=$state -ceq 'failure' -and $parts[5] -ceq 'unknown' -and $parts[6] -cmatch '^([0-3]|unknown)$'
+                }elseif($parts.Count -eq 8){
+                    $shape=$phase -cin @('Execute','Recover','ProofRuntimeAccount') -and $state -ceq 'result' -and
+                        $parts[5] -cin @('Confirmed','Uncertain','Refused','Unavailable','NotConfirmed','unknown') -and
+                        $parts[6] -cin $updateCodes -and $parts[7] -cmatch '^([0-3]|unknown)$'
+                }elseif($parts.Count -eq 10){
+                    $shape=$phase -cin @('DelegateExecute','DelegateObserve') -and $state -ceq 'result' -and
+                        $parts[5] -cin @('Confirmed','Uncertain','Refused','Unavailable','NotConfirmed','unknown') -and
+                        $parts[6] -cin $updateCodes -and $parts[7] -cmatch '^([0-3]|unknown)$' -and
+                        $parts[8] -ceq 'receipt-present' -and $parts[9] -cin @('true','false')
+                }
+                if(!$shape){return $invalid}
+                if($state -cin @('failure','Failed')){$hasFailure=$true}
+                $records.Add('Diagnostic workload: '+$line.Substring(5))
+            }elseif($parts[2] -cin @('k14','k24')){
                 $replacementPhases=if($parts[2] -ceq 'k14'){@('initial-create','uid-delete','absence-poll','replacement-create','old-uid-observe','assertion')}else{@('uid-delete','absence-poll','replacement-create')}
                 if($Mode -cne 'kernel' -or $parts.Count -lt 5 -or $parts[3] -cnotin $replacementPhases){return $invalid}
                 $phase=$parts[3];$state=$parts[4];$shape=$false

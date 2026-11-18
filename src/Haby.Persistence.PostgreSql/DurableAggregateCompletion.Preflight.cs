@@ -72,7 +72,7 @@ internal static partial class DurableAggregateCompletion
                     identity.SourceGeneration != (reuse?.SourceGeneration ?? generation) || reuse is not null && identity.Id != reuse.ManagementId) return null;
                 identities.Add(resource, identity.Id);
             }
-            if (closure is null && target.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, deployment, target, token)) return null;
+            if (closure is null && target.Baseline is not null && !InternalResourceStage.IsEmpty(root.Inputs(), target) && !await ResourceContinuity.ValidateAsync(db, deployment, target, token)) return null;
             var generations = closure is null ? target.ReusedResources.Concat(target.RetainedResources).Select(x => x.SourceGeneration).Append(generation).Distinct().ToArray() : [generation];
             if (generations.Any(x => x > generation)) return null;
             var sources = new List<ReadinessSource>();
@@ -89,7 +89,7 @@ internal static partial class DurableAggregateCompletion
                     !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                         graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
                     graph.Nodes.Count + graph.ReusedResources.Count == 0 && !(row.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))) return null;
-                if (row.InternalEffects) _ = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, row, token) : await InternalGenerationAuthority.RequireAsync(db, row, token);
+                if (row.InternalEffects) _ = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, row, token) : await InternalGenerationAuthority.RequireStageAsync(db, row, token);
                 if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint || admission is not null && !admission.Supports(graph)) return null;
                 var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token);
                 if (revision is null) return null;
@@ -202,7 +202,7 @@ internal static partial class DurableAggregateCompletion
     {
         if (source.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))
         {
-            _ = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, source, token) : await InternalGenerationAuthority.RequireAsync(db, source, token);
+            _ = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, source, token) : await InternalGenerationAuthority.RequireStageAsync(db, source, token);
             return true;
         }
         if (source.InternalEffects)
