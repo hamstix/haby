@@ -403,10 +403,21 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
         'api-access-denied','action-canceled','managed-object-missing','action-budget','precondition-limit','object-absent','observation-unavailable','unknown')
     $rpcCodes=@('OK','Cancelled','Unknown','InvalidArgument','DeadlineExceeded','NotFound','AlreadyExists','PermissionDenied',
         'ResourceExhausted','FailedPrecondition','Aborted','OutOfRange','Unimplemented','Internal','Unavailable','DataLoss','Unauthenticated','unknown')
-    $updateOperations=@('Execute','ExpectedLoss','Recover','ReceiptDecode','Readback','Projection','ObservationReceipt','ApiResponseReceipt')
+    $updateOperations=@('Execute','ExpectedLoss','Recover','ReceiptDecode','Readback','Projection','ObservationReceipt','ApiResponseReceipt',
+        'DelegateExecute','DelegateObserve','ProofRuntimeAccount')
     $updateConditions=@('ReceiptPresence','ApiResponsePresence','U06Outcome','U06Source','U06PatchCount','U06SavedUid',
         'U06TargetImage','U06PatchPresence','U06ResourceVersion','U06PatchUid','U06ResponseUid','U06ResponseGeneration')
-    $updateCodes=$codes+@('confirmed','not-dispatched','manual-recovery-required','terminal-failure','managed-identity-conflict','managed-object-conflict','intent-invalid')
+    $updateCodes=$codes+@('confirmed','not-dispatched','manual-recovery-required','terminal-failure','managed-identity-conflict','managed-object-conflict','intent-invalid',
+        'retained-identity-confirmed','retained-identity-unconfirmed')
+    $updatePredicates=@('Intent','Readback','Ownership','Uid','Target','Marker','Receipt','ResponseReceipt','RuntimeAccount')
+    $updateProofCodes=@('intent-format','intent-update-pair','immutable-container','immutable-runtime-mode','immutable-runtime-identity',
+        'binding','namespace','name','value','projection','image','runtime-projection','receipt-format','object-identity','ownership',
+        'reserved-location','selector-drift','uid-conflict','container-identity','container-drift','resource-shape','resource-drift',
+        'scalar-drift','strategy-drift','node-selector-drift','pull-secret-shape','pull-secret-identity','pull-secret-drift',
+        'runtime-account-drift','runtime-list-shape','runtime-list-identity','runtime-bootstrap-drift','runtime-volume-drift',
+        'runtime-mount-drift','runtime-mount-collision','runtime-token-injection','ports-shape','port-shape','port-identity',
+        'port-drift','probe-drift','removed-resource-present','removed-port-present','removed-probe-present',
+        'removed-node-selector-present','removed-pull-secret-present','operation-marker','unknown')
     $records=[Collections.Generic.List[string]]::new();$entry=$false;$hasFailure=$false
     foreach($line in (($Output+"`n"+$ErrorOutput) -split "`r?`n")){
         if($line -cin $passes){$records.Add($line)}
@@ -415,9 +426,20 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
             if($parts[2] -ceq 'update'){
-                if($Mode -cne 'configured' -or $parts.Count -lt 5 -or $parts[3] -cnotin ($updateOperations+$updateConditions)){return $invalid}
+                if($Mode -cne 'configured' -or $parts.Count -lt 5){return $invalid}
                 $phase=$parts[3];$state=$parts[4];$shape=$false
-                if($parts.Count -eq 5){
+                if($phase -ceq 'wire'){
+                    $shape=$parts.Count -eq 8 -and $state -ceq 'status' -and $parts[6] -cmatch '^([0-3]|unknown)$' -and
+                        (($parts[5] -cmatch '^[1-5][0-9]{2}$' -and $parts[7] -ceq 'true') -or
+                         ($parts[5] -ceq 'no-response' -and $parts[7] -ceq 'false') -or
+                         ($parts[5] -ceq 'unknown' -and $parts[7] -ceq 'true'))
+                }elseif($phase -ceq 'proof'){
+                    $shape=$parts.Count -eq 7 -and $state -cin $updatePredicates -and
+                        (($parts[5] -ceq 'passed' -and $parts[6] -ceq 'confirmed') -or
+                         ($parts[5] -ceq 'failed' -and $parts[6] -cin $updateProofCodes))
+                    if($shape -and $parts[5] -ceq 'failed'){$hasFailure=$true}
+                }elseif($phase -cnotin ($updateOperations+$updateConditions)){return $invalid}
+                elseif($parts.Count -eq 5){
                     $shape=($phase -cin $updateConditions -and $state -cin @('Start','Passed','Failed')) -or
                         ($phase -cin $updateOperations -and $state -cin @('Start','Completed')) -or
                         ($phase -ceq 'Execute' -and $state -ceq 'Returned') -or
@@ -425,9 +447,14 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
                 }elseif($parts.Count -eq 7){
                     $shape=$state -ceq 'failure' -and $parts[5] -ceq 'unknown' -and $parts[6] -cmatch '^([0-3]|unknown)$'
                 }elseif($parts.Count -eq 8){
-                    $shape=$phase -cin @('Execute','Recover') -and $state -ceq 'result' -and
+                    $shape=$phase -cin @('Execute','Recover','ProofRuntimeAccount') -and $state -ceq 'result' -and
                         $parts[5] -cin @('Confirmed','Uncertain','Refused','Unavailable','NotConfirmed','unknown') -and
                         $parts[6] -cin $updateCodes -and $parts[7] -cmatch '^([0-3]|unknown)$'
+                }elseif($parts.Count -eq 10){
+                    $shape=$phase -cin @('DelegateExecute','DelegateObserve') -and $state -ceq 'result' -and
+                        $parts[5] -cin @('Confirmed','Uncertain','Refused','Unavailable','NotConfirmed','unknown') -and
+                        $parts[6] -cin $updateCodes -and $parts[7] -cmatch '^([0-3]|unknown)$' -and
+                        $parts[8] -ceq 'receipt-present' -and $parts[9] -cin @('true','false')
                 }
                 if(!$shape){return $invalid}
                 if($state -cin @('failure','Failed')){$hasFailure=$true}

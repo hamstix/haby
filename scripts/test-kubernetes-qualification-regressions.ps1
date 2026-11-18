@@ -1119,6 +1119,28 @@ Write-Output 'PASS kernel K24 replacement phases and finite 601-read evidence; u
 Write-Output 'PASS fixed K14 substeps: closed results/receipt/status/count, exception failure, hostile/unknown/mode rejection and unchanged bounds (synthetic)'
 
 # Pure parser controls for both existing workload modes, never a cluster execution.
+foreach($suffix in @('DelegateExecute result Uncertain response-unconfirmed 1 receipt-present false',
+    'DelegateObserve result Confirmed observation-confirmed 1 receipt-present true',
+    'ProofRuntimeAccount result Confirmed retained-identity-confirmed 1',
+    'wire status 422 1 true','wire status 200 1 true','wire status no-response 1 false','wire status unknown unknown true',
+    'proof Ownership passed confirmed','proof Target failed runtime-volume-drift','proof Receipt failed unknown')){
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`nQ243 configured update $suffix") ''
+    if($parsed.Status -cne 'valid' -or ("Diagnostic workload: configured update $suffix") -cnotin $parsed.Records -or
+        $parsed.HasFailure -ne ($suffix -cin @('proof Target failed runtime-volume-drift','proof Receipt failed unknown'))){throw 'Full uncertainty interval diagnostic missing'}
+    $wrongMode=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`nQ243 kernel update $suffix") ''
+    if($wrongMode.Status -cne 'invalid' -or @($wrongMode.Records).Count){throw 'Full interval diagnostic accepted for wrong mode'}
+}
+foreach($suffix in @('DelegateExecute result Confirmed confirmed 1 receipt-present protected-bootstrap',
+    'DelegateExecute result Refused protected-reason 1 receipt-present false',
+    'DelegateExecute result Confirmed confirmed 1 receipt-present true protected-body',
+    'wire status 099 1 true','wire status 600 1 true','wire status 200 1 false','wire status no-response 1 true',
+    'wire status 422 4 true','wire status 422 1 true protected-headers',
+    'proof Target failed protected-message','proof Target passed runtime-volume-drift','proof protected-field failed unknown',
+    'proof Target failed runtime-volume-drift protected-config')){
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`nQ243 configured update $suffix") ''
+    if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Unrecognized interval diagnostic detail published'}
+}
+Write-Output 'PASS delegated pre-loss result, receipt presence, bounded HTTP/no-response and existing-proof codes; hostile-value/mode rejection (synthetic)'
 foreach($stage in @('Execute','ExpectedLoss','Recover','ReceiptPresence','ReceiptDecode','Readback','Projection',
     'ObservationReceipt','ApiResponsePresence','ApiResponseReceipt','U06Outcome','U06Source','U06PatchCount',
     'U06SavedUid','U06TargetImage','U06PatchPresence','U06ResourceVersion','U06PatchUid','U06ResponseUid','U06ResponseGeneration')){

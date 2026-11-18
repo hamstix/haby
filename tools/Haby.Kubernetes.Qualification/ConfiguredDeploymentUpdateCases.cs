@@ -88,8 +88,10 @@ internal static class ConfiguredDeploymentUpdateCases
         var wire = new PatchEvidence();
         var update = new InternalDeploymentAction(secrets, connection => new DeploymentKernel(connection.Binding,
             ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true);
+        var recordedUpdate = new ConfiguredDeploymentUpdateHandler(update,
+            (phase, result) => Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Delegated(phase, result, wire.Writes)));
         var loseResponse = true;
-        InternalDurableActions Actions() => new(contexts, [identity, create, update], services.GetServices<IProviderConfigurationCodec>(),
+        InternalDurableActions Actions() => new(contexts, [identity, create, recordedUpdate], services.GetServices<IProviderConfigurationCodec>(),
             services.GetServices<IExternalOperationOutputContract>(), services.GetRequiredService<DurableActionAdmission>(),
             services.GetRequiredService<DurableOperationSerialization>(), services.GetRequiredService<TimeProvider>(), point =>
             { if (point == InternalActionFault.AfterExternalResult && loseResponse) { loseResponse = false; throw new LostUpdateResponse(); } }, configuration);
@@ -143,6 +145,8 @@ internal static class ConfiguredDeploymentUpdateCases
             result = await Actions().RecoverByObservationAsync(key, token);
             Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Result(stage, result, wire.Writes));
             Complete();
+            if (result.Outcome == InternalActionOutcome.NotConfirmed)
+                await DiagnoseUnconfirmed(admin, Actions(), accepted, subject, intent, wire, token);
             Require(UpdateStage.ReceiptPresence, () => result.Receipt is not null);
             Begin(UpdateStage.ReceiptDecode);
             var response = DeploymentIntents.DecodeReceipt(result.Receipt!);
@@ -217,6 +221,40 @@ internal static class ConfiguredDeploymentUpdateCases
             "U08-runtime-new-revision-delivery-old-permissions-and-Applied-boundary");
     }
 
+    private static async Task DiagnoseUnconfirmed(Kubernetes admin, InternalDurableActions actions, DurableChangeSetCommit accepted,
+        ProviderInput.Workload subject, DeploymentIntent intent, PatchEvidence wire, CancellationToken token)
+    {
+        // Supplemental read-only diagnostics never replace the recovery result or its failure.
+        Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Wire(wire.Status, wire.Writes));
+        void Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate predicate, Action check) =>
+            Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Inspect(predicate, check));
+        Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Intent, () => DeploymentIntents.Validate(intent));
+        try
+        {
+            var retained = await actions.ObserveRetainedIdentityAsync(accepted, subject, token);
+            if (retained is null) Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Proof(ConfiguredDeploymentUpdateDiagnostics.Predicate.RuntimeAccount, false, null));
+            else Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Result(UpdateStage.ProofRuntimeAccount, retained.Result, wire.Writes));
+        }
+        catch { Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Proof(ConfiguredDeploymentUpdateDiagnostics.Predicate.RuntimeAccount, false, null)); }
+        if (wire.Response is not null)
+            Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.ResponseReceipt, () => DeploymentObjects.Receipt(wire.Response, intent, ConfirmationSource.Response));
+        JsonObject current;
+        try
+        {
+            // Exactly one additional Deployment GET, without writes or recovery retries.
+            current = DeploymentObjects.Read(await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, intent.Namespace, cancellationToken: token));
+            Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Proof(ConfiguredDeploymentUpdateDiagnostics.Predicate.Readback, true, null));
+        }
+        catch (WorkloadContractException error) { Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Proof(ConfiguredDeploymentUpdateDiagnostics.Predicate.Readback, false, error)); return; }
+        catch { Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Proof(ConfiguredDeploymentUpdateDiagnostics.Predicate.Readback, false, null)); return; }
+        Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Ownership, () => DeploymentObjects.Ownership(current, intent));
+        Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Uid, () => DeploymentIntents.Need(intent.ExpectedUid is null ||
+            DeploymentObjects.String(current, "metadata", "uid") == intent.ExpectedUid, "uid-conflict"));
+        Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Target, () => DeploymentObjects.Matches(current, intent.Target));
+        Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Marker, () => DeploymentIntents.Need(DeploymentObjects.HasMarkers(current, intent), "operation-marker"));
+        Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Receipt, () => DeploymentObjects.Receipt(current, intent, ConfirmationSource.Observation));
+    }
+
     private static void Check(bool condition, string id)
     {
         if (!condition) throw new InvalidOperationException("Configured update case failed: " + id);
@@ -229,14 +267,26 @@ internal static class ConfiguredDeploymentUpdateCases
         internal int Writes;
         internal JsonArray? Patch;
         internal JsonObject? Response;
+        internal int? Status;
     }
     private sealed class CapturePatch(PatchEvidence evidence) : DelegatingHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             var update = request.Method == HttpMethod.Patch && request.RequestUri!.AbsolutePath.Contains("/deployments/", StringComparison.Ordinal);
-            if (update) { evidence.Writes++; evidence.Patch = JsonNode.Parse(await request.Content!.ReadAsStringAsync(token))!.AsArray(); }
-            var response = await base.SendAsync(request, token);
+            if (update) { evidence.Writes++; evidence.Status = null; evidence.Patch = JsonNode.Parse(await request.Content!.ReadAsStringAsync(token))!.AsArray(); }
+            HttpResponseMessage response;
+            try { response = await base.SendAsync(request, token); }
+            catch
+            {
+                if (update) Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Wire(null, evidence.Writes));
+                throw;
+            }
+            if (update)
+            {
+                evidence.Status = (int)response.StatusCode;
+                Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Wire(evidence.Status, evidence.Writes));
+            }
             if (update && response.StatusCode == HttpStatusCode.OK)
                 evidence.Response = JsonNode.Parse(await response.Content.ReadAsStringAsync(token))!.AsObject();
             return response;
