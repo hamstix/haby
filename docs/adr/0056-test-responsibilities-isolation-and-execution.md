@@ -1,5 +1,13 @@
 # ADR-056: Test responsibilities, isolation and execution
 
+> Accepted amendment: [ADR-061](0061-focused-development-and-final-qualification.md)
+> separates focused iteration from exact-SHA full merge qualification in #263,
+> after #259 and before #261. Earlier every-change/full-gate wording describes
+> current execution until that safe mechanical gate transition is implemented.
+> Full applicable qualification before merge remains mandatory; this documentation
+> changes no workflow, required context or remote protection setting.
+
+
 Status: Accepted
 
 Date: 2026-11-13

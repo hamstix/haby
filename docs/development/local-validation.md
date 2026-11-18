@@ -1,5 +1,13 @@
 # Local validation when hosted runners are unavailable
 
+> Accepted amendment: [ADR-061](../adr/0061-focused-development-and-final-qualification.md)
+> separates focused iteration from exact-SHA full merge qualification in #263,
+> after #259 and before #261. Earlier every-change/full-gate wording describes
+> current execution until that safe mechanical gate transition is implemented.
+> Full applicable qualification before merge remains mandatory; this documentation
+> changes no workflow, required context or remote protection setting.
+
+
 This is a historical quota fallback, not the current maintenance default. Use the
 [hosted suite/gate workflow](197-suite-routing.md) under ADR-056. Do not resume
 #188/#191 or this old run chain without the architect's explicit reassessment.
