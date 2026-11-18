@@ -22,7 +22,7 @@ internal static class ConfiguredDeploymentUpdateCases
     private sealed class LostUpdateResponse : IOException;
     internal static async Task Run(Kubernetes admin, ServiceProvider services, DurableChangeSetCommit baseline, JsonNode envelope,
         string image, IInternalActionHandler identity, IInternalActionHandler create, InternalWorkloadConfiguration configuration,
-        ConcurrentQueue<Guid> requests, Func<CancellationToken, Task> drain, CancellationToken token)
+        ConcurrentQueue<Guid> requests, Func<CancellationToken, Task> drain, CancellationToken token, ConfiguredLifecycle lifetime)
     {
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         var secrets = services.GetRequiredService<ISecretStore>();
@@ -93,15 +93,16 @@ internal static class ConfiguredDeploymentUpdateCases
             await admin.AppsV1.PatchNamespacedDeploymentAsync(new(foreignPatch.ToJsonString(), V1Patch.PatchType.JsonPatch), previous.Name, previous.Namespace, cancellationToken: token);
             var wire = new PatchEvidence();
             DeploymentKernel? recipientKernel = null;
+            var diagnostics = new ConfiguredRetirementDiagnostics.Output();
             var update = new InternalDeploymentAction(secrets, connection => recipientKernel = new DeploymentKernel(connection.Binding,
-                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true, recipientDiagnostic: value => Console.WriteLine(ConfiguredRetirementDiagnostics.Recipients(value)));
+                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true, recipientDiagnostic: diagnostics.Recipient);
             var recordedUpdate = new ConfiguredDeploymentUpdateHandler(update,
                 (phase, result) => Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Delegated(phase, result, wire.Writes)));
             var loseResponse = true;
             InternalDurableActions Actions() => new(contexts, [identity, create, recordedUpdate], services.GetServices<IProviderConfigurationCodec>(),
                 services.GetServices<IExternalOperationOutputContract>(), services.GetRequiredService<DurableActionAdmission>(),
                 services.GetRequiredService<DurableOperationSerialization>(), services.GetRequiredService<TimeProvider>(), point =>
-                { if (point == InternalActionFault.AfterExternalResult && loseResponse) { loseResponse = false; throw new LostUpdateResponse(); } }, configuration, value => Console.WriteLine(ConfiguredRetirementDiagnostics.Closure(value.Stage.ToString(), value.Predicate.ToString())));
+                { if (point == InternalActionFault.AfterExternalResult && loseResponse) { loseResponse = false; throw new LostUpdateResponse(); } }, configuration, value => diagnostics.Completion(value.Stage.ToString(), value.Predicate.ToString()));
             var actions = Actions();
             Check((await configuration.PrepareAsync(accepted, "qualification", token)).Prepared.Count == 2, "U02-new-exact-documents-prepared");
             var reused = await new InternalRuntimeIdentityPreparation(contexts, configuration, actions, identity.Contract.Action).PrepareAsync(accepted, token);
@@ -230,10 +231,11 @@ internal static class ConfiguredDeploymentUpdateCases
             await ConfiguredUpdateRetirement.CompleteAsync(admin, contexts, Actions, accepted, previous, target, held, requests,
                 (ct, diagnostic) => (recipientKernel ?? throw new InvalidOperationException("Confirmed recipient kernel unavailable."))
                     .RecipientsAsync(intent, DeploymentIntents.DecodeReceipt(result.Receipt!), new(), ct, diagnostic),
-                sample => update.ValidateRecipients(DeploymentIntents.Encode(intent), result.Receipt!, sample), drain, token);
+                sample => update.ValidateRecipients(DeploymentIntents.Encode(intent), result.Receipt!, sample), drain, token, lifetime);
         }
         catch (Exception error)
         {
+            lifetime.Functional.Fail();
             updatePrimary = error;
             Console.WriteLine(error is ConfiguredFixtureDrain.Failure failure
                 ? ConfiguredRetirementDiagnostics.Failure("DrainCleanup", failure.InnerException!)
@@ -242,8 +244,8 @@ internal static class ConfiguredDeploymentUpdateCases
         }
         finally
         {
-            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            try { if (holdDispatched) await ConfiguredUpdateRetirement.ReleaseAsync(admin, previous.Namespace, held, cleanup.Token); }
+            using var cleanup = lifetime.Start(ConfiguredLifecycle.Kind.ReleaseCleanup);
+            try { if (holdDispatched) await ConfiguredUpdateRetirement.ReleaseAsync(admin, previous.Namespace, held, cleanup.Token); cleanup.Complete(); }
             catch (Exception error)
             {
                 Console.WriteLine(ConfiguredRetirementDiagnostics.Failure("ReleaseCleanup", error));
@@ -315,7 +317,7 @@ internal static class ConfiguredDeploymentUpdateCases
         }
     }
 
-    private static void Check(bool condition, string id)
+    internal static void Check(bool condition, string id)
     {
         if (!condition) throw new InvalidOperationException("Configured update case failed: " + id);
         Console.WriteLine("PASS configured-" + id);

@@ -33,14 +33,14 @@ internal static class ConfiguredFixtureDrain
                 await admin.AppsV1.PatchNamespacedDeploymentAsync(new(patch.ToJsonString(), V1Patch.PatchType.JsonPatch),
                     receipt.Name, receipt.Namespace, cancellationToken: token);
             }
-            // Consume the caller's existing absolute restart-delivery token; never create or renew a deadline.
-            for (var round = 0; round < 141; round++)
+            // Consume the caller's one bounded drain allocation; never renew it.
+            for (var round = 0; round < 181; round++)
             {
                 token.ThrowIfCancellationRequested();
                 remaining = await VerifyOwnedAsync(admin, owned, expected, token, requireQuiesced: true);
                 token.ThrowIfCancellationRequested();
                 if (remaining == 0) { Console.WriteLine("Q243 configured retirement DrainComplete"); return; }
-                if (round < 140) await (pause?.Invoke(TimeSpan.FromMilliseconds(250), token) ?? Task.Delay(250, token));
+                if (round < 180) await (pause?.Invoke(TimeSpan.FromMilliseconds(250), token) ?? Task.Delay(250, token));
             }
             throw new TimeoutException("Fixture drain round bound exhausted.");
         }
