@@ -128,7 +128,10 @@ bounded recipient counts/categories and a fixed expiry marker. The fixture then
 requires exact old-right denial, retained target delivery and Applied completion.
 After all U01-U12 assertions, separately labeled fixture teardown quiesces only
 catalog-receipted Deployments with fresh namespace/UID/ownership checks and
-UID/resourceVersion-guarded scale-to-zero. Complete namespace Deployment,
+UID/resourceVersion-guarded scale-to-zero. Maintained confirmed readback receipts
+cover the initial, peer and negative-readiness Deployments; the catalog inventory
+must match every exact identity, rather than an earlier two-Application assertion
+counter. Extra, missing, replaced or duplicate receipts refuse. Complete namespace Deployment,
 ReplicaSet and Pod lists refuse unknown identities and include terminating,
 pre-restart and replacement Pods. Delivery and drain share the same existing
 absolute 35-second restart-delivery token, followed by the unchanged 20-second
@@ -150,12 +153,16 @@ origin receipts, retired permission rows and current-object state before public
 operational UPDATE or an ADR-058 operational declaration. That follow-up is not
 implemented in parallel here. Public UPDATE remains closed.
 
-The existing contour records a fixed returned/threw stage for the entire second
-wait, Ready/Applied/expected-generation booleans, closed reason/stop values,
+The existing contour records fixed returned/threw stages for both waits and the
+held-Pod GET, Ready/Applied/expected-generation booleans, closed reason/stop values,
 recipient counts and the first fixed projection failure category. Catalog closure
 records the actual called stage and a closed classification of existing static
 refusals. No duplicate acceptance validator or fallback acceptance is introduced.
-U11 checks Ready, Applied and expected generation separately, retaining all three
+All five unchanged U09 predicates are emitted as fixed booleans: Ready, not
+Applied, old-recipients reason, held UID match and deletion timestamp present.
+A held finalizer alone does not request deletion; the terminating assertion stays
+mandatory. No controller-ordering repair or additional wait is implied by these
+diagnostics. U11 checks Ready, Applied and expected generation separately, retaining all three
 requirements. Primary and cleanup failures are distinct; existing reads report
 only whether the fixture-owned finalizer is present. No budget, deletion scope,
 normalization predicate or runtime/public contract changes follow from diagnostics.

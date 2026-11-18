@@ -60,11 +60,18 @@ internal static class ConfiguredUpdateRetirement
         using var completionBudget = CancellationTokenSource.CreateLinkedTokenSource(token);
         completionBudget.CancelAfter(TimeSpan.FromMilliseconds(options.RequestMilliseconds));
         var completionToken = completionBudget.Token;
-        var waiting = await actions().WaitUpdateAsync(accepted, "configured-update-held-recipient", "qualification", options, new(), completionToken);
-        var old = await admin.CoreV1.ReadNamespacedPodAsync(held.Metadata.Name, prior.Namespace, cancellationToken: completionToken);
-        Check(waiting.Ready && !waiting.Applied && waiting.CompletionReason == "old-recipients-present" &&
-            old.Metadata.Uid == held.Metadata.Uid && old.Metadata.DeletionTimestamp is not null,
-            "U09-fresh-target-ready-terminating-old-UID-chain-blocks-retirement");
+        var waiting = await ConfiguredRetirementDiagnostics.WaitAsync(() => actions().WaitUpdateAsync(accepted,
+            "configured-update-held-recipient", "qualification", options, new(), completionToken), accepted.Generation.Value);
+        var old = await ConfiguredRetirementDiagnostics.ReadHeldAsync(() =>
+            admin.CoreV1.ReadNamespacedPodAsync(held.Metadata.Name, prior.Namespace, cancellationToken: completionToken));
+        (string Name, bool Value)[] heldConditions =
+        [
+            ("U09Ready", waiting.Ready), ("U09NotApplied", !waiting.Applied),
+            ("U09OldRecipients", waiting.CompletionReason == "old-recipients-present"),
+            ("U09HeldUid", old.Metadata.Uid == held.Metadata.Uid), ("U09Terminating", old.Metadata.DeletionTimestamp is not null)
+        ];
+        foreach (var condition in heldConditions) Console.WriteLine(ConfiguredRetirementDiagnostics.Condition(condition.Name, condition.Value));
+        Check(heldConditions.All(x => x.Value), "U09-fresh-target-ready-terminating-old-UID-chain-blocks-retirement");
         await using (var db = await contexts.CreateDbContextAsync(completionToken))
         {
             var id = Guid.Parse(accepted.DeploymentId.ToString());

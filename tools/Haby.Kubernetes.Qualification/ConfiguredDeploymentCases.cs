@@ -60,6 +60,7 @@ internal static class ConfiguredDeploymentCases
             var requests = new ConcurrentQueue<Guid>(); var reviews = 0; var revokeNextRead = 0;
             var deploymentWrites = 0; var loseConfirmation = false; var loseIdentityConfirmation = false;
             var expectedDeploymentWrites = 1;
+            var confirmedDrain = new List<DeploymentReceipt>();
             System.Text.Json.Nodes.JsonNode configuredEnvelope = null!;
             Console.WriteLine("Q243 configured namespace-create start");
             ownedNamespace = await admin.CoreV1.CreateNamespaceAsync(new() { Metadata = new() { Name = ns, Labels = new Dictionary<string, string> { ["haby.dev/qualification"] = ns } } }, cancellationToken: token);
@@ -283,7 +284,7 @@ internal static class ConfiguredDeploymentCases
                     "C06-real-projected-token-HTTPS-two-exact-documents-primary");
                 Console.WriteLine("Q243 configured readback start");
                 var saved = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, ns, cancellationToken: token);
-                DeploymentObjects.Receipt(DeploymentObjects.Read(saved), intent, ConfirmationSource.Observation);
+                confirmedDrain.Add(DeploymentObjects.Receipt(DeploymentObjects.Read(saved), intent, ConfirmationSource.Observation));
                 var actualResources = saved.Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer").Resources;
                 var actualMain = saved.Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer");
                 var podMain = currentPod.Spec.Containers.Single(c => c.Name == "configured-consumer");
@@ -357,12 +358,13 @@ internal static class ConfiguredDeploymentCases
                 await using (var read = await contexts.CreateDbContextAsync(token))
                     disabledIntent = DeploymentIntents.Decode((await read.ActionIntents.AsNoTracking().SingleAsync(x =>
                         x.DeploymentId == Guid.Parse(peer.DeploymentId.ToString()) && x.ActionContract == InternalDeploymentAction.Create, token)).Payload);
-                var disabledMain = (await admin.AppsV1.ReadNamespacedDeploymentAsync(disabledIntent.Name, ns, cancellationToken: token))
-                    .Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer");
+                var disabledObject = await admin.AppsV1.ReadNamespacedDeploymentAsync(disabledIntent.Name, ns, cancellationToken: token);
+                var disabledMain = disabledObject.Spec.Template.Spec.Containers.Single(c => c.Name == "configured-consumer");
                 Check(submittedPeer.Outcome == "submitted" && deploymentWrites == 2 && disabledIntent.Target.Ports.Count == 0 &&
                     disabledMain.Ports is null or { Count: 0 } && disabledMain.StartupProbe is null &&
                     disabledMain.LivenessProbe is null && disabledMain.ReadinessProbe is null,
                     "B01-second-exact-configured-generation-submitted");
+                confirmedDrain.Add(DeploymentObjects.Receipt(DeploymentObjects.Read(disabledObject), disabledIntent, ConfirmationSource.Observation));
                 expectedDeploymentWrites = 2;
                 var path = Path.Combine(directory, "batch-members.json");
                 async Task WriteBatch(params BatchQualificationMember[] members) => await File.WriteAllTextAsync(path,
@@ -453,6 +455,7 @@ internal static class ConfiguredDeploymentCases
                 }
                 var pod = await Startup("primary-started");
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(30));
+                DeploymentReceipt? blockedReceipt = null;
                 while (true)
                 {
                     pod = await admin.CoreV1.ReadNamespacedPodAsync(pod.Metadata.Name, ns, cancellationToken: deadline.Token);
@@ -460,7 +463,11 @@ internal static class ConfiguredDeploymentCases
                     var deployment = await admin.AppsV1.ReadNamespacedDeploymentAsync(intent.Name, ns, cancellationToken: deadline.Token);
                     if (state is { Started: true, Ready: false, State.Running: not null } &&
                         deployment.Status.ObservedGeneration >= deployment.Metadata.Generation && deployment.Status.UpdatedReplicas == 1 &&
-                        (deployment.Status.ReadyReplicas ?? 0) == 0) break;
+                        (deployment.Status.ReadyReplicas ?? 0) == 0)
+                    {
+                        blockedReceipt = DeploymentObjects.Receipt(DeploymentObjects.Read(deployment), intent, ConfirmationSource.Observation);
+                        break;
+                    }
                     await Task.Delay(100, deadline.Token);
                 }
                 var waited = await client.WaitGenerationAsync(new GenerationWaitRequest
@@ -477,6 +484,7 @@ internal static class ConfiguredDeploymentCases
                     intent.Target.Ports.Count == 1 && intent.Target.Probes.Readiness!.Path == "/unready" &&
                     (await finalRead.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(blocked.DeploymentId.ToString()), token)).AppliedGeneration is null &&
                     deploymentWrites == 3, "R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied");
+                confirmedDrain.Add(blockedReceipt ?? throw new InvalidOperationException("Confirmed fixture Deployment receipt required."));
             });
             await WithHost(() => ConfiguredDeploymentUpdateCases.Run(admin, services, updateBaseline, updateEnvelope, image,
                 identity, deployment, configurationPreparation, requests, async ct =>
@@ -484,11 +492,7 @@ internal static class ConfiguredDeploymentCases
                     drainOwnershipRefused = true;
                     try
                     {
-                        await using var read = await contexts.CreateDbContextAsync(ct);
-                        var rows = await read.OwnedObjects.AsNoTracking().Where(x => x.Role == "deployment" &&
-                            x.Contract == "haby.kubernetes.deployment-receipt/v4" && x.Format == 4).ToArrayAsync(ct);
-                        if (rows.Length != expectedDeploymentWrites) throw new ConfiguredFixtureDrain.OwnershipRefused();
-                        drainReceipts = rows.Select(x => DeploymentIntents.DecodeReceipt(x.Payload)).ToArray();
+                        drainReceipts = await ConfiguredDrainInventory.ReadAsync(contexts, confirmedDrain, ct);
                         drainOwnershipRefused = false;
                         await ConfiguredFixtureDrain.RunAsync(admin, ownedNamespace, drainReceipts, ct);
                     }

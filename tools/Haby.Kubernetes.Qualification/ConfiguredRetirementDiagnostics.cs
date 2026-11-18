@@ -1,6 +1,7 @@
 using Haby.Application;
 using Haby.Kubernetes;
 using k8s.Autorest;
+using k8s.Models;
 
 internal static class ConfiguredRetirementDiagnostics
 {
@@ -26,7 +27,7 @@ internal static class ConfiguredRetirementDiagnostics
         _ => "Unknown"
     };
     internal static string Failure(string phase, Exception error) => "Q243 configured retirement " +
-        (phase is "WaitThrew" or "Primary" or "ReleaseCleanup" or "NamespaceCleanup" or "DrainCleanup" ? phase : "Unknown") + " " + Category(error);
+        (phase is "WaitThrew" or "Primary" or "ReleaseCleanup" or "NamespaceCleanup" or "DrainCleanup" or "HeldReadThrew" ? phase : "Unknown") + " " + Category(error);
     internal static string Returned(RolloutResult result, long expected) => "Q243 configured retirement WaitReturned " + Flag(result.Ready) + " " +
         Flag(result.Applied) + " " + Flag(result.AppliedGeneration == expected) + " " +
         (Reasons.Contains(result.CompletionReason, StringComparer.Ordinal) ? result.CompletionReason : "unknown") + " " +
@@ -40,9 +41,15 @@ internal static class ConfiguredRetirementDiagnostics
             _ => "Unknown"
         });
     internal static string Condition(string condition, bool value) => "Q243 configured retirement Condition " +
-        (condition is "U11Ready" or "U11Applied" or "U11Generation" ? condition : "Unknown") + " " + Flag(value);
+        (condition is "U09Ready" or "U09NotApplied" or "U09OldRecipients" or "U09HeldUid" or "U09Terminating" or "U11Ready" or "U11Applied" or "U11Generation" ? condition : "Unknown") + " " + Flag(value);
     internal static AggregateException Combine(Exception primary, Exception cleanup) => new(primary, cleanup);
     internal static string Finalizer(bool? present) => "Q243 configured retirement OwnedFinalizer " + (present is { } value ? Flag(value) : "unknown");
+    internal static async Task<V1Pod> ReadHeldAsync(Func<Task<V1Pod>> read)
+    {
+        Console.WriteLine("Q243 configured retirement HeldReadStart");
+        try { var result = await read(); Console.WriteLine("Q243 configured retirement HeldReadReturned"); return result; }
+        catch (Exception error) { Console.WriteLine(Failure("HeldReadThrew", error)); throw; }
+    }
     internal static async ValueTask<RolloutResult> WaitAsync(Func<ValueTask<RolloutResult>> wait, long expected)
     {
         Console.WriteLine("Q243 configured retirement WaitStart");

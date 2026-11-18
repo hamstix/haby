@@ -35,4 +35,17 @@ public sealed class ConfiguredRetirementDiagnosticsTests
         Assert.Equal(RecipientProjectionFailure.Unknown, DeploymentRecipientDiagnostics.Failure(new WorkloadContractException("runtime-mount-drift\nprotected")));
         Assert.Equal("Q243 configured retirement Recipients unknown unknown 0 Unknown None", ConfiguredRetirementDiagnostics.Recipients(new(-1, 16385, 0, (RecipientProjectionFailure)999, RecipientProjectionFailure.None)));
     }
+    [Fact]
+    public async Task Held_read_and_U09_diagnostics_preserve_results_exceptions_and_closed_booleans()
+    {
+        var pod = new k8s.Models.V1Pod();
+        Assert.Same(pod, await ConfiguredRetirementDiagnostics.ReadHeldAsync(() => Task.FromResult(pod)));
+        var error = new IOException("protected-message");
+        Assert.Same(error, await Assert.ThrowsAsync<IOException>(() => ConfiguredRetirementDiagnostics.ReadHeldAsync(() => Task.FromException<k8s.Models.V1Pod>(error))));
+        foreach (var condition in new[] { "U09Ready", "U09NotApplied", "U09OldRecipients", "U09HeldUid", "U09Terminating" })
+            Assert.Equal("Q243 configured retirement Condition " + condition + " false", ConfiguredRetirementDiagnostics.Condition(condition, false));
+        Assert.Equal("Q243 configured retirement Condition Unknown true", ConfiguredRetirementDiagnostics.Condition("U09Terminating protected", true));
+        Assert.Equal("Q243 configured retirement HeldReadThrew Canceled", ConfiguredRetirementDiagnostics.Failure("HeldReadThrew", new OperationCanceledException("protected")));
+    }
+
 }

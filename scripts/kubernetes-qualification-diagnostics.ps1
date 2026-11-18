@@ -432,7 +432,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($parts[2] -ceq 'retirement'){
                 if($Mode -cne 'configured' -or $parts.Count -lt 4){return $invalid}
                 $phase=$parts[3];$shape=$false
-                if($phase -cin @('WaitStart','RecipientWaitExpired','DrainStart','DrainComplete','DrainOwnershipRefused','DrainExhausted')){$shape=$parts.Count -eq 4}
+                if($phase -cin @('WaitStart','RecipientWaitExpired','DrainStart','DrainComplete','DrainOwnershipRefused','DrainExhausted','HeldReadStart','HeldReadReturned')){$shape=$parts.Count -eq 4}
                 elseif($phase -ceq 'WaitReturned'){
                     $shape=$parts.Count -eq 9 -and $parts[4] -cin @('true','false') -and $parts[5] -cin @('true','false') -and $parts[6] -cin @('true','false') -and
                         $parts[7] -cin @('not-ready','applied','inventory-conflict','prerequisite-incomplete','generation-superseded','current-authority-unavailable','unsupported-inventory','commit-unconfirmed','old-recipients-present','recipient-evidence-incomplete','unknown') -and
@@ -445,12 +445,12 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
                 }elseif($phase -ceq 'Recipients'){
                     $shape=$parts.Count -eq 9 -and @($parts[4..6] | Where-Object {$_ -cnotmatch '^(unknown|0|[1-9][0-9]{0,3}|1[0-5][0-9]{3}|16[0-2][0-9]{2}|163[0-7][0-9]|1638[0-4])$'}).Count -eq 0 -and
                         $parts[7] -cin @('None','Container','Resources','Ports','Probes','RuntimeAccount','RuntimeBootstrap','RuntimeVolume','RuntimeMount','RuntimeInjection','Shape','Unknown') -and $parts[8] -cin @('None','Container','Resources','Ports','Probes','RuntimeAccount','RuntimeBootstrap','RuntimeVolume','RuntimeMount','RuntimeInjection','Shape','Unknown')
-                }elseif($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','DrainCleanup','Unknown')){
+                }elseif($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','DrainCleanup','HeldReadThrew','Unknown')){
                     $shape=$parts.Count -eq 5 -and $parts[4] -cin @('Canceled','Api','Data','Timeout','Condition','Unknown')
                 }elseif($phase -ceq 'OwnedFinalizer'){$shape=$parts.Count -eq 5 -and $parts[4] -cin @('true','false','unknown')}
-                elseif($phase -ceq 'Condition'){$shape=$parts.Count -eq 6 -and $parts[4] -cin @('U11Ready','U11Applied','U11Generation','Unknown') -and $parts[5] -cin @('true','false')}
+                elseif($phase -ceq 'Condition'){$shape=$parts.Count -eq 6 -and $parts[4] -cin @('U09Ready','U09NotApplied','U09OldRecipients','U09HeldUid','U09Terminating','U11Ready','U11Applied','U11Generation','Unknown') -and $parts[5] -cin @('true','false')}
                 if(!$shape){return $invalid}
-                if($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','RecipientWaitExpired','DrainOwnershipRefused','DrainExhausted','DrainCleanup') -or ($phase -ceq 'Condition' -and $parts[5] -ceq 'false')){$hasFailure=$true}
+                if($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','RecipientWaitExpired','DrainOwnershipRefused','DrainExhausted','DrainCleanup','HeldReadThrew') -or ($phase -ceq 'Condition' -and $parts[5] -ceq 'false')){$hasFailure=$true}
                 $records.Add('Diagnostic workload: '+$line.Substring(5))
             }elseif($parts[2] -ceq 'update'){
                 if($Mode -cne 'configured' -or $parts.Count -lt 5){return $invalid}
