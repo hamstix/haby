@@ -12,16 +12,36 @@ internal sealed record InitialCompletionProof(int Version, Guid Id, Guid Deploym
     Guid ChangeSet, string InputFingerprint, string InventoryHash, long? PriorApplied, Guid ResourcesReady,
     string ResourcesHash, Guid Submitted, string SubmittedHash, Guid SavedReady, string SavedReadyHash,
     ReadyProof FreshReady, string Request, string Actor, DateTimeOffset At, string CatalogHash, string FreshSamplesHash,
-    CompletionPublication[] Publications);
+    CompletionPublication[] Publications, RetirementRecipient[]? Recipients = null);
 
 // Closed, catalog-only proof validation. It never calls an action loader or generation read
 // authority: completed authentication/observation readers may safely depend on it.
 internal static class InitialRetirementCompletion
 {
+    internal static InitialRetirementTarget[] CompletionTargets(DeploymentGenerationRow source)
+    {
+        var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        if (graph.Retirement is { } initial) return initial.Document.Targets;
+        var update = graph.WorkloadUpdate?.Document ?? throw new InvalidDataException("Frozen completion inventory required.");
+        var inputs = source.Inputs();
+        return update.Members.Select(member =>
+        {
+            var subject = new ProviderInput.Workload(Haby.Domain.ManifestLocalId.Create(member.Component), Haby.Domain.ManifestLocalId.Create(member.Workload));
+            var exact = inputs.Providers.Entries[subject];
+            return new InitialRetirementTarget("Workload/" + member.Component + "/" + member.Workload,
+                inputs.Configuration!.Manifest.Spec.Components[subject.Component].Workloads[subject.Id].Type.Value,
+                Guid.Parse(exact.Instance.ToString()), exact.Configuration.Value,
+                ResourcesReadyCheckpointCodec.Hash(InternalPlacementInput.Decode(exact.Placement!).Declaration.Payload),
+                member.PrepareDocuments, member.PrepareDocuments.Length > 0);
+        }).OrderBy(x => x.Subject, StringComparer.Ordinal).ToArray();
+    }
+
     internal const string Stage = "RetirementCompleted";
     internal static async Task<InitialCompletionProof> RequireProofAsync(ManifestCatalogDbContext db,
         DeploymentGenerationRow source, CancellationToken token)
     {
+        if (DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is not null)
+            return await UpdateRetirementCompletion.RequireProofAsync(db, source, token);
         await InitialRetirementAuthority.ValidateAsync(db, source, token);
         var row = await db.GenerationStageCheckpoints.AsNoTracking().SingleOrDefaultAsync(x =>
             x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == Stage, token)
@@ -68,7 +88,7 @@ internal static class InitialRetirementCompletion
     internal static async Task RequireFreshSamplesAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
         ReadyProof proof, string request, CancellationToken token)
     {
-        var targets = DurableOperationGraphCodec.Decode(source.GraphJson).Retirement!.Document.Targets;
+        var targets = CompletionTargets(source);
         if (proof.Format != 1 || proof.Stage != "RolloutReady" || proof.Deployment != source.DeploymentId || proof.Generation != source.Generation ||
             proof.InputFingerprint != source.Fingerprint || proof.Members.Length != targets.Length ||
             !proof.Members.Select(x => x.Origin.Subject).SequenceEqual(targets.Select(x => x.Subject)))
@@ -109,7 +129,7 @@ internal static class InitialRetirementCompletion
                               select b).Take(513).ToArrayAsync(token);
         if (bindings.Length > 512) throw new InvalidDataException("Binding bound exceeded.");
         var ids = bindings.Select(x => x.Id).ToArray();
-        var permissions = await db.RuntimeConfigurationPermissions.AsNoTracking().Where(x => ids.Contains(x.BindingId)).OrderBy(x => x.Id).Take(513).ToArrayAsync(token);
+        var permissions = await db.RuntimeConfigurationPermissions.AsNoTracking().Where(x => ids.Contains(x.BindingId) && db.ConfigurationDocuments.Any(d => d.Id == x.RevisionId && d.DeploymentId == source.DeploymentId && d.Generation == source.Generation)).OrderBy(x => x.Id).Take(513).ToArrayAsync(token);
         if (permissions.Length > 512) throw new InvalidDataException("Publication bound exceeded.");
         var result = new List<CompletionPublication>();
         foreach (var permission in permissions)
@@ -165,13 +185,13 @@ internal static class InitialRetirementCompletion
             .OrderBy(x => x.Component).ThenBy(x => x.Workload).ThenBy(x => x.Document).Take(513).ToArrayAsync(token);
         var documents = await db.ConfigurationDocuments.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation)
             .OrderBy(x => x.Id).Select(x => new CompletedDocumentEvidence(x.Id, x.DeploymentId, x.Generation, x.Component, x.Document, x.Fingerprint)).Take(513).ToArrayAsync(token);
-        if (owned.Length > 1024 || recipients.Length > 512 || documents.Length > 512 || owned.Any(x => x.Generation != generation || x.Payload.Length > 1048576)) throw new InvalidDataException("Preparation inventory bound exceeded.");
+        if (owned.Length > 1024 || recipients.Length > 512 || documents.Length > 512 || owned.Any(x => (DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null && x.Generation != generation) || x.Payload.Length > 1048576)) throw new InvalidDataException("Preparation inventory bound exceeded.");
         var managedIds = managed.Select(x => x.Id).ToArray();
         var bindings = await db.RuntimeIdentityBindings.AsNoTracking().Where(x => managedIds.Contains(x.ManagedWorkloadId)).OrderBy(x => x.Id)
             .Select(x => new CompletedBindingEvidence(x.Id, x.InstallationId, x.EnvironmentId, x.ManagedWorkloadId, x.ProviderId, x.ConfigurationRevision,
                 x.Authenticator, x.Audience, x.Role, x.Contract, x.Format, x.ValidationPayload)).Take(513).ToArrayAsync(token);
         if (bindings.Length > 512) throw new InvalidDataException("Binding bound exceeded.");
-        var targets = DurableOperationGraphCodec.Decode(source.GraphJson).Retirement!.Document.Targets;
+        var targets = CompletionTargets(source);
         var required = targets.SelectMany(x => x.Documents.Select(document => (x.Subject, Document: document))).ToHashSet();
         if (publications.Length != required.Count || publications.Select(x => x.Permission).Distinct().Count() != publications.Length ||
             publications.Select(x => (x.Binding, x.Revision)).Distinct().Count() != publications.Length ||
@@ -210,7 +230,8 @@ internal static class InitialRetirementCompletion
             documents, publications.OrderBy(x => x.Permission).ToArray());
         var json = JsonSerializer.Serialize(evidence, InitialCompletionMetadata.Default.CompletedCatalogEvidence);
         if (Encoding.UTF8.GetByteCount(json) > 16777216) throw new InvalidDataException("Completion evidence exceeds bound.");
-        return ResourcesReadyCheckpointCodec.Hash(json);
+        return ResourcesReadyCheckpointCodec.Hash(DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null ? json :
+            json + await UpdateRetirementCompletion.CatalogHashAsync(db, source, token));
     }
 }
 

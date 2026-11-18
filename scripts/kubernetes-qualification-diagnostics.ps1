@@ -390,13 +390,17 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS configured-U06-conditional-configured-patch-response-readback-lost-response-recovery',
           'PASS configured-U07-sidecar-foreign-metadata-and-api-defaulting-preserved',
           'PASS configured-U08-runtime-new-revision-delivery-old-permissions-and-Applied-boundary',
+          'PASS configured-U09-fresh-target-ready-terminating-old-UID-chain-blocks-retirement',
+          'PASS configured-U10-old-permissions-retained-no-retirement-start-previous-Applied',
+          'PASS configured-U11-exact-obsolete-retirement-before-update-Applied',
+          'PASS configured-U12-old-rights-denied-target-exact-delivery-stable-binding',
           'PASS configured-owned-namespace-absent',
           'PASS configured-owned-catalog-cleanup')
     }
     $stages=@('entry','namespace-create','namespace-created','catalog-init','accepted-plan','host-build','host-start',
         'first-submit','uncertain-submit','cli-submit','pod-startup','readback','prepare-update','cleanup-ownership',
         'cleanup-namespace','cleanup-catalog','completed','unknown')
-    if($Mode -ceq 'configured'){$stages+=@('update-target-envelope','update-import','update-image-baseline','update-plan')}
+    if($Mode -ceq 'configured'){$stages+=@('update-target-envelope','update-import','update-image-baseline','update-plan','update-retirement-hold','update-retirement-ready','update-retirement-release','update-retirement-complete')}
     $outcomes=@('Confirmed','Refused','Conflict','Uncertain','CanceledBeforeDispatch','ObservationUnavailable','NotConfirmed','unknown')
     $codes=@('response-confirmed','observation-confirmed','evidence-not-confirmed','response-unconfirmed','invalid-input',
         'connection-unavailable','dispatch-uncertain','occupied-name','owned-state-conflict','uid-conflict','api-conflict',

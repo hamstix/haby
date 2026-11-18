@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Haby.Persistence.PostgreSql;
 
-internal enum InternalActionFault { BeforeMarkerCommit, AfterMarkerCommit, AfterExternalResult, BeforeCompletionCommit, AfterCompletionCommit, BeforeReadinessCheckpoint }
+internal enum InternalActionFault { BeforeMarkerCommit, AfterMarkerCommit, AfterExternalResult, BeforeCompletionCommit, AfterCompletionCommit, BeforeReadinessCheckpoint, AfterRetirementStart, AfterRetirementPermission, BeforeUpdateApplied, AfterUpdateApplied }
 internal sealed record InternalActionView(DurableActionIntentRow Intent, DurableOperationRow Operation,
     IReadOnlyList<DurableOperationAttemptRow> Attempts, IReadOnlyList<DurableActionObservationRow> Observations, OperationOutputRow? Output);
 

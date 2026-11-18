@@ -10,7 +10,7 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
-    private sealed class UpdateSubmissionFixture : IInternalActionHandler
+    private sealed partial class UpdateSubmissionFixture : IInternalActionHandler, IInternalReadinessHandler, IInternalRecipientObserver
     {
         private readonly InternalDeploymentAction adapter = new(null!, update: true);
         internal int Writes, Reads;

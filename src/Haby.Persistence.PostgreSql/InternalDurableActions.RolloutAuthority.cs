@@ -26,7 +26,7 @@ internal sealed partial class InternalDurableActions
 
     private async Task<SubmittedSet> InspectSubmittedAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, bool persist, CancellationToken token, bool completedRead = false)
     {
-        source = completedRead ? await InternalGenerationAuthority.RequireReadAsync(db, source, token) : await InternalGenerationAuthority.RequireAsync(db, source, token);
+        source = await InternalGenerationAuthority.RequireStageReadAsync(db, source, token);
         var targets = Targets(source); var confirmed = new List<SubmittedMember>();
         var intents = await db.ActionIntents.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.SubjectKind == "Workload").ToArrayAsync(token);
         foreach (var subject in targets)

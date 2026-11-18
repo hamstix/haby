@@ -108,9 +108,9 @@ removes external Resources.
 
 ## Remaining lifecycle
 
-New readiness, observation of all old recipients including terminating Pods,
-obsolete-permission retirement and Applied advancement remain separate ADR-058
-stages. ADR-052 corrective generations and the integrated real lifecycle rehearsal
+[Issue #259](259-update-readiness-retirement.md) adds internal fresh readiness,
+observation of all old recipients including terminating Pods, exact obsolete
+publication retirement and Applied advancement. ADR-052 corrective generations and the integrated real lifecycle rehearsal
 remain required before public operational UPDATE. CLI composition follows that
-operational path under ADR-059. Retained old rights are a deliberate incomplete
-stage boundary, not final rollout completion.
+operational path under ADR-059. Old rights remain until the separately authorized retirement boundary; submission
+alone never claims rollout completion.

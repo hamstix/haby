@@ -51,9 +51,9 @@ internal sealed partial class InternalDurableActions
 
     // Current authority for new effects and fresh public readiness reads, under the deployment lock.
     // Immutable history, replay and internal post-dispatch observation do not require current permission.
-    private static async Task RequireCurrentRuntimeAsync(ManifestCatalogDbContext db, InternalActionContext context, CancellationToken token)
+    private static async Task RequireCurrentRuntimeAsync(ManifestCatalogDbContext db, InternalActionContext context, CancellationToken token, bool observation = false)
     {
-        if (context.Update is not null)
+        if (context.Update is not null && !observation)
         {
             var deployment = Guid.Parse(context.Key.DeploymentId.ToString());
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == context.Key.Generation.Value, token);

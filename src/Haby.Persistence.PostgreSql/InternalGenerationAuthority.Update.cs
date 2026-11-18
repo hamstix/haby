@@ -5,6 +5,22 @@ namespace Haby.Persistence.PostgreSql;
 
 internal static partial class InternalGenerationAuthority
 {
+    private static async Task<DeploymentGenerationRow> RequireUpdateReadAsync(ManifestCatalogDbContext db,
+        DeploymentGenerationRow source, CancellationToken token)
+    {
+        var commit = await db.ChangeSetCommits.AsNoTracking().SingleAsync(x => x.ChangeSetId == source.ChangeSetId, token);
+        var accepted = new DurableChangeSetCommit(Haby.Domain.DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()),
+            Haby.Domain.DeploymentPlanId.Parse(commit.PlanId.ToString()), Haby.Domain.ApplicationDeploymentId.Parse(commit.DeploymentId.ToString()),
+            Haby.Domain.DeploymentGeneration.Create(commit.Generation), commit.CommittedAt, commit.ActorId);
+        var verified = await RequireCoreAsync(db, accepted, true, token, true);
+        if (verified.GraphJson != source.GraphJson || verified.Fingerprint != source.Fingerprint || verified.PlanId != source.PlanId ||
+            verified.ConfigurationJson != source.ConfigurationJson || verified.ProviderInputsJson != source.ProviderInputsJson || !source.InternalEffects)
+            throw new InvalidDataException("Update read source mismatch.");
+        var applied = await db.ApplicationDeployments.Where(x => x.Id == source.DeploymentId).Select(x => x.AppliedGeneration).SingleAsync(token);
+        if (applied >= source.Generation) _ = await InitialRetirementCompletion.RequireProofAsync(db, verified, token);
+        return verified;
+    }
+
     internal static async Task RequireCurrentStageAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
         var inventory = DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate?.Document;
@@ -25,11 +41,11 @@ internal static partial class InternalGenerationAuthority
     }
 
     private static async Task RequireUpdateBaselineAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
-        ApplicationDeploymentRow owner, DurableOperationGraph graph, WorkloadUpdateDocument update, CancellationToken token)
+        ApplicationDeploymentRow owner, DurableOperationGraph graph, WorkloadUpdateDocument update, CancellationToken token, bool readOnly = false)
     {
         var inputs = source.Inputs();
         if (graph.Retirement is not null || update.Deployment != source.DeploymentId || update.TargetGeneration != source.Generation ||
-            update.TargetGeneration != update.BaselineGeneration + 1 || owner.AppliedGeneration != update.BaselineGeneration ||
+            update.TargetGeneration != update.BaselineGeneration + 1 || (!readOnly && owner.AppliedGeneration != update.BaselineGeneration || readOnly && owner.AppliedGeneration != update.BaselineGeneration && owner.AppliedGeneration < source.Generation) ||
             graph.Baseline?.Generation != update.BaselineGeneration || graph.Baseline.Deployment.ToString() != source.DeploymentId.ToString() ||
             graph.Baseline.Fingerprint != update.Fingerprint || graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
             graph.ReusedResources.Count != inputs.Providers.Declaration.Spec.Resources.Count || graph.ReusedResources.Any(x => x.Reintroduced) ||

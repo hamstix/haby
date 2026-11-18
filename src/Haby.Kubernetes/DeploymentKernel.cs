@@ -16,13 +16,15 @@ namespace Haby.Kubernetes;
 public sealed partial class DeploymentKernel
 {
     private readonly KubernetesBinding _binding;
+    private readonly Func<RecipientObservationOptions, CancellationToken, ValueTask<KernelClient>> _connectRecipients;
     private readonly Func<CancellationToken, ValueTask<KernelClient>> _connect;
     public DeploymentKernel(KubernetesConnection connection, ISecretStore secrets)
     {
         connection.Validate(); ArgumentNullException.ThrowIfNull(secrets);
         _binding = connection.Binding; _connect = token => KubernetesClientFactory.Create(connection, secrets, token);
+        _connectRecipients = (options, token) => KubernetesClientFactory.CreateRuntime(connection, secrets, [new BoundedRecipientResponse(options.MaximumResponseBytes)], token);
     }
-    internal DeploymentKernel(KubernetesBinding binding, Func<CancellationToken, ValueTask<KernelClient>> connect) { _binding = binding; _connect = connect; }
+    internal DeploymentKernel(KubernetesBinding binding, Func<CancellationToken, ValueTask<KernelClient>> connect) { _binding = binding; _connect = connect; _connectRecipients = (_, token) => connect(token); }
 
     public async Task<KernelResult> ExecuteAsync(DeploymentIntent intent, CancellationToken cancellationToken = default)
     {
