@@ -1,5 +1,11 @@
 name: Kubernetes qualification
 on:
+  workflow_call:
+    inputs:
+      candidate:
+        description: Immutable tested commit supplied by installed trusted control
+        required: true
+        type: string
   workflow_dispatch:
   pull_request:
     paths:
@@ -16,7 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.candidate || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
