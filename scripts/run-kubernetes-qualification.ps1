@@ -12,6 +12,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
+if((@($ProbeStockTls,$DeploymentKernel,$DurableActions,$ConfiguredDeployment) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-process.ps1')
 . (Join-Path $PSScriptRoot 'kubernetes-qualification-diagnostics.ps1')
 . (Join-Path $PSScriptRoot 'runtime-consumer-image.ps1')
@@ -135,7 +136,6 @@ try {
         Complete-CopyOperation
     }
     $record.Add('Stage: copy-complete'); $stage='harness'; $record.Add('Stage: harness-start')
-    if((@($ProbeStockTls,$DeploymentKernel,$DurableActions,$ConfiguredDeployment) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
     [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}elseif($ConfiguredDeployment){@('--configured-deployment')}else{@()}
     $record.Add('Harness command elapsed origin: before-process-start-through-output-drain; prebuilt-output')
     $harnessSeconds=if($ConfiguredDeployment){240}else{180}

@@ -7,6 +7,48 @@ function Get-HabyPostgreSqlSuites([string]$Selection) {
     }
 }
 
+function Test-HabyFocusedPostgreSqlArguments([string]$TestCase, [string]$TestGroup) {
+    if ($TestCase -and $TestGroup) { throw 'Select one PostgreSQL testcase or group, not both.' }
+    foreach ($value in @($TestCase, $TestGroup)) {
+        if ($value -and $value -cnotmatch '^Haby\.PostgreSql\.IntegrationTests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$') {
+            throw 'Focused selection requires an exact fully qualified method or class name.'
+        }
+    }
+    return [bool]($TestCase -or $TestGroup)
+}
+
+function Get-HabyFocusedPostgreSqlSelection([object[]]$Cases, [string]$TestCase, [string]$TestGroup) {
+    if (-not (Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup)) { return $null }
+    $selected = @($Cases | Where-Object {
+        if ($TestCase) { $_.method -ceq $TestCase }
+        else { $_.method.Substring(0, $_.method.LastIndexOf('.')) -ceq $TestGroup }
+    })
+    if ($selected.Count -eq 0) { throw 'Focused selection matched zero discovered cases.' }
+    $methods = @($selected.method | Sort-Object -Unique)
+    return [pscustomobject]@{
+        cases = $selected
+        suites = @($selected.suite | Sort-Object -Unique)
+        filter = ($methods | ForEach-Object { 'FullyQualifiedName=' + $_ }) -join '|'
+    }
+}
+
+# Static current-plan admission precedes owned runtime setup; live discovery and
+# executed theory identities are independently reconciled later.
+function Assert-HabyFocusedPostgreSqlPlan([string]$PlanPath, [string]$TestCase, [string]$TestGroup) {
+    if (-not (Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup)) { return }
+    $plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
+    $rows = @($plan.entries | Where-Object { $_.gate -ceq 'postgresql-integration' })
+    try { $null = Get-HabyFocusedPostgreSqlSelection $rows $TestCase $TestGroup }
+    catch { throw 'Focused selector absent from current coverage plan.' }
+}
+
+function Assert-HabyFocusedGatePlan([object[]]$Cases, [string]$PlanPath, [string]$TestCase, [string]$TestGroup, [string[]]$Suites) {
+    $plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
+    $planned = @($plan.entries | Where-Object { $_.gate -ceq 'postgresql-integration' -and $_.suite -cin $Suites })
+    $selection = Get-HabyFocusedPostgreSqlSelection $planned $TestCase $TestGroup
+    Assert-HabyInventory $selection.cases $Cases
+}
+
 function Get-HabySuiteFilter([object[]]$Cases, [string]$Suite) {
     $selected = @($Cases | Where-Object suite -CEQ $Suite)
     if ($selected.Count -eq 0) { throw 'Selected suite has no discovered cases.' }

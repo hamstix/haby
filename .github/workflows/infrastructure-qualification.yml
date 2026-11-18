@@ -4,17 +4,46 @@ on:
   schedule:
     - cron: '23 4 * * 1'
   workflow_dispatch:
+    inputs:
+      testcase:
+        description: Exact current PostgreSQL test method (focused only)
+        type: string
+        default: ''
+      testgroup:
+        description: Exact current PostgreSQL test class (focused only)
+        type: string
+        default: ''
+      expected_head:
+        description: Required immutable checkout SHA for focused execution
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   owned-infrastructure:
+    name: ${{ github.event_name == 'workflow_dispatch' && (inputs.testcase != '' || inputs.testgroup != '') && 'Focused PostgreSQL (not final)' || 'owned-infrastructure' }}
     runs-on: ubuntu-latest
     env:
       HABY_TEST_SOURCE_ROOT: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Admit exact current focused selection before runtime
+        shell: pwsh
+        env:
+          TEST_CASE: ${{ inputs.testcase }}
+          TEST_GROUP: ${{ inputs.testgroup }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          ACTUAL_HEAD: ${{ github.sha }}
+        run: |
+          . ./scripts/test-suite-plan.ps1
+          if (Test-HabyFocusedPostgreSqlArguments $env:TEST_CASE $env:TEST_GROUP) {
+            if ($env:EXPECTED_HEAD -cnotmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_HEAD -cne $env:ACTUAL_HEAD) { throw 'Focused checkout identity mismatch.' }
+            Assert-HabyFocusedPostgreSqlPlan ./tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json $env:TEST_CASE $env:TEST_GROUP
+          }
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -29,14 +58,21 @@ jobs:
       - name: Qualify owned infrastructure
         shell: pwsh
         env:
+          TEST_CASE: ${{ inputs.testcase }}
+          TEST_GROUP: ${{ inputs.testgroup }}
           HABY_AOT_CLI_REQUIRED: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
-        run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite infrastructure-qualification -ResultsDirectory ./.artifacts/qualification
+        run: |
+          if ($env:TEST_CASE -or $env:TEST_GROUP) {
+            ./scripts/test-postgresql-measured.ps1 -Docker -TestCase $env:TEST_CASE -TestGroup $env:TEST_GROUP -ResultsDirectory ./.artifacts/qualification
+          } else {
+            ./scripts/test-postgresql-measured.ps1 -Docker -Suite infrastructure-qualification -ResultsDirectory ./.artifacts/qualification
+          }
       - name: Publish allowlisted qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: infrastructure-qualification-${{ github.sha }}-${{ github.run_attempt }}
+          name: ${{ github.event_name == 'workflow_dispatch' && (inputs.testcase != '' || inputs.testgroup != '') && 'focused-only-not-final-postgresql-' || 'infrastructure-qualification-' }}${{ github.sha }}-${{ github.run_attempt }}
           path: |
             .artifacts/qualification/safe/measurement.json
             .artifacts/qualification/safe/preflight.json

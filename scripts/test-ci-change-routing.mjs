@@ -132,3 +132,21 @@ test('workflow keeps mandatory gate, names, conditions and permissions', () => {
   for (const step of validate.split('      - ').filter(step => /setup-dotnet|dotnet |export-test-gate|upload-artifact/.test(step)))
     assert.match(step, /if: (?:always\(\) && )?steps.routing.outputs.full == 'true'/);
 });
+
+test('manual focused contours preserve automatic and reusable full defaults', () => {
+  const workloads = readFileSync(new URL('../.github/workflows/kubernetes-deployment-kernel.yml', import.meta.url), 'utf8');
+  for (const contour of ['configured-deployment', 'durable-actions', 'deployment-kernel']) {
+    assert.ok(workloads.includes(`    if: github.event_name != 'workflow_dispatch' || inputs.contour == 'all' || (inputs.contour == '${contour}' && inputs.expected_head == github.sha && inputs.expected_head != '')`));
+    assert.ok(workloads.includes(`'Focused ${contour}' || '${contour}'`));
+  }
+  assert.ok(workloads.includes('options: [all, configured-deployment, durable-actions, deployment-kernel]'));
+  assert.ok(workloads.includes('default: all'));
+  assert.equal((workloads.match(/focused-only-not-final-/g) ?? []).length, 3);
+  assert.ok(workloads.includes('process.env.EXPECTED_HEAD !== process.env.ACTUAL_HEAD'));
+  const pg = readFileSync(new URL('../.github/workflows/infrastructure-qualification.yml', import.meta.url), 'utf8');
+  assert.ok(pg.includes('focused-only-not-final-postgresql-'));
+  assert.ok(pg.includes('Focused PostgreSQL (not final)'));
+  assert.ok(pg.includes('-Suite infrastructure-qualification'));
+  assert.ok(pg.includes('Assert-HabyFocusedPostgreSqlPlan'));
+  assert.ok(pg.indexOf('Admit exact current focused selection') < pg.indexOf('Validate native prerequisites'));
+});
