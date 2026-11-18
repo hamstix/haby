@@ -27,9 +27,17 @@ try
     if (args.Length == 3 && args[2] == "--configured-deployment")
     {
         Console.WriteLine("Q243 configured entry start");
-        using var bootstrap = ClientFactory.Create(endpoint, directory);
-        using var configuredDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(150));
-        await ConfiguredDeploymentCases.Run(bootstrap, endpoint, directory, configuredDeadline.Token);
+        using var canceled = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; canceled.Cancel(); };
+        Console.CancelKeyPress += cancel;
+        try
+        {
+            using var lifetime = new ConfiguredLifecycle(canceled.Token);
+            using var bootstrap = ClientFactory.Create(endpoint, directory);
+            await ConfiguredDeploymentCases.Run(bootstrap, endpoint, directory, lifetime);
+            lifetime.Complete();
+        }
+        finally { Console.CancelKeyPress -= cancel; }
         return 0;
     }
     if (args.Length == 3 && args[2] == "--durable-actions")

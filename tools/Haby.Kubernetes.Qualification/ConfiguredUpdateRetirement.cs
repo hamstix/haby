@@ -53,7 +53,7 @@ internal static class ConfiguredUpdateRetirement
         Func<InternalDurableActions> actions, DurableChangeSetCommit accepted, DeploymentReceipt prior, RuntimeBootstrap target,
         V1Pod held, ConcurrentQueue<Guid> requests,
         Func<CancellationToken, Action<DeploymentRecipientDiagnostic>, Task<RecipientObservation>> recipients,
-        Func<RecipientObservation, bool> validateRecipients, Func<CancellationToken, Task> drain, CancellationToken token)
+        Func<RecipientObservation, bool> validateRecipients, Func<CancellationToken, Task> drain, CancellationToken token, ConfiguredLifecycle lifetime)
     {
         Console.WriteLine("Q243 configured update-retirement-ready start");
         var options = new RolloutOptions(MaximumCalls: 128, MaximumRounds: 128, PollMilliseconds: 250, RequestMilliseconds: 60000);
@@ -109,12 +109,16 @@ internal static class ConfiguredUpdateRetirement
             c.Env?.Any(e => e.Name == RuntimeBootstrap.Variable && e.Value == RuntimeBootstrapCodec.Encode(target)) == true));
         await admin.CoreV1.DeleteNamespacedPodAsync(restart.Metadata.Name, prior.Namespace,
             new V1DeleteOptions { Preconditions = new() { Uid = restart.Metadata.Uid } }, cancellationToken: token);
-        using (var delivery = CancellationTokenSource.CreateLinkedTokenSource(token))
+        using (var delivery = lifetime.Start(ConfiguredLifecycle.Kind.Delivery))
         {
-            delivery.CancelAfter(TimeSpan.FromSeconds(35));
             while (!target.Documents.Values.Select(Guid.Parse).All(requests.Contains)) await Task.Delay(100, delivery.Token);
+            delivery.Complete();
+            lifetime.Functional.Complete();
             Check(target.Documents.Values.Select(Guid.Parse).All(requests.Contains), "U12-old-rights-denied-target-exact-delivery-stable-binding");
-            try { await drain(delivery.Token); }
+        }
+        using (var draining = lifetime.Start(ConfiguredLifecycle.Kind.Drain))
+        {
+            try { await drain(draining.Token); draining.Complete(); }
             catch (Exception error) { throw new ConfiguredFixtureDrain.Failure(error); }
         }
         Console.WriteLine("Q243 configured update-retirement-complete completed");

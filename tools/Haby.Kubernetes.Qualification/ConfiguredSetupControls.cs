@@ -38,7 +38,8 @@ internal static class ConfiguredSetupControls
                 using var cancellation = new CancellationTokenSource();
                 var fixture = new Fixture(cancellation, cancel, cleanupFailure);
                 Exception? observed = null;
-                try { await ConfiguredDeploymentCases.Run(null!, new Uri("https://192.0.2.3/"), directory, cancellation.Token, fixture); }
+                using var lifetime = new ConfiguredLifecycle(cancellation.Token);
+                try { await ConfiguredDeploymentCases.Run(null!, new Uri("https://192.0.2.3/"), directory, lifetime, fixture); }
                 catch (Exception error) { observed = error; }
                 var errors = observed is AggregateException aggregate ? aggregate.InnerExceptions.ToArray() : observed is null ? [] : new[] { observed };
                 var hasPrimary = errors.Count(error => cancel ? error is OperationCanceledException : error is UnauthorizedAccessException or IOException) == 1;

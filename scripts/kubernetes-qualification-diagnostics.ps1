@@ -429,7 +429,21 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($line.Length -gt 160){return $invalid}
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
-            if($parts[2] -ceq 'retirement'){
+            if($parts[2] -ceq 'cli-tail'){
+                if($Mode -cne 'configured' -or $parts.Count -ne 4 -or $parts[3] -cnotin @('Output','Termination')){return $invalid}
+                $hasFailure=$true
+                $records.Add('Diagnostic workload: configured cli-tail '+$parts[3])
+            }elseif($parts[2] -ceq 'budget'){
+                if($Mode -cne 'configured' -or $parts.Count -ne 9 -or
+                    $parts[3] -cnotin @('Overall','Functional','Delivery','Drain','NamespaceCleanup','ReleaseCleanup','NativeCli') -or
+                    $parts[4] -cnotin @('Start','Complete','Failed') -or
+                    $parts[8] -cnotin @('None','User','Overall','Functional','Phase','Output','Termination')){return $invalid}
+                foreach($index in @(5,6,7)){
+                    if($parts[$index] -cnotmatch '^(0|[1-9][0-9]{0,6})$' -or [long]$parts[$index] -gt $(if($index -eq 5){3600000}else{240000})){return $invalid}
+                }
+                if($parts[4] -ceq 'Failed'){$hasFailure=$true}
+                $records.Add('Diagnostic workload: configured budget '+($parts[3..8] -join ' '))
+            }elseif($parts[2] -ceq 'retirement'){
                 if($Mode -cne 'configured' -or $parts.Count -lt 4){return $invalid}
                 $phase=$parts[3];$shape=$false
                 if($phase -cin @('WaitStart','RecipientWaitExpired','DrainStart','DrainComplete','DrainOwnershipRefused','DrainExhausted','HeldReadStart','HeldReadReturned','MembersOverflow')){$shape=$parts.Count -eq 4}

@@ -22,7 +22,7 @@ internal static class ConfiguredDeploymentUpdateCases
     private sealed class LostUpdateResponse : IOException;
     internal static async Task Run(Kubernetes admin, ServiceProvider services, DurableChangeSetCommit baseline, JsonNode envelope,
         string image, IInternalActionHandler identity, IInternalActionHandler create, InternalWorkloadConfiguration configuration,
-        ConcurrentQueue<Guid> requests, Func<CancellationToken, Task> drain, CancellationToken token)
+        ConcurrentQueue<Guid> requests, Func<CancellationToken, Task> drain, CancellationToken token, ConfiguredLifecycle lifetime)
     {
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
         var secrets = services.GetRequiredService<ISecretStore>();
@@ -230,10 +230,11 @@ internal static class ConfiguredDeploymentUpdateCases
             await ConfiguredUpdateRetirement.CompleteAsync(admin, contexts, Actions, accepted, previous, target, held, requests,
                 (ct, diagnostic) => (recipientKernel ?? throw new InvalidOperationException("Confirmed recipient kernel unavailable."))
                     .RecipientsAsync(intent, DeploymentIntents.DecodeReceipt(result.Receipt!), new(), ct, diagnostic),
-                sample => update.ValidateRecipients(DeploymentIntents.Encode(intent), result.Receipt!, sample), drain, token);
+                sample => update.ValidateRecipients(DeploymentIntents.Encode(intent), result.Receipt!, sample), drain, token, lifetime);
         }
         catch (Exception error)
         {
+            lifetime.Functional.Fail();
             updatePrimary = error;
             Console.WriteLine(error is ConfiguredFixtureDrain.Failure failure
                 ? ConfiguredRetirementDiagnostics.Failure("DrainCleanup", failure.InnerException!)
@@ -242,8 +243,8 @@ internal static class ConfiguredDeploymentUpdateCases
         }
         finally
         {
-            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            try { if (holdDispatched) await ConfiguredUpdateRetirement.ReleaseAsync(admin, previous.Namespace, held, cleanup.Token); }
+            using var cleanup = lifetime.Start(ConfiguredLifecycle.Kind.ReleaseCleanup);
+            try { if (holdDispatched) await ConfiguredUpdateRetirement.ReleaseAsync(admin, previous.Namespace, held, cleanup.Token); cleanup.Complete(); }
             catch (Exception error)
             {
                 Console.WriteLine(ConfiguredRetirementDiagnostics.Failure("ReleaseCleanup", error));

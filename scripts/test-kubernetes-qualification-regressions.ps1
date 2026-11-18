@@ -1500,3 +1500,4 @@ Write-Output 'PASS bounded journal content, ordering, path refusal and no false 
 Write-Output 'PASS executable resolution selects one application path'
 
 & "$PSScriptRoot/test-retirement-diagnostics.ps1"
+& "$PSScriptRoot/test-configured-lifecycle-diagnostics.ps1"

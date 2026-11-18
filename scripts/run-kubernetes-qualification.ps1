@@ -138,7 +138,8 @@ try {
     if((@($ProbeStockTls,$DeploymentKernel,$DurableActions,$ConfiguredDeployment) | Where-Object { $_ }).Count -gt 1){throw 'Select one harness mode.'}
     [string[]]$probeArgs=if($ProbeStockTls){@('--probe-stock-tls')}elseif($DeploymentKernel){@('--deployment-kernel')}elseif($DurableActions){@('--durable-actions')}elseif($ConfiguredDeployment){@('--configured-deployment')}else{@()}
     $record.Add('Harness command elapsed origin: before-process-start-through-output-drain; prebuilt-output')
-    $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-build','--no-restore','-c','Debug','--','https://127.0.0.1:16443',$private)+$probeArgs) 180
+    $harnessSeconds=if($ConfiguredDeployment){240}else{180}
+    $result=Call 'dotnet' (@('run','--project','tools/Haby.Kubernetes.Qualification','--no-build','--no-restore','-c','Debug','--','https://127.0.0.1:16443',$private)+$probeArgs) $harnessSeconds
     if($result.ExitCode -isnot [int]){throw 'Harness result unavailable.'}
     $record.Add('Harness exit code: '+$result.ExitCode.ToString([Globalization.CultureInfo]::InvariantCulture))
     $harnessExitRecorded=$true
