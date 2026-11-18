@@ -70,6 +70,7 @@ jobs:
               ($completion -join ',') -cne (@('A01','A02','A03') -join ',') -or
               ($batch -join ',') -cne (@('B01','B02','B03','B04') -join ',') -or
               ($updates -join ',') -cne ((1..12 | ForEach-Object { 'U{0:d2}' -f $_ }) -join ',') -or
+              'Diagnostic workload: configured retirement DrainComplete' -notin $lines -or
               'Harness: PASS' -notin $lines -or 'PASS configured-owned-namespace-absent' -notin $lines -or
               'PASS configured-owned-catalog-cleanup' -notin $lines -or
               'Run-owned private directory removed.' -notin $lines -or

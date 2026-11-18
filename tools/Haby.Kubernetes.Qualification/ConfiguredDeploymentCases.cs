@@ -32,6 +32,8 @@ internal static class ConfiguredDeploymentCases
         var postgres = fixture ?? new PostgreSqlFixture();
         V1Namespace? ownedNamespace = null;
         Exception? primary = null;
+        var drainOwnershipRefused = false;
+        DeploymentReceipt[]? drainReceipts = null;
         Console.WriteLine("Q243 configured catalog-init start");
         await ((Xunit.IAsyncLifetime)postgres).InitializeAsync();
         Console.WriteLine("Q243 configured catalog-init completed");
@@ -477,7 +479,21 @@ internal static class ConfiguredDeploymentCases
                     deploymentWrites == 3, "R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied");
             });
             await WithHost(() => ConfiguredDeploymentUpdateCases.Run(admin, services, updateBaseline, updateEnvelope, image,
-                identity, deployment, configurationPreparation, requests, token));
+                identity, deployment, configurationPreparation, requests, async ct =>
+                {
+                    drainOwnershipRefused = true;
+                    try
+                    {
+                        await using var read = await contexts.CreateDbContextAsync(ct);
+                        var rows = await read.OwnedObjects.AsNoTracking().Where(x => x.Role == "deployment" &&
+                            x.Contract == "haby.kubernetes.deployment-receipt/v4" && x.Format == 4).ToArrayAsync(ct);
+                        if (rows.Length != expectedDeploymentWrites) throw new ConfiguredFixtureDrain.OwnershipRefused();
+                        drainReceipts = rows.Select(x => DeploymentIntents.DecodeReceipt(x.Payload)).ToArray();
+                        drainOwnershipRefused = false;
+                        await ConfiguredFixtureDrain.RunAsync(admin, ownedNamespace, drainReceipts, ct);
+                    }
+                    catch (ConfiguredFixtureDrain.OwnershipRefused) { drainOwnershipRefused = true; throw; }
+                }, token));
         }
         catch (Exception error) { primary = error; throw; }
         finally
@@ -489,6 +505,8 @@ internal static class ConfiguredDeploymentCases
                 {
                     Console.WriteLine("Q243 configured cleanup-namespace start");
                     using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    if (drainOwnershipRefused) throw new InvalidOperationException("Namespace deletion refused after drain ownership conflict.");
+                    if (drainReceipts is not null) _ = await ConfiguredFixtureDrain.VerifyOwnedAsync(admin, ownedNamespace, drainReceipts, budget.Token);
                     await admin.CoreV1.DeleteNamespaceAsync(ns, new V1DeleteOptions { Preconditions = new() { Uid = ownedNamespace.Metadata.Uid } }, cancellationToken: budget.Token);
                     while (true)
                     {

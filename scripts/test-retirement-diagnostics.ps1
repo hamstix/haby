@@ -4,6 +4,12 @@ $records = @(
  'Q243 configured entry start',
  'Q243 configured retirement WaitStart',
  'Q243 configured retirement RecipientWaitExpired',
+ 'Q243 configured retirement DrainStart',
+ 'Q243 configured retirement DrainRemaining 2',
+ 'Q243 configured retirement DrainExhausted',
+ 'Q243 configured retirement DrainOwnershipRefused',
+ 'Q243 configured retirement DrainCleanup Canceled',
+ 'Q243 configured retirement DrainComplete',
  'Q243 configured retirement Recipients 2 1 0 Container None',
  'Q243 configured retirement Closure CatalogHash Unknown',
  'Q243 configured retirement Closure PrerequisiteIncomplete RetirementProgressChanged',
@@ -15,6 +21,8 @@ $records = @(
 $result = Read-QualificationWorkloadEvidence configured ($records -join "`n") ''
 if ($result.Status -cne 'valid' -or -not $result.HasFailure) { throw 'Closed retirement records were not retained.' }
 foreach ($bad in @('Q243 configured retirement Closure protected protected',
+ 'Q243 configured retirement DrainRemaining 65',
+ 'Q243 configured retirement DrainRemaining protected',
  'Q243 configured retirement Recipients 16385 1 0 None None',
  'Q243 configured retirement WaitReturned true false false protected Complete',
  'Q243 configured retirement Condition U11Applied protected')) {

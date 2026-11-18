@@ -26,7 +26,7 @@ internal static class ConfiguredRetirementDiagnostics
         _ => "Unknown"
     };
     internal static string Failure(string phase, Exception error) => "Q243 configured retirement " +
-        (phase is "WaitThrew" or "Primary" or "ReleaseCleanup" or "NamespaceCleanup" ? phase : "Unknown") + " " + Category(error);
+        (phase is "WaitThrew" or "Primary" or "ReleaseCleanup" or "NamespaceCleanup" or "DrainCleanup" ? phase : "Unknown") + " " + Category(error);
     internal static string Returned(RolloutResult result, long expected) => "Q243 configured retirement WaitReturned " + Flag(result.Ready) + " " +
         Flag(result.Applied) + " " + Flag(result.AppliedGeneration == expected) + " " +
         (Reasons.Contains(result.CompletionReason, StringComparer.Ordinal) ? result.CompletionReason : "unknown") + " " +

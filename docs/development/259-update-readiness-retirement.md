@@ -126,6 +126,17 @@ one normal final wait. Observation polling cannot submit lifecycle actions, rene
 attempts or extend the original rollout deadline. Expiry reports only the last
 bounded recipient counts/categories and a fixed expiry marker. The fixture then
 requires exact old-right denial, retained target delivery and Applied completion.
+After all U01-U12 assertions, separately labeled fixture teardown quiesces only
+catalog-receipted Deployments with fresh namespace/UID/ownership checks and
+UID/resourceVersion-guarded scale-to-zero. Complete namespace Deployment,
+ReplicaSet and Pod lists refuse unknown identities and include terminating,
+pre-restart and replacement Pods. Delivery and drain share the same existing
+absolute 35-second restart-delivery token, followed by the unchanged 20-second
+namespace cleanup. No grace override, command/image change or new deadline is
+introduced. Exhaustion fails explicitly; an ownership conflict also refuses the
+namespace-delete fallback. Other failures retain bounded owned cleanup and
+separate functional/drain/cleanup attribution. This scale is qualification cleanup,
+not product UPDATE evidence.
 The existing Recreate/RollingUpdate venues remain; no new image, cluster mode,
 PostgreSQL matrix or load campaign is added. Test inventories are obligations,
 not passing evidence. Executed results, unperformed checks, current full SHA and

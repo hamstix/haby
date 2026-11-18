@@ -53,7 +53,7 @@ internal static class ConfiguredUpdateRetirement
         Func<InternalDurableActions> actions, DurableChangeSetCommit accepted, DeploymentReceipt prior, RuntimeBootstrap target,
         V1Pod held, ConcurrentQueue<Guid> requests,
         Func<CancellationToken, Action<DeploymentRecipientDiagnostic>, Task<RecipientObservation>> recipients,
-        Func<RecipientObservation, bool> validateRecipients, CancellationToken token)
+        Func<RecipientObservation, bool> validateRecipients, Func<CancellationToken, Task> drain, CancellationToken token)
     {
         Console.WriteLine("Q243 configured update-retirement-ready start");
         var options = new RolloutOptions(MaximumCalls: 128, MaximumRounds: 128, PollMilliseconds: 250, RequestMilliseconds: 60000);
@@ -106,8 +106,10 @@ internal static class ConfiguredUpdateRetirement
         {
             delivery.CancelAfter(TimeSpan.FromSeconds(35));
             while (!target.Documents.Values.Select(Guid.Parse).All(requests.Contains)) await Task.Delay(100, delivery.Token);
+            Check(target.Documents.Values.Select(Guid.Parse).All(requests.Contains), "U12-old-rights-denied-target-exact-delivery-stable-binding");
+            try { await drain(delivery.Token); }
+            catch (Exception error) { throw new ConfiguredFixtureDrain.Failure(error); }
         }
-        Check(target.Documents.Values.Select(Guid.Parse).All(requests.Contains), "U12-old-rights-denied-target-exact-delivery-stable-binding");
         Console.WriteLine("Q243 configured update-retirement-complete completed");
     }
     private static void Require(string condition, bool value)
