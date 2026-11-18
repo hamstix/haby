@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-18
 - Implementation: Not implemented by this documentation; tracked in [issue #261](https://github.com/hamstix/haby/issues/261)
-- Release order: Immediately after issue #259; no concurrent TLS implementation
+- Release order: After issue #259 and test-cycle separation #263 (ADR-061); no concurrent TLS implementation
 
 ## Context
 
@@ -103,7 +103,7 @@ an operator guide with platform limits and the fresh-catalog boundary.
 
 ## Sequencing and limits
 
-Issue #261 follows merged #259 and this accepted documentation. It does not open
+Issue #261 follows merged #259, test-cycle separation #263 under ADR-061 and this accepted documentation. It does not open
 public UPDATE or complete P3. Afterwards retain the successive ordinary UPDATE
 proof (initial to update1 Applied to update2 Applied), ADR-052 corrective work,
 integrated rehearsal and public operational UPDATE dependencies. ADR-059 CLI
