@@ -128,6 +128,28 @@ public sealed class ConfiguredLifecycleTests
         Assert.False(exit.Task.IsCompleted); // Not represented as cleaned or completed.
     }
 
+    [Fact]
+    public async Task Owned_cli_config_cleanup_preserves_primary_and_completes_only_after_deletion()
+    {
+        var primary = new OperationCanceledException("primary control");
+        var deletion = new IOException("deletion control");
+        var completed = false;
+        var failure = await Assert.ThrowsAsync<AggregateException>(() => ConfiguredCliProcess.WithOwnedConfigurationAsync<string>(
+            () => Task.FromException<string>(primary), () => throw deletion, () => completed = true));
+        Assert.Same(primary, failure.InnerExceptions[0]); Assert.Same(deletion, failure.InnerExceptions[1]);
+        Assert.False(completed);
+        var onlyCleanup = await Assert.ThrowsAsync<IOException>(() => ConfiguredCliProcess.WithOwnedConfigurationAsync(
+            () => Task.FromResult("complete"), () => throw deletion, () => completed = true));
+        Assert.Same(deletion, onlyCleanup); Assert.False(completed);
+        var deleted = false;
+        var result = await ConfiguredCliProcess.WithOwnedConfigurationAsync(() => Task.FromResult("complete"),
+            () => deleted = true, () => { Assert.True(deleted); completed = true; });
+        Assert.Equal("complete", result); Assert.True(completed);
+        var retained = await Assert.ThrowsAsync<OperationCanceledException>(() => ConfiguredCliProcess.WithOwnedConfigurationAsync<string>(
+            () => Task.FromException<string>(primary), () => { }, () => throw new InvalidOperationException("false success")));
+        Assert.Same(primary, retained);
+    }
+
     private sealed class Clock : TimeProvider
     {
         private long ticks;

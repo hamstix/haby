@@ -6,6 +6,22 @@ internal static class ConfiguredCliProcess
     {
         internal string Reason => reason;
     }
+    internal static async Task<T> WithOwnedConfigurationAsync<T>(Func<Task<T>> work, Action cleanup, Action complete)
+    {
+        T result = default!;
+        Exception? primary = null;
+        try { result = await work(); }
+        catch (Exception error) { primary = error; }
+        try { cleanup(); }
+        catch (Exception error)
+        {
+            if (primary is null) throw;
+            throw ConfiguredLifecycle.Combine(primary, [error]);
+        }
+        if (primary is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(primary).Throw();
+        complete();
+        return result;
+    }
     internal static async Task<(string Output, string Error)> CollectAsync(Task exited, Task<string> output, Task<string> error,
         Action killOwnedTree, CancellationToken token, TimeProvider clock)
     {
