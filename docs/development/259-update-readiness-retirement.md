@@ -166,3 +166,16 @@ diagnostics. U11 checks Ready, Applied and expected generation separately, retai
 requirements. Primary and cleanup failures are distinct; existing reads report
 only whether the fixture-owned finalizer is present. No budget, deletion scope,
 normalization predicate or runtime/public contract changes follow from diagnostics.
+
+Returned-wait diagnostics include complete indexed members for the bounded fixture
+inventory (up to 16; larger sets emit an explicit failing overflow marker rather
+than a partial list). Summary fields are returned count, count with an attempt,
+expired-budget count, replay flag and HTTP admission count (`Unknown`, because
+it is not returned). Attempt presence describes submitted inventory, not API
+admission. Member fields are index, Outcome, explicitly allowlisted Code, Budget,
+attempt presence, Temporary and consumed-recovery state (`Unknown`, because it
+is not returned). No identifiers, deadlines, evidence payloads or raw strings are
+printed. Thus empty/non-submitted, invalid, superseded, refused, permanent versus
+temporary unavailable and expired-budget results stay distinguishable without
+claiming that an expired recovery was consumed. Ordinary Pending -> Ready keeps
+the same original attempt/deadline. These diagnostics never change wait policy.

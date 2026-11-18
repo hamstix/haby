@@ -9,6 +9,35 @@ internal static class ConfiguredRetirementDiagnostics
     private static readonly string[] Predicates = ["Unknown", "InternalUPDATECompletionRequiresAnUpdateInventory", "UPDATEInventoryRequired", "UpdateExpectedAppliedChanged", "UpdateCompletionExceedsCheckpointBound", "UpdateAppliedCompareAndSwapFailed", "UpdateInventoryMissing", "UpdateGenerationSuperseded", "UpdateAttemptsChanged", "ObsoleteInventoryChanged", "UnretiredPublicationChanged", "RetirementProgressChanged", "RetirementStartMismatch", "RetirementStartRecipientEvidenceInvalid", "ConfigurationAuthorityRequired", "RetirementNotStarted", "FrozenObsoletePermissionMismatch", "ObsoletePublicationHasAnActiveLiveReference", "RetirementProgressMismatch", "CurrentObsoletePermissionNoLongerMatchesInventory", "FrozenCompletionInventoryRequired", "CompletionProofUnavailable", "CompletionProofCorrupt", "CompletionProofOriginMismatch", "CompletionReadinessEvidenceChanged", "CompletionPrerequisiteEvidenceMismatch", "CompletionRequestUnavailable", "CompletionRequestOutcomeMismatch", "ReadinessSampleExceedsBound", "ReadinessSampleCoverageMismatch", "FreshCompleteSetReadinessRequired", "FreshReadinessSampleOriginMismatch", "CompletionCheckpointReferenceMismatch", "BindingBoundExceeded", "PublicationBoundExceeded", "CurrentPublicationPrerequisiteUnavailable", "CompletionPrerequisiteTextExceedsBound", "UnexpectedActionInventory", "CompleteActionEvidenceRequired", "ManagedInventoryBoundScopeMismatch", "PreparationInventoryBoundExceeded", "CompletionPublicationCoverageMismatch", "PublicationOriginRequired", "RetainedPublicationEvidenceMismatch", "CompletionEvidenceExceedsBound", "FrozenUpdateRequired", "UpdateCompletionCorrupt", "UpdateCompletionMissing", "UpdateCompletionOriginMismatch", "UpdateCompletionPrerequisitesChanged", "UpdateCompletionRequestMismatch", "CurrentObjectEvidenceExceedsBound", "CompleteUpdateCurrentObjectEvidenceRequired", "CurrentObjectReceiptMismatch", "RetirementStartEvidenceMismatch", "RetirementStartOriginMismatch", "ExactObsoleteRevocationProofMismatch"];
     private static readonly string[] Reasons = ["not-ready", "applied", "inventory-conflict", "prerequisite-incomplete", "generation-superseded",
         "current-authority-unavailable", "unsupported-inventory", "commit-unconfirmed", "old-recipients-present", "recipient-evidence-incomplete"];
+    private static readonly string[] MemberCodes = ["ready", "rollout-pending", "progress-deadline", "status-invalid", "owned-state-conflict", "object-absent",
+        "api-access-denied", "observation-unavailable", "api-rejected", "input-invalid", "runtime-authority-unavailable", "attempt-superseded",
+        "clock-budget-elapsed", "call-stopped", "read-timeout", "not-submitted", "not-observed"];
+    internal static string[] Members(RolloutResult result)
+    {
+        // Fixture diagnostic bound only. Unexpected larger inventories fail explicitly; never publish a partial set.
+        if (result.Members.Length > 16) return ["Q243 configured retirement MembersOverflow"];
+        var records = new List<string> { "Q243 configured retirement WaitMembers " + result.Members.Length + " " +
+            result.Members.Count(x => x.Attempt is not null) + " " + result.Members.Count(x => x.Budget == RolloutBudget.Expired) + " " + Flag(result.Replayed) + " Unknown" };
+        for (var index = 0; index < result.Members.Length; index++)
+        {
+            var member = result.Members[index]; var observation = member.Observation;
+            records.Add("Q243 configured retirement Member " + index + " " + (observation.Outcome switch
+            {
+                RolloutOutcome.Ready => "Ready",
+                RolloutOutcome.Pending => "Pending",
+                RolloutOutcome.Conflict => "Conflict",
+                RolloutOutcome.Unavailable => "Unavailable",
+                RolloutOutcome.Refused => "Refused",
+                RolloutOutcome.NotSubmitted => "NotSubmitted",
+                RolloutOutcome.NotObserved => "NotObserved",
+                _ => "Unknown"
+            }) + " " + (MemberCodes.Contains(observation.Code, StringComparer.Ordinal) ? observation.Code : "Unknown") + " " +
+                (member.Budget switch { RolloutBudget.Active => "Active", RolloutBudget.Expired => "Expired", _ => "Unknown" }) + " " +
+                Flag(member.Attempt is not null) + " " + Flag(observation.Temporary) + " Unknown");
+        }
+        // Returned attempts describe submitted inventory, not HTTP admissions. Consumed recovery is not returned: Unknown.
+        return records.ToArray();
+    }
     private static string Flag(bool value) => value ? "true" : "false";
     internal static string Closure(string stage, string predicate) => "Q243 configured retirement Closure " +
         (Stages.Contains(stage, StringComparer.Ordinal) ? stage : "Unknown") + " " +
@@ -53,7 +82,12 @@ internal static class ConfiguredRetirementDiagnostics
     internal static async ValueTask<RolloutResult> WaitAsync(Func<ValueTask<RolloutResult>> wait, long expected)
     {
         Console.WriteLine("Q243 configured retirement WaitStart");
-        try { var result = await wait(); Console.WriteLine(Returned(result, expected)); return result; }
+        try
+        {
+            var result = await wait(); Console.WriteLine(Returned(result, expected));
+            foreach (var record in Members(result)) Console.WriteLine(record);
+            return result;
+        }
         catch (Exception error) { Console.WriteLine(Failure("WaitThrew", error)); throw; }
     }
 }

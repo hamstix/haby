@@ -48,4 +48,66 @@ public sealed class ConfiguredRetirementDiagnosticsTests
         Assert.Equal("Q243 configured retirement HeldReadThrew Canceled", ConfiguredRetirementDiagnostics.Failure("HeldReadThrew", new OperationCanceledException("protected")));
     }
 
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("not-submitted")]
+    [InlineData("expired")]
+    [InlineData("invalid")]
+    [InlineData("superseded")]
+    [InlineData("refused")]
+    [InlineData("unavailable")]
+    public void Complete_returned_members_distinguish_nonready_branches_without_exposing_identity(string branch)
+    {
+        var observation = branch switch
+        {
+            "not-submitted" => new RolloutObservation(RolloutOutcome.NotSubmitted, "not-submitted"),
+            "invalid" => new RolloutObservation(RolloutOutcome.Pending, "status-invalid"),
+            "superseded" => new RolloutObservation(RolloutOutcome.Refused, "attempt-superseded"),
+            "refused" => new RolloutObservation(RolloutOutcome.Refused, "runtime-authority-unavailable"),
+            "unavailable" => new RolloutObservation(RolloutOutcome.Unavailable, "api-access-denied"),
+            _ => new RolloutObservation(RolloutOutcome.Pending, "rollout-pending")
+        };
+        var id = Guid.NewGuid();
+        var member = new RolloutMember("protected-subject", branch == "not-submitted" ? null : id, DateTimeOffset.MaxValue,
+            branch == "expired" ? RolloutBudget.Expired : RolloutBudget.Active, observation with { Evidence = "protected-bootstrap" });
+        var result = new RolloutResult(false, null, null, RolloutStop.Complete, branch == "empty" ? [] : [member], Replayed: true);
+        var records = ConfiguredRetirementDiagnostics.Members(result);
+        Assert.Equal("Q243 configured retirement WaitReturned false false false not-ready Complete", ConfiguredRetirementDiagnostics.Returned(result, 2));
+        Console.WriteLine(ConfiguredRetirementDiagnostics.Returned(result, 2));
+        Assert.Equal(branch == "empty" ? 1 : 2, records.Length);
+        Assert.Equal("Q243 configured retirement WaitMembers " + (branch == "empty" ? "0 0 0" : branch == "not-submitted" ? "1 0 0" : branch == "expired" ? "1 1 1" : "1 1 0") + " true Unknown", records[0]);
+        if (branch != "empty") Assert.Equal("Q243 configured retirement Member 0 " + observation.Outcome + " " + observation.Code + " " +
+            (branch == "expired" ? "Expired" : "Active") + " " + (branch == "not-submitted" ? "false" : "true") + " false Unknown", records[1]);
+        foreach (var record in records) Console.WriteLine(record);
+        Assert.False(result.Ready); Assert.False(result.Applied);
+        Assert.All(records, record => { Assert.DoesNotContain("protected", record); Assert.DoesNotContain(id.ToString(), record); Assert.True(record.Length <= 160); });
+    }
+    [Fact]
+    public async Task Pending_then_Ready_diagnostics_preserve_the_same_attempt_deadline_and_result()
+    {
+        var attempt = Guid.NewGuid(); var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        var pending = new RolloutResult(false, null, null, RolloutStop.CallLimit,
+            [new("protected", attempt, deadline, RolloutBudget.Active, new(RolloutOutcome.Pending, "rollout-pending"))]);
+        var ready = pending with
+        {
+            Ready = true,
+            Stop = RolloutStop.Complete,
+            Members = [pending.Members[0] with { Observation = new(RolloutOutcome.Ready, "ready") }]
+        };
+        Assert.Same(pending, await ConfiguredRetirementDiagnostics.WaitAsync(() => ValueTask.FromResult(pending), 2));
+        Assert.Same(ready, await ConfiguredRetirementDiagnostics.WaitAsync(() => ValueTask.FromResult(ready), 2));
+        Assert.Equal(pending.Members[0].Attempt, ready.Members[0].Attempt); Assert.Equal(deadline, ready.Members[0].Deadline);
+        Assert.Contains("Member 0 Pending rollout-pending Active true false Unknown", ConfiguredRetirementDiagnostics.Members(pending)[1]);
+        Assert.Contains("Member 0 Ready ready Active true false Unknown", ConfiguredRetirementDiagnostics.Members(ready)[1]);
+        var hostile = pending with
+        {
+            Members = [pending.Members[0] with { Budget = (RolloutBudget)99,
+            Observation = new((RolloutOutcome)99, "protected-code", true) }]
+        };
+        Assert.EndsWith("Member 0 Unknown Unknown Unknown true true Unknown", ConfiguredRetirementDiagnostics.Members(hostile)[1]);
+        foreach (var record in ConfiguredRetirementDiagnostics.Members(hostile)) Console.WriteLine(record);
+        Console.WriteLine("Q243 configured retirement MembersOverflow");
+        Assert.Equal(["Q243 configured retirement MembersOverflow"], ConfiguredRetirementDiagnostics.Members(pending with { Members = Enumerable.Repeat(pending.Members[0], 17).ToArray() }));
+    }
+
 }
