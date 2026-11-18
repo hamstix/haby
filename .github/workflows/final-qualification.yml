@@ -1,0 +1,182 @@
+name: Final qualification control
+
+# This control is usable only AFTER installation on main. The bootstrap PR is
+# qualified by the unchanged automatic workflows, never by self-certification.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: string
+      head:
+        description: Expected immutable PR HEAD SHA
+        required: true
+        type: string
+      base:
+        description: Expected immutable main base/control SHA
+        required: true
+        type: string
+      merge:
+        description: Expected immutable tested merge commit SHA
+        required: true
+        type: string
+      tree:
+        description: Expected immutable tested merge tree SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-qualification-${{ inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      identity: ${{ steps.candidate.outputs.identity }}
+      merge: ${{ steps.candidate.outputs.merge }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Resolve installed control and current immutable candidate
+        id: candidate
+        uses: actions/github-script@v7
+        env:
+          REQUEST: ${{ toJSON(inputs) }}
+          CONTROL_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        with:
+          script: |
+            const { prepare } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/final-qualification.mjs`);
+            const identity = await prepare(github, {
+              repository: process.env.GITHUB_REPOSITORY, ref: process.env.GITHUB_REF,
+              workflowRef: process.env.WORKFLOW_REF, control: process.env.CONTROL_SHA,
+              event: context.eventName
+            }, JSON.parse(process.env.REQUEST), context.actor);
+            core.setOutput('identity', JSON.stringify(identity));
+            core.setOutput('merge', identity.merge);
+
+  start:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    outputs:
+      check: ${{ steps.start.outputs.check }}
+    steps:
+      - name: Record actual qualification in progress on this HEAD
+        id: start
+        uses: actions/github-script@v7
+        env:
+          IDENTITY: ${{ needs.prepare.outputs.identity }}
+        with:
+          script: |
+            const identity = JSON.parse(process.env.IDENTITY);
+            const result = await github.rest.checks.create({
+              ...context.repo, name: 'Final qualification', head_sha: identity.head,
+              status: 'in_progress', external_id: `${context.runId}:${process.env.GITHUB_RUN_ATTEMPT}`,
+              details_url: `https://github.com/${identity.repository}/actions/runs/${context.runId}`,
+              output: { title: 'Full qualification running', summary: `HEAD ${identity.head}; base ${identity.base}; tested merge ${identity.merge}; tree ${identity.tree}.` }
+            });
+            core.setOutput('check', String(result.data.id));
+
+  # Local reusable workflow files come from this installed control commit.
+  # Only checkout data/source is supplied by the candidate. No secrets or write
+  # permissions are inherited by these jobs, and credentials are not persisted.
+  build:
+    needs: [prepare, start]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml
+    with:
+      candidate: ${{ needs.prepare.outputs.merge }}
+
+  api:
+    needs: [prepare, start]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/kubernetes-qualification.yml
+    with:
+      candidate: ${{ needs.prepare.outputs.merge }}
+
+  workloads:
+    needs: [prepare, start]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/kubernetes-deployment-kernel.yml
+    with:
+      candidate: ${{ needs.prepare.outputs.merge }}
+
+  publish:
+    needs: [prepare, start, build, api, workloads]
+    if: always() && needs.prepare.result == 'success' && needs.start.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Download only this invocation's evidence
+        id: artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          path: .qualification-evidence
+      - name: Reduce existing full qualification evidence
+        id: reduction
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          IDENTITY: ${{ needs.prepare.outputs.identity }}
+          RESULTS: ${{ toJSON(needs) }}
+          DOWNLOAD: ${{ steps.artifacts.outcome }}
+        with:
+          script: |
+            const { reduce } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/final-qualification.mjs`);
+            const needs = JSON.parse(process.env.RESULTS);
+            const results = Object.fromEntries(['build', 'api', 'workloads'].map(key => [key, needs[key]?.result]));
+            if (process.env.DOWNLOAD !== 'success') results.build = 'failure';
+            await reduce(github, JSON.parse(process.env.IDENTITY), results,
+              `${process.env.GITHUB_WORKSPACE}/.qualification-evidence`, context.runId,
+              Number(process.env.GITHUB_RUN_ATTEMPT));
+      - name: Publish compact control outcome
+        id: control
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qualification-summary.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Complete current candidate qualification after verified publication
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          IDENTITY: ${{ needs.prepare.outputs.identity }}
+          CHECK_ID: ${{ needs.start.outputs.check }}
+          REDUCTION: ${{ steps.reduction.outcome }}
+          UPLOAD: ${{ steps.control.outcome }}
+          ARTIFACT: ${{ steps.control.outputs.artifact-id }}
+        with:
+          script: |
+            const { publish } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/final-qualification.mjs`);
+            await publish(github, JSON.parse(process.env.IDENTITY), context.runId,
+              Number(process.env.GITHUB_RUN_ATTEMPT), process.env.CHECK_ID,
+              `${process.env.GITHUB_WORKSPACE}/qualification-summary.json`,
+              { reduction: process.env.REDUCTION, upload: process.env.UPLOAD, artifact: process.env.ARTIFACT });

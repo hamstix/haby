@@ -116,7 +116,9 @@ test('workflow keeps mandatory gate, names, conditions and permissions', () => {
   assert.match(workflow, /permissions:\s+contents: read/);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /node --test \.\/scripts\/test-ci-change-routing.mjs/);
-  assert.match(workflow, /id: routing\s+run: node \.\/scripts\/ci-change-routing.mjs/);
+  assert.match(workflow, /id: routing\s+env:\s+QUALIFICATION_CANDIDATE: \$\{\{ inputs.candidate \}\}/);
+  assert.match(workflow, /else\s+node \.\/scripts\/ci-change-routing.mjs\s+fi/);
+  assert.match(workflow, /echo 'full=true' >> "\$GITHUB_OUTPUT"/);
   for (const id of ['native-aot-windows', 'native-aot-linux', 'postgresql-integration']) {
     assert.match(workflow, new RegExp(`  ${id}:\\r?\\n    needs: validate\\r?\\n    if: needs.validate.outputs.full == 'true'`));
   }

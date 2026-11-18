@@ -1,6 +1,12 @@
 name: Build
 
 on:
+  workflow_call:
+    inputs:
+      candidate:
+        description: Immutable tested commit supplied by installed trusted control
+        required: true
+        type: string
   push:
     branches: [main]
   pull_request:
@@ -22,14 +28,28 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.candidate || github.sha }}
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Verify fail-closed CI routing and documentation controls
         run: node --test ./scripts/test-ci-change-routing.mjs
 
+      - name: Verify installed final control isolation and fail-closed reduction
+        run: node --test ./scripts/test-final-qualification.mjs
+
       - name: Classify complete change and validate documentation
         id: routing
-        run: node ./scripts/ci-change-routing.mjs
+        env:
+          QUALIFICATION_CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          if [ -n "$QUALIFICATION_CANDIDATE" ]; then
+            [[ "$QUALIFICATION_CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || exit 1
+            # Explicit final invocation always retains complete existing gates.
+            echo 'full=true' >> "$GITHUB_OUTPUT"
+          else
+            node ./scripts/ci-change-routing.mjs
+          fi
 
       - name: Set up .NET SDK
         if: steps.routing.outputs.full == 'true'
@@ -60,7 +80,7 @@ jobs:
         if: always() && steps.routing.outputs.full == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: fast-inventory-${{ github.sha }}-${{ github.run_attempt }}
+          name: fast-inventory-${{ inputs.candidate || github.sha }}-${{ github.run_attempt }}
           path: |
             .artifacts/fast/safe/gate.json
             .artifacts/fast/safe/cases.json
@@ -136,6 +156,9 @@ jobs:
     steps: &native-steps
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate || github.sha }}
+          persist-credentials: false
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -201,7 +224,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-inventory-${{ env.HABY_NATIVE_RID }}-${{ github.sha }}-${{ github.run_attempt }}
+          name: native-inventory-${{ env.HABY_NATIVE_RID }}-${{ inputs.candidate || github.sha }}-${{ github.run_attempt }}
           path: |
             .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/compiler.json
             .artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe/gate.json
@@ -231,6 +254,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate || github.sha }}
+          persist-credentials: false
       - name: Review dependency licenses and vulnerabilities
         uses: actions/dependency-review-action@v4
         with:
@@ -244,6 +270,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate || github.sha }}
+          persist-credentials: false
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -264,7 +293,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: operator-composition-sample-${{ github.sha }}-${{ github.run_attempt }}
+          name: operator-composition-sample-${{ inputs.candidate || github.sha }}-${{ github.run_attempt }}
           path: .artifacts/postgresql-measurement/composition-sample/
           if-no-files-found: error
           retention-days: 14
@@ -272,7 +301,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: postgresql-timing-${{ github.sha }}-${{ github.run_attempt }}
+          name: postgresql-timing-${{ inputs.candidate || github.sha }}-${{ github.run_attempt }}
           path: |
             .artifacts/postgresql-measurement/safe/measurement.json
             .artifacts/postgresql-measurement/safe/preflight.json
