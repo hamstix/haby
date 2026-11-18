@@ -1,5 +1,14 @@
 # Kubernetes Provider administration
 
+> Accepted policy amendment: [ADR-060](../adr/0060-explicit-kubernetes-provider-tls-policy.md)
+> authorizes explicit Kubernetes Provider trust and revocation modes in issue #261,
+> immediately after #259. Earlier mandatory-Online wording below describes the
+> current implementation and remains the omitted-policy default. The accepted
+> operator policy capability is not a fixture exception; it must cover TokenReview
+> and all other production factories. It is not implemented by this documentation.
+> The maintainer selected explicit fresh-catalog format 2, without automatic reset,
+> backfill, legacy v1 reading or adoption of existing external resources.
+
 Kubernetes Provider preparation uses the authenticated operator Host and the
 existing API-only `habyctl provider` commands. It prepares immutable,
 Environment-owned access configuration. It does not enable public Workload

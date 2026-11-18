@@ -263,6 +263,9 @@ source of truth; Kubernetes is not a mandatory runtime for hosting Haby. A CRD
 operator, leader election and Kubernetes-only storage mode are separate later
 capabilities, not prerequisites for this milestone.
 
+- [x] Accept [ADR-060](docs/adr/0060-explicit-kubernetes-provider-tls-policy.md): explicit Kubernetes Provider TLS trust/revocation policy, unchanged omitted Online default and an explicit fresh-catalog format-2 transition.
+- [ ] Implement [issue #261](https://github.com/hamstix/haby/issues/261) immediately after merged #259, covering every production client/frozen input path and controlled TLS evidence. Then resume successive UPDATE qualification, ADR-052 correction, integrated rehearsal and public operational UPDATE; CLI composition remains after operational UPDATE. TLS policy acceptance is not implementation or P3 completion.
+
 ### Accepted P3 execution order
 
 Queue clarification: issue #252 is followed immediately by the accepted docs-only
