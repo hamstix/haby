@@ -90,3 +90,31 @@ Kubernetes is unavailable. Existing PostgreSQL, both Native AOT and applicable
 Kubernetes final checks remain mandatory. No dispatcher, protection transition,
 new image or environment is introduced. A new required hosted failure stops new
 cycles pending bounded disposition; no unchanged blind rerun.
+
+The reporting envelope is independently bounded. The existing sanitizer accepts
+at most 256 records across stdout and stderr together, at most 160 characters
+per recognized diagnostic line, and at most 1,048,576 combined string characters
+before parsing (the pre-existing guard counts .NET string length, not UTF-8
+bytes). These limits and all allowlists remain unchanged. Required individual
+case PASS records, complete returned UPDATE member inventory, drain completion,
+and namespace/catalog cleanup proofs are retained. Duplicate successful case
+stage records and per-CLI success budget chatter are omitted. CLI failures still
+retain phase, effective/overall remaining budget and primary/tail outcomes.
+
+One UPDATE-owned diagnostic observer spans reconstructed actions. Repeated
+completion success callbacks are omitted; the first failed prerequisite survives
+all prior polling. Recipient diagnostics retain the first sample and first
+projection failure, at most two records; timeout retains the caller's last
+recipient sample separately. No assertion, response, recovery or ownership
+behavior depends on diagnostic suppression. U09-U12 and returned member sets
+continue to prove the actual outcomes.
+
+`test-configured-reporting-budget.ps1` runs source-bound controls through the
+actual configured Check/lifecycle/UPDATE callback/wait/cleanup formatters and
+unchanged sanitizer. It reconstructs all 39 case identities against the current
+ledger, fixed one-off emissions, five Host/four Startup calls, six CLI calls,
+both UPDATE waits at 128 rounds, and conservative negative cleanup/rejection
+suffixes. This is a synthetic upper envelope, including mutually exclusive
+branches; it is not claimed as the failed hosted run's missing transcript or
+runtime qualification. Its combined-stream record and character boundary tests
+remain fail-closed. The normal launcher regression suite invokes this control.

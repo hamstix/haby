@@ -52,9 +52,14 @@ internal sealed class ConfiguredLifecycle : IDisposable
     internal static Exception Combine(Exception? primary, IReadOnlyCollection<Exception> cleanup) =>
         new AggregateException(primary is null ? cleanup : new[] { primary }.Concat(cleanup));
     private static TimeSpan Positive(TimeSpan value) => value > TimeSpan.Zero ? value : TimeSpan.Zero;
-    private void Write(string phase, string state, TimeSpan elapsed, TimeSpan remaining, string cause) => report(
-        "Q243 configured budget " + phase + " " + state + " " + Milliseconds(elapsed, 3600000) + " " +
-        Milliseconds(remaining, 240000) + " " + Milliseconds(Remaining, 240000) + " " + cause);
+    private void Write(string phase, string state, TimeSpan elapsed, TimeSpan remaining, string cause)
+    {
+        // Per-call success is already asserted by its owning case PASS. Preserve
+        // the first failed call's deadline and tail category without CLI chatter.
+        if (phase == nameof(Kind.NativeCli) && state != "Failed") return;
+        report("Q243 configured budget " + phase + " " + state + " " + Milliseconds(elapsed, 3600000) + " " +
+            Milliseconds(remaining, 240000) + " " + Milliseconds(Remaining, 240000) + " " + cause);
+    }
     private static string Milliseconds(TimeSpan value, long maximum) =>
         Math.Clamp((long)value.TotalMilliseconds, 0, maximum).ToString(CultureInfo.InvariantCulture);
     public void Dispose()

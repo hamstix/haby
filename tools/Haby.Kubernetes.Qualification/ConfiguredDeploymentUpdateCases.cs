@@ -93,15 +93,16 @@ internal static class ConfiguredDeploymentUpdateCases
             await admin.AppsV1.PatchNamespacedDeploymentAsync(new(foreignPatch.ToJsonString(), V1Patch.PatchType.JsonPatch), previous.Name, previous.Namespace, cancellationToken: token);
             var wire = new PatchEvidence();
             DeploymentKernel? recipientKernel = null;
+            var diagnostics = new ConfiguredRetirementDiagnostics.Output();
             var update = new InternalDeploymentAction(secrets, connection => recipientKernel = new DeploymentKernel(connection.Binding,
-                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true, recipientDiagnostic: value => Console.WriteLine(ConfiguredRetirementDiagnostics.Recipients(value)));
+                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true, recipientDiagnostic: diagnostics.Recipient);
             var recordedUpdate = new ConfiguredDeploymentUpdateHandler(update,
                 (phase, result) => Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Delegated(phase, result, wire.Writes)));
             var loseResponse = true;
             InternalDurableActions Actions() => new(contexts, [identity, create, recordedUpdate], services.GetServices<IProviderConfigurationCodec>(),
                 services.GetServices<IExternalOperationOutputContract>(), services.GetRequiredService<DurableActionAdmission>(),
                 services.GetRequiredService<DurableOperationSerialization>(), services.GetRequiredService<TimeProvider>(), point =>
-                { if (point == InternalActionFault.AfterExternalResult && loseResponse) { loseResponse = false; throw new LostUpdateResponse(); } }, configuration, value => Console.WriteLine(ConfiguredRetirementDiagnostics.Closure(value.Stage.ToString(), value.Predicate.ToString())));
+                { if (point == InternalActionFault.AfterExternalResult && loseResponse) { loseResponse = false; throw new LostUpdateResponse(); } }, configuration, value => diagnostics.Completion(value.Stage.ToString(), value.Predicate.ToString()));
             var actions = Actions();
             Check((await configuration.PrepareAsync(accepted, "qualification", token)).Prepared.Count == 2, "U02-new-exact-documents-prepared");
             var reused = await new InternalRuntimeIdentityPreparation(contexts, configuration, actions, identity.Contract.Action).PrepareAsync(accepted, token);
@@ -316,7 +317,7 @@ internal static class ConfiguredDeploymentUpdateCases
         }
     }
 
-    private static void Check(bool condition, string id)
+    internal static void Check(bool condition, string id)
     {
         if (!condition) throw new InvalidOperationException("Configured update case failed: " + id);
         Console.WriteLine("PASS configured-" + id);

@@ -1501,3 +1501,5 @@ Write-Output 'PASS executable resolution selects one application path'
 
 & "$PSScriptRoot/test-retirement-diagnostics.ps1"
 & "$PSScriptRoot/test-configured-lifecycle-diagnostics.ps1"
+
+& "$PSScriptRoot/test-configured-reporting-budget.ps1"

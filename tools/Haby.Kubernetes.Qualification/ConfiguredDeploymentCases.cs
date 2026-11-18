@@ -556,11 +556,11 @@ internal static class ConfiguredDeploymentCases
         public override DateTimeOffset GetUtcNow() => source.GetUtcNow() + offset;
         internal void Advance(TimeSpan value) => offset += value;
     }
-    private static void Check(bool value, string id)
+    internal static void Check(bool value, string id)
     {
         var prefix = id.Split('-')[0];
         var stage = prefix is "C01" or "C02" or "C03" or "C04" or "C05" or "C06" or "C07" or "C08" or "C09" or "C10" or "C11" or "C12" or "C13" or "R01" or "R02" or "R03" or "R04" or "R05" or "R06" or "R07" or "B01" or "B02" or "B03" or "B04" or "A01" or "A02" or "A03" ? prefix : "unknown";
-        Console.WriteLine($"Q243 configured {stage} {(value ? "passed" : "failed")}");
+        if (!value) Console.WriteLine($"Q243 configured {stage} failed");
         if (!value) throw new InvalidOperationException("Configured Deployment case failed: " + id);
         Console.WriteLine("PASS configured-" + id);
     }

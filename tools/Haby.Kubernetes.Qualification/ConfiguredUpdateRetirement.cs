@@ -128,7 +128,7 @@ internal static class ConfiguredUpdateRetirement
         Console.WriteLine(ConfiguredRetirementDiagnostics.Condition(condition, value));
         if (!value) throw new InvalidOperationException("Configured update retirement condition failed.");
     }
-    private static void Check(bool valid, string name)
+    internal static void Check(bool valid, string name)
     {
         if (!valid) throw new InvalidOperationException("Configured update retirement condition failed.");
         Console.WriteLine("PASS configured-" + name);
