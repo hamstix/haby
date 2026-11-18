@@ -137,27 +137,46 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: .qualification-evidence
-      - name: Reduce complete results and recheck live identities
+      - name: Reduce existing full qualification evidence
+        id: reduction
+        continue-on-error: true
         uses: actions/github-script@v7
         env:
           IDENTITY: ${{ needs.prepare.outputs.identity }}
           RESULTS: ${{ toJSON(needs) }}
-          CHECK_ID: ${{ needs.start.outputs.check }}
           DOWNLOAD: ${{ steps.artifacts.outcome }}
         with:
           script: |
-            const { publish } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/final-qualification.mjs`);
+            const { reduce } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/final-qualification.mjs`);
             const needs = JSON.parse(process.env.RESULTS);
             const results = Object.fromEntries(['build', 'api', 'workloads'].map(key => [key, needs[key]?.result]));
             if (process.env.DOWNLOAD !== 'success') results.build = 'failure';
-            await publish(github, JSON.parse(process.env.IDENTITY), results,
+            await reduce(github, JSON.parse(process.env.IDENTITY), results,
               `${process.env.GITHUB_WORKSPACE}/.qualification-evidence`, context.runId,
-              Number(process.env.GITHUB_RUN_ATTEMPT), process.env.CHECK_ID);
+              Number(process.env.GITHUB_RUN_ATTEMPT));
       - name: Publish compact control outcome
+        id: control
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: qualification-control-${{ github.run_id }}-${{ github.run_attempt }}
           path: qualification-summary.json
           if-no-files-found: error
           retention-days: 14
+      - name: Complete current candidate qualification after verified publication
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          IDENTITY: ${{ needs.prepare.outputs.identity }}
+          CHECK_ID: ${{ needs.start.outputs.check }}
+          REDUCTION: ${{ steps.reduction.outcome }}
+          UPLOAD: ${{ steps.control.outcome }}
+          ARTIFACT: ${{ steps.control.outputs.artifact-id }}
+        with:
+          script: |
+            const { publish } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/final-qualification.mjs`);
+            await publish(github, JSON.parse(process.env.IDENTITY), context.runId,
+              Number(process.env.GITHUB_RUN_ATTEMPT), process.env.CHECK_ID,
+              `${process.env.GITHUB_WORKSPACE}/qualification-summary.json`,
+              { reduction: process.env.REDUCTION, upload: process.env.UPLOAD, artifact: process.env.ARTIFACT });

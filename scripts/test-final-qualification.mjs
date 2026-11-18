@@ -4,7 +4,7 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { validateRequest, assertCandidate, assertCurrent, assertResults, assertJobs, artifactNames, validateEvidence, publish } from './final-qualification.mjs';
+import { validateRequest, assertCandidate, assertCurrent, assertResults, assertJobs, artifactNames, validateEvidence, reduce, publish } from './final-qualification.mjs';
 
 const sha = c => c.repeat(40);
 const request = { pr: '17', head: sha('a'), base: sha('b'), merge: sha('c'), tree: sha('d') };
@@ -75,23 +75,23 @@ function fixture() {
   for (const suite of ['functional', 'infrastructure-qualification']) {
     const row = member('postgresql-integration', suite); row.method += suite; row.case += suite;
     pgRows.push({ ...row, outcome: 'Passed' });
-    put('postgresql', `safe/${suite}/cases.json`, [{ ...row, outcome: 'Passed' }]);
-    put('postgresql', `safe/${suite}/resources.json`, owned);
-    put('postgresql', `safe/${suite}/failure-evidence.json`, { failedCases: 0 });
+    put('postgresql', `${suite}/cases.json`, [{ ...row, outcome: 'Passed' }]);
+    put('postgresql', `${suite}/resources.json`, owned);
+    put('postgresql', `${suite}/failure-evidence.json`, { failedCases: 0 });
   }
-  put('postgresql', 'safe/cases.json', pgRows);
-  put('postgresql', 'safe/counts.json', { total: 2, passed: 2, failed: 0, skipped: 0 });
-  put('postgresql', 'safe/failure-evidence.json', { failedCases: 0 });
-  put('postgresql', 'safe/results.trx', '<sanitized/>');
-  put('postgresql', 'safe/coverage.json', { status: 'complete', selection: 'full', discovered: 2, executed: 2 });
-  put('postgresql', 'safe/resources.json', owned);
-  put('postgresql', 'safe/preflight.json', { prerequisites: { exitCode: 0, cleanup: 'ok' }, ownedServer: { exitCode: 0, cleanup: 'ok' } });
+  put('postgresql', 'cases.json', pgRows);
+  put('postgresql', 'counts.json', { total: 2, passed: 2, failed: 0, skipped: 0 });
+  put('postgresql', 'failure-evidence.json', { failedCases: 0 });
+  put('postgresql', 'results.trx', '<sanitized/>');
+  put('postgresql', 'coverage.json', { status: 'complete', selection: 'full', discovered: 2, executed: 2 });
+  put('postgresql', 'resources.json', owned);
+  put('postgresql', 'preflight.json', { prerequisites: { exitCode: 0, cleanup: 'ok' }, ownedServer: { exitCode: 0, cleanup: 'ok' } });
   put('composition', 'Haby.Operator.Composition.Sample.dll', 'example-executable-bytes');
-  put('postgresql', 'safe/measurement.json', { source: identity.merge, sourceChangedDuringRun: false, untrackedFileCountAtStart: 0,
+  put('postgresql', 'measurement.json', { source: identity.merge, sourceChangedDuringRun: false, untrackedFileCountAtStart: 0,
     requiredAot: true, testExitCode: 0, reportingFailed: false, preflightCleanupExitCode: 0, selection: 'full',
     compositionSampleSha256: createHash('sha256').update('example-executable-bytes').digest('hex'),
     groups: ['functional', 'infrastructure-qualification'].map(suite => ({ suite, phase: 'complete', testExitCode: 0 })) });
-  put('postgresql', 'safe/anonymous-reflection-precheck/precheck.json', { source: identity.merge, status: 'passed', exitCode: 0,
+  put('postgresql', 'anonymous-reflection-precheck/precheck.json', { source: identity.merge, status: 'passed', exitCode: 0,
     testExitCode: 0, reportingFailed: false, cleanup: 'confirmed-by-named-test-lifecycle' });
   const common = `Source: ${identity.merge}\nDirty: False\nRun-owned private directory removed.\nRun-owned container and 4 anonymous volumes absent.\n`;
   for (const [key, name, markers] of [
@@ -113,14 +113,27 @@ test('complete separate gate outcomes reduce to compact coverage/cleanup summary
   const f = fixture();
   assert.equal(validateEvidence(f.identity, f.plan, f.artifacts, 1).length, 8);
 });
+test('PostgreSQL positive fixture uses the actual producer archive root', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8');
+  const block = workflow.split('name: Publish allowlisted PostgreSQL timing and case inventory')[1];
+  const paths = [...block.matchAll(/^\s+(\.artifacts\/postgresql-measurement\/safe\/[^\r\n]+)$/gm)].map(match => match[1]);
+  assert.ok(paths.length > 10);
+  const directories = paths.map(path => path.split('/').slice(0, -1));
+  const ancestor = directories[0].filter((part, index) => directories.every(parts => parts[index] === part)).join('/') + '/';
+  assert.equal(ancestor, '.artifacts/postgresql-measurement/safe/');
+  const actualMembers = paths.map(path => path.slice(ancestor.length));
+  const f = fixture();
+  for (const path of f.artifacts.get(f.names.postgresql).keys()) assert.ok(actualMembers.includes(path), path);
+  assert.equal(validateEvidence(f.identity, f.plan, f.artifacts, 1).length, 8);
+});
 test('each artifact and required member is independently mandatory', () => {
   const good = fixture();
   for (const name of good.artifacts.keys()) {
     const bad = new Map(good.artifacts); bad.delete(name);
     assert.throws(() => validateEvidence(good.identity, good.plan, bad, 1), name);
   }
-  for (const [key, path] of [['fast', 'results.trx'], ['linux', 'compiler.json'], ['postgresql', 'safe/resources.json'],
-    ['postgresql', 'safe/infrastructure-qualification/cases.json'], ['postgresql', 'safe/preflight.json'], ['provider', 'qualification-evidence/control/qualification-readiness-failure.txt'], ['configured', 'evidence.txt']]) {
+  for (const [key, path] of [['fast', 'results.trx'], ['linux', 'compiler.json'], ['postgresql', 'resources.json'],
+    ['postgresql', 'infrastructure-qualification/cases.json'], ['postgresql', 'preflight.json'], ['provider', 'qualification-evidence/control/qualification-readiness-failure.txt'], ['configured', 'evidence.txt']]) {
     const f = fixture(); f.artifacts.get(f.names[key]).delete(path);
     assert.throws(() => validateEvidence(f.identity, f.plan, f.artifacts, 1), path);
   }
@@ -129,11 +142,11 @@ test('focused/stale/failed/skipped/incomplete coverage and cleanup evidence fail
   for (const [key, path, delta] of [
     ['fast', 'gate.json', { source: sha('e') }], ['fast', 'gate.json', { dirty: true }],
     ['windows', 'safe/gate.json', { requiredAot: false }],
-    ['postgresql', 'safe/coverage.json', { status: 'focused' }], ['postgresql', 'safe/coverage.json', { executed: 1 }],
-    ['postgresql', 'safe/measurement.json', { testExitCode: 130 }], ['postgresql', 'safe/measurement.json', { reportingFailed: true }],
-    ['postgresql', 'safe/measurement.json', { groups: [{ suite: 'functional', phase: 'complete', testExitCode: 0 }] }],
-    ['postgresql', 'safe/resources.json', { cleanupFailed: 1 }], ['postgresql', 'safe/resources.json', { catalogDatabasesDropped: 0 }],
-    ['postgresql', 'safe/anonymous-reflection-precheck/precheck.json', { cleanup: 'not-confirmed' }],
+    ['postgresql', 'coverage.json', { status: 'focused' }], ['postgresql', 'coverage.json', { executed: 1 }],
+    ['postgresql', 'measurement.json', { testExitCode: 130 }], ['postgresql', 'measurement.json', { reportingFailed: true }],
+    ['postgresql', 'measurement.json', { groups: [{ suite: 'functional', phase: 'complete', testExitCode: 0 }] }],
+    ['postgresql', 'resources.json', { cleanupFailed: 1 }], ['postgresql', 'resources.json', { catalogDatabasesDropped: 0 }],
+    ['postgresql', 'anonymous-reflection-precheck/precheck.json', { cleanup: 'not-confirmed' }],
   ]) {
     const f = fixture(); const value = JSON.parse(f.artifacts.get(f.names[key]).get(path));
     f.put(key, path, { ...value, ...delta });
@@ -180,6 +193,10 @@ test('workflow isolates write permission and never executes candidate in publish
     assert.doesNotMatch(text, /checks: write|secrets: inherit/);
   }
 });
+test('required control artifact upload precedes candidate check completion', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/final-qualification.yml', import.meta.url), 'utf8');
+  assert.ok(workflow.indexOf('uses: actions/upload-artifact@v4') < workflow.indexOf('await publish('), 'Check can turn green before the required control upload.');
+});
 
 test('publisher reads actual artifact files, rechecks live identity and never publishes stale success', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'haby-final-control-'));
@@ -189,13 +206,14 @@ test('publisher reads actual artifact files, rechecks live identity and never pu
       const destination = join(directory, name, path); mkdirSync(join(destination, '..'), { recursive: true }); writeFileSync(destination, bytes);
     }
     const updates = [];
-    let stale = false; let missing = false;
+    let stale = false; let missing = false; let controlMissing = false; let apiError = false;
     const jobNames = ['build / validate', 'build / Native AOT (win-x64)', 'build / Native AOT (linux-x64)', 'build / postgresql-integration',
       'api / qualification', 'workloads / configured-deployment', 'workloads / durable-actions', 'workloads / deployment-kernel'];
     const listJobs = () => {}; const listArtifacts = () => {};
     const github = {
       rest: {
-        actions: { listJobsForWorkflowRunAttempt: listJobs, listWorkflowRunArtifacts: listArtifacts },
+        actions: { listJobsForWorkflowRunAttempt: listJobs, listWorkflowRunArtifacts: listArtifacts,
+          getArtifact: async () => ({ data: { id: 900, name: 'qualification-control-123-1', workflow_run: { id: 123 }, expired: controlMissing, size_in_bytes: 1 } }) },
         pulls: { get: async () => ({ data: stale ? { ...pr, head: { sha: sha('e') } } : pr }) },
         git: { getCommit: async () => ({ data: commit }) },
         checks: {
@@ -205,20 +223,80 @@ test('publisher reads actual artifact files, rechecks live identity and never pu
       },
       paginate: async method => method === listJobs ? jobNames.map(name => ({ name, status: 'completed', conclusion: 'success' })) :
         (missing ? [] : Object.values(f.names).map(name => ({ name, expired: false, size_in_bytes: 1 }))),
-      request: async () => ({ data: f.plan }),
+      request: async () => { if (apiError) throw new Error('PROTECTED-api-or-parser-output'); return { data: f.plan }; },
     };
     const summary = join(directory, 'summary.json');
     const results = { build: 'success', api: 'success', workloads: 'success' };
-    await publish(github, f.identity, results, directory, 123, 1, '9', summary);
+    const uploaded = { reduction: 'success', upload: 'success', artifact: '900' };
+    const execute = async (outcomes = results, publication = uploaded) => {
+      await reduce(github, f.identity, outcomes, directory, 123, 1, summary);
+      return publish(github, f.identity, 123, 1, '9', summary, publication);
+    };
+    await reduce(github, f.identity, results, directory, 123, 1, summary);
+    assert.equal(updates.length, 0, 'Reduction published a check before required upload.');
+    await publish(github, f.identity, 123, 1, '9', summary, uploaded);
     assert.equal(updates.at(-1).conclusion, 'success');
     stale = true;
-    await assert.rejects(publish(github, f.identity, results, directory, 123, 1, '9', summary));
+    await assert.rejects(execute());
     assert.equal(updates.at(-1).conclusion, 'failure');
+    const staleReport = JSON.parse(readFileSync(summary, 'utf8'));
+    assert.equal(staleReport.primary?.code, 'stale-candidate');
+    assert.equal(staleReport.primary?.stage, 'freshness');
+    assert.equal(staleReport.cleanup, 'confirmed-by-required-gates');
     stale = false; missing = true;
-    await assert.rejects(publish(github, f.identity, results, directory, 123, 1, '9', summary));
+    await assert.rejects(execute());
     assert.equal(updates.at(-1).conclusion, 'failure');
-    await assert.rejects(publish(github, f.identity, { ...results, api: 'cancelled' }, directory, 123, 1, '9', summary));
+    const absentArtifact = JSON.parse(readFileSync(summary, 'utf8'));
+    assert.equal(absentArtifact.primary.code, 'missing-artifact');
+    assert.equal(absentArtifact.primary.stage, 'artifacts');
+    assert.equal(absentArtifact.primary.member, f.names.fast);
+    await assert.rejects(execute({ ...results, api: 'cancelled' }));
     assert.equal(updates.at(-1).conclusion, 'failure');
+    const canceled = JSON.parse(readFileSync(summary, 'utf8'));
+    assert.equal(canceled.primary.code, 'workflow-outcome');
+    assert.equal(canceled.primary.gate, 'api');
+    assert.equal(canceled.primary.outcome, 'cancelled');
+    missing = false;
+    const member = join(directory, f.names.postgresql, 'measurement.json');
+    const saved = readFileSync(member); rmSync(member);
+    const absentMember = await reduce(github, f.identity, results, directory, 123, 1, summary);
+    assert.equal(absentMember.primary.code, 'missing-member');
+    assert.equal(absentMember.primary.stage, 'evidence');
+    assert.equal(absentMember.primary.gate, 'postgresql-integration');
+    assert.equal(absentMember.primary.member, 'measurement.json');
+    assert.equal(absentMember.cleanup, 'not-established');
+    writeFileSync(member, saved);
+    const resources = join(directory, f.names.postgresql, 'functional/resources.json');
+    const resourceBytes = readFileSync(resources);
+    writeFileSync(resources, JSON.stringify({ ...JSON.parse(resourceBytes), cleanupFailed: 1 }));
+    const cleanup = await reduce(github, f.identity, results, directory, 123, 1, summary);
+    assert.equal(cleanup.primary.code, 'cleanup-incomplete');
+    assert.equal(cleanup.primary.member, 'functional/resources.json');
+    assert.equal(cleanup.cleanup, 'incomplete');
+    assert.equal(cleanup.primary.deadline, null);
+    writeFileSync(resources, resourceBytes);
+    apiError = true;
+    const unavailable = await reduce(github, f.identity, results, directory, 123, 1, summary);
+    assert.equal(unavailable.primary.code, 'api-or-data-unavailable');
+    assert.equal(unavailable.primary.stage, 'coverage-plan');
+    assert.ok(!readFileSync(summary, 'utf8').includes('PROTECTED-api-or-parser-output'));
+    apiError = false;
+    for (const upload of ['failure', 'cancelled', 'skipped', undefined]) {
+      await assert.rejects(execute(results, { ...uploaded, upload }));
+      assert.equal(updates.at(-1).conclusion, 'failure');
+    }
+    await assert.rejects(execute(results, { ...uploaded, artifact: '' }));
+    assert.equal(updates.at(-1).conclusion, 'failure');
+    controlMissing = true;
+    await assert.rejects(execute());
+    assert.equal(updates.at(-1).conclusion, 'failure');
+    assert.ok(updates.at(-1).output.summary.includes('control-artifact-incomplete'));
+    controlMissing = false;
+    await reduce(github, f.identity, results, directory, 123, 1, summary);
+    stale = true; // HEAD advances after reduction/upload but before check completion.
+    await assert.rejects(publish(github, f.identity, 123, 1, '9', summary, uploaded));
+    assert.equal(updates.at(-1).conclusion, 'failure');
+    assert.ok(updates.at(-1).output.summary.includes('stale-candidate'));
     assert.equal(updates.filter(value => value.conclusion === 'success').length, 1);
   } finally {
     assert.ok(resolve(directory).startsWith(resolve(tmpdir()) + (process.platform === 'win32' ? '\\' : '/')));

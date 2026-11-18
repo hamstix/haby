@@ -3,7 +3,17 @@ import { readFileSync, readdirSync, lstatSync, realpathSync, writeFileSync } fro
 import { resolve, relative, isAbsolute, join } from 'node:path';
 
 const sha = value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value) && !/^0+$/.test(value);
-const requireThat = (value, message) => { if (!value) throw new Error(message); };
+class QualificationFailure extends Error {
+  constructor(message, details = {}) { super(message); this.details = details; }
+}
+const requireThat = (value, message, details) => { if (!value) throw new QualificationFailure(message, details); };
+function boundedFailure(error, stage) {
+  const detail = error instanceof QualificationFailure ? error.details : { code: 'api-or-data-unavailable' };
+  return { primary: { code: detail.code ?? 'contract-mismatch', stage: detail.stage ?? stage,
+    gate: detail.gate ?? null, member: detail.member ?? null, outcome: detail.outcome ?? 'failure', deadline: null },
+  cleanup: detail.cleanup ?? 'not-established' };
+}
+const outcome = value => ['failure', 'cancelled', 'skipped', 'timed_out', 'action_required', 'neutral'].includes(value) ? value : 'missing-or-incomplete';
 
 export function validateRequest(environment, input) {
   requireThat(environment.event === 'workflow_dispatch' && environment.ref === 'refs/heads/main', 'Installed main dispatch required.');
@@ -17,9 +27,11 @@ export function validateRequest(environment, input) {
 export function assertCurrent(identity, pr, commit) {
   requireThat(pr.state === 'open' && pr.number === identity.pr && pr.head?.sha === identity.head &&
     pr.base?.sha === identity.base && pr.base?.ref === 'main' && pr.base?.repo?.full_name === identity.repository &&
-    pr.merge_commit_sha === identity.merge, 'Candidate is stale or outside the expected PR/base.');
+    pr.merge_commit_sha === identity.merge, 'Candidate is stale or outside the expected PR/base.',
+  { code: 'stale-candidate', stage: 'freshness', gate: 'candidate', member: 'HEAD/base/merge/tree', outcome: 'stale' });
   requireThat(commit.sha === identity.merge && commit.tree?.sha === identity.tree && commit.parents?.length === 2 &&
-    commit.parents[0].sha === identity.base && commit.parents[1].sha === identity.head, 'Tested merge/tree identity mismatch.');
+    commit.parents[0].sha === identity.base && commit.parents[1].sha === identity.head, 'Tested merge/tree identity mismatch.',
+  { code: 'tested-tree-mismatch', stage: 'freshness', gate: 'candidate', member: 'merge-parents/tree', outcome: 'stale' });
 }
 
 export function assertCandidate(identity, pr, commit, permission) {
@@ -28,13 +40,16 @@ export function assertCandidate(identity, pr, commit, permission) {
 }
 
 export function assertResults(results) {
-  requireThat(['build', 'api', 'workloads'].every(name => results[name] === 'success'), 'Full qualification jobs failed, were canceled, skipped or are missing.');
+  const missing = ['build', 'api', 'workloads'].find(name => results[name] !== 'success');
+  requireThat(!missing, 'Full qualification jobs failed, were canceled, skipped or are missing.',
+    { code: 'workflow-outcome', gate: missing, member: 'workflow-result', outcome: outcome(results[missing]) });
 }
 
 export function assertJobs(jobs) {
   for (const name of ['build / validate', 'build / Native AOT (win-x64)', 'build / Native AOT (linux-x64)', 'build / postgresql-integration',
     'api / qualification', 'workloads / configured-deployment', 'workloads / durable-actions', 'workloads / deployment-kernel']) {
-    requireThat(jobs.filter(job => job.name === name && job.status === 'completed' && job.conclusion === 'success').length === 1, 'Required job is missing, canceled, skipped or failed.');
+    requireThat(jobs.filter(job => job.name === name && job.status === 'completed' && job.conclusion === 'success').length === 1, 'Required job is missing, canceled, skipped or failed.',
+      { code: 'job-outcome', gate: name, member: 'job-result', outcome: outcome(jobs.find(job => job.name === name)?.conclusion) });
   }
 }
 
@@ -55,44 +70,49 @@ export function artifactNames(identity, attempt) {
 }
 
 function json(files, path) {
-  requireThat(files.has(path), 'Required evidence member is missing.');
+  const detail = { code: 'missing-member', gate: files.qualificationGate, member: path };
+  requireThat(files.has(path), 'Required evidence member is missing.', detail);
   const text = files.get(path);
   requireThat(Buffer.byteLength(text) <= 8 * 1024 * 1024, 'Evidence member exceeds bound.');
-  return JSON.parse(text.toString());
+  try { return JSON.parse(text.toString()); }
+  catch { throw new QualificationFailure('Invalid evidence JSON.', { ...detail, code: 'invalid-member' }); }
 }
 const array = value => Array.isArray(value) ? value : [value];
-function inventory(expected, actual) {
-  requireThat(expected.length > 0 && actual.length === expected.length, 'Incomplete gate coverage.');
+function inventory(expected, actual, detail = {}) {
+  const context = { code: 'coverage-incomplete', ...detail };
+  requireThat(expected.length > 0 && actual.length === expected.length && actual.every(row => row && typeof row.method === 'string' && typeof row.case === 'string'), 'Incomplete gate coverage.', context);
   const keys = rows => rows.map(row => `${row.method}#${row.case}`).sort();
-  requireThat(JSON.stringify(keys(expected)) === JSON.stringify(keys(actual)) && actual.every(row => row.outcome === 'Passed'), 'Failed, skipped or different gate cases.');
+  requireThat(JSON.stringify(keys(expected)) === JSON.stringify(keys(actual)) && actual.every(row => row.outcome === 'Passed'), 'Failed, skipped or different gate cases.', context);
 }
 function counts(files, prefix, expected) {
   const value = json(files, `${prefix}counts.json`);
-  requireThat(value.total === expected && value.passed === expected && value.failed === 0 && value.skipped === 0, 'Gate counts are incomplete.');
-  requireThat(json(files, `${prefix}failure-evidence.json`).failedCases === 0, 'Primary test failure present.');
-  requireThat(files.has(`${prefix}results.trx`), 'Sanitized test results missing.');
+  requireThat(value.total === expected && value.passed === expected && value.failed === 0 && value.skipped === 0, 'Gate counts are incomplete.', { code: 'counts-incomplete', gate: files.qualificationGate, member: `${prefix}counts.json` });
+  requireThat(json(files, `${prefix}failure-evidence.json`).failedCases === 0, 'Primary test failure present.', { code: 'test-failure', gate: files.qualificationGate, member: `${prefix}failure-evidence.json` });
+  requireThat(files.has(`${prefix}results.trx`), 'Sanitized test results missing.', { code: 'missing-member', gate: files.qualificationGate, member: `${prefix}results.trx` });
 }
 function gate(files, prefix, identity, name, expected) {
   const value = json(files, `${prefix}gate.json`);
   requireThat(value.source === identity.merge && value.status === 'complete' && value.gate === name &&
-    value.cases === expected.length && value.dirty !== true, 'Gate source/completeness mismatch.');
-  inventory(expected, array(json(files, `${prefix}cases.json`)));
+    value.cases === expected.length && value.dirty !== true, 'Gate source/completeness mismatch.', { code: 'gate-incomplete', gate: name, member: `${prefix}gate.json` });
+  inventory(expected, array(json(files, `${prefix}cases.json`)), { gate: name, member: `${prefix}cases.json` });
   return value;
 }
-function resources(value) {
+function resources(value, member = 'resources.json') {
   requireThat(value && Number.isInteger(value.limit) && value.limit >= 2 && value.limit <= 8 &&
     value.active === 0 && value.cleanupFailed === 0 && value.readyActive === 0 && value.hostGroupsActive === 0 &&
     value.startupAttempts === value.cleaned && value.catalogDatabasesCreated === value.catalogDatabasesDropped &&
     value.peakReservedServers <= value.limit && value.peakReadyServers <= value.limit &&
-    value.hostGroupLimit >= 1 && value.hostGroupLimit < value.limit && value.peakHostGroups <= value.hostGroupLimit, 'PostgreSQL cleanup/resource accounting incomplete.');
+    value.hostGroupLimit >= 1 && value.hostGroupLimit < value.limit && value.peakHostGroups <= value.hostGroupLimit, 'PostgreSQL cleanup/resource accounting incomplete.',
+  { code: 'cleanup-incomplete', gate: 'postgresql-integration', member, cleanup: 'incomplete' });
 }
-function cleanup(text, identity, marker) {
+function cleanup(text, identity, marker, gate = 'kubernetes-provider-access') {
   const lines = text.toString().split(/\r?\n/);
   requireThat(lines.includes(`Source: ${identity.merge}`) && lines.includes('Dirty: False') &&
     lines.includes('Harness: PASS') && lines.includes('Run-owned private directory removed.') &&
     lines.filter(line => /^Run-owned container and [0-9]+ anonymous volumes absent\.$/.test(line)).length === 1 &&
-    !lines.some(line => /^FAIL |^Failure:|cleanup: FAIL|stop: FAIL|Evidence write: FAIL/.test(line)), 'Kubernetes outcome/source/cleanup incomplete.');
-  for (const item of marker) requireThat(lines.includes(item), 'Required Kubernetes lifecycle member missing.');
+    !lines.some(line => /^FAIL |^Failure:|cleanup: FAIL|stop: FAIL|Evidence write: FAIL/.test(line)), 'Kubernetes outcome/source/cleanup incomplete.',
+  { code: 'kubernetes-evidence-incomplete', gate, member: 'evidence.txt', cleanup: 'not-confirmed' });
+  for (const item of marker) requireThat(lines.includes(item), 'Required Kubernetes lifecycle member missing.', { code: 'missing-lifecycle-member', gate, member: item, cleanup: 'not-confirmed' });
 }
 
 // Read only the compact, existing per-gate reports and the candidate's existing
@@ -100,7 +120,11 @@ function cleanup(text, identity, marker) {
 export function validateEvidence(identity, plan, artifacts, attempt) {
   requireThat(Array.isArray(plan.entries) && plan.entries.length > 0, 'Coverage plan is missing.');
   const names = artifactNames(identity, attempt);
-  const files = key => { requireThat(artifacts.has(names[key]), 'Required qualification artifact is missing.'); return artifacts.get(names[key]); };
+  const gates = { fast: 'validate', windows: 'Native AOT (win-x64)', linux: 'Native AOT (linux-x64)', postgresql: 'postgresql-integration', composition: 'postgresql-integration', provider: 'kubernetes-provider-access', configured: 'kubernetes-configured-deployment', durable: 'kubernetes-durable-actions', kernel: 'kubernetes-deployment-kernel' };
+  const files = key => {
+    requireThat(artifacts.has(names[key]), 'Required qualification artifact is missing.', { code: 'missing-artifact', gate: gates[key], member: names[key] });
+    const content = artifacts.get(names[key]); content.qualificationGate = gates[key]; return content;
+  };
   const expected = (name, suite) => plan.entries.filter(row => row.gate === name && (!suite || row.suite === suite));
   const summary = [];
   for (const [key, name, prefix] of [['fast', 'validate', ''], ['windows', 'Native AOT (win-x64)', 'safe/'], ['linux', 'Native AOT (linux-x64)', 'safe/']]) {
@@ -115,21 +139,21 @@ export function validateEvidence(identity, plan, artifacts, attempt) {
     summary.push({ gate: name, cases: rows.length, status: 'complete' });
   }
   const pg = files('postgresql'); const rows = expected('postgresql-integration');
-  inventory(rows, array(json(pg, 'safe/cases.json'))); counts(pg, 'safe/', rows.length);
-  const coverage = json(pg, 'safe/coverage.json'); const measurement = json(pg, 'safe/measurement.json');
+  inventory(rows, array(json(pg, 'cases.json')), { gate: 'postgresql-integration', member: 'cases.json' }); counts(pg, '', rows.length);
+  const coverage = json(pg, 'coverage.json'); const measurement = json(pg, 'measurement.json');
   requireThat(coverage.status === 'complete' && coverage.selection === 'full' && coverage.discovered === rows.length && coverage.executed === rows.length, 'Focused or partial PostgreSQL evidence cannot qualify.');
   requireThat(measurement.source === identity.merge && measurement.sourceChangedDuringRun === false && measurement.untrackedFileCountAtStart === 0 &&
     measurement.requiredAot === true && measurement.testExitCode === 0 && measurement.reportingFailed === false && measurement.preflightCleanupExitCode === 0 && measurement.selection === 'full', 'PostgreSQL source, outcome or cleanup incomplete.');
   requireThat(measurement.groups?.length === 2 && ['functional', 'infrastructure-qualification'].every(suite => measurement.groups.filter(group => group.suite === suite && group.phase === 'complete' && group.testExitCode === 0).length === 1), 'Complete PostgreSQL suites missing.');
-  resources(json(pg, 'safe/resources.json'));
-  const preflight = json(pg, 'safe/preflight.json');
+  resources(json(pg, 'resources.json'));
+  const preflight = json(pg, 'preflight.json');
   requireThat(['prerequisites', 'ownedServer'].every(key => preflight[key]?.exitCode === 0 && preflight[key]?.cleanup === 'ok'), 'PostgreSQL preflight/cleanup evidence incomplete.');
   for (const suite of ['functional', 'infrastructure-qualification']) {
-    inventory(expected('postgresql-integration', suite), array(json(pg, `safe/${suite}/cases.json`)));
-    resources(json(pg, `safe/${suite}/resources.json`));
-    requireThat(json(pg, `safe/${suite}/failure-evidence.json`).failedCases === 0, 'PostgreSQL suite failure present.');
+    inventory(expected('postgresql-integration', suite), array(json(pg, `${suite}/cases.json`)), { gate: 'postgresql-integration', member: `${suite}/cases.json` });
+    resources(json(pg, `${suite}/resources.json`), `${suite}/resources.json`);
+    requireThat(json(pg, `${suite}/failure-evidence.json`).failedCases === 0, 'PostgreSQL suite failure present.');
   }
-  const precheck = json(pg, 'safe/anonymous-reflection-precheck/precheck.json');
+  const precheck = json(pg, 'anonymous-reflection-precheck/precheck.json');
   requireThat(precheck.source === identity.merge && precheck.status === 'passed' && precheck.exitCode === 0 && precheck.testExitCode === 0 && precheck.reportingFailed === false && precheck.cleanup === 'confirmed-by-named-test-lifecycle', 'Named reflection precheck incomplete.');
   const composition = files('composition');
   requireThat(composition.has('Haby.Operator.Composition.Sample.dll') && createHash('sha256').update(composition.get('Haby.Operator.Composition.Sample.dll')).digest('hex') === measurement.compositionSampleSha256, 'Tested composition executable missing or different.');
@@ -141,7 +165,7 @@ export function validateEvidence(identity, plan, artifacts, attempt) {
   ]) {
     const content = files(key); const members = expected(name);
     gate(content, '', identity, name, members);
-    cleanup(content.get('evidence.txt') ?? '', identity, markers);
+    cleanup(content.get('evidence.txt') ?? '', identity, markers, name);
     summary.push({ gate: name, cases: members.length, status: 'complete', cleanup: 'confirmed' });
   }
   const provider = files('provider'); const members = expected('kubernetes-provider-access');
@@ -201,25 +225,66 @@ export function readArtifacts(directory, names) {
   return result;
 }
 
-export async function publish(github, identity, results, directory, runId, attempt, checkId, summaryPath = 'qualification-summary.json') {
+export async function reduce(github, identity, results, directory, runId, attempt, summaryPath = 'qualification-summary.json') {
   const [owner, repo] = identity.repository.split('/');
-  let conclusion = 'failure'; let summary = 'Qualification failed, is stale or has incomplete evidence.'; let report = [];
+  let verified = false; let report = []; let failure = null; let stage = 'workflow-results'; let cleanupState = 'not-established';
   try {
     assertResults(results);
+    stage = 'job-results';
     const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, { owner, repo, run_id: runId, attempt_number: attempt, per_page: 100 });
     assertJobs(jobs);
+    stage = 'artifacts';
     const actualArtifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: runId, per_page: 100 });
-    for (const name of Object.values(artifactNames(identity, attempt))) requireThat(actualArtifacts.filter(item => item.name === name && !item.expired && item.size_in_bytes > 0).length === 1, 'Run artifact missing, expired or ambiguous.');
+    for (const [key, name] of Object.entries(artifactNames(identity, attempt))) requireThat(actualArtifacts.filter(item => item.name === name && !item.expired && item.size_in_bytes > 0).length === 1, 'Run artifact missing, expired or ambiguous.',
+      { code: 'missing-artifact', gate: key, member: name });
+    stage = 'coverage-plan';
     const planResponse = await github.request('GET /repos/{owner}/{repo}/contents/{path}', { owner, repo, path: 'tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json', ref: identity.merge, headers: { accept: 'application/vnd.github.raw+json' } });
     const plan = typeof planResponse.data === 'string' ? JSON.parse(planResponse.data) : planResponse.data;
     requireThat(plan && Buffer.byteLength(JSON.stringify(plan)) <= 4 * 1024 * 1024, 'Coverage plan unavailable or exceeds bound.');
+    stage = 'evidence';
     report = validateEvidence(identity, plan, readArtifacts(directory, artifactNames(identity, attempt)), attempt);
+    cleanupState = 'confirmed-by-required-gates';
+    stage = 'freshness';
     await current(github, identity);
-    conclusion = 'success'; summary = 'Complete existing qualification passed on the current exact HEAD/base/tested merge tree. Pilot maintainer trust applies; this is not architect merge approval.';
-  } catch {
+    verified = true;
+  } catch (error) {
     // Never echo API/parser messages or artifact data, which may contain secrets.
+    failure = boundedFailure(error, stage);
+    if (failure.cleanup === 'not-established') failure.cleanup = cleanupState;
   }
-  writeFileSync(summaryPath, JSON.stringify({ ...identity, runId, attempt, conclusion, gates: report }, null, 2) + '\n');
+  const reduction = { ...identity, runId, attempt, outcome: verified ? 'verified' : 'failure', gates: report,
+    primary: failure?.primary ?? null, cleanup: failure?.cleanup ?? 'confirmed-by-required-gates' };
+  writeFileSync(summaryPath, JSON.stringify(reduction, null, 2) + '\n');
+  return reduction;
+}
+
+export async function publish(github, identity, runId, attempt, checkId, summaryPath, publication) {
+  const [owner, repo] = identity.repository.split('/');
+  let conclusion = 'failure'; let summary = 'Qualification failed, is stale or has incomplete publication.'; let failure = null; let stage = 'control-summary'; let cleanupState = 'not-established';
+  try {
+    const reduction = JSON.parse(readFileSync(summaryPath, 'utf8'));
+    requireThat(reduction.runId === runId && reduction.attempt === attempt &&
+      ['repository', 'control', 'pr', 'head', 'base', 'merge', 'tree'].every(key => reduction[key] === identity[key]), 'Reduction is incomplete or belongs to another candidate.');
+    if (reduction.cleanup === 'confirmed-by-required-gates') cleanupState = reduction.cleanup;
+    if (reduction.outcome !== 'verified' && reduction.primary) failure = { primary: reduction.primary, cleanup: reduction.cleanup };
+    requireThat(reduction.outcome === 'verified', 'Reduction failed.', { code: 'reduction-incomplete', member: 'qualification-summary.json' });
+    stage = 'publication';
+    requireThat(publication?.reduction === 'success' && publication?.upload === 'success' && /^[1-9][0-9]*$/.test(publication?.artifact ?? ''), 'Required control artifact publication failed or was canceled.',
+      { code: 'control-upload-incomplete', gate: 'control', member: 'qualification-summary.json', outcome: outcome(publication?.reduction !== 'success' ? publication?.reduction : publication?.upload) });
+    stage = 'control-artifact';
+    const artifact = (await github.rest.actions.getArtifact({ owner, repo, artifact_id: Number(publication.artifact) })).data;
+    requireThat(artifact.id === Number(publication.artifact) && artifact.name === `qualification-control-${runId}-${attempt}` &&
+      artifact.workflow_run?.id === runId && artifact.expired === false && artifact.size_in_bytes > 0, 'Required control artifact is missing or belongs to another invocation.',
+    { code: 'control-artifact-incomplete', gate: 'control', member: `qualification-control-${runId}-${attempt}` });
+    stage = 'freshness';
+    await current(github, identity);
+    conclusion = 'success'; summary = 'Complete existing qualification and required control publication passed on the current exact HEAD/base/tested merge tree. Pilot maintainer trust applies; this is not architect merge approval.';
+  } catch (error) {
+    // Completion never grants green credit for reduction/upload/freshness failure.
+    failure ??= boundedFailure(error, stage);
+    if (failure.cleanup === 'not-established') failure.cleanup = cleanupState;
+    summary = 'Qualification did not pass: ' + JSON.stringify(failure);
+  }
   const existing = (await github.rest.checks.get({ owner, repo, check_run_id: Number(checkId) })).data;
   requireThat(existing.head_sha === identity.head && existing.name === 'Final qualification' && existing.external_id === `${runId}:${attempt}`, 'Qualification check identity mismatch.');
   await github.rest.checks.update({ owner, repo, check_run_id: Number(checkId), status: 'completed', conclusion,

@@ -89,9 +89,28 @@ executed or printed. Parser/API errors do not echo their contents.
 Immediately before completing the real aggregate check, the publisher fetches
 live PR/merge identities again. A newer HEAD has no matching check; a changed
 base/tree invalidates the result. A compact control artifact records identities,
-run/attempt, outcome and per-gate counts/cleanup. Cancellation or missing publisher
+run/attempt, reduction outcome and per-gate counts/cleanup. Reduction first stages
+this report, then the required control upload returns an artifact ID. The final
+step verifies that artifact's name, ID, current run, availability and nonempty
+size before rechecking live identities and completing the candidate check. Failed,
+canceled, skipped or missing upload cannot grant success. The immutable artifact
+records the prepublication reduction; the check records the final publication and
+freshness result. Cancellation or missing publisher
 leaves an incomplete check rather than a success. Architect merge approval remains
 separate from successful execution.
+
+Failure reports retain a bounded primary code, stage, expected gate/member and
+outcome, with deadline facts explicitly unknown when unavailable and cleanup as a
+separate state. Missing members, incomplete cleanup and stale candidates remain
+distinct; unknown parser/API failures use a fixed code and never echo their raw
+messages. The check retains the first reduction failure when publication follows.
+
+The PostgreSQL artifact uses archive-relative `cases.json`, `measurement.json`,
+`functional/cases.json`, etc. Its producer uploads only paths beneath `safe/`, so
+that directory is the archive root. Native artifacts also upload `compiler.json`
+beside `safe/`, retaining their `safe/` prefix. A focused contract test checks the
+PostgreSQL fixture against the actual producer path list. See the upload action's
+[multiple-path root and artifact ID contract](https://github.com/actions/upload-artifact/blob/v4/README.md).
 
 ## Minimal protection proposal, not applied
 
