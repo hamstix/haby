@@ -432,7 +432,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($parts[2] -ceq 'retirement'){
                 if($Mode -cne 'configured' -or $parts.Count -lt 4){return $invalid}
                 $phase=$parts[3];$shape=$false
-                if($phase -ceq 'WaitStart'){$shape=$parts.Count -eq 4}
+                if($phase -cin @('WaitStart','RecipientWaitExpired')){$shape=$parts.Count -eq 4}
                 elseif($phase -ceq 'WaitReturned'){
                     $shape=$parts.Count -eq 9 -and $parts[4] -cin @('true','false') -and $parts[5] -cin @('true','false') -and $parts[6] -cin @('true','false') -and
                         $parts[7] -cin @('not-ready','applied','inventory-conflict','prerequisite-incomplete','generation-superseded','current-authority-unavailable','unsupported-inventory','commit-unconfirmed','old-recipients-present','recipient-evidence-incomplete','unknown') -and
@@ -448,7 +448,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
                 }elseif($phase -ceq 'OwnedFinalizer'){$shape=$parts.Count -eq 5 -and $parts[4] -cin @('true','false','unknown')}
                 elseif($phase -ceq 'Condition'){$shape=$parts.Count -eq 6 -and $parts[4] -cin @('U11Ready','U11Applied','U11Generation','Unknown') -and $parts[5] -cin @('true','false')}
                 if(!$shape){return $invalid}
-                if($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup') -or ($phase -ceq 'Condition' -and $parts[5] -ceq 'false')){$hasFailure=$true}
+                if($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','RecipientWaitExpired') -or ($phase -ceq 'Condition' -and $parts[5] -ceq 'false')){$hasFailure=$true}
                 $records.Add('Diagnostic workload: '+$line.Substring(5))
             }elseif($parts[2] -ceq 'update'){
                 if($Mode -cne 'configured' -or $parts.Count -lt 5){return $invalid}

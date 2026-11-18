@@ -51,42 +51,40 @@ internal static class ConfiguredUpdateRetirement
     }
     internal static async Task CompleteAsync(Kubernetes admin, IDbContextFactory<ManifestCatalogDbContext> contexts,
         Func<InternalDurableActions> actions, DurableChangeSetCommit accepted, DeploymentReceipt prior, RuntimeBootstrap target,
-        V1Pod held, ConcurrentQueue<Guid> requests, CancellationToken token)
+        V1Pod held, ConcurrentQueue<Guid> requests,
+        Func<CancellationToken, Action<DeploymentRecipientDiagnostic>, Task<RecipientObservation>> recipients,
+        Func<RecipientObservation, bool> validateRecipients, CancellationToken token)
     {
         Console.WriteLine("Q243 configured update-retirement-ready start");
         var options = new RolloutOptions(MaximumCalls: 128, MaximumRounds: 128, PollMilliseconds: 250, RequestMilliseconds: 60000);
-        var waiting = await actions().WaitUpdateAsync(accepted, "configured-update-held-recipient", "qualification", options, new(), token);
-        var old = await admin.CoreV1.ReadNamespacedPodAsync(held.Metadata.Name, prior.Namespace, cancellationToken: token);
+        using var completionBudget = CancellationTokenSource.CreateLinkedTokenSource(token);
+        completionBudget.CancelAfter(TimeSpan.FromMilliseconds(options.RequestMilliseconds));
+        var completionToken = completionBudget.Token;
+        var waiting = await actions().WaitUpdateAsync(accepted, "configured-update-held-recipient", "qualification", options, new(), completionToken);
+        var old = await admin.CoreV1.ReadNamespacedPodAsync(held.Metadata.Name, prior.Namespace, cancellationToken: completionToken);
         Check(waiting.Ready && !waiting.Applied && waiting.CompletionReason == "old-recipients-present" &&
             old.Metadata.Uid == held.Metadata.Uid && old.Metadata.DeletionTimestamp is not null,
             "U09-fresh-target-ready-terminating-old-UID-chain-blocks-retirement");
-        await using (var db = await contexts.CreateDbContextAsync(token))
+        await using (var db = await contexts.CreateDbContextAsync(completionToken))
         {
             var id = Guid.Parse(accepted.DeploymentId.ToString());
-            Check((await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == id, token)).AppliedGeneration == accepted.Generation.Value - 1 &&
-                !await db.GenerationStageCheckpoints.AnyAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value && x.Stage == "RetirementStarted", token) &&
-                await db.RuntimeConfigurationPermissions.CountAsync(x => x.BindingId == Guid.Parse(target.BindingId) && x.Status == "Published", token) == 4,
+            Check((await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == id, completionToken)).AppliedGeneration == accepted.Generation.Value - 1 &&
+                !await db.GenerationStageCheckpoints.AnyAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value && x.Stage == "RetirementStarted", completionToken) &&
+                await db.RuntimeConfigurationPermissions.CountAsync(x => x.BindingId == Guid.Parse(target.BindingId) && x.Status == "Published", completionToken) == 4,
                 "U10-old-permissions-retained-no-retirement-start-previous-Applied");
         }
         Console.WriteLine("Q243 configured update-retirement-release start");
-        await ReleaseAsync(admin, prior.Namespace, held, token);
-        using (var disappearance = CancellationTokenSource.CreateLinkedTokenSource(token))
-        {
-            disappearance.CancelAfter(TimeSpan.FromSeconds(30));
-            while (true)
+        await ReleaseAsync(admin, prior.Namespace, held, completionToken);
+        var last = new DeploymentRecipientDiagnostic(-1, -1, -1, RecipientProjectionFailure.Unknown, RecipientProjectionFailure.Unknown);
+        await ConfiguredRecipientWait.UntilAbsentAsync(ct => recipients(ct, value => last = value), validateRecipients,
+            options.MaximumRounds, options.PollMilliseconds, () =>
             {
-                try
-                {
-                    var pod = await admin.CoreV1.ReadNamespacedPodAsync(held.Metadata.Name, prior.Namespace, cancellationToken: disappearance.Token);
-                    if (pod.Metadata.Uid != held.Metadata.Uid) throw new InvalidOperationException("Old recipient replaced.");
-                }
-                catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.NotFound) { break; }
-                await Task.Delay(100, disappearance.Token);
-            }
-        }
+                Console.WriteLine(ConfiguredRetirementDiagnostics.Recipients(last));
+                Console.WriteLine("Q243 configured retirement RecipientWaitExpired");
+            }, completionToken);
         Console.WriteLine("Q243 configured update-retirement-complete start");
         var complete = await ConfiguredRetirementDiagnostics.WaitAsync(() => actions().WaitUpdateAsync(accepted,
-            "configured-update-finished-recipients", "qualification", options, new(), token), accepted.Generation.Value);
+            "configured-update-finished-recipients", "qualification", options, new(), completionToken), accepted.Generation.Value);
         Require("U11Ready", complete.Ready);
         Require("U11Applied", complete.Applied);
         Require("U11Generation", complete.AppliedGeneration == accepted.Generation.Value);

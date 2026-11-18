@@ -92,6 +92,56 @@ public sealed class DeploymentRecipientTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Fixture_wait_requires_every_previous_UID_chain_absent_after_held_Pod_disappears(bool terminating)
+    {
+        var f = Fixture();
+        foreach (var name in new[] { "held", "other" })
+        {
+            var set = KubernetesJson.Deserialize<V1ReplicaSet>(KubernetesJson.Serialize(f.Sets.Items[0]));
+            set.Metadata.Name = name; set.Metadata.Uid = name + "-rs";
+            set.Spec.Template.Spec.Containers.Single(x => x.Name == f.Intent.Target.Container).Image = "registry.example/app:v1";
+            f.Sets.Items.Add(set);
+            var pod = KubernetesJson.Deserialize<V1Pod>(KubernetesJson.Serialize(f.Pods.Items[0]));
+            pod.Metadata.Name = name; pod.Metadata.Uid = name + "-pod";
+            pod.Metadata.OwnerReferences[0].Name = name; pod.Metadata.OwnerReferences[0].Uid = set.Metadata.Uid;
+            pod.Metadata.DeletionTimestamp = terminating ? DateTime.UtcNow : null;
+            pod.Spec = set.Spec.Template.Spec;
+            f.Pods.Items.Add(pod);
+        }
+        var reads = 0;
+        await ConfiguredRecipientWait.UntilAbsentAsync(_ =>
+        {
+            if (++reads == 2) f.Pods.Items.RemoveAt(1); // Held gone, other UID chain remains.
+            if (reads == 3) f.Pods.Items.RemoveAt(1);
+            var sample = DeploymentRecipients.Evaluate(f.Intent, f.Receipt, f.Sets, f.Pods, new());
+            Assert.Equal(reads == 3, sample.Absent);
+            return Task.FromResult(sample);
+        }, sample => DeploymentRecipients.Validate(DeploymentIntents.Encode(f.Intent), DeploymentIntents.Encode(f.Receipt), sample),
+            3, 1, () => Assert.Fail("Unexpected expiry."), default);
+        Assert.Equal(3, reads);
+    }
+
+    [Fact]
+    public async Task Fixture_recipient_wait_never_renews_cancellation_or_accepts_unvalidated_absence()
+    {
+        using var budget = new CancellationTokenSource();
+        var reads = 0; var expiries = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ConfiguredRecipientWait.UntilAbsentAsync(ct =>
+        {
+            Assert.Equal(budget.Token, ct);
+            reads++; budget.Cancel();
+            return Task.FromResult(new RecipientObservation(true, "old-recipients-absent"));
+        }, _ => true, 128, 1, () => expiries++, budget.Token));
+        Assert.Equal(1, reads); Assert.Equal(1, expiries);
+        await Assert.ThrowsAsync<TimeoutException>(() => ConfiguredRecipientWait.UntilAbsentAsync(_ =>
+            Task.FromResult(new RecipientObservation(true, "old-recipients-absent")), _ => false,
+            2, 1, () => expiries++, default));
+        Assert.Equal(2, expiries);
+    }
+
+    [Theory]
     [InlineData("set-page")]
     [InlineData("pod-page")]
     [InlineData("remaining")]

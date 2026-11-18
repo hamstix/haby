@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $records = @(
  'Q243 configured entry start',
  'Q243 configured retirement WaitStart',
+ 'Q243 configured retirement RecipientWaitExpired',
  'Q243 configured retirement Recipients 2 1 0 Container None',
  'Q243 configured retirement Closure CatalogHash Unknown',
  'Q243 configured retirement Closure PrerequisiteIncomplete RetirementProgressChanged',

@@ -92,7 +92,8 @@ internal static class ConfiguredDeploymentUpdateCases
                 });
             await admin.AppsV1.PatchNamespacedDeploymentAsync(new(foreignPatch.ToJsonString(), V1Patch.PatchType.JsonPatch), previous.Name, previous.Namespace, cancellationToken: token);
             var wire = new PatchEvidence();
-            var update = new InternalDeploymentAction(secrets, connection => new DeploymentKernel(connection.Binding,
+            DeploymentKernel? recipientKernel = null;
+            var update = new InternalDeploymentAction(secrets, connection => recipientKernel = new DeploymentKernel(connection.Binding,
                 ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true, recipientDiagnostic: value => Console.WriteLine(ConfiguredRetirementDiagnostics.Recipients(value)));
             var recordedUpdate = new ConfiguredDeploymentUpdateHandler(update,
                 (phase, result) => Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Delegated(phase, result, wire.Writes)));
@@ -226,7 +227,10 @@ internal static class ConfiguredDeploymentUpdateCases
                 (await verify.RuntimeIdentityBindings.AsNoTracking().SingleAsync(x => x.Id == binding, token)).Status == "Prepared",
                 "U08-runtime-new-revision-delivery-old-permissions-and-Applied-boundary");
             await verify.DisposeAsync();
-            await ConfiguredUpdateRetirement.CompleteAsync(admin, contexts, Actions, accepted, previous, target, held, requests, token);
+            await ConfiguredUpdateRetirement.CompleteAsync(admin, contexts, Actions, accepted, previous, target, held, requests,
+                (ct, diagnostic) => (recipientKernel ?? throw new InvalidOperationException("Confirmed recipient kernel unavailable."))
+                    .RecipientsAsync(intent, DeploymentIntents.DecodeReceipt(result.Receipt!), new(), ct, diagnostic),
+                sample => update.ValidateRecipients(DeploymentIntents.Encode(intent), result.Receipt!, sample), token);
         }
         catch (Exception error)
         {

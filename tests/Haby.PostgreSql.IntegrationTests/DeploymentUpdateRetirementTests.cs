@@ -13,6 +13,7 @@ public sealed partial class DurableDeploymentPlanningTests
     {
         internal bool OldRecipients, PendingReadiness;
         internal int ReadinessReads, RecipientReads;
+        internal int? RemainingOldRecipients;
         public int MaximumObservationCalls => 5;
         internal Func<CancellationToken, Task>? BeforeRecipients;
         public int ObservationSeconds(string intent, string receipt) => adapter.ObservationSeconds(intent, receipt);
@@ -30,7 +31,8 @@ public sealed partial class DurableDeploymentPlanningTests
         public async ValueTask<RecipientObservation> ObserveRecipientsAsync(InternalActionContext context, string intent, string receipt, RecipientObservationOptions options, CancellationToken token)
         {
             RecipientReads++; if (BeforeRecipients is not null) await BeforeRecipients(token); token.ThrowIfCancellationRequested();
-            return new(!OldRecipients, OldRecipients ? "old-recipients-present" : "old-recipients-absent", new("fixture-recipient/v1", receipt));
+            var previousRemain = RemainingOldRecipients is { } count ? count > 0 : OldRecipients;
+            return new(!previousRemain, previousRemain ? "old-recipients-present" : "old-recipients-absent", new("fixture-recipient/v1", receipt));
         }
         public bool ValidateRecipients(string intent, string receipt, RecipientObservation observation) =>
             observation.Evidence == new DurableActionPayload("fixture-recipient/v1", receipt);
@@ -50,6 +52,7 @@ public sealed partial class DurableDeploymentPlanningTests
     [InlineData(true, "cancel-after-permission")]
     [InlineData(false, "none")]
     [InlineData(true, "old-pod")]
+    [InlineData(true, "multiple-old-pods")]
     [InlineData(true, "stale-ready")]
     [InlineData(true, "after-start")]
     [InlineData(true, "after-permission")]
@@ -113,6 +116,7 @@ public sealed partial class DurableDeploymentPlanningTests
             update.PendingReadiness = false;
         }
         var recipientOptions = interruption == "recipient-budget" ? new RecipientObservationOptions(MaximumCalls: 1) : new RecipientObservationOptions();
+        if (interruption == "multiple-old-pods") update.RemainingOldRecipients = 2;
         update.OldRecipients = interruption == "old-pod"; update.PendingReadiness = interruption == "stale-ready";
         if (interruption == "recipient-failure") update.BeforeRecipients = _ => throw new IOException("Simulated recipient observation unavailable.");
         if (interruption == "cancel") update.BeforeRecipients = _ => { canceled.Cancel(); return Task.CompletedTask; };
@@ -160,12 +164,12 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.Equal(0, update.RecipientReads);
             await Assert.ThrowsAsync<InvalidDataException>(() => actions.WaitUpdateAsync(accepted, "first-update-wait", "tester", options, new(), default).AsTask());
         }
-        if (interruption is "old-pod" or "stale-ready" or "target-revoked" or "obsolete-revoked" || disrupted && interruption != "after-applied" || interruption is "cancel" or "cancel-after-start" or "cancel-after-permission" or "recipient-failure" or "missing-workload" or "recipient-budget")
+        if (interruption is "old-pod" or "multiple-old-pods" or "stale-ready" or "target-revoked" or "obsolete-revoked" || disrupted && interruption != "after-applied" || interruption is "cancel" or "cancel-after-start" or "cancel-after-permission" or "recipient-failure" or "missing-workload" or "recipient-budget")
         {
             await using var verify = await contexts.CreateDbContextAsync();
             Assert.Equal(scenario.Commit.Generation.Value, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
             Assert.False(await verify.GenerationStageCheckpoints.AnyAsync(x => x.Generation == accepted.Generation.Value && x.Stage == "RetirementCompleted"));
-            if (interruption is "old-pod" or "stale-ready") Assert.Equal(4, await verify.RuntimeConfigurationPermissions.CountAsync(x => x.Status == "Published"));
+            if (interruption is "old-pod" or "multiple-old-pods" or "stale-ready") Assert.Equal(4, await verify.RuntimeConfigurationPermissions.CountAsync(x => x.Status == "Published"));
         }
         if (interruption is "target-revoked" or "obsolete-revoked") return;
         if (interruption == "missing-workload")
@@ -205,6 +209,18 @@ public sealed partial class DurableDeploymentPlanningTests
             Assert.Equal(scenario.Commit.Generation.Value, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
             Assert.Equal(interruption == "missing-progress" ? 1 : 0, await verify.RuntimeConfigurationPermissions.CountAsync(x => x.Status == "Revoked"));
             return;
+        }
+        if (interruption == "multiple-old-pods")
+        {
+            update.RemainingOldRecipients = 1; // Held recipient gone; another old/terminating recipient remains.
+            var remaining = await Actions().WaitUpdateAsync(accepted, "held-gone-other-remains", "tester", options, new(), default);
+            Assert.True(remaining.Ready); Assert.False(remaining.Applied);
+            Assert.Equal("old-recipients-present", remaining.CompletionReason);
+            await using var verify = await contexts.CreateDbContextAsync();
+            Assert.Equal(scenario.Commit.Generation.Value, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            Assert.False(await verify.GenerationStageCheckpoints.AnyAsync(x => x.Generation == accepted.Generation.Value && x.Stage == "RetirementStarted"));
+            Assert.Equal(4, await verify.RuntimeConfigurationPermissions.CountAsync(x => x.Status == "Published"));
+            update.RemainingOldRecipients = 0;
         }
         update.OldRecipients = false; update.PendingReadiness = false; update.BeforeRecipients = null;
         var completed = first is { Applied: true } ? first : await Actions().WaitUpdateAsync(accepted, "restart-update-wait", "tester", options, new(), default);

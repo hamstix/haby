@@ -118,7 +118,13 @@ remain regression gates.
 The existing configured Kubernetes contour reuses the pinned consumer graph and
 image. A fixture-owned finalizer holds one verified old Pod during target readiness;
 its UID chain and terminating state must block retirement. The fixture releases
-only its own marker under UID/resourceVersion checks with bounded cleanup, then
+only its own marker under UID/resourceVersion checks with bounded cleanup. Both
+normal waits and the intervening production recipient observations share one
+absolute 60-second fixture budget. Releasing the held Pod is insufficient: every
+previous UID-chain recipient, including terminating Pods, must be absent before
+one normal final wait. Observation polling cannot submit lifecycle actions, renew
+attempts or extend the original rollout deadline. Expiry reports only the last
+bounded recipient counts/categories and a fixed expiry marker. The fixture then
 requires exact old-right denial, retained target delivery and Applied completion.
 The existing Recreate/RollingUpdate venues remain; no new image, cluster mode,
 PostgreSQL matrix or load campaign is added. Test inventories are obligations,
