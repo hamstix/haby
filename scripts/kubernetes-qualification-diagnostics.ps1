@@ -390,13 +390,17 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS configured-U06-conditional-configured-patch-response-readback-lost-response-recovery',
           'PASS configured-U07-sidecar-foreign-metadata-and-api-defaulting-preserved',
           'PASS configured-U08-runtime-new-revision-delivery-old-permissions-and-Applied-boundary',
+          'PASS configured-U09-fresh-target-ready-terminating-old-UID-chain-blocks-retirement',
+          'PASS configured-U10-old-permissions-retained-no-retirement-start-previous-Applied',
+          'PASS configured-U11-exact-obsolete-retirement-before-update-Applied',
+          'PASS configured-U12-old-rights-denied-target-exact-delivery-stable-binding',
           'PASS configured-owned-namespace-absent',
           'PASS configured-owned-catalog-cleanup')
     }
     $stages=@('entry','namespace-create','namespace-created','catalog-init','accepted-plan','host-build','host-start',
         'first-submit','uncertain-submit','cli-submit','pod-startup','readback','prepare-update','cleanup-ownership',
         'cleanup-namespace','cleanup-catalog','completed','unknown')
-    if($Mode -ceq 'configured'){$stages+=@('update-target-envelope','update-import','update-image-baseline','update-plan')}
+    if($Mode -ceq 'configured'){$stages+=@('update-target-envelope','update-import','update-image-baseline','update-plan','update-retirement-hold','update-retirement-ready','update-retirement-release','update-retirement-complete')}
     $outcomes=@('Confirmed','Refused','Conflict','Uncertain','CanceledBeforeDispatch','ObservationUnavailable','NotConfirmed','unknown')
     $codes=@('response-confirmed','observation-confirmed','evidence-not-confirmed','response-unconfirmed','invalid-input',
         'connection-unavailable','dispatch-uncertain','occupied-name','owned-state-conflict','uid-conflict','api-conflict',
@@ -425,7 +429,38 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($line.Length -gt 160){return $invalid}
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
-            if($parts[2] -ceq 'update'){
+            if($parts[2] -ceq 'retirement'){
+                if($Mode -cne 'configured' -or $parts.Count -lt 4){return $invalid}
+                $phase=$parts[3];$shape=$false
+                if($phase -cin @('WaitStart','RecipientWaitExpired','DrainStart','DrainComplete','DrainOwnershipRefused','DrainExhausted','HeldReadStart','HeldReadReturned','MembersOverflow')){$shape=$parts.Count -eq 4}
+                elseif($phase -ceq 'WaitMembers'){
+                    $shape=$parts.Count -eq 9 -and @($parts[4..6] | Where-Object {$_ -cnotmatch '^(0|[1-9]|1[0-6])$'}).Count -eq 0 -and $parts[7] -cin @('true','false') -and $parts[8] -ceq 'Unknown'
+                    if($shape){$shape=[int]$parts[5] -le [int]$parts[4] -and [int]$parts[6] -le [int]$parts[4]}
+                }elseif($phase -ceq 'Member'){
+                    $shape=$parts.Count -eq 11 -and $parts[4] -cmatch '^(0|[1-9]|1[0-5])$' -and
+                        $parts[5] -cin @('Ready','Pending','Conflict','Unavailable','Refused','NotSubmitted','NotObserved','Unknown') -and
+                        $parts[6] -cin @('ready','rollout-pending','progress-deadline','status-invalid','owned-state-conflict','object-absent','api-access-denied','observation-unavailable','api-rejected','input-invalid','runtime-authority-unavailable','attempt-superseded','clock-budget-elapsed','call-stopped','read-timeout','not-submitted','not-observed','Unknown') -and
+                        $parts[7] -cin @('Active','Expired','Unknown') -and $parts[8] -cin @('true','false') -and $parts[9] -cin @('true','false') -and $parts[10] -ceq 'Unknown'
+                }elseif($phase -ceq 'WaitReturned'){
+                    $shape=$parts.Count -eq 9 -and $parts[4] -cin @('true','false') -and $parts[5] -cin @('true','false') -and $parts[6] -cin @('true','false') -and
+                        $parts[7] -cin @('not-ready','applied','inventory-conflict','prerequisite-incomplete','generation-superseded','current-authority-unavailable','unsupported-inventory','commit-unconfirmed','old-recipients-present','recipient-evidence-incomplete','unknown') -and
+                        $parts[8] -cin @('Complete','CallLimit','RequestDeadline','Canceled','Interrupted','Unknown')
+                }elseif($phase -ceq 'Closure'){
+                    $shape=$parts.Count -eq 6 -and $parts[4] -cin @('Unknown','Begin','Recipients','ClosureSource','CaptureSubmitted','ObsoleteProgress','RetirementMarker','CurrentRuntime','ConfigurationComplete','FreshSamples','RetirementStart','Revoke','Publications','CatalogHash','SamplesHash','AppliedCas','CloseRequest','PrerequisiteIncomplete') -and
+                        $parts[5] -cin @('Unknown','InternalUPDATECompletionRequiresAnUpdateInventory','UPDATEInventoryRequired','UpdateExpectedAppliedChanged','UpdateCompletionExceedsCheckpointBound','UpdateAppliedCompareAndSwapFailed','UpdateInventoryMissing','UpdateGenerationSuperseded','UpdateAttemptsChanged','ObsoleteInventoryChanged','UnretiredPublicationChanged','RetirementProgressChanged','RetirementStartMismatch','RetirementStartRecipientEvidenceInvalid','ConfigurationAuthorityRequired','RetirementNotStarted','FrozenObsoletePermissionMismatch','ObsoletePublicationHasAnActiveLiveReference','RetirementProgressMismatch','CurrentObsoletePermissionNoLongerMatchesInventory','FrozenCompletionInventoryRequired','CompletionProofUnavailable','CompletionProofCorrupt','CompletionProofOriginMismatch','CompletionReadinessEvidenceChanged','CompletionPrerequisiteEvidenceMismatch','CompletionRequestUnavailable','CompletionRequestOutcomeMismatch','ReadinessSampleExceedsBound','ReadinessSampleCoverageMismatch','FreshCompleteSetReadinessRequired','FreshReadinessSampleOriginMismatch','CompletionCheckpointReferenceMismatch','BindingBoundExceeded','PublicationBoundExceeded','CurrentPublicationPrerequisiteUnavailable','CompletionPrerequisiteTextExceedsBound','UnexpectedActionInventory','CompleteActionEvidenceRequired','ManagedInventoryBoundScopeMismatch','PreparationInventoryBoundExceeded','CompletionPublicationCoverageMismatch','PublicationOriginRequired','RetainedPublicationEvidenceMismatch','CompletionEvidenceExceedsBound','FrozenUpdateRequired','UpdateCompletionCorrupt','UpdateCompletionMissing','UpdateCompletionOriginMismatch','UpdateCompletionPrerequisitesChanged','UpdateCompletionRequestMismatch','CurrentObjectEvidenceExceedsBound','CompleteUpdateCurrentObjectEvidenceRequired','CurrentObjectReceiptMismatch','RetirementStartEvidenceMismatch','RetirementStartOriginMismatch','ExactObsoleteRevocationProofMismatch')
+                }elseif($phase -ceq 'DrainRemaining'){
+                    $shape=$parts.Count -eq 5 -and $parts[4] -cmatch '^(unknown|0|[1-9]|[1-5][0-9]|6[0-4])$'
+                }elseif($phase -ceq 'Recipients'){
+                    $shape=$parts.Count -eq 9 -and @($parts[4..6] | Where-Object {$_ -cnotmatch '^(unknown|0|[1-9][0-9]{0,3}|1[0-5][0-9]{3}|16[0-2][0-9]{2}|163[0-7][0-9]|1638[0-4])$'}).Count -eq 0 -and
+                        $parts[7] -cin @('None','Container','Resources','Ports','Probes','RuntimeAccount','RuntimeBootstrap','RuntimeVolume','RuntimeMount','RuntimeInjection','Shape','Unknown') -and $parts[8] -cin @('None','Container','Resources','Ports','Probes','RuntimeAccount','RuntimeBootstrap','RuntimeVolume','RuntimeMount','RuntimeInjection','Shape','Unknown')
+                }elseif($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','DrainCleanup','HeldReadThrew','Unknown')){
+                    $shape=$parts.Count -eq 5 -and $parts[4] -cin @('Canceled','Api','Data','Timeout','Condition','Unknown')
+                }elseif($phase -ceq 'OwnedFinalizer'){$shape=$parts.Count -eq 5 -and $parts[4] -cin @('true','false','unknown')}
+                elseif($phase -ceq 'Condition'){$shape=$parts.Count -eq 6 -and $parts[4] -cin @('U09Ready','U09NotApplied','U09OldRecipients','U09HeldUid','U09Terminating','U11Ready','U11Applied','U11Generation','Unknown') -and $parts[5] -cin @('true','false')}
+                if(!$shape){return $invalid}
+                if($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','RecipientWaitExpired','DrainOwnershipRefused','DrainExhausted','DrainCleanup','HeldReadThrew','MembersOverflow') -or ($phase -ceq 'Condition' -and $parts[5] -ceq 'false')){$hasFailure=$true}
+                $records.Add('Diagnostic workload: '+$line.Substring(5))
+            }elseif($parts[2] -ceq 'update'){
                 if($Mode -cne 'configured' -or $parts.Count -lt 5){return $invalid}
                 $phase=$parts[3];$state=$parts[4];$shape=$false
                 if($phase -ceq 'rejection'){

@@ -42,7 +42,8 @@ internal sealed record SubmittedProof(int Format, string Stage, Guid Deployment,
 internal sealed record ReadyMember(RolloutOrigin Origin, Guid Attempt, Guid Observation);
 internal sealed record ReadyProof(int Format, string Stage, Guid Deployment, long Generation,
     string InputFingerprint, Guid Submitted, ReadyMember[] Members);
-internal sealed record RolloutRequest(string Action, string Actor, RolloutOptions? Options, RolloutResume[] Members);
+internal sealed record RolloutRequest(string Action, string Actor, RolloutOptions? Options, RolloutResume[] Members,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RecipientObservationOptions? Recipients = null);
 
 internal static class RolloutJson
 {
@@ -53,7 +54,7 @@ internal static class RolloutJson
         var result = JsonSerializer.Deserialize(json, RolloutMetadata.Default.RolloutResult)
             ?? throw new InvalidDataException("Observation result unavailable.");
         if (result.CompletionReason is not ("not-ready" or "applied" or "inventory-conflict" or "prerequisite-incomplete" or
-                "generation-superseded" or "current-authority-unavailable" or "unsupported-inventory" or "commit-unconfirmed") ||
+                "old-recipients-present" or "recipient-evidence-incomplete" or "generation-superseded" or "current-authority-unavailable" or "unsupported-inventory" or "commit-unconfirmed") ||
             result.Retirement == Guid.Empty || result.AppliedGeneration is <= 0 ||
             result.Applied && (!result.Ready || result.Retirement is null || result.AppliedGeneration is null || result.CompletionReason != "applied") ||
             !result.Applied && result.CompletionReason == "applied" || !Enum.IsDefined(result.Stop) || result.Members is not { Length: > 0 and <= 512 } ||

@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Haby.Persistence.PostgreSql;
 
-internal enum InternalActionFault { BeforeMarkerCommit, AfterMarkerCommit, AfterExternalResult, BeforeCompletionCommit, AfterCompletionCommit, BeforeReadinessCheckpoint }
+internal enum InternalActionFault { BeforeMarkerCommit, AfterMarkerCommit, AfterExternalResult, BeforeCompletionCommit, AfterCompletionCommit, BeforeReadinessCheckpoint, AfterRetirementStart, AfterRetirementPermission, BeforeUpdateApplied, AfterUpdateApplied }
 internal sealed record InternalActionView(DurableActionIntentRow Intent, DurableOperationRow Operation,
     IReadOnlyList<DurableOperationAttemptRow> Attempts, IReadOnlyList<DurableActionObservationRow> Observations, OperationOutputRow? Output);
 
@@ -14,7 +14,7 @@ internal sealed partial class InternalDurableActions(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IEnumerable<IInternalActionHandler> registrations,
     IEnumerable<IProviderConfigurationCodec> codecs, IEnumerable<IExternalOperationOutputContract> resourceOutputs,
     DurableActionAdmission resourceAdmission, DurableOperationSerialization serialization, TimeProvider clock,
-    Action<InternalActionFault>? fault = null, InternalWorkloadConfiguration? configurationPreparation = null)
+    Action<InternalActionFault>? fault = null, InternalWorkloadConfiguration? configurationPreparation = null, Action<UpdateCompletionDiagnostic>? updateDiagnostic = null)
 {
     private readonly IInternalActionHandler[] handlers = ValidateRegistrations(registrations);
     private readonly IProviderConfigurationCodec[] typedCodecs = codecs.ToArray();

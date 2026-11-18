@@ -16,6 +16,7 @@ public sealed partial class DurableDeploymentPlanningTests
         internal int Writes, Reads;
         internal bool LoseResponse;
         internal bool Pending;
+        internal bool DistinctOwnedUids;
         internal int ReadinessReads;
         internal Func<CancellationToken, Task>? BeforeRead;
         public int ObservationSeconds(string intent, string receipt) => adapter.ObservationSeconds(intent, receipt);
@@ -41,11 +42,11 @@ public sealed partial class DurableDeploymentPlanningTests
         public bool Validate(InternalActionContext context, string payload) => adapter.Validate(context, payload);
         public bool ValidateReceipt(InternalActionContext context, string payload, string receipt, bool observation) => adapter.ValidateReceipt(context, payload, receipt, observation);
         public InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt) => adapter.ObjectConfirmation(context, payload, receipt);
-        private static InternalActionResult Confirm(string payload, bool observation)
+        private InternalActionResult Confirm(string payload, bool observation)
         {
             var i = DeploymentIntents.Decode(payload);
             return new(InternalActionOutcome.Confirmed, "fixture-confirmed", DeploymentIntents.Encode(new DeploymentReceipt(4,
-                i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload, i.TargetGeneration, i.Operation, "deployment-uid", 1, i.Target,
+                i.Binding, i.Namespace, i.Name, i.Owner, i.ManagedWorkload, i.TargetGeneration, i.Operation, DistinctOwnedUids ? "deployment-" + i.ManagedWorkload.ToString("N") : "deployment-uid", 1, i.Target,
                 observation ? ConfirmationSource.Observation : ConfirmationSource.Response)));
         }
         public ValueTask<InternalActionResult> ExecuteAsync(InternalActionContext context, string payload, CancellationToken token)

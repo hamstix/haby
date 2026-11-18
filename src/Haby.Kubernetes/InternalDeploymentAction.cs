@@ -9,7 +9,7 @@ namespace Haby.Kubernetes;
 /// <summary>Internal exact CREATE or bounded same-identity UPDATE adapter. The UPDATE
 /// registration requires catalog-verified original inputs and generation authority.</summary>
 internal sealed class InternalDeploymentAction(ISecretStore secrets,
-    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null, bool update = false) : IInternalActionHandler, IInternalReadinessHandler, IInternalWorkloadUpdatePlanner
+    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null, bool update = false, Action<DeploymentRecipientDiagnostic>? recipientDiagnostic = null) : IInternalActionHandler, IInternalReadinessHandler, IInternalWorkloadUpdatePlanner, IInternalRecipientObserver
 {
     public DurableActionPayload CaptureUpdate(InternalActionContext previous, DurablePlanningInputs target, string targetVersion, string intent, string receipt) =>
         DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(previous, target, targetVersion, intent, receipt));
@@ -21,6 +21,11 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         "haby.kubernetes.deployment-intent/v4", "haby.kubernetes.deployment-receipt/v4");
     public bool ObservationRecovery => true;
     public bool RequiresRuntimePublication => true;
+    public async ValueTask<RecipientObservation> ObserveRecipientsAsync(InternalActionContext context, string intent, string receipt,
+        RecipientObservationOptions options, CancellationToken token) =>
+        await Kernel(context).RecipientsAsync(DeploymentIntents.Decode(intent), DeploymentIntents.DecodeReceipt(receipt), options, token, recipientDiagnostic);
+    public int MaximumObservationCalls => 5;
+    public bool ValidateRecipients(string intent, string receipt, RecipientObservation observation) => DeploymentRecipients.Validate(intent, receipt, observation);
     public int ObservationSeconds(string intent, string receipt) => DeploymentReadiness.Budget(intent, receipt);
     public bool ValidateObservation(string intent, string receipt, RolloutObservation observation) => DeploymentReadiness.Validate(intent, receipt, observation);
     public async ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string intent, string receipt, CancellationToken token) =>

@@ -3,8 +3,16 @@ using Haby.Domain;
 
 // Delegate every capability unchanged; observe returned results before the caller's fault hook.
 internal sealed class ConfiguredDeploymentUpdateHandler(IInternalActionHandler inner,
-    Action<ConfiguredDeploymentUpdateDiagnostics.Stage, InternalActionResult> record) : IInternalActionHandler
+    Action<ConfiguredDeploymentUpdateDiagnostics.Stage, InternalActionResult> record) : IInternalActionHandler, IInternalReadinessHandler, IInternalRecipientObserver
 {
+    public int ObservationSeconds(string intent, string receipt) => ((IInternalReadinessHandler)inner).ObservationSeconds(intent, receipt);
+    public bool ValidateObservation(string intent, string receipt, RolloutObservation observation) => ((IInternalReadinessHandler)inner).ValidateObservation(intent, receipt, observation);
+    public ValueTask<RolloutObservation> ReadinessAsync(InternalActionContext context, string intent, string receipt, CancellationToken token) =>
+        ((IInternalReadinessHandler)inner).ReadinessAsync(context, intent, receipt, token);
+    public ValueTask<RecipientObservation> ObserveRecipientsAsync(InternalActionContext context, string intent, string receipt, RecipientObservationOptions options, CancellationToken token) =>
+        ((IInternalRecipientObserver)inner).ObserveRecipientsAsync(context, intent, receipt, options, token);
+    public int MaximumObservationCalls => ((IInternalRecipientObserver)inner).MaximumObservationCalls;
+    public bool ValidateRecipients(string intent, string receipt, RecipientObservation observation) => ((IInternalRecipientObserver)inner).ValidateRecipients(intent, receipt, observation);
     public InternalActionContract Contract => inner.Contract;
     public bool ObservationRecovery => inner.ObservationRecovery;
     public bool RequiresPreparedConfiguration => inner.RequiresPreparedConfiguration;

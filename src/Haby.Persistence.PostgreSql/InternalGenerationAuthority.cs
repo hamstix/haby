@@ -27,14 +27,17 @@ internal static partial class InternalGenerationAuthority
 
     internal static Task<DeploymentGenerationRow> RequireStageReadAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token) =>
         WithConnectionAsync(db, () => DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null
-            ? RequireReadAsync(db, source, token) : RequireStageAsync(db, source, token), token);
+            ? RequireReadAsync(db, source, token) : RequireUpdateReadAsync(db, source, token), token);
 
     internal static async Task<DeploymentGenerationRow> RequireStageReadAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
     {
         var id = Guid.Parse(accepted.DeploymentId.ToString());
-        var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value, token);
+        var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value, token)
+            ?? throw new InvalidDataException("Accepted internal generation unavailable.");
+        if (source.PlanId.ToString() != accepted.PlanId.ToString() || source.ChangeSetId.ToString() != accepted.ChangeSetId.ToString() ||
+            source.AcceptedAt != accepted.CommittedAt || source.ActorId != accepted.ActorId) throw new InvalidDataException("Stage read receipt mismatch.");
         return await WithConnectionAsync(db, () => DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null
-            ? RequireReadAsync(db, accepted, token) : RequireStageAsync(db, accepted, token), token);
+            ? RequireReadAsync(db, accepted, token) : RequireUpdateReadAsync(db, source, token), token);
     }
 
     internal static async Task<DeploymentGenerationRow> RequireStageAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
@@ -81,10 +84,10 @@ internal static partial class InternalGenerationAuthority
         var inputs = row.Inputs();
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson); graph.ValidateReferences(inputs);
         if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint) throw new InvalidDataException("Accepted generation fingerprint mismatch.");
-        var update = stage ? graph.WorkloadUpdate?.Document : null;
+        var update = stage || readOnly ? graph.WorkloadUpdate?.Document : null;
         var retirement = graph.Retirement?.Document;
         if (retirement is null && update is null) throw new InvalidDataException("Frozen stage authority required.");
-        var priorApplied = readOnly ? retirement!.PriorApplied : owner?.AppliedGeneration;
+        var priorApplied = readOnly ? retirement?.PriorApplied ?? update?.BaselineGeneration : owner?.AppliedGeneration;
         var initial = InternalResourceStage.IsEmpty(inputs, graph) && row.Generation == 1 && priorApplied is null &&
             change is { ExpectedAbsence: true, ExpectedGeneration: null };
         var mixed = graph.Baseline is not null && priorApplied is not null && priorApplied == graph.Baseline.Generation &&
@@ -102,7 +105,7 @@ internal static partial class InternalGenerationAuthority
             commit.PlanId != Guid.Parse(accepted.PlanId.ToString()) || commit.ChangeSetId != Guid.Parse(accepted.ChangeSetId.ToString()) ||
             commit.ActorId != accepted.ActorId || commit.CommittedAt != accepted.CommittedAt || row.AcceptedAt != commit.CommittedAt || row.ActorId != commit.ActorId)
             throw new InvalidDataException("Accepted internal authority mismatch.");
-        if (update is not null) await RequireUpdateBaselineAsync(db, row, owner, graph, update, token);
+        if (update is not null) await RequireUpdateBaselineAsync(db, row, owner, graph, update, token, readOnly);
         var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token)
             ?? throw new InvalidDataException("Accepted declaration unavailable.");
         var manifest = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);

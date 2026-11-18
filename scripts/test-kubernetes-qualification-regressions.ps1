@@ -1498,3 +1498,5 @@ Write-Output 'PASS bounded journal content, ordering, path refusal and no false 
     if((Resolve-QualificationExecutable 'fixture') -ne 'first-path'){throw 'Executable resolution joined multiple paths'}
 }
 Write-Output 'PASS executable resolution selects one application path'
+
+& "$PSScriptRoot/test-retirement-diagnostics.ps1"

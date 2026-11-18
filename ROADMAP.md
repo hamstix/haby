@@ -292,9 +292,12 @@ Service, headless Service and individual Ingress. Those objects remain in P3.
 - [x] Implement internal generation-specific configuration, stable runtime identity
   reuse, exact publication and durable same-UID conditional PATCH under
   [issue #257](docs/development/257-durable-deployment-update-submission.md).
-  Confirmed submission/history only; public UPDATE and its completion remain closed.
-- [ ] Confirm target readiness and old recipients (including terminating Pods),
-  retire obsolete runtime permissions and only then advance AppliedGeneration.
+  Confirmed submission/history; internal completion is delivered below. Public UPDATE remains closed.
+- [x] Complete internal target readiness and old-recipient observation (including
+  terminating Pods), exact obsolete runtime publication retirement and only then
+  Applied advancement under [issue #259](docs/development/259-update-readiness-retirement.md).
+  Public operational UPDATE, corrective generations and the integrated rehearsal
+  remain unavailable.
 - [ ] Implement ADR-052 corrective generation for incomplete rollout before declaring
   the update workflow operationally ready; no rollback or automatic adoption.
 - [ ] Rehearse the real update/correction lifecycle, stable Resources/credentials,
