@@ -8,6 +8,7 @@
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredDeploymentUpdateTarget.cs" Link="ConfiguredDeploymentUpdateTarget.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredDeploymentUpdateDiagnostics.cs" Link="ConfiguredDeploymentUpdateDiagnostics.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredDeploymentUpdateHandler.cs" Link="ConfiguredDeploymentUpdateHandler.cs" />
+    <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredDeploymentPatchStatus.cs" Link="ConfiguredDeploymentPatchStatus.cs" />
     <ProjectReference Include="../../src/Haby.PostgreSql/Haby.PostgreSql.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />

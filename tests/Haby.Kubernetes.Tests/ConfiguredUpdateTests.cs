@@ -2,7 +2,10 @@ using System.Collections.Immutable;
 using System.Text.Json.Nodes;
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using System.Text.Encodings.Web;
 using k8s;
+using k8s.Models;
 using Haby.Configuration.Contracts;
 using Xunit;
 
@@ -10,6 +13,53 @@ namespace Haby.Kubernetes.Tests;
 
 public sealed class ConfiguredUpdateTests
 {
+    [Fact]
+    public async Task Configured_patch_sdk_wire_preserves_test_values_but_bootstrap_has_distinct_raw_string_encoding()
+    {
+        var previous = ConfiguredDeploymentTests.Intent();
+        var bootstrap = RuntimeBootstrapCodec.Decode(previous.Target.Runtime!.Bootstrap);
+        var next = previous with
+        {
+            ExpectedUid = "saved-uid",
+            LastConfirmed = previous.Target,
+            TargetGeneration = 2,
+            Operation = Guid.NewGuid(),
+            Target = previous.Target with
+            {
+                Image = "registry.example/app:v2",
+                Runtime = previous.Target.Runtime with
+                {
+                    Bootstrap = RuntimeBootstrapCodec.Encode(bootstrap with
+                    { Documents = bootstrap.Documents.ToImmutableSortedDictionary(x => x.Key, _ => Guid.CreateVersion7().ToString("D"), StringComparer.Ordinal) })
+                }
+            }
+        };
+        var current = KernelTests.Object(previous);
+        current["spec"]!["template"]!["spec"]!["containers"]!.AsArray().Insert(0, new JsonObject { ["name"] = "foreign", ["image"] = "foreign:v1" });
+        var patch = DeploymentObjects.Patch(current, next);
+        var api = new KernelTests.FakeApi((_, _) => KernelTests.Reply(200, current));
+        using var client = new k8s.Kubernetes(new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, api);
+        using var response = await client.AppsV1.PatchNamespacedDeploymentWithHttpMessagesAsync(
+            new V1Patch(patch.ToJsonString(), V1Patch.PatchType.JsonPatch), next.Name, next.Namespace);
+        using var wire = JsonDocument.Parse(Assert.Single(api.Bodies));
+        var tests = wire.RootElement.EnumerateArray().Where(x => x.GetProperty("op"u8).GetString() == "test").ToArray();
+        Assert.NotEmpty(tests);
+        foreach (var operation in tests)
+        {
+            JsonNode? live = current;
+            foreach (var segment in operation.GetProperty("path"u8).GetString()!.Split('/').Skip(1))
+                live = live is JsonArray array ? array[int.Parse(segment, System.Globalization.CultureInfo.InvariantCulture)] : live![segment.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal)];
+            Assert.Equal(live!.GetValue<string>(), operation.GetProperty("value"u8).GetString());
+        }
+        var oldValue = tests.Single(x => x.GetProperty("path"u8).GetString() == "/spec/template/spec/containers/1/env/0/value").GetProperty("value"u8);
+        var goStyleScalar = JsonSerializer.Serialize(previous.Target.Runtime.Bootstrap,
+            new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        // Source-audited evanphx/json-patch v4 compares compact scalar JSON bytes.
+        // This is a wire representation probe, not proof of the hosted 422 cause.
+        Assert.NotEqual(goStyleScalar, oldValue.GetRawText());
+        Assert.Contains("\\u0022", oldValue.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(previous.Target.Runtime.Bootstrap, JsonSerializer.Deserialize<string>(goStyleScalar));
+    }
     [Theory]
     [InlineData("uid")]
     [InlineData("owner")]

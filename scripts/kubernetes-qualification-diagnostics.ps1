@@ -409,7 +409,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
         'U06TargetImage','U06PatchPresence','U06ResourceVersion','U06PatchUid','U06ResponseUid','U06ResponseGeneration')
     $updateCodes=$codes+@('confirmed','not-dispatched','manual-recovery-required','terminal-failure','managed-identity-conflict','managed-object-conflict','intent-invalid',
         'retained-identity-confirmed','retained-identity-unconfirmed')
-    $updatePredicates=@('Intent','Readback','Ownership','Uid','Target','Marker','Receipt','ResponseReceipt','RuntimeAccount')
+    $updatePredicates=@('Intent','Readback','Ownership','Uid','Baseline','Target','Marker','Receipt','ResponseReceipt','RuntimeAccount')
     $updateProofCodes=@('intent-format','intent-update-pair','immutable-container','immutable-runtime-mode','immutable-runtime-identity',
         'binding','namespace','name','value','projection','image','runtime-projection','receipt-format','object-identity','ownership',
         'reserved-location','selector-drift','uid-conflict','container-identity','container-drift','resource-shape','resource-drift',
@@ -428,7 +428,18 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($parts[2] -ceq 'update'){
                 if($Mode -cne 'configured' -or $parts.Count -lt 5){return $invalid}
                 $phase=$parts[3];$state=$parts[4];$shape=$false
-                if($phase -ceq 'wire'){
+                if($phase -ceq 'rejection'){
+                    if($parts.Count -eq 6){
+                        $shape=($state -ceq 'Status' -and $parts[5] -cin @('Invalid','BadRequest','Conflict','Forbidden','NotFound','Unauthorized','unknown')) -or
+                            ($state -ceq 'RvClassifier' -and $parts[5] -cin @('true','false')) -or
+                            ($state -ceq 'Shape' -and $parts[5] -cin @('oversized','unknown'))
+                    }elseif($parts.Count -eq 7){
+                        $shape=($state -ceq 'Cause' -and
+                            $parts[5] -cin @('FieldValueInvalid','FieldValueRequired','FieldValueForbidden','FieldValueNotSupported','FieldValueDuplicate','FieldValueNotFound','UnexpectedServerResponse','unknown') -and
+                            $parts[6] -cin @('UidTest','ResourceVersionTest','ContainerNameTest','BootstrapNameTest','BootstrapValueTest','OtherGeneratedTest','PatchField','ImageField','EnvironmentValueField','unknown')) -or
+                            ($state -ceq 'Probe' -and $parts[5] -cin @('Control','BootstrapValueTest') -and $parts[6] -cmatch '^([1-5][0-9]{2}|unknown)$')
+                    }
+                }elseif($phase -ceq 'wire'){
                     $shape=$parts.Count -eq 8 -and $state -ceq 'status' -and $parts[6] -cmatch '^([0-3]|unknown)$' -and
                         (($parts[5] -cmatch '^[1-5][0-9]{2}$' -and $parts[7] -ceq 'true') -or
                          ($parts[5] -ceq 'no-response' -and $parts[7] -ceq 'false') -or

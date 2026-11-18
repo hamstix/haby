@@ -250,9 +250,37 @@ internal static class ConfiguredDeploymentUpdateCases
         Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Ownership, () => DeploymentObjects.Ownership(current, intent));
         Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Uid, () => DeploymentIntents.Need(intent.ExpectedUid is null ||
             DeploymentObjects.String(current, "metadata", "uid") == intent.ExpectedUid, "uid-conflict"));
+        Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Baseline, () => DeploymentObjects.Matches(current, intent.LastConfirmed!));
         Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Target, () => DeploymentObjects.Matches(current, intent.Target));
         Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Marker, () => DeploymentIntents.Need(DeploymentObjects.HasMarkers(current, intent), "operation-marker"));
         Inspect(ConfiguredDeploymentUpdateDiagnostics.Predicate.Receipt, () => DeploymentObjects.Receipt(current, intent, ConfirmationSource.Observation));
+        if (wire.Status == 422 && wire.Patch is not null)
+        {
+            var bootstrapTest = wire.Patch.SingleOrDefault(x => x?["op"]?.GetValue<string>() == "test" &&
+                x["path"]?.GetValue<string>() is { } path && ConfiguredDeploymentPatchStatus.TestPathCategory(path) == "BootstrapValueTest");
+            if (bootstrapTest is not null)
+            {
+                // Two diagnostic requests in this same contour. Server dry-run only:
+                // empty control and the EXACT generated test, no mutation operations.
+                // Neither request goes through/retries the UPDATE kernel client.
+                async Task Probe(ConfiguredDeploymentPatchStatus.ProbeCase probe, JsonArray operations)
+                {
+                    int? status = null;
+                    try
+                    {
+                        using var response = await admin.AppsV1.PatchNamespacedDeploymentWithHttpMessagesAsync(
+                            new V1Patch(operations.ToJsonString(), V1Patch.PatchType.JsonPatch), intent.Name, intent.Namespace,
+                            dryRun: "All", cancellationToken: token);
+                        status = (int)response.Response.StatusCode;
+                    }
+                    catch (k8s.Autorest.HttpOperationException error) { status = (int?)error.Response?.StatusCode; }
+                    catch { }
+                    Console.WriteLine(ConfiguredDeploymentPatchStatus.Probe(probe, status));
+                }
+                await Probe(ConfiguredDeploymentPatchStatus.ProbeCase.Control, []);
+                await Probe(ConfiguredDeploymentPatchStatus.ProbeCase.BootstrapValueTest, [bootstrapTest.DeepClone()]);
+            }
+        }
     }
 
     private static void Check(bool condition, string id)
@@ -286,6 +314,18 @@ internal static class ConfiguredDeploymentUpdateCases
             {
                 evidence.Status = (int)response.StatusCode;
                 Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Wire(evidence.Status, evidence.Writes));
+                if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+                {
+                    try
+                    {
+                        // Buffer without changing the content consumed by the SDK. Never
+                        // retain/publish raw Status text or arbitrary message/field values.
+                        await response.Content.LoadIntoBufferAsync(131072, token);
+                        foreach (var record in ConfiguredDeploymentPatchStatus.Classify(response,
+                            await response.Content.ReadAsStringAsync(token), evidence.Patch!)) Console.WriteLine(record);
+                    }
+                    catch { Console.WriteLine("Q243 configured update rejection Shape unknown"); }
+                }
             }
             if (update && response.StatusCode == HttpStatusCode.OK)
                 evidence.Response = JsonNode.Parse(await response.Content.ReadAsStringAsync(token))!.AsObject();

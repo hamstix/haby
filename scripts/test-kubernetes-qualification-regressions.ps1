@@ -1119,6 +1119,18 @@ Write-Output 'PASS kernel K24 replacement phases and finite 601-read evidence; u
 Write-Output 'PASS fixed K14 substeps: closed results/receipt/status/count, exception failure, hostile/unknown/mode rejection and unchanged bounds (synthetic)'
 
 # Pure parser controls for both existing workload modes, never a cluster execution.
+foreach($suffix in @('Status Invalid','RvClassifier false','Shape unknown','Cause FieldValueInvalid BootstrapValueTest',
+    'Cause UnexpectedServerResponse unknown','Probe Control 200','Probe BootstrapValueTest 422')){
+    $line="Q243 configured update rejection $suffix"
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$line) 'protected-response-body'
+    if($parsed.Status -cne 'valid' -or ('Diagnostic workload: '+$line.Substring(5)) -cnotin $parsed.Records){throw 'Fixed 422 classifier/probe record missing'}
+}
+foreach($suffix in @('Status protected-reason','Cause FieldValueInvalid protected-field','Cause unknown BootstrapValueTest protected-bootstrap',
+    'Probe protected-path 422','Probe BootstrapValueTest 600','RvClassifier protected-body')){
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`nQ243 configured update rejection $suffix") ''
+    if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Unrecognized 422 diagnostic content published'}
+}
+Write-Output 'PASS fixed 422 Status/cause/test categories and two named server dry-run probes; unknown detail rejected (synthetic)'
 foreach($suffix in @('DelegateExecute result Uncertain response-unconfirmed 1 receipt-present false',
     'DelegateObserve result Confirmed observation-confirmed 1 receipt-present true',
     'ProofRuntimeAccount result Confirmed retained-identity-confirmed 1',

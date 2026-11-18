@@ -12,7 +12,7 @@ internal static class ConfiguredDeploymentUpdateDiagnostics
         U06PatchPresence, U06ResourceVersion, U06PatchUid, U06ResponseUid, U06ResponseGeneration,
         DelegateExecute, DelegateObserve, ProofRuntimeAccount
     }
-    internal enum Predicate { Intent, Readback, Ownership, Uid, Target, Marker, Receipt, ResponseReceipt, RuntimeAccount }
+    internal enum Predicate { Intent, Readback, Ownership, Uid, Baseline, Target, Marker, Receipt, ResponseReceipt, RuntimeAccount }
     internal enum State { Start, Completed, Returned, Observed, Passed, Failed }
 
     internal static string Progress(Stage stage, State state) => $"Q243 configured update {stage} {state}";
