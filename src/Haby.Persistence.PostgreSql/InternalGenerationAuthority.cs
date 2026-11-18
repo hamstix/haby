@@ -32,7 +32,8 @@ internal static partial class InternalGenerationAuthority
     internal static async Task<DeploymentGenerationRow> RequireStageReadAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, CancellationToken token)
     {
         var id = Guid.Parse(accepted.DeploymentId.ToString());
-        var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value, token);
+        var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value, token)
+            ?? throw new InvalidDataException("Accepted internal generation unavailable.");
         if (source.PlanId.ToString() != accepted.PlanId.ToString() || source.ChangeSetId.ToString() != accepted.ChangeSetId.ToString() ||
             source.AcceptedAt != accepted.CommittedAt || source.ActorId != accepted.ActorId) throw new InvalidDataException("Stage read receipt mismatch.");
         return await WithConnectionAsync(db, () => DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null

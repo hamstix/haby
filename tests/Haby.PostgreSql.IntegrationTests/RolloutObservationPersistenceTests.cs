@@ -174,15 +174,44 @@ public sealed partial class DurableDeploymentPlanningTests
     [Fact]
     public async Task Rollout_unresolved_write_and_cross_generation_commit_cannot_authorize_readiness()
     {
-        var scenario = await RolloutScenario(); var deployment = new ConfiguredSubmissionFixture { LoseResponse = true }; var identity = new IdentityFixture();
-        await using var services = InternalServices(scenario.Connection, scenario.Time);
-        var actions = await PrepareRollout(services, scenario, deployment, identity);
-        var key = await actions.AcceptAsync(scenario.Commit, RuntimeSubject, deployment.Contract.Action, "uncertain", default);
-        Assert.Equal(InternalActionOutcome.Uncertain, (await actions.ExecuteAsync(key, default)).Outcome);
-        var result = await actions.ObserveRolloutAsync(scenario.Commit, "observe", OneRound, default);
-        Assert.False(result.Ready); Assert.Equal(RolloutOutcome.NotSubmitted, result.Members[0].Observation.Outcome); Assert.Equal(0, deployment.ReadinessReads);
-        await Assert.ThrowsAsync<InvalidDataException>(async () => await actions.ObserveRolloutAsync(scenario.Commit with { Generation = DeploymentGeneration.Create(2) }, "wrong", OneRound, default));
-        Assert.Equal(0, deployment.ReadinessReads); Assert.Equal(1, deployment.Writes);
+        var stage = "Setup";
+        void Begin(string value) { stage = value; Console.WriteLine("F259PG " + stage + " Start"); }
+        void Passed() => Console.WriteLine("F259PG " + stage + " Passed");
+        static string Category(Exception error) => error switch
+        {
+            InvalidDataException => "InvalidData", InvalidOperationException => "InvalidOperation",
+            OperationCanceledException => "Canceled", Xunit.Sdk.XunitException => "Assertion", _ => "Unknown"
+        };
+        try
+        {
+            Begin("Setup");
+            var scenario = await RolloutScenario(); var deployment = new ConfiguredSubmissionFixture { LoseResponse = true }; var identity = new IdentityFixture();
+            await using var services = InternalServices(scenario.Connection, scenario.Time);
+            var actions = await PrepareRollout(services, scenario, deployment, identity);
+            var key = await actions.AcceptAsync(scenario.Commit, RuntimeSubject, deployment.Contract.Action, "uncertain", default);
+            Passed();
+            Begin("ExecuteUncertain");
+            Assert.Equal(InternalActionOutcome.Uncertain, (await actions.ExecuteAsync(key, default)).Outcome);
+            Passed();
+            Begin("NotReadyNotSubmitted");
+            var result = await actions.ObserveRolloutAsync(scenario.Commit, "observe", OneRound, default);
+            Assert.False(result.Ready); Assert.Equal(RolloutOutcome.NotSubmitted, result.Members[0].Observation.Outcome);
+            Passed();
+            Begin("ZeroReads");
+            Assert.Equal(0, deployment.ReadinessReads);
+            Passed();
+            Begin("CrossgenInvalidDataRefusal");
+            await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            {
+                try { await actions.ObserveRolloutAsync(scenario.Commit with { Generation = DeploymentGeneration.Create(2) }, "wrong", OneRound, default); }
+                catch (Exception error) { Console.WriteLine("F259PG CrossgenActual " + Category(error)); throw; }
+            });
+            Passed();
+            Begin("FinalZeroReadsOneWrite");
+            Assert.Equal(0, deployment.ReadinessReads); Assert.Equal(1, deployment.Writes);
+            Passed();
+        }
+        catch (Exception error) { Console.WriteLine("F259PG " + stage + " Failed " + Category(error)); throw; }
     }
     [Fact]
     public async Task Rollout_old_inflight_result_cannot_satisfy_a_concurrently_resumed_attempt()
