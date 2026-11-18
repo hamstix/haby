@@ -39,6 +39,13 @@ commit's ordered parents and tree. Missing, changing or unavailable merge data
 fails closed. Concurrent dispatches are serialized per PR and newer dispatches
 cancel older ones; a canceled run cannot qualify.
 
+Every freshness check reads the current `main` branch SHA and verifies it equals
+the immutable expected base. The PR's `base.sha` can retain an older snapshot
+after main advances; it is not the current-base authority. Keep the PR's base ref
+and repository checks, and bind the actual tested merge's first parent to current
+main, its second parent to expected HEAD and its tree to the expected tested tree.
+Missing or changed live main fails closed, including after control publication.
+
 Reusable workflow definitions come from the installed control commit. Candidate
 jobs check out only the verified tested merge commit, with read-only permissions,
 no inherited secrets and no persisted checkout credentials. They execute candidate

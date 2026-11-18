@@ -14,8 +14,14 @@ const commit = { sha: request.merge, tree: { sha: request.tree }, parents: [{ sh
 
 test('installed main control validates immutable candidate identities', () => {
   const valid = validateRequest(environment, request);
-  assertCandidate(valid, pr, commit, 'write');
-  assertCurrent(valid, pr, commit);
+  assertCandidate(valid, pr, commit, 'write', request.base);
+  assertCurrent(valid, pr, commit, request.base);
+});
+test('current main and tested parents determine base despite an older PR snapshot', () => {
+  const valid = validateRequest(environment, request);
+  const olderSnapshot = { ...pr, base: { ...pr.base, sha: sha('e') } };
+  assertCurrent(valid, olderSnapshot, commit, request.base);
+  for (const main of [sha('e'), '', undefined]) assert.throws(() => assertCurrent(valid, olderSnapshot, commit, main));
 });
 test('untrusted event/ref/control, shell input and malformed SHA fail closed', () => {
   for (const delta of [{ event: 'pull_request' }, { ref: 'refs/heads/topic' }, { control: sha('e') }, { workflowRef: 'example/project/.github/workflows/final-qualification.yml@refs/heads/topic' }]) {
@@ -24,15 +30,15 @@ test('untrusted event/ref/control, shell input and malformed SHA fail closed', (
   for (const delta of [{ pr: '17;echo injected' }, { pr: '0' }, { head: 'main' }, { base: sha('B') }, { merge: '$()' }, { tree: '' }]) {
     assert.throws(() => validateRequest(environment, { ...request, ...delta }));
   }
-  for (const permission of ['read', 'triage', '', undefined]) assert.throws(() => assertCandidate(validateRequest(environment, request), pr, commit, permission));
+  for (const permission of ['read', 'triage', '', undefined]) assert.throws(() => assertCandidate(validateRequest(environment, request), pr, commit, permission, request.base));
 });
 test('new HEAD/base/merge tree, closed PR and wrong repository are stale', () => {
   const valid = validateRequest(environment, request);
-  for (const delta of [{ head: { sha: sha('e') } }, { base: { ...pr.base, sha: sha('e') } }, { merge_commit_sha: sha('e') }, { state: 'closed' }, { base: { ...pr.base, repo: { full_name: 'other/repository' } } }]) {
-    assert.throws(() => assertCurrent(valid, { ...pr, ...delta }, commit));
+  for (const delta of [{ head: { sha: sha('e') } }, { base: { ...pr.base, ref: 'other' } }, { merge_commit_sha: sha('e') }, { state: 'closed' }, { base: { ...pr.base, repo: { full_name: 'other/repository' } } }]) {
+    assert.throws(() => assertCurrent(valid, { ...pr, ...delta }, commit, request.base));
   }
   for (const delta of [{ tree: { sha: sha('e') } }, { parents: [{ sha: request.head }, { sha: request.base }] }, { parents: [] }]) {
-    assert.throws(() => assertCurrent(valid, pr, { ...commit, ...delta }));
+    assert.throws(() => assertCurrent(valid, pr, { ...commit, ...delta }, request.base));
   }
 });
 test('failed, canceled, skipped, missing and unknown gate results cannot pass', () => {
@@ -172,6 +178,20 @@ test('successful aggregate cannot hide missing or skipped actual jobs', () => {
     assert.throws(() => assertJobs(jobs.map(job => job.name === name ? { ...job, conclusion: 'skipped' } : job)));
   }
 });
+test('native, composition and Provider known failures retain expected members', () => {
+  for (const [change, code, gate, member] of [
+    [f => { const value = JSON.parse(f.artifacts.get(f.names.linux).get('safe/gate.json')); f.put('linux', 'safe/gate.json', { ...value, requiredAot: false }); }, 'published-native-incomplete', 'Native AOT (linux-x64)', 'safe/gate.json'],
+    [f => f.put('composition', 'Haby.Operator.Composition.Sample.dll', 'different-bytes'), 'composition-incomplete', 'postgresql-integration', 'Haby.Operator.Composition.Sample.dll'],
+    [f => { const path = 'qualification-evidence/control/qualification-stock.txt'; f.put('provider', path, f.artifacts.get(f.names.provider).get(path).toString().replace('Failure:', 'Unperformed:')); }, 'rehearsal-outcome-incomplete', 'kubernetes-provider-access', 'qualification-stock.txt'],
+    [f => { const path = 'qualification-evidence/control/qualification-success.txt'; f.put('provider', path, f.artifacts.get(f.names.provider).get(path).toString() + '\nContainer/storage cleanup: FAIL'); }, 'provider-evidence-incomplete', 'kubernetes-provider-access', 'qualification-success.txt'],
+  ]) {
+    const f = fixture(); change(f); let failure;
+    try { validateEvidence(f.identity, f.plan, f.artifacts, 1); } catch (error) { failure = error; }
+    assert.equal(failure?.details?.code, code);
+    assert.equal(failure.details.gate, gate);
+    assert.equal(failure.details.member, member);
+  }
+});
 test('workflow isolates write permission and never executes candidate in publisher', () => {
   const workflow = readFileSync(new URL('../.github/workflows/final-qualification.yml', import.meta.url), 'utf8');
   assert.doesNotMatch(workflow, /pull_request_target:|secrets: inherit|statuses: write|actions: write/);
@@ -206,7 +226,7 @@ test('publisher reads actual artifact files, rechecks live identity and never pu
       const destination = join(directory, name, path); mkdirSync(join(destination, '..'), { recursive: true }); writeFileSync(destination, bytes);
     }
     const updates = [];
-    let stale = false; let missing = false; let controlMissing = false; let apiError = false;
+    let stale = false; let missing = false; let controlMissing = false; let apiError = false; let liveMain = request.base;
     const jobNames = ['build / validate', 'build / Native AOT (win-x64)', 'build / Native AOT (linux-x64)', 'build / postgresql-integration',
       'api / qualification', 'workloads / configured-deployment', 'workloads / durable-actions', 'workloads / deployment-kernel'];
     const listJobs = () => {}; const listArtifacts = () => {};
@@ -214,8 +234,9 @@ test('publisher reads actual artifact files, rechecks live identity and never pu
       rest: {
         actions: { listJobsForWorkflowRunAttempt: listJobs, listWorkflowRunArtifacts: listArtifacts,
           getArtifact: async () => ({ data: { id: 900, name: 'qualification-control-123-1', workflow_run: { id: 123 }, expired: controlMissing, size_in_bytes: 1 } }) },
-        pulls: { get: async () => ({ data: stale ? { ...pr, head: { sha: sha('e') } } : pr }) },
+        pulls: { get: async () => ({ data: stale ? { ...pr, head: { sha: sha('e') } } : { ...pr, base: { ...pr.base, sha: sha('e') } } }) },
         git: { getCommit: async () => ({ data: commit }) },
+        repos: { getBranch: async () => ({ data: { commit: { sha: liveMain } } }) },
         checks: {
           get: async () => ({ data: { head_sha: request.head, name: 'Final qualification', external_id: '123:1' } }),
           update: async value => { updates.push(value); },
@@ -275,6 +296,23 @@ test('publisher reads actual artifact files, rechecks live identity and never pu
     assert.equal(cleanup.cleanup, 'incomplete');
     assert.equal(cleanup.primary.deadline, null);
     writeFileSync(resources, resourceBytes);
+    for (const [key, path, change, code, cleanupState, expectedGate] of [
+      ['postgresql', 'measurement.json', value => ({ ...value, preflightCleanupExitCode: 21 }), 'preflight-cleanup-incomplete', 'incomplete', 'postgresql-integration'],
+      ['postgresql', 'preflight.json', value => ({ ...value, ownedServer: { ...value.ownedServer, cleanup: 'remove-failed' } }), 'preflight-incomplete', 'incomplete', 'postgresql-integration'],
+      ['postgresql', 'coverage.json', value => ({ ...value, executed: 1 }), 'coverage-incomplete', 'not-established', 'postgresql-integration'],
+      ['postgresql', 'anonymous-reflection-precheck/precheck.json', value => ({ ...value, cleanup: 'not-confirmed' }), 'precheck-incomplete', 'not-confirmed', 'postgresql-integration'],
+      ['linux', 'compiler.json', value => ({ ...value, source: sha('e') }), 'native-compiler-incomplete', 'not-established', 'Native AOT (linux-x64)'],
+    ]) {
+      const file = join(directory, f.names[key], path); const bytes = readFileSync(file);
+      writeFileSync(file, JSON.stringify(change(JSON.parse(bytes))));
+      const diagnostic = await reduce(github, f.identity, results, directory, 123, 1, summary);
+      assert.equal(diagnostic.primary.code, code, path);
+      assert.equal(diagnostic.primary.stage, 'evidence', path);
+      assert.equal(diagnostic.primary.gate, expectedGate, path);
+      assert.equal(diagnostic.primary.member, path, path);
+      assert.equal(diagnostic.cleanup, cleanupState, path);
+      writeFileSync(file, bytes);
+    }
     apiError = true;
     const unavailable = await reduce(github, f.identity, results, directory, 123, 1, summary);
     assert.equal(unavailable.primary.code, 'api-or-data-unavailable');
@@ -297,6 +335,13 @@ test('publisher reads actual artifact files, rechecks live identity and never pu
     await assert.rejects(publish(github, f.identity, 123, 1, '9', summary, uploaded));
     assert.equal(updates.at(-1).conclusion, 'failure');
     assert.ok(updates.at(-1).output.summary.includes('stale-candidate'));
+    stale = false;
+    for (const value of [sha('e'), undefined]) {
+      liveMain = value;
+      await assert.rejects(publish(github, f.identity, 123, 1, '9', summary, uploaded));
+      assert.equal(updates.at(-1).conclusion, 'failure');
+      assert.ok(updates.at(-1).output.summary.includes('stale-main'));
+    }
     assert.equal(updates.filter(value => value.conclusion === 'success').length, 1);
   } finally {
     assert.ok(resolve(directory).startsWith(resolve(tmpdir()) + (process.platform === 'win32' ? '\\' : '/')));

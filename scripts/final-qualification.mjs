@@ -24,9 +24,11 @@ export function validateRequest(environment, input) {
   return { repository: environment.repository, control: environment.control, pr: Number(input.pr), head: input.head, base: input.base, merge: input.merge, tree: input.tree };
 }
 
-export function assertCurrent(identity, pr, commit) {
+export function assertCurrent(identity, pr, commit, main) {
+  requireThat(main === identity.base, 'Current main no longer matches the expected base.',
+    { code: 'stale-main', stage: 'freshness', gate: 'candidate', member: 'refs/heads/main', outcome: 'stale' });
   requireThat(pr.state === 'open' && pr.number === identity.pr && pr.head?.sha === identity.head &&
-    pr.base?.sha === identity.base && pr.base?.ref === 'main' && pr.base?.repo?.full_name === identity.repository &&
+    pr.base?.ref === 'main' && pr.base?.repo?.full_name === identity.repository &&
     pr.merge_commit_sha === identity.merge, 'Candidate is stale or outside the expected PR/base.',
   { code: 'stale-candidate', stage: 'freshness', gate: 'candidate', member: 'HEAD/base/merge/tree', outcome: 'stale' });
   requireThat(commit.sha === identity.merge && commit.tree?.sha === identity.tree && commit.parents?.length === 2 &&
@@ -34,9 +36,9 @@ export function assertCurrent(identity, pr, commit) {
   { code: 'tested-tree-mismatch', stage: 'freshness', gate: 'candidate', member: 'merge-parents/tree', outcome: 'stale' });
 }
 
-export function assertCandidate(identity, pr, commit, permission) {
+export function assertCandidate(identity, pr, commit, permission, main) {
   requireThat(['write', 'maintain', 'admin'].includes(permission), 'Maintainer dispatch permission required.');
-  assertCurrent(identity, pr, commit);
+  assertCurrent(identity, pr, commit, main);
 }
 
 export function assertResults(results) {
@@ -73,8 +75,12 @@ function json(files, path) {
   const detail = { code: 'missing-member', gate: files.qualificationGate, member: path };
   requireThat(files.has(path), 'Required evidence member is missing.', detail);
   const text = files.get(path);
-  requireThat(Buffer.byteLength(text) <= 8 * 1024 * 1024, 'Evidence member exceeds bound.');
-  try { return JSON.parse(text.toString()); }
+  requireThat(Buffer.byteLength(text) <= 8 * 1024 * 1024, 'Evidence member exceeds bound.', { ...detail, code: 'member-bound' });
+  try {
+    const value = JSON.parse(text.toString());
+    requireThat(value !== null && typeof value === 'object', 'Invalid evidence JSON shape.', { ...detail, code: 'invalid-member' });
+    return value;
+  }
   catch { throw new QualificationFailure('Invalid evidence JSON.', { ...detail, code: 'invalid-member' }); }
 }
 const array = value => Array.isArray(value) ? value : [value];
@@ -105,20 +111,20 @@ function resources(value, member = 'resources.json') {
     value.hostGroupLimit >= 1 && value.hostGroupLimit < value.limit && value.peakHostGroups <= value.hostGroupLimit, 'PostgreSQL cleanup/resource accounting incomplete.',
   { code: 'cleanup-incomplete', gate: 'postgresql-integration', member, cleanup: 'incomplete' });
 }
-function cleanup(text, identity, marker, gate = 'kubernetes-provider-access') {
+function cleanup(text, identity, marker, gate = 'kubernetes-provider-access', member = 'evidence.txt') {
   const lines = text.toString().split(/\r?\n/);
   requireThat(lines.includes(`Source: ${identity.merge}`) && lines.includes('Dirty: False') &&
     lines.includes('Harness: PASS') && lines.includes('Run-owned private directory removed.') &&
     lines.filter(line => /^Run-owned container and [0-9]+ anonymous volumes absent\.$/.test(line)).length === 1 &&
     !lines.some(line => /^FAIL |^Failure:|cleanup: FAIL|stop: FAIL|Evidence write: FAIL/.test(line)), 'Kubernetes outcome/source/cleanup incomplete.',
-  { code: 'kubernetes-evidence-incomplete', gate, member: 'evidence.txt', cleanup: 'not-confirmed' });
+  { code: 'kubernetes-evidence-incomplete', gate, member, cleanup: 'not-confirmed' });
   for (const item of marker) requireThat(lines.includes(item), 'Required Kubernetes lifecycle member missing.', { code: 'missing-lifecycle-member', gate, member: item, cleanup: 'not-confirmed' });
 }
 
 // Read only the compact, existing per-gate reports and the candidate's existing
 // coverage plan. Never import, execute or print candidate artifacts.
 export function validateEvidence(identity, plan, artifacts, attempt) {
-  requireThat(Array.isArray(plan.entries) && plan.entries.length > 0, 'Coverage plan is missing.');
+  requireThat(Array.isArray(plan.entries) && plan.entries.length > 0, 'Coverage plan is missing.', { code: 'coverage-plan-incomplete', gate: 'control', member: 'suite-gate-map.json' });
   const names = artifactNames(identity, attempt);
   const gates = { fast: 'validate', windows: 'Native AOT (win-x64)', linux: 'Native AOT (linux-x64)', postgresql: 'postgresql-integration', composition: 'postgresql-integration', provider: 'kubernetes-provider-access', configured: 'kubernetes-configured-deployment', durable: 'kubernetes-durable-actions', kernel: 'kubernetes-deployment-kernel' };
   const files = key => {
@@ -132,31 +138,42 @@ export function validateEvidence(identity, plan, artifacts, attempt) {
     const value = gate(content, prefix, identity, name, rows);
     counts(content, prefix, rows.length);
     if (key !== 'fast') {
-      requireThat(value.requiredAot === true && /^[0-9a-f]{64}$/.test(value.nativeSha256) && /^[0-9a-f]{64}$/.test(value.runtimeConsumerSha256), 'Published native evidence missing.');
+      requireThat(value.requiredAot === true && /^[0-9a-f]{64}$/.test(value.nativeSha256) && /^[0-9a-f]{64}$/.test(value.runtimeConsumerSha256), 'Published native evidence missing.',
+        { code: 'published-native-incomplete', gate: name, member: `${prefix}gate.json` });
       const compiler = json(content, 'compiler.json');
-      requireThat(compiler.source === identity.merge && compiler.rid === (key === 'windows' ? 'win-x64' : 'linux-x64') && compiler.packs?.length === 2, 'Native compiler identity missing.');
+      requireThat(compiler.source === identity.merge && compiler.rid === (key === 'windows' ? 'win-x64' : 'linux-x64') && compiler.packs?.length === 2, 'Native compiler identity missing.',
+        { code: 'native-compiler-incomplete', gate: name, member: 'compiler.json' });
     }
     summary.push({ gate: name, cases: rows.length, status: 'complete' });
   }
   const pg = files('postgresql'); const rows = expected('postgresql-integration');
   inventory(rows, array(json(pg, 'cases.json')), { gate: 'postgresql-integration', member: 'cases.json' }); counts(pg, '', rows.length);
   const coverage = json(pg, 'coverage.json'); const measurement = json(pg, 'measurement.json');
-  requireThat(coverage.status === 'complete' && coverage.selection === 'full' && coverage.discovered === rows.length && coverage.executed === rows.length, 'Focused or partial PostgreSQL evidence cannot qualify.');
+  requireThat(coverage.status === 'complete' && coverage.selection === 'full' && coverage.discovered === rows.length && coverage.executed === rows.length, 'Focused or partial PostgreSQL evidence cannot qualify.',
+    { code: 'coverage-incomplete', gate: 'postgresql-integration', member: 'coverage.json' });
   requireThat(measurement.source === identity.merge && measurement.sourceChangedDuringRun === false && measurement.untrackedFileCountAtStart === 0 &&
-    measurement.requiredAot === true && measurement.testExitCode === 0 && measurement.reportingFailed === false && measurement.preflightCleanupExitCode === 0 && measurement.selection === 'full', 'PostgreSQL source, outcome or cleanup incomplete.');
-  requireThat(measurement.groups?.length === 2 && ['functional', 'infrastructure-qualification'].every(suite => measurement.groups.filter(group => group.suite === suite && group.phase === 'complete' && group.testExitCode === 0).length === 1), 'Complete PostgreSQL suites missing.');
+    measurement.requiredAot === true && measurement.testExitCode === 0 && measurement.reportingFailed === false && measurement.selection === 'full', 'PostgreSQL source or outcome incomplete.',
+    { code: 'postgresql-execution-incomplete', gate: 'postgresql-integration', member: 'measurement.json', cleanup: measurement.preflightCleanupExitCode === 0 ? 'not-established' : 'incomplete' });
+  requireThat(measurement.preflightCleanupExitCode === 0, 'PostgreSQL preflight cleanup incomplete.',
+    { code: 'preflight-cleanup-incomplete', gate: 'postgresql-integration', member: 'measurement.json', cleanup: 'incomplete' });
+  requireThat(measurement.groups?.length === 2 && ['functional', 'infrastructure-qualification'].every(suite => measurement.groups.filter(group => group.suite === suite && group.phase === 'complete' && group.testExitCode === 0).length === 1), 'Complete PostgreSQL suites missing.',
+    { code: 'suite-coverage-incomplete', gate: 'postgresql-integration', member: 'measurement.json' });
   resources(json(pg, 'resources.json'));
   const preflight = json(pg, 'preflight.json');
-  requireThat(['prerequisites', 'ownedServer'].every(key => preflight[key]?.exitCode === 0 && preflight[key]?.cleanup === 'ok'), 'PostgreSQL preflight/cleanup evidence incomplete.');
+  requireThat(['prerequisites', 'ownedServer'].every(key => preflight[key]?.exitCode === 0 && preflight[key]?.cleanup === 'ok'), 'PostgreSQL preflight/cleanup evidence incomplete.',
+    { code: 'preflight-incomplete', gate: 'postgresql-integration', member: 'preflight.json', cleanup: ['prerequisites', 'ownedServer'].every(key => preflight[key]?.cleanup === 'ok') ? 'not-established' : 'incomplete' });
   for (const suite of ['functional', 'infrastructure-qualification']) {
     inventory(expected('postgresql-integration', suite), array(json(pg, `${suite}/cases.json`)), { gate: 'postgresql-integration', member: `${suite}/cases.json` });
     resources(json(pg, `${suite}/resources.json`), `${suite}/resources.json`);
-    requireThat(json(pg, `${suite}/failure-evidence.json`).failedCases === 0, 'PostgreSQL suite failure present.');
+    requireThat(json(pg, `${suite}/failure-evidence.json`).failedCases === 0, 'PostgreSQL suite failure present.',
+      { code: 'test-failure', gate: 'postgresql-integration', member: `${suite}/failure-evidence.json` });
   }
   const precheck = json(pg, 'anonymous-reflection-precheck/precheck.json');
-  requireThat(precheck.source === identity.merge && precheck.status === 'passed' && precheck.exitCode === 0 && precheck.testExitCode === 0 && precheck.reportingFailed === false && precheck.cleanup === 'confirmed-by-named-test-lifecycle', 'Named reflection precheck incomplete.');
+  requireThat(precheck.source === identity.merge && precheck.status === 'passed' && precheck.exitCode === 0 && precheck.testExitCode === 0 && precheck.reportingFailed === false && precheck.cleanup === 'confirmed-by-named-test-lifecycle', 'Named reflection precheck incomplete.',
+    { code: 'precheck-incomplete', gate: 'postgresql-integration', member: 'anonymous-reflection-precheck/precheck.json', cleanup: precheck.cleanup === 'confirmed-by-named-test-lifecycle' ? 'not-established' : 'not-confirmed' });
   const composition = files('composition');
-  requireThat(composition.has('Haby.Operator.Composition.Sample.dll') && createHash('sha256').update(composition.get('Haby.Operator.Composition.Sample.dll')).digest('hex') === measurement.compositionSampleSha256, 'Tested composition executable missing or different.');
+  requireThat(composition.has('Haby.Operator.Composition.Sample.dll') && createHash('sha256').update(composition.get('Haby.Operator.Composition.Sample.dll')).digest('hex') === measurement.compositionSampleSha256, 'Tested composition executable missing or different.',
+    { code: 'composition-incomplete', gate: 'postgresql-integration', member: 'Haby.Operator.Composition.Sample.dll' });
   summary.push({ gate: 'postgresql-integration', cases: rows.length, status: 'complete', cleanup: 'confirmed' });
   for (const [key, name, markers] of [
     ['kernel', 'kubernetes-deployment-kernel', ['PASS kernel-cleanup-ownership', 'PASS kernel-namespace-absence-after-UID-delete']],
@@ -172,16 +189,19 @@ export function validateEvidence(identity, plan, artifacts, attempt) {
   gate(provider, 'provider-access/', identity, 'kubernetes-provider-access', members);
   const scenarios = ['success', 'stock', 'port-collision', 'readiness-failure'];
   for (const scenario of scenarios) {
+    const member = `qualification-${scenario}.txt`;
     const matching = [...provider.keys()].filter(path => path.endsWith(`/qualification-${scenario}.txt`));
-    requireThat(matching.length === 1, 'API rehearsal member missing or ambiguous.');
+    requireThat(matching.length === 1, 'API rehearsal member missing or ambiguous.', { code: 'missing-rehearsal-member', gate: 'kubernetes-provider-access', member });
     const lines = provider.get(matching[0]).toString().split(/\r?\n/);
     requireThat(lines.includes(`Source: ${identity.merge}`) && lines.includes('Dirty: False') && lines.includes('Run-owned private directory removed.') &&
       lines.filter(line => /^Run-owned container and [0-9]+ anonymous volumes absent\.$/.test(line) || (scenario === 'port-collision' && line === 'Run-owned container absent after attempted launch.')).length === 1 &&
-      !lines.some(line => /cleanup: FAIL|stop: FAIL|Evidence write: FAIL/.test(line)), 'API rehearsal cleanup/source incomplete.');
-    if (scenario === 'success') cleanup(provider.get(matching[0]), identity, []);
+      !lines.some(line => /cleanup: FAIL|stop: FAIL|Evidence write: FAIL/.test(line)), 'API rehearsal cleanup/source incomplete.',
+    { code: 'provider-evidence-incomplete', gate: 'kubernetes-provider-access', member, cleanup: 'not-confirmed' });
+    if (scenario === 'success') cleanup(provider.get(matching[0]), identity, [], 'kubernetes-provider-access', member);
     else {
       const failure = scenario === 'stock' ? 'stage=harness; reason=nonzero' : scenario === 'port-collision' ? 'stage=launch; reason=nonzero' : 'stage=readiness; reason=deadline';
-      requireThat(lines.filter(line => line.startsWith(`Failure: ${failure}; category=`)).length === 1, 'Expected failure rehearsal outcome missing.');
+      requireThat(lines.filter(line => line.startsWith(`Failure: ${failure}; category=`)).length === 1, 'Expected failure rehearsal outcome missing.',
+        { code: 'rehearsal-outcome-incomplete', gate: 'kubernetes-provider-access', member });
     }
   }
   summary.push({ gate: 'kubernetes-provider-access', cases: members.length, status: 'complete', cleanup: 'confirmed' });
@@ -192,17 +212,17 @@ export async function current(github, identity) {
   const [owner, repo] = identity.repository.split('/');
   const pr = (await github.rest.pulls.get({ owner, repo, pull_number: identity.pr })).data;
   const commit = (await github.rest.git.getCommit({ owner, repo, commit_sha: identity.merge })).data;
-  assertCurrent(identity, pr, commit);
-  return { pr, commit };
+  const main = (await github.rest.repos.getBranch({ owner, repo, branch: 'main' })).data.commit?.sha;
+  assertCurrent(identity, pr, commit, main);
+  return { pr, commit, main };
 }
 
 export async function prepare(github, environment, input, actor) {
   const identity = validateRequest(environment, input);
   const [owner, repo] = identity.repository.split('/');
-  const { pr, commit } = await current(github, identity);
+  const { pr, commit, main } = await current(github, identity);
   const permission = (await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: actor })).data.permission;
-  assertCandidate(identity, pr, commit, permission);
-  requireThat((await github.rest.repos.getBranch({ owner, repo, branch: 'main' })).data.commit.sha === identity.control, 'Installed main control moved.');
+  assertCandidate(identity, pr, commit, permission, main);
   return identity;
 }
 
