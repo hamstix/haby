@@ -34,19 +34,29 @@ internal static class ConfiguredDeploymentUpdateCases
             binding = (await db.RuntimeIdentityBindings.AsNoTracking().SingleAsync(x => x.ManagedWorkloadId == action.ManagedIdentity, token)).Id;
         }
         var oldDocuments = RuntimeBootstrapCodec.Decode(previous.Projection.Runtime!.Bootstrap).Documents.Values.Select(Guid.Parse).ToArray();
-        // Reuse the already-published tag AND its accepted digest. Image bytes and
-        // consumer input graph are unchanged; the resolved image reference changes.
-        const string package = "ghcr.io/hamstix/haby-runtime-consumer";
-        const string input = "b7cb2fbcd77b062869a9c450003da26f87dfc5477750d79d7ef1a71bacde4b24";
-        const string digest = "sha256:192203c5c93a3d21989b0b7b54a1e687fa03c35ea75b14fb11018aef99fd378a";
-        if (image != package + "@" + digest) throw new InvalidOperationException("Update qualification requires the existing accepted consumer digest.");
-        var targetImage = package + ":inputs-" + input + "@" + digest;
-        envelope["applicationVersion"] = "configured-update-v2";
-        envelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["image"]!["reference"] = targetImage;
+        Console.WriteLine("Q243 configured update-target-envelope start");
+        var targetImage = ConfiguredDeploymentUpdateTarget.PrepareEnvelope(envelope, image);
+        Console.WriteLine("Q243 configured update-target-envelope completed");
         var catalog = new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition], [KubernetesContract.Definition], [], []);
+        Console.WriteLine("Q243 configured update-import start");
         var imported = await new ImportApplicationManifest(services.GetRequiredService<IManifestImportStore>(), catalog,
             services.GetRequiredService<TimeProvider>()).ExecuteAsync(Encoding.UTF8.GetBytes(envelope.ToJsonString()), "qualification");
-        var revision = (imported as ImportApplicationManifestResult.Succeeded)?.ManifestRevisionRef ?? throw new InvalidOperationException("Update manifest refused.");
+        if (imported is not ImportApplicationManifestResult.Succeeded succeeded)
+        {
+            Console.WriteLine("Q243 configured update-import failed");
+            throw new InvalidOperationException("Update manifest refused.");
+        }
+        var revision = succeeded.ManifestRevisionRef;
+        Console.WriteLine("Q243 configured update-import completed");
+        Console.WriteLine("Q243 configured update-image-baseline start");
+        var baselinePods = await admin.CoreV1.ListNamespacedPodAsync(previous.Namespace,
+            labelSelector: DeploymentIntents.ManagedKey + "=" + previous.ManagedWorkload.ToString("N"), cancellationToken: token);
+        var baselineImageId = baselinePods.Items.Where(x => x.Spec.Containers.Any(c => c.Name == previous.Projection.Container && c.Image == image))
+            .SelectMany(x => x.Status.ContainerStatuses ?? [])
+            .Where(x => x.Name == previous.Projection.Container && x.State?.Running is not null && !string.IsNullOrEmpty(x.ImageID))
+            .Select(x => x.ImageID.Split('@')[^1]).Distinct(StringComparer.Ordinal).Single();
+        Console.WriteLine("Q243 configured update-image-baseline completed");
+        Console.WriteLine("Q243 configured update-plan start");
         var planner = services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>();
         var handlers = services.GetServices<IInternalActionHandler>().ToArray();
         EnvironmentRecordId environment;
@@ -54,14 +64,15 @@ internal static class ConfiguredDeploymentUpdateCases
             environment = EnvironmentRecordId.Parse((await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == deploymentId, token)).EnvironmentRecordId.ToString());
         var change = (await planner.CreateChangeSetAsync(environment, revision.ApplicationRecordId, revision,
             new DeploymentPrecondition.ExpectedGeneration(baseline.Generation), "qualification", token)).ChangeSet!;
+        Console.WriteLine("Q243 configured update-plan completed");
         Check((await planner.CreateOperatorPlanAsync(change.Id, "qualification", token, handlers)).Status == DurablePlanStatus.UnsupportedShape,
             "U01-public-update-remains-closed");
         var plan = (await planner.CreateInternalPlanAsync(change.Id, "qualification", token, handlers)).Plan!;
         var accepted = (await ((PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>())
             .CommitInternalAsync(change.Id, plan.Id, "qualification", token, handlers) as DurableCommitResult.Committed)?.Commit
             ?? throw new InvalidOperationException("Internal update acceptance refused.");
-        // Simulate permitted foreign fields after the accepted baseline. No new image
-        // is fetched: the injected process uses the same pinned consumer image.
+        // Simulate permitted foreign fields after the accepted baseline. The sidecar
+        // uses the original reference; the target Pod must resolve the :443 reference.
         var foreignPatch = new JsonArray(
             new JsonObject { ["op"] = "add", ["path"] = "/metadata/annotations/qualification.example~1foreign", ["value"] = "retained" },
             new JsonObject
@@ -117,14 +128,19 @@ internal static class ConfiguredDeploymentUpdateCases
             "U07-sidecar-foreign-metadata-and-api-defaulting-preserved");
         using var startup = CancellationTokenSource.CreateLinkedTokenSource(token); startup.CancelAfter(TimeSpan.FromSeconds(35));
         var started = false;
+        var sameRuntimeImage = false;
         while (!started || !target.Documents.Values.Select(Guid.Parse).All(requests.Contains))
         {
             var pods = await admin.CoreV1.ListNamespacedPodAsync(previous.Namespace,
                 labelSelector: DeploymentIntents.ManagedKey + "=" + intent.ManagedWorkload.ToString("N"), cancellationToken: startup.Token);
             foreach (var pod in pods.Items.Where(x => x.Spec.ServiceAccountName == intent.Target.Runtime.ServiceAccount &&
-                x.Spec.Containers.Any(c => c.Name == intent.Target.Container && c.Env?.Any(e => e.Name == RuntimeBootstrap.Variable && e.Value == intent.Target.Runtime.Bootstrap) == true) &&
+                x.Spec.Containers.Any(c => c.Name == intent.Target.Container && c.Image == targetImage && c.Env?.Any(e => e.Name == RuntimeBootstrap.Variable && e.Value == intent.Target.Runtime.Bootstrap) == true) &&
                 x.Status.ContainerStatuses?.Any(c => c.Name == intent.Target.Container && c.State?.Running is not null) == true))
             {
+                var status = pod.Status.ContainerStatuses.Single(x => x.Name == intent.Target.Container);
+                if (string.IsNullOrEmpty(status.ImageID) || status.ImageID.Split('@')[^1] != baselineImageId)
+                    throw new InvalidOperationException("Updated runtime image identity differs from the pinned baseline.");
+                sameRuntimeImage = true;
                 using var stream = await admin.CoreV1.ReadNamespacedPodLogAsync(pod.Metadata.Name, previous.Namespace, container: intent.Target.Container, cancellationToken: startup.Token);
                 using var reader = new StreamReader(stream, new UTF8Encoding(false, true));
                 var buffer = new char[4097];
@@ -137,7 +153,7 @@ internal static class ConfiguredDeploymentUpdateCases
         }
         await using var verify = await contexts.CreateDbContextAsync(token);
         var state = await verify.ManagedObjectStates.AsNoTracking().SingleAsync(x => x.DeploymentId == deploymentId, token);
-        Check(state.Payload == result.Receipt && state.Generation == accepted.Generation.Value && state.OriginGeneration == baseline.Generation.Value &&
+        Check(sameRuntimeImage && state.Payload == result.Receipt && state.Generation == accepted.Generation.Value && state.OriginGeneration == baseline.Generation.Value &&
             (await verify.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == deploymentId, token)).AppliedGeneration == baseline.Generation.Value &&
             await verify.RuntimeConfigurationPermissions.CountAsync(x => x.BindingId == binding && x.Status == "Published", token) == 4 &&
             await verify.RuntimeConfigurationPermissions.CountAsync(x => x.BindingId == binding && oldDocuments.Contains(x.RevisionId) && x.Status == "Published", token) == oldDocuments.Length &&
@@ -152,6 +168,8 @@ internal static class ConfiguredDeploymentUpdateCases
     }
     private sealed class PatchEvidence
     {
+        // Only Deployment PATCH requests sent through this UPDATE kernel client.
+        // This counter does not observe other clients or all network traffic.
         internal int Writes;
         internal JsonArray? Patch;
         internal JsonObject? Response;

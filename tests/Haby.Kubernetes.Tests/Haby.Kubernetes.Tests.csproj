@@ -5,6 +5,7 @@
     <Compile Include="../InternalKubernetesFixturePreflight.cs" Link="InternalKubernetesFixturePreflight.cs" />
     <Compile Include="../DeploymentReplacementObservation.cs" Link="DeploymentReplacementObservation.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/DeploymentKernelReplacement.cs" Link="DeploymentKernelReplacement.cs" />
+    <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredDeploymentUpdateTarget.cs" Link="ConfiguredDeploymentUpdateTarget.cs" />
     <ProjectReference Include="../../src/Haby.PostgreSql/Haby.PostgreSql.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />

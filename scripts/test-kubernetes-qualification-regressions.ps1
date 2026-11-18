@@ -1119,6 +1119,21 @@ Write-Output 'PASS kernel K24 replacement phases and finite 601-read evidence; u
 Write-Output 'PASS fixed K14 substeps: closed results/receipt/status/count, exception failure, hostile/unknown/mode rejection and unchanged bounds (synthetic)'
 
 # Pure parser controls for both existing workload modes, never a cluster execution.
+foreach($stage in @('update-target-envelope','update-import','update-image-baseline','update-plan')){
+    foreach($state in @('start','completed','failed')){
+        $line="Q243 configured $stage $state"
+        $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$line) 'protected-error-sentinel'
+        if($parsed.Status -cne 'valid' -or ('Diagnostic workload: '+$line.Substring(5)) -cnotin $parsed.Records -or
+            $parsed.HasFailure -ne ($state -ceq 'failed')){throw 'Fixed UPDATE setup diagnostic missing'}
+        $wrongMode=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`nQ243 kernel $stage $state") ''
+        if($wrongMode.Status -cne 'invalid' -or @($wrongMode.Records).Count){throw 'UPDATE setup stage accepted for wrong mode'}
+    }
+}
+foreach($line in @('Q243 configured update-import protected-secret','Q243 configured update-import failed protected-secret')){
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$line) ''
+    if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Unrecognized UPDATE setup detail published'}
+}
+Write-Output 'PASS fixed UPDATE setup stages; closed value-free states, failure attribution and hostile/mode rejection (synthetic)'
 foreach($mode in @('kernel','configured')){
     $case=if($mode -ceq 'kernel'){'K25'}else{'C07'}
     $valid="Q243 $mode entry start`nQ243 $mode $case failed"

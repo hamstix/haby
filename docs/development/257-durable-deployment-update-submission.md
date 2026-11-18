@@ -85,9 +85,11 @@ drift before any write. Existing CREATE and public lifecycle suites remain gates
 
 The existing configured Kubernetes consumer contour also exercises an internal
 successor after a genuinely completed initial baseline. It preserves all prior
-contour assertions, uses the already-published `inputs-b7cb2fbcd77b062869a9c450003da26f87dfc5477750d79d7ef1a71bacde4b24`
-tag with the same pinned digest, and changes the resolved reference without
-building another image. It checks the real conditional payload, API response,
+contour assertions and uses the accepted consumer digest with the explicit default
+registry port (`ghcr.io:443`). This changes the reference without building another
+image. A shared fixture-envelope regression exercises the registered production
+import. The contour checks the target Pod reference and runtime image identity
+against the original pinned baseline, the real conditional payload, API response,
 same-UID readback, injected sidecar/metadata/default preservation, lost-response
 observation, stable-identity startup fetching new exact revisions and retained old
 permissions. This test does not claim UPDATE readiness or Applied completion.

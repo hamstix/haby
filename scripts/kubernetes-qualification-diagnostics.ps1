@@ -396,6 +396,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
     $stages=@('entry','namespace-create','namespace-created','catalog-init','accepted-plan','host-build','host-start',
         'first-submit','uncertain-submit','cli-submit','pod-startup','readback','prepare-update','cleanup-ownership',
         'cleanup-namespace','cleanup-catalog','completed','unknown')
+    if($Mode -ceq 'configured'){$stages+=@('update-target-envelope','update-import','update-image-baseline','update-plan')}
     $outcomes=@('Confirmed','Refused','Conflict','Uncertain','CanceledBeforeDispatch','ObservationUnavailable','NotConfirmed','unknown')
     $codes=@('response-confirmed','observation-confirmed','evidence-not-confirmed','response-unconfirmed','invalid-input',
         'connection-unavailable','dispatch-uncertain','occupied-name','owned-state-conflict','uid-conflict','api-conflict',
