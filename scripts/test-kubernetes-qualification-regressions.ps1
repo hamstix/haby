@@ -1119,6 +1119,34 @@ Write-Output 'PASS kernel K24 replacement phases and finite 601-read evidence; u
 Write-Output 'PASS fixed K14 substeps: closed results/receipt/status/count, exception failure, hostile/unknown/mode rejection and unchanged bounds (synthetic)'
 
 # Pure parser controls for both existing workload modes, never a cluster execution.
+foreach($stage in @('Execute','ExpectedLoss','Recover','ReceiptPresence','ReceiptDecode','Readback','Projection',
+    'ObservationReceipt','ApiResponsePresence','ApiResponseReceipt','U06Outcome','U06Source','U06PatchCount',
+    'U06SavedUid','U06TargetImage','U06PatchPresence','U06ResourceVersion','U06PatchUid','U06ResponseUid','U06ResponseGeneration')){
+    foreach($suffix in @('Start','failure unknown 1')){
+        $line="Q243 configured update $stage $suffix"
+        $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$line) 'protected-error-sentinel'
+        if($parsed.Status -cne 'valid' -or ('Diagnostic workload: '+$line.Substring(5)) -cnotin $parsed.Records -or
+            $parsed.HasFailure -ne ($suffix -ceq 'failure unknown 1')){throw 'UPDATE stage/failure diagnostic missing'}
+        $wrongMode=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`nQ243 kernel update $stage $suffix") ''
+        if($wrongMode.Status -cne 'invalid' -or @($wrongMode.Records).Count){throw 'UPDATE diagnostic accepted for wrong mode'}
+    }
+}
+foreach($suffix in @('Execute Returned','ExpectedLoss Observed','ExpectedLoss Failed','Execute Completed','Recover Completed',
+    'ReceiptPresence Passed','ApiResponsePresence Passed','U06Outcome Passed','U06Outcome Failed',
+    'Execute result Refused owned-state-conflict 0','Recover result Confirmed confirmed 1','Execute result unknown unknown unknown')){
+    $line="Q243 configured update $suffix"
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$line) ''
+    if($parsed.Status -cne 'valid' -or ('Diagnostic workload: '+$line.Substring(5)) -cnotin $parsed.Records -or
+        $parsed.HasFailure -ne ($suffix -cin @('ExpectedLoss Failed','U06Outcome Failed'))){throw 'UPDATE result/condition diagnostic missing'}
+}
+foreach($suffix in @('protected-stage Start','Execute failure protected-exception 1','Execute failure unknown 4',
+    'Execute failure unknown 01','Execute result Refused protected-reason 1','Execute result protected-outcome unknown 1',
+    'Execute result Refused unknown 1 protected-bootstrap','Recover Observed','Readback result Confirmed confirmed 1',
+    'Execute failure unknown 1 protected-response','U06Outcome Completed')){
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`nQ243 configured update $suffix") ''
+    if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Unrecognized UPDATE diagnostic value published'}
+}
+Write-Output 'PASS post-U05 UPDATE operation/condition stages, expected loss/normal return, scoped counts and hostile-value rejection (synthetic)'
 foreach($stage in @('update-target-envelope','update-import','update-image-baseline','update-plan')){
     foreach($state in @('start','completed','failed')){
         $line="Q243 configured $stage $state"

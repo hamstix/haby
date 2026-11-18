@@ -403,6 +403,10 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
         'api-access-denied','action-canceled','managed-object-missing','action-budget','precondition-limit','object-absent','observation-unavailable','unknown')
     $rpcCodes=@('OK','Cancelled','Unknown','InvalidArgument','DeadlineExceeded','NotFound','AlreadyExists','PermissionDenied',
         'ResourceExhausted','FailedPrecondition','Aborted','OutOfRange','Unimplemented','Internal','Unavailable','DataLoss','Unauthenticated','unknown')
+    $updateOperations=@('Execute','ExpectedLoss','Recover','ReceiptDecode','Readback','Projection','ObservationReceipt','ApiResponseReceipt')
+    $updateConditions=@('ReceiptPresence','ApiResponsePresence','U06Outcome','U06Source','U06PatchCount','U06SavedUid',
+        'U06TargetImage','U06PatchPresence','U06ResourceVersion','U06PatchUid','U06ResponseUid','U06ResponseGeneration')
+    $updateCodes=$codes+@('confirmed','not-dispatched','manual-recovery-required','terminal-failure','managed-identity-conflict','managed-object-conflict','intent-invalid')
     $records=[Collections.Generic.List[string]]::new();$entry=$false;$hasFailure=$false
     foreach($line in (($Output+"`n"+$ErrorOutput) -split "`r?`n")){
         if($line -cin $passes){$records.Add($line)}
@@ -410,7 +414,25 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($line.Length -gt 160){return $invalid}
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
-            if($parts[2] -cin @('k14','k24')){
+            if($parts[2] -ceq 'update'){
+                if($Mode -cne 'configured' -or $parts.Count -lt 5 -or $parts[3] -cnotin ($updateOperations+$updateConditions)){return $invalid}
+                $phase=$parts[3];$state=$parts[4];$shape=$false
+                if($parts.Count -eq 5){
+                    $shape=($phase -cin $updateConditions -and $state -cin @('Start','Passed','Failed')) -or
+                        ($phase -cin $updateOperations -and $state -cin @('Start','Completed')) -or
+                        ($phase -ceq 'Execute' -and $state -ceq 'Returned') -or
+                        ($phase -ceq 'ExpectedLoss' -and $state -cin @('Observed','Failed'))
+                }elseif($parts.Count -eq 7){
+                    $shape=$state -ceq 'failure' -and $parts[5] -ceq 'unknown' -and $parts[6] -cmatch '^([0-3]|unknown)$'
+                }elseif($parts.Count -eq 8){
+                    $shape=$phase -cin @('Execute','Recover') -and $state -ceq 'result' -and
+                        $parts[5] -cin @('Confirmed','Uncertain','Refused','Unavailable','NotConfirmed','unknown') -and
+                        $parts[6] -cin $updateCodes -and $parts[7] -cmatch '^([0-3]|unknown)$'
+                }
+                if(!$shape){return $invalid}
+                if($state -cin @('failure','Failed')){$hasFailure=$true}
+                $records.Add('Diagnostic workload: '+$line.Substring(5))
+            }elseif($parts[2] -cin @('k14','k24')){
                 $replacementPhases=if($parts[2] -ceq 'k14'){@('initial-create','uid-delete','absence-poll','replacement-create','old-uid-observe','assertion')}else{@('uid-delete','absence-poll','replacement-create')}
                 if($Mode -cne 'kernel' -or $parts.Count -lt 5 -or $parts[3] -cnotin $replacementPhases){return $invalid}
                 $phase=$parts[3];$state=$parts[4];$shape=$false

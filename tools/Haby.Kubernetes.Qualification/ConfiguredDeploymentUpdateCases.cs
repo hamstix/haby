@@ -14,6 +14,8 @@ using k8s;
 using k8s.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using UpdateStage = ConfiguredDeploymentUpdateDiagnostics.Stage;
+using UpdateState = ConfiguredDeploymentUpdateDiagnostics.State;
 
 internal static class ConfiguredDeploymentUpdateCases
 {
@@ -106,21 +108,75 @@ internal static class ConfiguredDeploymentUpdateCases
         Check(target.BindingId == binding.ToString("D") && target.Documents.Count == 2 && !target.Documents.Values.Select(Guid.Parse).Intersect(oldDocuments).Any(),
             "U05-target-bootstrap-new-exact-revisions-stable-binding");
         requests.Clear();
-        try { await actions.ExecuteAsync(key, token); throw new InvalidOperationException("Lost update confirmation was not exercised."); }
-        catch (LostUpdateResponse) { }
-        var result = await Actions().RecoverByObservationAsync(key, token);
-        var response = DeploymentIntents.DecodeReceipt(result.Receipt ?? throw new InvalidOperationException("Update observation did not confirm."));
-        var current = await admin.AppsV1.ReadNamespacedDeploymentAsync(previous.Name, previous.Namespace, cancellationToken: token);
-        var projection = DeploymentObjects.Read(current);
-        _ = DeploymentObjects.Receipt(projection, intent, ConfirmationSource.Observation);
-        if (wire.Response is null) throw new InvalidOperationException("Conditional PATCH response unavailable.");
-        var apiResponse = DeploymentObjects.Receipt(wire.Response, intent, ConfirmationSource.Response);
-        Check(result.Outcome == InternalActionOutcome.Confirmed && response.Source == ConfirmationSource.Observation && wire.Writes == 1 &&
-            current.Metadata.Uid == previous.Uid && current.Spec.Template.Spec.Containers.Single(x => x.Name == intent.Target.Container).Image == targetImage &&
-            wire.Patch is not null && wire.Patch.Any(x => x!["path"]!.GetValue<string>() == "/metadata/resourceVersion") &&
-            wire.Patch.Any(x => x!["path"]!.GetValue<string>() == "/metadata/uid") && apiResponse.Uid == response.Uid &&
-            apiResponse.KubernetesGeneration == response.KubernetesGeneration,
-            "U06-conditional-configured-patch-response-readback-lost-response-recovery");
+        InternalActionResult result;
+        V1Deployment current;
+        var stage = UpdateStage.Execute;
+        void Begin(UpdateStage next)
+        {
+            stage = next;
+            Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Progress(stage, UpdateState.Start));
+        }
+        void Complete() => Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Progress(stage, UpdateState.Completed));
+        void Require(UpdateStage condition, Func<bool> predicate)
+        {
+            Begin(condition);
+            var satisfied = predicate();
+            Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Progress(stage, satisfied ? UpdateState.Passed : UpdateState.Failed));
+            if (!satisfied) throw new InvalidOperationException("Configured update diagnostic condition failed.");
+        }
+        try
+        {
+            Begin(UpdateStage.Execute);
+            try
+            {
+                var returned = await actions.ExecuteAsync(key, token);
+                Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Progress(stage, UpdateState.Returned));
+                Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Result(stage, returned, wire.Writes));
+                Require(UpdateStage.ExpectedLoss, () => false);
+            }
+            catch (LostUpdateResponse)
+            {
+                Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Progress(UpdateStage.ExpectedLoss, UpdateState.Observed));
+                Complete();
+            }
+            Begin(UpdateStage.Recover);
+            result = await Actions().RecoverByObservationAsync(key, token);
+            Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Result(stage, result, wire.Writes));
+            Complete();
+            Require(UpdateStage.ReceiptPresence, () => result.Receipt is not null);
+            Begin(UpdateStage.ReceiptDecode);
+            var response = DeploymentIntents.DecodeReceipt(result.Receipt!);
+            Complete();
+            Begin(UpdateStage.Readback);
+            current = await admin.AppsV1.ReadNamespacedDeploymentAsync(previous.Name, previous.Namespace, cancellationToken: token);
+            Complete();
+            Begin(UpdateStage.Projection);
+            var projection = DeploymentObjects.Read(current);
+            Complete();
+            Begin(UpdateStage.ObservationReceipt);
+            _ = DeploymentObjects.Receipt(projection, intent, ConfirmationSource.Observation);
+            Complete();
+            Require(UpdateStage.ApiResponsePresence, () => wire.Response is not null);
+            Begin(UpdateStage.ApiResponseReceipt);
+            var apiResponse = DeploymentObjects.Receipt(wire.Response!, intent, ConfirmationSource.Response);
+            Complete();
+            Require(UpdateStage.U06Outcome, () => result.Outcome == InternalActionOutcome.Confirmed);
+            Require(UpdateStage.U06Source, () => response.Source == ConfirmationSource.Observation);
+            Require(UpdateStage.U06PatchCount, () => wire.Writes == 1);
+            Require(UpdateStage.U06SavedUid, () => current.Metadata.Uid == previous.Uid);
+            Require(UpdateStage.U06TargetImage, () => current.Spec.Template.Spec.Containers.Single(x => x.Name == intent.Target.Container).Image == targetImage);
+            Require(UpdateStage.U06PatchPresence, () => wire.Patch is not null);
+            Require(UpdateStage.U06ResourceVersion, () => wire.Patch!.Any(x => x!["path"]!.GetValue<string>() == "/metadata/resourceVersion"));
+            Require(UpdateStage.U06PatchUid, () => wire.Patch!.Any(x => x!["path"]!.GetValue<string>() == "/metadata/uid"));
+            Require(UpdateStage.U06ResponseUid, () => apiResponse.Uid == response.Uid);
+            Require(UpdateStage.U06ResponseGeneration, () => apiResponse.KubernetesGeneration == response.KubernetesGeneration);
+            Console.WriteLine("PASS configured-U06-conditional-configured-patch-response-readback-lost-response-recovery");
+        }
+        catch
+        {
+            Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Failure(stage, wire.Writes));
+            throw;
+        }
         Check(current.Metadata.Annotations["qualification.example/foreign"] == "retained" && current.Spec.Template.Spec.Containers[0].Name == "foreign" &&
             current.Spec.Template.Spec.Containers[0].Image == image &&
             current.Spec.Template.Spec.Containers[0].Command.SequenceEqual(new[] { "dotnet", "--info" }) &&
