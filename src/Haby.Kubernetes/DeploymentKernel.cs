@@ -61,7 +61,7 @@ public sealed partial class DeploymentKernel
                 try
                 {
                     using var response = await client.AppsV1.PatchNamespacedDeploymentWithHttpMessagesAsync(
-                        new V1Patch(patch.ToJsonString(), V1Patch.PatchType.JsonPatch), intent.Name, intent.Namespace, cancellationToken: budget.Token);
+                        new V1Patch(DeploymentPatchTransport.Serialize(patch), V1Patch.PatchType.JsonPatch), intent.Name, intent.Namespace, cancellationToken: budget.Token);
                     var observed = DeploymentObjects.Read(response.Body);
                     Need(DeploymentObjects.String(observed, "metadata", "uid") == intent.ExpectedUid, "uid-conflict");
                     return new(KernelOutcome.Confirmed, "response-confirmed", writes, DeploymentObjects.Receipt(observed, intent, ConfirmationSource.Response));

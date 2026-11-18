@@ -93,6 +93,10 @@ against the original pinned baseline, the real conditional payload, API response
 same-UID readback, injected sidecar/metadata/default preservation, lost-response
 observation, stable-identity startup fetching new exact revisions and retained old
 permissions. This test does not claim UPDATE readiness or Applied completion.
+Outbound Deployment JSON Patch string tokens use the API server's scalar encoding
+so that the exact old-bootstrap test remains meaningful for embedded JSON. This
+transport encoding preserves decoded values and every conditional operation;
+stored bootstrap codecs, canonical inputs and retry classification are unchanged.
 Executable assertions are not executed evidence: exact results and current-SHA
 mandatory CI belong in the author report and draft pull request.
 

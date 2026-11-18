@@ -269,7 +269,7 @@ internal static class ConfiguredDeploymentUpdateCases
                     try
                     {
                         using var response = await admin.AppsV1.PatchNamespacedDeploymentWithHttpMessagesAsync(
-                            new V1Patch(operations.ToJsonString(), V1Patch.PatchType.JsonPatch), intent.Name, intent.Namespace,
+                            new V1Patch(DeploymentPatchTransport.Serialize(operations), V1Patch.PatchType.JsonPatch), intent.Name, intent.Namespace,
                             dryRun: "All", cancellationToken: token);
                         status = (int)response.Response.StatusCode;
                     }

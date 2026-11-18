@@ -14,7 +14,7 @@ namespace Haby.Kubernetes.Tests;
 public sealed class ConfiguredUpdateTests
 {
     [Fact]
-    public async Task Configured_patch_sdk_wire_preserves_test_values_but_bootstrap_has_distinct_raw_string_encoding()
+    public async Task Configured_patch_sdk_wire_preserves_test_values_and_server_compatible_bootstrap_encoding()
     {
         var previous = ConfiguredDeploymentTests.Intent();
         var bootstrap = RuntimeBootstrapCodec.Decode(previous.Target.Runtime!.Bootstrap);
@@ -40,7 +40,7 @@ public sealed class ConfiguredUpdateTests
         var api = new KernelTests.FakeApi((_, _) => KernelTests.Reply(200, current));
         using var client = new k8s.Kubernetes(new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, api);
         using var response = await client.AppsV1.PatchNamespacedDeploymentWithHttpMessagesAsync(
-            new V1Patch(patch.ToJsonString(), V1Patch.PatchType.JsonPatch), next.Name, next.Namespace);
+            new V1Patch(DeploymentPatchTransport.Serialize(patch), V1Patch.PatchType.JsonPatch), next.Name, next.Namespace);
         using var wire = JsonDocument.Parse(Assert.Single(api.Bodies));
         var tests = wire.RootElement.EnumerateArray().Where(x => x.GetProperty("op"u8).GetString() == "test").ToArray();
         Assert.NotEmpty(tests);
@@ -55,9 +55,7 @@ public sealed class ConfiguredUpdateTests
         var goStyleScalar = JsonSerializer.Serialize(previous.Target.Runtime.Bootstrap,
             new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         // Source-audited evanphx/json-patch v4 compares compact scalar JSON bytes.
-        // This is a wire representation probe, not proof of the hosted 422 cause.
-        Assert.NotEqual(goStyleScalar, oldValue.GetRawText());
-        Assert.Contains("\\u0022", oldValue.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(goStyleScalar, oldValue.GetRawText());
         Assert.Equal(previous.Target.Runtime.Bootstrap, JsonSerializer.Deserialize<string>(goStyleScalar));
     }
     [Theory]
