@@ -56,6 +56,11 @@ without launching a runtime contour. Focused job names and artifacts have distin
 entire current case ledger and owned cleanup assertions; it is partial campaign
 evidence and cannot count as full final qualification. Automatic PR and trusted
 workflow_call execution still run all three contours with their original names.
+Reusable workflows inherit the caller's event context: the installed final caller
+is itself a workflow_dispatch. A nonempty required candidate therefore explicitly
+selects full execution before direct-dispatch classification. Focused admission,
+names and artifact prefixes require an absent candidate. Missing direct inputs
+remain invalid rather than being mistaken for a reusable call.
 
 The existing Infrastructure qualification workflow accepts manual `testcase` or
 `testgroup` plus `expected_head` for hosted focused PG. It validates current-plan

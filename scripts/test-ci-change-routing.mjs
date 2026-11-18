@@ -135,18 +135,103 @@ test('workflow keeps mandatory gate, names, conditions and permissions', () => {
 
 test('manual focused contours preserve automatic and reusable full defaults', () => {
   const workloads = readFileSync(new URL('../.github/workflows/kubernetes-deployment-kernel.yml', import.meta.url), 'utf8');
-  for (const contour of ['configured-deployment', 'durable-actions', 'deployment-kernel']) {
-    assert.ok(workloads.includes(`    if: github.event_name != 'workflow_dispatch' || inputs.contour == 'all' || (inputs.contour == '${contour}' && inputs.expected_head == github.sha && inputs.expected_head != '')`));
-    assert.ok(workloads.includes(`'Focused ${contour}' || '${contour}'`));
-  }
   assert.ok(workloads.includes('options: [all, configured-deployment, durable-actions, deployment-kernel]'));
   assert.ok(workloads.includes('default: all'));
   assert.equal((workloads.match(/focused-only-not-final-/g) ?? []).length, 3);
-  assert.ok(workloads.includes('process.env.EXPECTED_HEAD !== process.env.ACTUAL_HEAD'));
   const pg = readFileSync(new URL('../.github/workflows/infrastructure-qualification.yml', import.meta.url), 'utf8');
   assert.ok(pg.includes('focused-only-not-final-postgresql-'));
   assert.ok(pg.includes('Focused PostgreSQL (not final)'));
   assert.ok(pg.includes('-Suite infrastructure-qualification'));
   assert.ok(pg.includes('Assert-HabyFocusedPostgreSqlPlan'));
   assert.ok(pg.indexOf('Admit exact current focused selection') < pg.indexOf('Validate native prerequisites'));
+});
+
+// Evaluate only the boolean/string subset used by these actual workflow fields.
+// Missing context properties are empty strings, as in GitHub expressions. This
+// reads producer expressions, rather than copying routing into a test policy.
+function workflowExpression(expression, context) {
+  const tokens = expression.match(/\|\||&&|==|!=|[()]|'[^']*'|[A-Za-z_][A-Za-z0-9_.]*/g) ?? [];
+  assert.equal(tokens.join(''), expression.replace(/\s+(?=(?:[^']*'[^']*')*[^']*$)/g, ''));
+  let index = 0;
+  const atom = () => {
+    const token = tokens[index++];
+    if (token === '(') { const value = or(); assert.equal(tokens[index++], ')'); return value; }
+    if (token?.startsWith("'")) return token.slice(1, -1);
+    assert.match(token ?? '', /^(github|inputs)\.[A-Za-z0-9_.]+$/);
+    return token.split('.').reduce((value, key) => value?.[key], context) ?? '';
+  };
+  const equality = () => {
+    const value = atom(); const operator = tokens[index];
+    if (operator !== '==' && operator !== '!=') return value;
+    index++; const right = atom();
+    const same = typeof value === 'string' && typeof right === 'string' ? value.toLowerCase() === right.toLowerCase() : value === right;
+    return operator === '==' ? same : !same;
+  };
+  const and = () => { let value = equality(); while (tokens[index] === '&&') { index++; const right = equality(); value = value && right; } return value; };
+  const or = () => { let value = and(); while (tokens[index] === '||') { index++; const right = and(); value = value || right; } return value; };
+  const value = or(); assert.equal(index, tokens.length); return value;
+}
+function workloadRoute(event, inputs = {}) {
+  const source = readFileSync(new URL('../.github/workflows/kubernetes-deployment-kernel.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n').split('\njobs:\n')[1];
+  const headings = [...source.matchAll(/^  ([a-z][a-z0-9-]*):\n/gm)];
+  const context = { inputs, github: { event_name: event, sha: 'a'.repeat(40), run_attempt: '1', event: { pull_request: { head: { sha: '' } } } } };
+  const render = value => value.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => String(workflowExpression(expression.trim(), context)));
+  return headings.map((heading, i) => {
+    const block = source.slice(heading.index, headings[i + 1]?.index);
+    const condition = block.match(/^    if: (.+)$/m)?.[1];
+    const enabled = Boolean(workflowExpression(condition, context));
+    let admitted = null;
+    if (heading[1] === 'validate-focused-selection' && enabled) {
+      const program = block.match(/^\s*node -e "(.+)"$/m)?.[1]; assert.ok(program);
+      try {
+        execFileSync(process.execPath, ['-e', program], { env: { ...process.env, CONTOUR: inputs.contour ?? '', EXPECTED_HEAD: inputs.expected_head ?? '', ACTUAL_HEAD: context.github.sha }, stdio: 'pipe' });
+        admitted = true;
+      } catch (error) { assert.equal(error.status, 1); admitted = false; }
+    }
+    return { id: heading[1], enabled, admitted,
+      name: render(block.match(/^    name: (.+)$/m)?.[1] ?? heading[1]),
+      artifact: render(block.match(/^          name: (.+)$/m)?.[1] ?? '') };
+  });
+}
+const workloadIds = ['configured-deployment', 'durable-actions', 'deployment-kernel'];
+function assertFullWorkloads(route, source) {
+  assert.equal(route.find(job => job.id === 'validate-focused-selection').enabled, false);
+  const jobs = route.filter(job => workloadIds.includes(job.id));
+  assert.equal(jobs.length, 3);
+  for (const job of jobs) {
+    assert.equal(job.enabled, true, job.id); assert.equal(job.name, job.id);
+    assert.equal(job.artifact, `kubernetes-${job.id}-${source}${job.id === 'durable-actions' ? '-1' : ''}`);
+  }
+}
+test('dispatch caller with reusable candidate and absent focused inputs runs all original full workloads', () => {
+  assertFullWorkloads(workloadRoute('workflow_dispatch', { candidate: 'b'.repeat(40) }), 'b'.repeat(40));
+  // A caller's focused-looking inputs cannot override required reusable candidate.
+  assertFullWorkloads(workloadRoute('workflow_dispatch', { candidate: 'b'.repeat(40), contour: 'unknown', expected_head: 'stale' }), 'b'.repeat(40));
+});
+test('direct all and automatic PR preserve full identities while each focused contour is isolated', () => {
+  assertFullWorkloads(workloadRoute('workflow_dispatch', { contour: 'all' }), 'a'.repeat(40));
+  assertFullWorkloads(workloadRoute('pull_request'), 'a'.repeat(40));
+  for (const contour of workloadIds) {
+    const route = workloadRoute('workflow_dispatch', { contour, expected_head: 'a'.repeat(40) });
+    assert.equal(route.find(job => job.id === 'validate-focused-selection').enabled, true);
+    assert.equal(route.find(job => job.id === 'validate-focused-selection').admitted, true);
+    const jobs = route.filter(job => workloadIds.includes(job.id) && job.enabled);
+    assert.equal(jobs.length, 1); assert.equal(jobs[0].id, contour); assert.equal(jobs[0].name, `Focused ${contour}`);
+    assert.equal(jobs[0].artifact, `focused-only-not-final-kubernetes-${contour}-${'a'.repeat(40)}${contour === 'durable-actions' ? '-1' : ''}`);
+  }
+});
+test('unknown stale or absent direct focused inputs launch no runtime workload', () => {
+  for (const inputs of [{}, { contour: 'unknown', expected_head: 'a'.repeat(40) }, { contour: 'deployment-kernel', expected_head: 'b'.repeat(40) }, { contour: 'durable-actions' }]) {
+    const route = workloadRoute('workflow_dispatch', inputs);
+    assert.equal(route.find(job => job.id === 'validate-focused-selection').enabled, true);
+    assert.equal(route.find(job => job.id === 'validate-focused-selection').admitted, false);
+    assert.equal(route.filter(job => workloadIds.includes(job.id) && job.enabled).length, 0);
+  }
+});
+
+test('focused admission agrees with case-insensitive workflow string identity comparisons', () => {
+  assertFullWorkloads(workloadRoute('workflow_dispatch', { contour: 'ALL' }), 'a'.repeat(40));
+  const route = workloadRoute('workflow_dispatch', { contour: 'DEPLOYMENT-KERNEL', expected_head: 'A'.repeat(40) });
+  assert.equal(route.find(job => job.id === 'validate-focused-selection').admitted, true);
+  assert.deepEqual(route.filter(job => workloadIds.includes(job.id) && job.enabled).map(job => job.id), ['deployment-kernel']);
 });
