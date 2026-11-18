@@ -5,6 +5,27 @@ using k8s.Models;
 
 internal static class ConfiguredRetirementDiagnostics
 {
+    // One instance belongs to the configured UPDATE caller, across reconstructed actions.
+    internal sealed class Output
+    {
+        private bool recipientSeen, recipientFailureSeen, completionFailureSeen;
+        internal void Recipient(DeploymentRecipientDiagnostic value)
+        {
+            var failed = value.ParentFailure != RecipientProjectionFailure.None || value.PodFailure != RecipientProjectionFailure.None;
+            if (!recipientSeen || (failed && !recipientFailureSeen)) Console.WriteLine(Recipients(value));
+            recipientSeen = true;
+            recipientFailureSeen |= failed;
+        }
+        internal void Completion(string stage, string predicate)
+        {
+            // Successful closure steps repeat during bounded polling; U09-U12
+            // and returned complete member sets carry the outcome proof. Retain
+            // the first failed prerequisite, even after every successful poll.
+            if (stage != "PrerequisiteIncomplete" || completionFailureSeen) return;
+            completionFailureSeen = true;
+            Console.WriteLine(Closure(stage, predicate));
+        }
+    }
     private static readonly string[] Stages = ["Unknown", "Begin", "Recipients", "ClosureSource", "CaptureSubmitted", "ObsoleteProgress", "RetirementMarker", "CurrentRuntime", "ConfigurationComplete", "FreshSamples", "RetirementStart", "Revoke", "Publications", "CatalogHash", "SamplesHash", "AppliedCas", "CloseRequest", "PrerequisiteIncomplete"];
     private static readonly string[] Predicates = ["Unknown", "InternalUPDATECompletionRequiresAnUpdateInventory", "UPDATEInventoryRequired", "UpdateExpectedAppliedChanged", "UpdateCompletionExceedsCheckpointBound", "UpdateAppliedCompareAndSwapFailed", "UpdateInventoryMissing", "UpdateGenerationSuperseded", "UpdateAttemptsChanged", "ObsoleteInventoryChanged", "UnretiredPublicationChanged", "RetirementProgressChanged", "RetirementStartMismatch", "RetirementStartRecipientEvidenceInvalid", "ConfigurationAuthorityRequired", "RetirementNotStarted", "FrozenObsoletePermissionMismatch", "ObsoletePublicationHasAnActiveLiveReference", "RetirementProgressMismatch", "CurrentObsoletePermissionNoLongerMatchesInventory", "FrozenCompletionInventoryRequired", "CompletionProofUnavailable", "CompletionProofCorrupt", "CompletionProofOriginMismatch", "CompletionReadinessEvidenceChanged", "CompletionPrerequisiteEvidenceMismatch", "CompletionRequestUnavailable", "CompletionRequestOutcomeMismatch", "ReadinessSampleExceedsBound", "ReadinessSampleCoverageMismatch", "FreshCompleteSetReadinessRequired", "FreshReadinessSampleOriginMismatch", "CompletionCheckpointReferenceMismatch", "BindingBoundExceeded", "PublicationBoundExceeded", "CurrentPublicationPrerequisiteUnavailable", "CompletionPrerequisiteTextExceedsBound", "UnexpectedActionInventory", "CompleteActionEvidenceRequired", "ManagedInventoryBoundScopeMismatch", "PreparationInventoryBoundExceeded", "CompletionPublicationCoverageMismatch", "PublicationOriginRequired", "RetainedPublicationEvidenceMismatch", "CompletionEvidenceExceedsBound", "FrozenUpdateRequired", "UpdateCompletionCorrupt", "UpdateCompletionMissing", "UpdateCompletionOriginMismatch", "UpdateCompletionPrerequisitesChanged", "UpdateCompletionRequestMismatch", "CurrentObjectEvidenceExceedsBound", "CompleteUpdateCurrentObjectEvidenceRequired", "CurrentObjectReceiptMismatch", "RetirementStartEvidenceMismatch", "RetirementStartOriginMismatch", "ExactObsoleteRevocationProofMismatch"];
     private static readonly string[] Reasons = ["not-ready", "applied", "inventory-conflict", "prerequisite-incomplete", "generation-superseded",

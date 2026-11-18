@@ -7,6 +7,8 @@
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/DeploymentKernelReplacement.cs" Link="DeploymentKernelReplacement.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredDeploymentUpdateTarget.cs" Link="ConfiguredDeploymentUpdateTarget.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredFixtureDrain.cs" Link="ConfiguredFixtureDrain.cs" />
+    <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredLifecycle.cs" Link="ConfiguredLifecycle.cs" />
+    <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredCliProcess.cs" Link="ConfiguredCliProcess.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredRecipientWait.cs" Link="ConfiguredRecipientWait.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredRetirementDiagnostics.cs" Link="ConfiguredRetirementDiagnostics.cs" />
     <Compile Include="../../tools/Haby.Kubernetes.Qualification/ConfiguredDeploymentUpdateDiagnostics.cs" Link="ConfiguredDeploymentUpdateDiagnostics.cs" />

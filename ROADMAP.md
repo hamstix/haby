@@ -264,7 +264,7 @@ operator, leader election and Kubernetes-only storage mode are separate later
 capabilities, not prerequisites for this milestone.
 
 - [x] Accept [ADR-060](docs/adr/0060-explicit-kubernetes-provider-tls-policy.md): explicit Kubernetes Provider TLS trust/revocation policy, unchanged omitted Online default and an explicit fresh-catalog format-2 transition.
-- [ ] Implement [issue #261](https://github.com/hamstix/haby/issues/261) after merged #259 and test-cycle separation #263, covering every production client/frozen input path and controlled TLS evidence. Then resume successive UPDATE qualification, ADR-052 correction, integrated rehearsal and public operational UPDATE; CLI composition remains after operational UPDATE. TLS policy acceptance is not implementation or P3 completion.
+- [ ] Implement [issue #261](https://github.com/hamstix/haby/issues/261) after merged #259 and test-cycle separation #263, covering every production client/frozen input path and controlled TLS evidence. Then deliver existing Resource import/attachment under ADR-062 and #267 before public CLI composition/NuGet and lower-priority feature work. Successive UPDATE qualification, ADR-052 correction, integrated rehearsal and public operational UPDATE remain required; CLI composition remains after operational UPDATE. TLS policy acceptance is not implementation or P3 completion.
 
 - [x] Accept [ADR-061](docs/adr/0061-focused-development-and-final-qualification.md): focused development and exact-SHA full merge qualification.
 - [ ] Implement [#263](https://github.com/hamstix/haby/issues/263) after #259 and before #261: independent focused PG/Kubernetes scenarios, fast ordinary iteration and a mechanical current-candidate full qualification gate. Existing checks remain until a safe approved transition.
@@ -357,6 +357,11 @@ sequentially. The coordinator may split narrow issues and choose ordinary techni
 details inside accepted semantics, but ownership/auth/lifecycle/scope/replay changes
 return for architectural approval. This does not change review/gate or Git/merge
 authorization rules. Contract acceptance never enables an incomplete executor.
+
+### Existing Resource adoption priority
+
+- [x] Accept [ADR-062](docs/adr/0062-existing-resource-import-and-attachment.md): standard Provider-neutral existing Resource import/attachment, Imported provenance and enforced use-and-retain authority.
+- [ ] Deliver [#267](https://github.com/hamstix/haby/issues/267) immediately after #265 -> #263 -> TLS #261, before public CLI composition/NuGet and lower-priority feature work. Split generic intent/capability/provenance/authority, PostgreSQL pair plus protected credential, then API-only operator/restart/delivery rehearsal into bounded reviewed slices. Existing database-owner imports may preserve an administrator-owned public schema when effective permissions satisfy the declared contract; fresh creation remains unchanged. No external repair, ownership/grant/password mutation or deletion during import. Architecture acceptance is not implementation or P3 completion.
 
 ## P4 - Standard Providers
 

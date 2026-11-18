@@ -24,8 +24,9 @@ using Microsoft.Extensions.Logging;
 internal static class ConfiguredDeploymentCases
 {
     private sealed class LostConfirmation : IOException;
-    internal static async Task Run(Kubernetes admin, Uri api, string directory, CancellationToken token, PostgreSqlFixture? fixture = null)
+    internal static async Task Run(Kubernetes admin, Uri api, string directory, ConfiguredLifecycle lifetime, PostgreSqlFixture? fixture = null)
     {
+        var token = lifetime.Functional.Token;
         var hostAddress = IPAddress.Parse((await File.ReadAllTextAsync(Path.Combine(directory, "pod-host-address"), token)).Trim());
         var image = (await File.ReadAllTextAsync(Path.Combine(directory, "consumer-image"), token)).Trim();
         var ns = "haby223-" + Guid.NewGuid().ToString("N")[..12];
@@ -185,8 +186,10 @@ internal static class ConfiguredDeploymentCases
                 Console.WriteLine("Q243 configured host-start start");
                 await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
                 Console.WriteLine("Q243 configured host-start completed");
-                activeHost = host; await work(); activeHost = null;
-                await host.StopAsync(token);
+                activeHost = host;
+                try { await work(); activeHost = null; }
+                catch { lifetime.Functional.Fail(); throw; }
+                await host.StopAsync(lifetime.Token);
             }
             V1Pod? currentPod = null;
             RolloutResult? rolloutReady = null;
@@ -274,7 +277,7 @@ internal static class ConfiguredDeploymentCases
                 var binary = Environment.GetEnvironmentVariable("HABY_AOT_CLI_PATH");
                 if (string.IsNullOrWhiteSpace(binary) || !File.Exists(binary)) throw new InvalidOperationException("Published qualification CLI is required.");
                 Console.WriteLine("Q243 configured cli-submit start");
-                using var submission = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                using var submission = JsonDocument.Parse(await ConfiguredNativeCli.Run(lifetime, directory, binary, localOperator.AbsoluteUri,
                     ["deployment", "generation", "submit", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
                 Console.WriteLine("Q243 configured cli-submit completed");
                 Check(submission.RootElement.GetProperty("outcome"u8).GetString() == "submitted" && deploymentWrites == 1,
@@ -322,7 +325,7 @@ internal static class ConfiguredDeploymentCases
                     "R04-audited-resume-renews-observation-only");
                 rolloutReady = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-renewed-internal", new(RequestMilliseconds: 30000), token);
                 observationClock.Advance(TimeSpan.FromSeconds(intent.Target.ProgressDeadlineSeconds));
-                using var renewed = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                using var renewed = JsonDocument.Parse(await ConfiguredNativeCli.Run(lifetime, directory, binary, localOperator.AbsoluteUri,
                     ["deployment", "generation", "resume", scenario.Commit.DeploymentId.ToString(), scenario.Commit.Generation.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         "--member", rolloutReady.Members[0].Subject + "=" + rolloutReady.Members[0].Attempt!.Value.ToString("D")], credential: issuedCredential));
                 var renewal = renewed.RootElement.GetProperty("data"u8);
@@ -330,7 +333,7 @@ internal static class ConfiguredDeploymentCases
                     renewal.GetProperty("members"u8)[0].GetProperty("outcome"u8).GetString() == "NotObserved" && deploymentWrites == 1,
                     "R06-native-public-expired-resume-observation-only");
                 rolloutReady = await actions.ObserveRolloutAsync(scenario.Commit, "rollout-renewed-public", new(RequestMilliseconds: 30000), token);
-                using var waited = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                using var waited = JsonDocument.Parse(await ConfiguredNativeCli.Run(lifetime, directory, binary, localOperator.AbsoluteUri,
                     ["deployment", "generation", "wait", request.DeploymentId, request.Generation.ToString(System.Globalization.CultureInfo.InvariantCulture)], credential: issuedCredential));
                 Check(waited.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
                     waited.RootElement.GetProperty("data"u8).GetProperty("currentApplied"u8).GetBoolean() &&
@@ -372,7 +375,7 @@ internal static class ConfiguredDeploymentCases
                 var originalMember = new BatchQualificationMember(request.DeploymentId, request.Generation);
                 var peerMember = new BatchQualificationMember(peer.DeploymentId.ToString(), peer.Generation.Value);
                 await WriteBatch(originalMember, new(ApplicationDeploymentId.New().ToString(), 1));
-                using var mixed = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri,
+                using var mixed = JsonDocument.Parse(await ConfiguredNativeCli.Run(lifetime, directory, binary, localOperator.AbsoluteUri,
                     ["deployment", "generation", "wait-batch", "--file", path], expectedExit: 1, credential: issuedCredential));
                 var mixedData = mixed.RootElement.GetProperty("data"u8);
                 Check(!mixedData.GetProperty("currentReady"u8).GetBoolean() && mixedData.GetProperty("members"u8).GetArrayLength() == 2 &&
@@ -381,13 +384,13 @@ internal static class ConfiguredDeploymentCases
                 await WriteBatch(originalMember, peerMember);
                 var batchId = Guid.NewGuid().ToString("D");
                 string[] batchArguments = ["deployment", "generation", "wait-batch", "--file", path, "--request-id", batchId];
-                using var complete = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri, batchArguments, credential: issuedCredential));
+                using var complete = JsonDocument.Parse(await ConfiguredNativeCli.Run(lifetime, directory, binary, localOperator.AbsoluteUri, batchArguments, credential: issuedCredential));
                 Check(complete.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
                     complete.RootElement.GetProperty("data"u8).GetProperty("currentApplied"u8).GetBoolean() &&
                     complete.RootElement.GetProperty("data"u8).GetProperty("members"u8).EnumerateArray().All(x => x.GetProperty("currentReady"u8).GetBoolean() && x.GetProperty("currentApplied"u8).GetBoolean() &&
                         x.GetProperty("retirementId"u8).GetString() is not null) && deploymentWrites == 2,
                     "B03-native-batch-complete-fresh-exact-generations-zero-extra-writes");
-                using var replayBatch = JsonDocument.Parse(await OperatorHostIntegrationTests.RunNativeCommitCli(binary, localOperator.AbsoluteUri, batchArguments, expectedExit: 1, credential: issuedCredential));
+                using var replayBatch = JsonDocument.Parse(await ConfiguredNativeCli.Run(lifetime, directory, binary, localOperator.AbsoluteUri, batchArguments, expectedExit: 1, credential: issuedCredential));
                 Check(!replayBatch.RootElement.GetProperty("data"u8).GetProperty("currentReady"u8).GetBoolean() &&
                     replayBatch.RootElement.GetProperty("data"u8).GetProperty("members"u8).EnumerateArray().All(x => x.GetProperty("replayed"u8).GetBoolean() &&
                         x.GetProperty("originalRequestReady"u8).GetBoolean() && x.GetProperty("originalRequestApplied"u8).GetBoolean() &&
@@ -497,9 +500,9 @@ internal static class ConfiguredDeploymentCases
                         await ConfiguredFixtureDrain.RunAsync(admin, ownedNamespace, drainReceipts, ct);
                     }
                     catch (ConfiguredFixtureDrain.OwnershipRefused) { drainOwnershipRefused = true; throw; }
-                }, token));
+                }, token, lifetime));
         }
-        catch (Exception error) { primary = error; throw; }
+        catch (Exception error) { lifetime.Functional.Fail(); primary = error; throw; }
         finally
         {
             var cleanup = new List<Exception>();
@@ -508,7 +511,7 @@ internal static class ConfiguredDeploymentCases
                 try
                 {
                     Console.WriteLine("Q243 configured cleanup-namespace start");
-                    using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    using var budget = lifetime.Start(ConfiguredLifecycle.Kind.NamespaceCleanup);
                     if (drainOwnershipRefused) throw new InvalidOperationException("Namespace deletion refused after drain ownership conflict.");
                     if (drainReceipts is not null) _ = await ConfiguredFixtureDrain.VerifyOwnedAsync(admin, ownedNamespace, drainReceipts, budget.Token);
                     await admin.CoreV1.DeleteNamespaceAsync(ns, new V1DeleteOptions { Preconditions = new() { Uid = ownedNamespace.Metadata.Uid } }, cancellationToken: budget.Token);
@@ -520,13 +523,14 @@ internal static class ConfiguredDeploymentCases
                     }
                     Console.WriteLine("Q243 configured cleanup-namespace completed");
                     Console.WriteLine("PASS configured-owned-namespace-absent");
+                    budget.Complete();
                 }
                 catch (Exception error) { Console.WriteLine("Q243 configured cleanup-namespace failed"); Console.WriteLine(ConfiguredRetirementDiagnostics.Failure("NamespaceCleanup", error)); cleanup.Add(error); }
             }
             Console.WriteLine("Q243 configured cleanup-catalog start");
             try { await ((Xunit.IAsyncLifetime)postgres).DisposeAsync(); Console.WriteLine("Q243 configured cleanup-catalog completed"); Console.WriteLine("PASS configured-owned-catalog-cleanup"); }
             catch (Exception error) { Console.WriteLine("Q243 configured cleanup-catalog failed"); cleanup.Add(error); }
-            if (cleanup.Count > 0) throw new AggregateException(primary is null ? cleanup : [primary, .. cleanup]);
+            if (cleanup.Count > 0) throw ConfiguredLifecycle.Combine(primary, cleanup);
         }
     }
     // Only this fixture's local operator clients use loopback; the listener and Pod delivery address stay unchanged.
@@ -552,11 +556,11 @@ internal static class ConfiguredDeploymentCases
         public override DateTimeOffset GetUtcNow() => source.GetUtcNow() + offset;
         internal void Advance(TimeSpan value) => offset += value;
     }
-    private static void Check(bool value, string id)
+    internal static void Check(bool value, string id)
     {
         var prefix = id.Split('-')[0];
         var stage = prefix is "C01" or "C02" or "C03" or "C04" or "C05" or "C06" or "C07" or "C08" or "C09" or "C10" or "C11" or "C12" or "C13" or "R01" or "R02" or "R03" or "R04" or "R05" or "R06" or "R07" or "B01" or "B02" or "B03" or "B04" or "A01" or "A02" or "A03" ? prefix : "unknown";
-        Console.WriteLine($"Q243 configured {stage} {(value ? "passed" : "failed")}");
+        if (!value) Console.WriteLine($"Q243 configured {stage} failed");
         if (!value) throw new InvalidOperationException("Configured Deployment case failed: " + id);
         Console.WriteLine("PASS configured-" + id);
     }
