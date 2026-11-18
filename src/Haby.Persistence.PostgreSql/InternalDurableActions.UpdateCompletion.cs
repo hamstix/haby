@@ -24,17 +24,22 @@ internal sealed partial class InternalDurableActions
             started, token, bounded.Token, actor, updateWait: true, recipientOptions: recipients), bounded.Token);
     }
 
+    private void Trace(UpdateCompletionStage stage, UpdateCompletionPredicate predicate = UpdateCompletionPredicate.Unknown) =>
+        UpdateCompletionDiagnostics.Emit(updateDiagnostic, stage, predicate);
+
     private async Task<RolloutResult> CompleteUpdateGuardedAsync(ObservationCall call, RolloutResult result,
         RolloutOptions rollout, RecipientObservationOptions options, CancellationToken token)
     {
         try { return await CompleteUpdateAsync(call, result, rollout, options, token); }
-        catch (InvalidDataException)
+        catch (InvalidDataException error)
         {
+            Trace(UpdateCompletionStage.PrerequisiteIncomplete, UpdateCompletionDiagnostics.Predicate(error));
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == call.Set.Source.DeploymentId, token);
             result = result with { AppliedGeneration = owner.AppliedGeneration, CompletionReason = "prerequisite-incomplete" };
+            Trace(UpdateCompletionStage.CloseRequest);
             await CloseRequestAsync(db, call.Request, result, token); token.ThrowIfCancellationRequested();
             await tx.CommitAsync(CancellationToken.None); return result;
         }
@@ -43,11 +48,13 @@ internal sealed partial class InternalDurableActions
     private async Task<RolloutResult> CompleteUpdateAsync(ObservationCall call, RolloutResult result,
         RolloutOptions rollout, RecipientObservationOptions options, CancellationToken token)
     {
+        Trace(UpdateCompletionStage.Begin);
         var source = call.Set.Source;
         var inventory = DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate ?? throw new InvalidDataException("UPDATE inventory required.");
         var observations = new List<RetirementRecipient>();
         var remainingCalls = options.MaximumCalls;
         long retainedEvidenceBytes = 0;
+        Trace(UpdateCompletionStage.Recipients);
         foreach (var member in call.Set.Members)
         {
             if (member.Loaded.Handler is not IInternalRecipientObserver observer) return await CloseUpdateAsync(result with { CompletionReason = "recipient-evidence-incomplete" });
@@ -73,12 +80,14 @@ internal sealed partial class InternalDurableActions
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
             var current = await RequireUpdateClosureAsync(db, call, token);
+            Trace(UpdateCompletionStage.FreshSamples);
             fresh = await FreshUpdateProofAsync(db, call, current, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
             if (owner.AppliedGeneration == source.Generation)
             {
                 var proof = await InitialRetirementCompletion.RequireProofAsync(db, source, token);
                 result = result with { Applied = true, Retirement = proof.Id, AppliedGeneration = source.Generation, CompletionReason = "applied" };
+                Trace(UpdateCompletionStage.CloseRequest);
                 await CloseRequestAsync(db, call.Request, result, token); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested();
                 await tx.CommitAsync(CancellationToken.None); return result;
             }
@@ -86,6 +95,7 @@ internal sealed partial class InternalDurableActions
                 x.Generation == source.Generation && x.Stage == UpdateRetirementCompletion.Started, token))
             {
                 var start = new RetirementStart(1, source.DeploymentId, source.Generation, inventory.Fingerprint, fresh, call.Request.Request, observations.ToArray());
+                Trace(UpdateCompletionStage.RetirementStart);
                 await CheckpointAsync(db, source, UpdateRetirementCompletion.Started,
                     JsonSerializer.Serialize(start, UpdateCompletionMetadata.Default.RetirementStart), token);
                 await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
@@ -99,6 +109,7 @@ internal sealed partial class InternalDurableActions
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
             _ = await RequireUpdateClosureAsync(db, call, token);
+            Trace(UpdateCompletionStage.Revoke);
             await RetirePermissionAsync(db, source, obsolete, JsonSerializer.Deserialize(call.Request.InputJson, RolloutMetadata.Default.RolloutRequest)!.Actor, token);
             await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             fault?.Invoke(InternalActionFault.AfterRetirementPermission);
@@ -109,12 +120,14 @@ internal sealed partial class InternalDurableActions
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
             var current = await RequireUpdateClosureAsync(db, call, token);
+            Trace(UpdateCompletionStage.FreshSamples);
             fresh = await FreshUpdateProofAsync(db, call, current, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
             if (owner.AppliedGeneration == source.Generation)
             {
                 var existing = await InitialRetirementCompletion.RequireProofAsync(db, source, token);
                 result = result with { Applied = true, Retirement = existing.Id, AppliedGeneration = source.Generation, CompletionReason = "applied" };
+                Trace(UpdateCompletionStage.CloseRequest);
                 await CloseRequestAsync(db, call.Request, result, token); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested();
                 await tx.CommitAsync(CancellationToken.None); return result;
             }
@@ -122,13 +135,23 @@ internal sealed partial class InternalDurableActions
             var resources = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == "ResourcesReady", token);
             var submitted = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.Id == current.Checkpoint, token);
             var ready = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.Id == result.SavedReady, token);
+            Trace(UpdateCompletionStage.Publications);
             var publications = await InitialRetirementCompletion.PublicationsAsync(db, source, token);
             var proof = new InitialCompletionProof(1, Guid.CreateVersion7(), source.DeploymentId, source.Generation, source.PlanId, source.ChangeSetId,
                 source.Fingerprint, inventory.Fingerprint, inventory.Document.BaselineGeneration, resources.Id, resources.EvidenceFingerprint,
                 submitted.Id, submitted.EvidenceFingerprint, ready.Id, ready.EvidenceFingerprint, fresh, call.Request.Request,
                 JsonSerializer.Deserialize(call.Request.InputJson, RolloutMetadata.Default.RolloutRequest)!.Actor, Now(),
-                await InitialRetirementCompletion.CatalogHashAsync(db, source, publications, token),
-                await InitialRetirementCompletion.SamplesHashAsync(db, fresh, token), publications, observations.ToArray());
+                await CatalogHash(), await SampleHash(), publications, observations.ToArray());
+            async Task<string> CatalogHash()
+            {
+                Trace(UpdateCompletionStage.CatalogHash);
+                return await InitialRetirementCompletion.CatalogHashAsync(db, source, publications, token);
+            }
+            async Task<string> SampleHash()
+            {
+                Trace(UpdateCompletionStage.SamplesHash);
+                return await InitialRetirementCompletion.SamplesHashAsync(db, fresh, token);
+            }
             var json = JsonSerializer.Serialize(proof, InitialCompletionMetadata.Default.InitialCompletionProof);
             if (System.Text.Encoding.UTF8.GetByteCount(json) > 2097152) throw new InvalidDataException("Update completion exceeds checkpoint bound.");
             db.GenerationStageCheckpoints.Add(new()
@@ -144,11 +167,13 @@ internal sealed partial class InternalDurableActions
                 ConfirmedAt = proof.At
             });
             token.ThrowIfCancellationRequested();
+            Trace(UpdateCompletionStage.AppliedCas);
             if (await db.ApplicationDeployments.Where(x => x.Id == source.DeploymentId && x.DesiredGeneration == source.Generation &&
                 x.AppliedGeneration == inventory.Document.BaselineGeneration && x.ConcurrencyToken == owner.ConcurrencyToken)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.AppliedGeneration, source.Generation).SetProperty(x => x.ConcurrencyToken, x => x.ConcurrencyToken + 1), token) != 1)
                 throw new InvalidDataException("Update Applied compare-and-swap failed.");
             result = result with { Applied = true, Retirement = proof.Id, AppliedGeneration = source.Generation, CompletionReason = "applied" };
+            Trace(UpdateCompletionStage.CloseRequest);
             await CloseRequestAsync(db, call.Request, result, token); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested();
             await tx.CommitAsync(CancellationToken.None);
         }
@@ -161,6 +186,7 @@ internal sealed partial class InternalDurableActions
             await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
             unfinished = unfinished with { AppliedGeneration = owner.AppliedGeneration };
+            Trace(UpdateCompletionStage.CloseRequest);
             await CloseRequestAsync(db, call.Request, unfinished, token); token.ThrowIfCancellationRequested();
             await tx.CommitAsync(CancellationToken.None); return unfinished;
         }
@@ -168,14 +194,17 @@ internal sealed partial class InternalDurableActions
 
     private async Task<SubmittedSet> RequireUpdateClosureAsync(ManifestCatalogDbContext db, ObservationCall call, CancellationToken token)
     {
+        Trace(UpdateCompletionStage.ClosureSource);
         var source = await InternalGenerationAuthority.RequireStageReadAsync(db, call.Set.Source, token);
         var inventory = DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate?.Document ?? throw new InvalidDataException("Update inventory missing.");
         var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
         if (owner.DesiredGeneration != source.Generation || owner.AppliedGeneration != inventory.BaselineGeneration && owner.AppliedGeneration != source.Generation)
             throw new InvalidDataException("Update generation superseded.");
+        Trace(UpdateCompletionStage.CaptureSubmitted);
         var set = await CaptureSubmittedAsync(db, source, token, completedRead: true);
         if (set.Members.Length != inventory.Members.Length || set.Members.Any(x => call.Set.Members.Single(m => m.Subject == x.Subject).Attempt.Id != x.Attempt.Id))
             throw new InvalidDataException("Update attempts changed.");
+        Trace(UpdateCompletionStage.ObsoleteProgress);
         foreach (var obsolete in inventory.ObsoletePublications)
         {
             var permission = await db.RuntimeConfigurationPermissions.AsNoTracking().SingleAsync(x => x.Id == obsolete.Permission, token);
@@ -200,6 +229,7 @@ internal sealed partial class InternalDurableActions
                     throw new InvalidDataException("Retirement progress changed.");
             }
         }
+        Trace(UpdateCompletionStage.RetirementMarker);
         var marker = await db.GenerationStageCheckpoints.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == source.DeploymentId &&
             x.Generation == source.Generation && x.Stage == UpdateRetirementCompletion.Started, token);
         if (marker is not null)
@@ -218,7 +248,9 @@ internal sealed partial class InternalDurableActions
                     throw new InvalidDataException("Retirement-start recipient evidence invalid.");
             }
         }
+        Trace(UpdateCompletionStage.CurrentRuntime);
         foreach (var member in set.Members) await RequireCurrentRuntimeAsync(db, member.Loaded.Context, token, observation: true);
+        Trace(UpdateCompletionStage.ConfigurationComplete);
         await (configurationPreparation ?? throw new InvalidDataException("Configuration authority required.")).RequireCompleteAsync(db, source, token, completedRead: true);
         return set;
     }

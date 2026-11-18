@@ -23,7 +23,7 @@ internal static class DeploymentRecipients
     internal const string Contract = "haby.kubernetes.deployment-recipients/v1";
     private static string Hash(string receipt) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(receipt)));
     internal static RecipientObservation Evaluate(DeploymentIntent intent, DeploymentReceipt receipt,
-        V1ReplicaSetList sets, V1PodList pods, RecipientObservationOptions options)
+        V1ReplicaSetList sets, V1PodList pods, RecipientObservationOptions options, Action<DeploymentRecipientDiagnostic>? diagnostic = null)
     {
         options.Validate();
         try
@@ -37,6 +37,7 @@ internal static class DeploymentRecipients
                 sets.Items is not null && pods.Items is not null && sets.Items.Count <= options.MaximumObjects && pods.Items.Count <= options.MaximumObjects,
                 "incomplete-list");
             var known = new Dictionary<string, (string Name, bool Owned, bool Target)>(StringComparer.Ordinal);
+            var parentFailure = RecipientProjectionFailure.None; var podFailure = RecipientProjectionFailure.None;
             var setEvidence = new List<RecipientSetIdentity>(); var podEvidence = new List<RecipientPodIdentity>();
             foreach (var set in sets.Items!)
             {
@@ -46,7 +47,9 @@ internal static class DeploymentRecipients
                 var owned = owner is { ApiVersion: "apps/v1", Kind: "Deployment" } && owner.Uid == receipt.Uid && owner.Name == receipt.Name;
                 Need(owner is null || owner.Uid != receipt.Uid || owned, "set-owner");
                 Need(owner is not { ApiVersion: "apps/v1", Kind: "Deployment" } || owner.Name != receipt.Name || owned, "replacement-controller");
-                var target = owned && Target(set.Spec?.Template, intent);
+                var failure = RecipientProjectionFailure.None;
+                var target = owned && Target(set.Spec?.Template, intent, out failure);
+                if (owned && !target && parentFailure == RecipientProjectionFailure.None) parentFailure = failure;
                 if (owned) setEvidence.Add(new(set.Metadata.Uid, set.Metadata.Name, owner!.Uid, target));
                 Need(known.TryAdd(set.Metadata.Uid, (set.Metadata.Name, owned, target)), "duplicate-set");
             }
@@ -62,11 +65,14 @@ internal static class DeploymentRecipients
                 var set = known[owner!.Uid];
                 if (set.Owned)
                 {
-                    var target = set.Target && Target(new V1PodTemplateSpec { Metadata = pod.Metadata, Spec = pod.Spec }, intent);
+                    var failure = RecipientProjectionFailure.None;
+                    var target = set.Target && Target(new V1PodTemplateSpec { Metadata = pod.Metadata, Spec = pod.Spec }, intent, out failure);
+                    if (set.Target && !target && podFailure == RecipientProjectionFailure.None) podFailure = failure;
                     if (!target) old++;
                     podEvidence.Add(new(pod.Metadata.Uid, owner.Uid, target, pod.Metadata.DeletionTimestamp is not null));
                 }
             }
+            DeploymentRecipientDiagnostics.Emit(diagnostic, new(setEvidence.Count, podEvidence.Count, old, parentFailure, podFailure));
             var evidence = new RecipientSnapshot(1, Hash(Encode(receipt)), receipt.Uid, receipt.KubernetesGeneration,
                 sets.Metadata!.ResourceVersion, pods.Metadata!.ResourceVersion, sets.Items!.Count, pods.Items!.Count, old, options,
                 setEvidence.OrderBy(x => x.Uid, StringComparer.Ordinal).ToArray(), podEvidence.OrderBy(x => x.Uid, StringComparer.Ordinal).ToArray());
@@ -85,16 +91,17 @@ internal static class DeploymentRecipients
         Need(controllers.Length <= 1 && controllers.All(x => !string.IsNullOrEmpty(x.Uid) && !string.IsNullOrEmpty(x.Name)), "controller");
         return controllers.SingleOrDefault();
     }
-    private static bool Target(V1PodTemplateSpec? template, DeploymentIntent intent)
+    private static bool Target(V1PodTemplateSpec? template, DeploymentIntent intent, out RecipientProjectionFailure failure)
     {
-        if (template?.Spec is null) return false;
+        failure = RecipientProjectionFailure.None;
+        if (template?.Spec is null) { failure = RecipientProjectionFailure.Shape; return false; }
         try
         {
             var projection = DeploymentObjects.Read(DeploymentObjects.Create(intent));
             projection["spec"]!["template"] = JsonNode.Parse(KubernetesJson.Serialize(template));
             DeploymentObjects.Matches(projection, intent.Target); return true;
         }
-        catch (Exception error) when (error is WorkloadContractException or InvalidOperationException or ArgumentException) { return false; }
+        catch (Exception error) when (error is WorkloadContractException or InvalidOperationException or ArgumentException) { failure = DeploymentRecipientDiagnostics.Failure(error); return false; }
     }
     internal static bool Validate(string intent, string receipt, RecipientObservation observation)
     {
@@ -126,9 +133,10 @@ internal static class DeploymentRecipients
 public sealed partial class DeploymentKernel
 {
     internal async Task<RecipientObservation> RecipientsAsync(DeploymentIntent intent, DeploymentReceipt receipt,
-        RecipientObservationOptions options, CancellationToken token)
+        RecipientObservationOptions options, CancellationToken token, Action<DeploymentRecipientDiagnostic>? diagnostic = null)
     {
         options.Validate();
+        DeploymentRecipientDiagnostics.Emit(diagnostic, new(-1, -1, -1, RecipientProjectionFailure.Unknown, RecipientProjectionFailure.Unknown));
         try
         {
             _ = DeploymentReadiness.Budget(Encode(intent), Encode(receipt)); Need(intent.Binding == _binding, "provider-binding");
@@ -141,7 +149,7 @@ public sealed partial class DeploymentKernel
                 limit: options.MaximumObjects, cancellationToken: token);
             using var pods = await lease.Client.CoreV1.ListNamespacedPodWithHttpMessagesAsync(intent.Namespace,
                 limit: options.MaximumObjects, cancellationToken: token);
-            var result = DeploymentRecipients.Evaluate(intent, receipt, sets.Body, pods.Body, options);
+            var result = DeploymentRecipients.Evaluate(intent, receipt, sets.Body, pods.Body, options, diagnostic);
             var after = await Read(lease.Client, intent, token);
             if (after is null || DeploymentReadiness.Evaluate(after, intent, receipt).Outcome != RolloutOutcome.Ready ||
                 before["metadata"]?["generation"]?.ToJsonString() != after["metadata"]?["generation"]?.ToJsonString())

@@ -34,11 +34,13 @@ internal static class ConfiguredUpdateRetirement
     }
     internal static async Task ReleaseAsync(Kubernetes admin, string ns, V1Pod held, CancellationToken token)
     {
+        Console.WriteLine(ConfiguredRetirementDiagnostics.Finalizer(null));
         V1Pod pod;
         try { pod = await admin.CoreV1.ReadNamespacedPodAsync(held.Metadata.Name, ns, cancellationToken: token); }
-        catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.NotFound) { return; }
+        catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.NotFound) { Console.WriteLine(ConfiguredRetirementDiagnostics.Finalizer(false)); return; }
         if (pod.Metadata.Uid != held.Metadata.Uid) throw new InvalidOperationException("Held recipient replacement refused.");
         var index = pod.Metadata.Finalizers?.IndexOf(Hold) ?? -1;
+        Console.WriteLine(ConfiguredRetirementDiagnostics.Finalizer(index >= 0));
         if (index < 0) return;
         var patch = new JsonArray(
             new JsonObject { ["op"] = "test", ["path"] = "/metadata/uid", ["value"] = held.Metadata.Uid },
@@ -83,9 +85,12 @@ internal static class ConfiguredUpdateRetirement
             }
         }
         Console.WriteLine("Q243 configured update-retirement-complete start");
-        var complete = await actions().WaitUpdateAsync(accepted, "configured-update-finished-recipients", "qualification", options, new(), token);
-        Check(complete.Ready && complete.Applied && complete.AppliedGeneration == accepted.Generation.Value,
-            "U11-exact-obsolete-retirement-before-update-Applied");
+        var complete = await ConfiguredRetirementDiagnostics.WaitAsync(() => actions().WaitUpdateAsync(accepted,
+            "configured-update-finished-recipients", "qualification", options, new(), token), accepted.Generation.Value);
+        Require("U11Ready", complete.Ready);
+        Require("U11Applied", complete.Applied);
+        Require("U11Generation", complete.AppliedGeneration == accepted.Generation.Value);
+        Check(true, "U11-exact-obsolete-retirement-before-update-Applied");
         var binding = Guid.Parse(target.BindingId);
         foreach (var revision in RuntimeBootstrapCodec.Decode(prior.Projection.Runtime!.Bootstrap).Documents.Values)
             if (await RuntimePublicationAuthorization.AuthorizeAsync(contexts, binding, Guid.Parse(revision), token) is not null)
@@ -106,6 +111,11 @@ internal static class ConfiguredUpdateRetirement
         }
         Check(target.Documents.Values.Select(Guid.Parse).All(requests.Contains), "U12-old-rights-denied-target-exact-delivery-stable-binding");
         Console.WriteLine("Q243 configured update-retirement-complete completed");
+    }
+    private static void Require(string condition, bool value)
+    {
+        Console.WriteLine(ConfiguredRetirementDiagnostics.Condition(condition, value));
+        if (!value) throw new InvalidOperationException("Configured update retirement condition failed.");
     }
     private static void Check(bool valid, string name)
     {

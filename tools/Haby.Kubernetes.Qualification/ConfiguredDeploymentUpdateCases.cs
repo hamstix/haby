@@ -55,6 +55,7 @@ internal static class ConfiguredDeploymentUpdateCases
             labelSelector: DeploymentIntents.ManagedKey + "=" + previous.ManagedWorkload.ToString("N"), cancellationToken: token);
         var held = baselinePods.Items.Single(x => x.Metadata.DeletionTimestamp is null && x.Spec.Containers.Any(c => c.Name == previous.Projection.Container && c.Image == image));
         var holdDispatched = false;
+        Exception? updatePrimary = null;
         try
         {
             _ = await ConfiguredUpdateRetirement.HoldAsync(admin, previous, new V1PodList { Items = [held] }, () => holdDispatched = true, token);
@@ -92,14 +93,14 @@ internal static class ConfiguredDeploymentUpdateCases
             await admin.AppsV1.PatchNamespacedDeploymentAsync(new(foreignPatch.ToJsonString(), V1Patch.PatchType.JsonPatch), previous.Name, previous.Namespace, cancellationToken: token);
             var wire = new PatchEvidence();
             var update = new InternalDeploymentAction(secrets, connection => new DeploymentKernel(connection.Binding,
-                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true);
+                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true, recipientDiagnostic: value => Console.WriteLine(ConfiguredRetirementDiagnostics.Recipients(value)));
             var recordedUpdate = new ConfiguredDeploymentUpdateHandler(update,
                 (phase, result) => Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Delegated(phase, result, wire.Writes)));
             var loseResponse = true;
             InternalDurableActions Actions() => new(contexts, [identity, create, recordedUpdate], services.GetServices<IProviderConfigurationCodec>(),
                 services.GetServices<IExternalOperationOutputContract>(), services.GetRequiredService<DurableActionAdmission>(),
                 services.GetRequiredService<DurableOperationSerialization>(), services.GetRequiredService<TimeProvider>(), point =>
-                { if (point == InternalActionFault.AfterExternalResult && loseResponse) { loseResponse = false; throw new LostUpdateResponse(); } }, configuration);
+                { if (point == InternalActionFault.AfterExternalResult && loseResponse) { loseResponse = false; throw new LostUpdateResponse(); } }, configuration, value => Console.WriteLine(ConfiguredRetirementDiagnostics.Closure(value.Stage.ToString(), value.Predicate.ToString())));
             var actions = Actions();
             Check((await configuration.PrepareAsync(accepted, "qualification", token)).Prepared.Count == 2, "U02-new-exact-documents-prepared");
             var reused = await new InternalRuntimeIdentityPreparation(contexts, configuration, actions, identity.Contract.Action).PrepareAsync(accepted, token);
@@ -227,10 +228,20 @@ internal static class ConfiguredDeploymentUpdateCases
             await verify.DisposeAsync();
             await ConfiguredUpdateRetirement.CompleteAsync(admin, contexts, Actions, accepted, previous, target, held, requests, token);
         }
+        catch (Exception error)
+        {
+            updatePrimary = error; Console.WriteLine(ConfiguredRetirementDiagnostics.Failure("Primary", error)); throw;
+        }
         finally
         {
             using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            if (holdDispatched) await ConfiguredUpdateRetirement.ReleaseAsync(admin, previous.Namespace, held, cleanup.Token);
+            try { if (holdDispatched) await ConfiguredUpdateRetirement.ReleaseAsync(admin, previous.Namespace, held, cleanup.Token); }
+            catch (Exception error)
+            {
+                Console.WriteLine(ConfiguredRetirementDiagnostics.Failure("ReleaseCleanup", error));
+                if (updatePrimary is null) throw;
+                throw ConfiguredRetirementDiagnostics.Combine(updatePrimary, error);
+            }
         }
     }
 

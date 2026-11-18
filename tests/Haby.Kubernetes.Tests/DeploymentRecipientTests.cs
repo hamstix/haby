@@ -141,6 +141,32 @@ public sealed class DeploymentRecipientTests
         using var client = new HttpClient(bounded);
         await Assert.ThrowsAsync<IOException>(() => client.GetAsync("https://fixture.invalid/api/v1/namespaces/test/pods"));
     }
+    [Fact]
+    public void Pod_API_defaults_and_foreign_fields_keep_the_existing_projection_predicate()
+    {
+        var f = Fixture();
+        f.Pods.Items[0] = KubernetesJson.Deserialize<V1Pod>(KubernetesJson.Serialize(f.Pods.Items[0]));
+        var pod = f.Pods.Items[0];
+        pod.Spec.ServiceAccount = f.Intent.Target.Runtime!.ServiceAccount;
+        pod.Spec.DnsPolicy = "ClusterFirst"; pod.Spec.RestartPolicy = "Always";
+        pod.Spec.Containers.Single(x => x.Name == f.Intent.Target.Container).ImagePullPolicy = "IfNotPresent";
+        pod.Metadata.Annotations = new Dictionary<string, string> { ["fixture.example/foreign"] = "retained" };
+        DeploymentRecipientDiagnostic? seen = null;
+        var result = DeploymentRecipients.Evaluate(f.Intent, f.Receipt, f.Sets, f.Pods, new(), value => seen = value);
+        Assert.True(result.Absent);
+        Assert.Equal(result, DeploymentRecipients.Evaluate(f.Intent, f.Receipt, f.Sets, f.Pods, new(), _ => throw new IOException("protected")));
+        Assert.Equal(new(1, 1, 0, RecipientProjectionFailure.None, RecipientProjectionFailure.None), seen);
+    }
+    [Fact]
+    public void Owned_Pod_mount_admission_difference_reports_the_actual_predicate_without_relaxing_it()
+    {
+        var f = Fixture();
+        f.Pods.Items[0] = KubernetesJson.Deserialize<V1Pod>(KubernetesJson.Serialize(f.Pods.Items[0]));
+        f.Pods.Items[0].Spec.Containers.Single(x => x.Name == f.Intent.Target.Container).VolumeMounts.Single(x => x.Name == "haby-runtime-token").MountPropagation = "None";
+        DeploymentRecipientDiagnostic? seen = null;
+        Assert.False(DeploymentRecipients.Evaluate(f.Intent, f.Receipt, f.Sets, f.Pods, new(), value => seen = value).Absent);
+        Assert.Equal(new(1, 1, 1, RecipientProjectionFailure.None, RecipientProjectionFailure.RuntimeMount), seen);
+    }
     private sealed class RecipientResponse : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>

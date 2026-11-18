@@ -14,7 +14,7 @@ internal sealed partial class InternalDurableActions(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IEnumerable<IInternalActionHandler> registrations,
     IEnumerable<IProviderConfigurationCodec> codecs, IEnumerable<IExternalOperationOutputContract> resourceOutputs,
     DurableActionAdmission resourceAdmission, DurableOperationSerialization serialization, TimeProvider clock,
-    Action<InternalActionFault>? fault = null, InternalWorkloadConfiguration? configurationPreparation = null)
+    Action<InternalActionFault>? fault = null, InternalWorkloadConfiguration? configurationPreparation = null, Action<UpdateCompletionDiagnostic>? updateDiagnostic = null)
 {
     private readonly IInternalActionHandler[] handlers = ValidateRegistrations(registrations);
     private readonly IProviderConfigurationCodec[] typedCodecs = codecs.ToArray();

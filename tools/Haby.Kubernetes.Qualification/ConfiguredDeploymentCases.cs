@@ -499,7 +499,7 @@ internal static class ConfiguredDeploymentCases
                     Console.WriteLine("Q243 configured cleanup-namespace completed");
                     Console.WriteLine("PASS configured-owned-namespace-absent");
                 }
-                catch (Exception error) { Console.WriteLine("Q243 configured cleanup-namespace failed"); cleanup.Add(error); }
+                catch (Exception error) { Console.WriteLine("Q243 configured cleanup-namespace failed"); Console.WriteLine(ConfiguredRetirementDiagnostics.Failure("NamespaceCleanup", error)); cleanup.Add(error); }
             }
             Console.WriteLine("Q243 configured cleanup-catalog start");
             try { await ((Xunit.IAsyncLifetime)postgres).DisposeAsync(); Console.WriteLine("Q243 configured cleanup-catalog completed"); Console.WriteLine("PASS configured-owned-catalog-cleanup"); }

@@ -124,3 +124,21 @@ The existing Recreate/RollingUpdate venues remain; no new image, cluster mode,
 PostgreSQL matrix or load campaign is added. Test inventories are obligations,
 not passing evidence. Executed results, unperformed checks, current full SHA and
 mandatory CI links belong in the author report and draft PR.
+
+## Qualification boundary and failure diagnostics
+
+This slice qualifies **first UPDATE completion only**. Successive UPDATE remains
+unqualified: initial -> update1 Applied -> update2 Applied must prove retained
+origin receipts, retired permission rows and current-object state before public
+operational UPDATE or an ADR-058 operational declaration. That follow-up is not
+implemented in parallel here. Public UPDATE remains closed.
+
+The existing contour records a fixed returned/threw stage for the entire second
+wait, Ready/Applied/expected-generation booleans, closed reason/stop values,
+recipient counts and the first fixed projection failure category. Catalog closure
+records the actual called stage and a closed classification of existing static
+refusals. No duplicate acceptance validator or fallback acceptance is introduced.
+U11 checks Ready, Applied and expected generation separately, retaining all three
+requirements. Primary and cleanup failures are distinct; existing reads report
+only whether the fixture-owned finalizer is present. No budget, deletion scope,
+normalization predicate or runtime/public contract changes follow from diagnostics.
