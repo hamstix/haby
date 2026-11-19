@@ -1,10 +1,24 @@
 # Focused development after trusted-control installation
 
-Issue263 continues after bootstrap265. The installed main control was accepted
-at `f31c0271d51b1be3700132fed2980c11a25c1847`. Installation does not activate
-fast-only ordinary routing or change protection. Every existing automatic full
-gate remains. This successor does not declare the parent complete or authorize
-remote settings, bypass or merge.
+Issue263 continues after bootstrap265 and the focused-development successor.
+The scope-compatible control was installed by
+[PR #272](https://github.com/hamstix/haby/pull/272) at main commit
+`ef048c451c3c0d9475b9056b4b544734a070d5b5`. Its implementation candidate passed
+full qualification through the previously installed control; that result does
+not demonstrate the newly installed docs-only path.
+
+The next evidence step is one ordinary documentation change reviewed at its exact
+SHA, followed by one installed-control invocation over its current immutable
+base/head/tested-merge/tree. A successful docs-only result must attest documentation
+checks, report no runtime execution and grant no runtime case or cleanup credit.
+Do not launch a full campaign merely to demonstrate this lightweight path.
+
+Installation does not activate fast-only ordinary code routing or change
+protection. Existing automatic routes and their applicable full gates remain.
+A routing/protection transition still needs a maintainer-owned authenticated
+snapshot, separate review and explicit approval. An unauthenticated401 leaves
+protection unknown. Neither installation nor the documentation demonstration
+completes the parent issue or authorizes settings changes, bypass or merge.
 
 ## Exact PostgreSQL selection
 
@@ -133,7 +147,8 @@ candidate calls remain full. No activation flag, remote variable or speculative
 disabled infrastructure is introduced. Future fast-only activation requires its
 own reviewed source SHA, owning protection snapshot and explicit approval.
 
-The new docs control must be accepted and installed on main before a real docs-
-only demonstration. Current installed full control can qualify the implementation
-candidate when released; earlier evidence cannot qualify a newer source/tree.
-Local pure Git/control regressions do not require PostgreSQL or Kubernetes runs.
+The docs control is now installed, so a real docs-only demonstration must use
+that installed main revision and a subsequent reviewed documentation candidate.
+The earlier implementation qualification cannot provide that demonstration or
+qualify a newer source/tree. Local pure Git/control checks do not require
+PostgreSQL or Kubernetes runs.
