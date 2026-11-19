@@ -95,4 +95,5 @@ try {
     if ($owned.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $owned -Recurse -Force }
 }
 'Suite controls: full/partial selection, empty refusal, aggregate multiplicity and cross-group redaction passed.'
+& "$PSScriptRoot/test-focused-selection.ps1"
 exit 0

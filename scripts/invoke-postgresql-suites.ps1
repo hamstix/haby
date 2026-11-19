@@ -1,7 +1,12 @@
 function Invoke-HabyPostgreSqlSuites {
     param([string]$Project, [string]$Artifacts, [string]$Private, [string]$Safe,
         [object[]]$Coverage, [string[]]$Suites, [string]$MapPath, [string]$PlanPath,
-        [int]$ServerLimit, [int]$HostLimit, [switch]$AnonymousReflectionPrecheck, [string]$Source)
+        [int]$ServerLimit, [int]$HostLimit, [switch]$AnonymousReflectionPrecheck, [string]$Source,
+        [string]$TestCase = '', [string]$TestGroup = '', [switch]$ExternalFocused)
+    $focused = Get-HabyFocusedPostgreSqlSelection $Coverage $TestCase $TestGroup
+    if ($ExternalFocused -and -not $focused) { throw 'External focused accounting cannot waive full resource checks.' }
+    if ($focused -and $AnonymousReflectionPrecheck) { throw 'Focused execution cannot run the full reflection precheck.' }
+    if ($focused) { $Suites = @($focused.suites) }
     $firstExit = 0; $failedReport = $false
     $reports = [Collections.Generic.List[object]]::new()
     $trx = [Collections.Generic.List[string]]::new()
@@ -21,14 +26,18 @@ function Invoke-HabyPostgreSqlSuites {
             $raw = Join-Path $Private $suite; $output = Join-Path $Safe $suite
             New-Item -ItemType Directory -Path $raw, $output | Out-Null
             if ($IsLinux) { [IO.File]::SetUnixFileMode($raw, [IO.UnixFileMode]448) }
-            $expected = @($Coverage | Where-Object suite -CEQ $suite)
-            $filter = Get-HabySuiteFilter $Coverage $suite
+            $expected = @($(if ($focused) { $focused.cases } else { $Coverage }) | Where-Object suite -CEQ $suite)
+            $filter = if ($focused) { $focused.filter } else { Get-HabySuiteFilter $Coverage $suite }
             $watch = [Diagnostics.Stopwatch]::StartNew()
             $phase = 'discovery'; $exitCode = 0; $discoverySeconds = $null; $testSeconds = $null; $exportSeconds = $null
             try {
                 & dotnet test $Project --no-build --no-restore --artifacts-path $Artifacts --list-tests --filter $filter *> (Join-Path $raw 'discovery.log')
                 if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE; throw 'Filtered discovery failed.' }
-                $discovered = @(Get-PostgreSqlCoverageCases (Join-Path $raw 'discovery.log') $MapPath)
+                try { $discovered = @(Get-PostgreSqlCoverageCases (Join-Path $raw 'discovery.log') $MapPath) }
+                catch {
+                    if ($_.Exception.Message -ceq 'No discovered integration cases.') { $phase = 'discovery-empty' }
+                    throw
+                }
                 Assert-HabyInventory $expected $discovered
                 $discoverySeconds = $watch.Elapsed.TotalSeconds; $watch.Restart(); $phase = 'test'
                 $env:HABY_TEST_TIMING_DIRECTORY = $output
@@ -40,17 +49,21 @@ function Invoke-HabyPostgreSqlSuites {
                 & "$PSScriptRoot/export-postgresql-timing.ps1" -TrxPath $path -OutputDirectory $output
                 $executed = @(Get-Content (Join-Path $output 'cases.json') -Raw | ConvertFrom-Json)
                 Assert-PostgreSqlCoverage $expected $executed
-                Assert-HabyGatePlan $executed $PlanPath 'postgresql-integration' @($suite)
-                $resources = Get-Content (Join-Path $output 'resources.json') -Raw | ConvertFrom-Json
-                Assert-HabyResourceCounts $resources $ServerLimit $HostLimit
-                $resourceGroups.Add($resources)
+                if ($focused) { Assert-HabyFocusedGatePlan $executed $PlanPath $TestCase $TestGroup @($suite) }
+                else { Assert-HabyGatePlan $executed $PlanPath 'postgresql-integration' @($suite) }
+                if (-not $ExternalFocused) {
+                    $resources = Get-Content (Join-Path $output 'resources.json') -Raw | ConvertFrom-Json
+                    Assert-HabyResourceCounts $resources $ServerLimit $HostLimit
+                    $resourceGroups.Add($resources)
+                }
                 $exportSeconds = $watch.Elapsed.TotalSeconds; $phase = 'complete'
             } catch {
                 $failedReport = $true
                 if ($firstExit -eq 0) { $firstExit = $(if ($exitCode -ne 0) { $exitCode } else { 1 }) }
                 Write-Warning 'Suite discovery/report/cleanup failed; protected output withheld. Remaining suites are unperformed when cleanup is unconfirmed.'
             }
-            $reports.Add([pscustomobject]@{ suite = $suite; expected = $expected.Count; phase = $phase; testExitCode = $exitCode
+            $outcome = if ($exitCode -in @(130, 143)) { 'canceled' } elseif ($phase -eq 'discovery-empty') { 'zero-discovery' } elseif ($phase -eq 'discovery') { 'discovery-failed' } elseif ($phase -ne 'complete') { 'reporting-failed' } elseif ($exitCode -ne 0) { 'failed' } else { 'passed' }
+            $reports.Add([pscustomobject]@{ suite = $suite; expected = $expected.Count; phase = $phase; testExitCode = $exitCode; outcome = $outcome
                 discoverySeconds = $discoverySeconds; testSeconds = $testSeconds; exportSeconds = $exportSeconds })
             if ($phase -ne 'complete') { break }
         }

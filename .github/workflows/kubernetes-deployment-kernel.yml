@@ -7,6 +7,16 @@ on:
         required: true
         type: string
   workflow_dispatch:
+    inputs:
+      contour:
+        description: One focused contour, or unchanged full workload qualification
+        type: choice
+        options: [all, configured-deployment, durable-actions, deployment-kernel]
+        default: all
+      expected_head:
+        description: Required immutable checkout SHA for focused execution
+        type: string
+        default: ''
   pull_request:
     paths:
       - 'src/Haby.Kubernetes/**'
@@ -38,7 +48,21 @@ on:
 permissions:
   contents: read
 jobs:
+  validate-focused-selection:
+    if: inputs.candidate == '' && github.event_name == 'workflow_dispatch' && inputs.contour != 'all'
+    name: Focused selection admission
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse unknown or stale selection before runtime
+        env:
+          CONTOUR: ${{ inputs.contour }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          ACTUAL_HEAD: ${{ github.sha }}
+        run: |
+          node -e "if (!['configured-deployment','durable-actions','deployment-kernel'].includes(process.env.CONTOUR.toLowerCase()) || !/^[0-9a-f]{40}$/i.test(process.env.EXPECTED_HEAD) || process.env.EXPECTED_HEAD.toLowerCase() !== process.env.ACTUAL_HEAD.toLowerCase()) process.exit(1)"
   configured-deployment:
+    if: inputs.candidate != '' || github.event_name != 'workflow_dispatch' || inputs.contour == 'all' || (inputs.contour == 'configured-deployment' && inputs.expected_head == github.sha && inputs.expected_head != '')
+    name: ${{ inputs.candidate == '' && github.event_name == 'workflow_dispatch' && inputs.contour != 'all' && 'Focused configured-deployment' || 'configured-deployment' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -99,7 +123,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kubernetes-configured-deployment-${{ inputs.candidate || github.event.pull_request.head.sha || github.sha }}
+          name: ${{ inputs.candidate == '' && github.event_name == 'workflow_dispatch' && inputs.contour != 'all' && 'focused-only-not-final-' || '' }}kubernetes-configured-deployment-${{ inputs.candidate || github.event.pull_request.head.sha || github.sha }}
           path: |
             .artifacts/configured-deployment/evidence.txt
             .artifacts/configured-deployment/cases.json
@@ -107,6 +131,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   durable-actions:
+    if: inputs.candidate != '' || github.event_name != 'workflow_dispatch' || inputs.contour == 'all' || (inputs.contour == 'durable-actions' && inputs.expected_head == github.sha && inputs.expected_head != '')
+    name: ${{ inputs.candidate == '' && github.event_name == 'workflow_dispatch' && inputs.contour != 'all' && 'Focused durable-actions' || 'durable-actions' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -161,13 +187,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kubernetes-durable-actions-${{ inputs.candidate || github.sha }}-${{ github.run_attempt }}
+          name: ${{ inputs.candidate == '' && github.event_name == 'workflow_dispatch' && inputs.contour != 'all' && 'focused-only-not-final-' || '' }}kubernetes-durable-actions-${{ inputs.candidate || github.sha }}-${{ github.run_attempt }}
           path: |
             .artifacts/durable-actions/evidence.txt
             .artifacts/durable-actions/cases.json
             .artifacts/durable-actions/gate.json
           retention-days: 7
   deployment-kernel:
+    if: inputs.candidate != '' || github.event_name != 'workflow_dispatch' || inputs.contour == 'all' || (inputs.contour == 'deployment-kernel' && inputs.expected_head == github.sha && inputs.expected_head != '')
+    name: ${{ inputs.candidate == '' && github.event_name == 'workflow_dispatch' && inputs.contour != 'all' && 'Focused deployment-kernel' || 'deployment-kernel' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -210,7 +238,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kubernetes-deployment-kernel-${{ inputs.candidate || github.event.pull_request.head.sha || github.sha }}
+          name: ${{ inputs.candidate == '' && github.event_name == 'workflow_dispatch' && inputs.contour != 'all' && 'focused-only-not-final-' || '' }}kubernetes-deployment-kernel-${{ inputs.candidate || github.event.pull_request.head.sha || github.sha }}
           path: |
             .artifacts/deployment-kernel/evidence.txt
             .artifacts/deployment-kernel/cases.json

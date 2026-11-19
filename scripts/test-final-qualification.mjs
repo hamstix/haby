@@ -348,3 +348,15 @@ test('publisher reads actual artifact files, rechecks live identity and never pu
     rmSync(directory, { recursive: true });
   }
 });
+
+test('focused job and artifact identities never satisfy the installed final reducer', () => {
+  const f = fixture();
+  const focused = new Map(f.artifacts);
+  for (const key of ['postgresql', 'configured', 'durable', 'kernel']) {
+    const name = f.names[key]; focused.set(`focused-only-not-final-${name}`, focused.get(name)); focused.delete(name);
+  }
+  assert.throws(() => validateEvidence(f.identity, f.plan, focused, 1));
+  const names = ['build / validate', 'build / Native AOT (win-x64)', 'build / Native AOT (linux-x64)', 'build / postgresql-integration',
+    'api / qualification', 'workloads / configured-deployment', 'workloads / durable-actions', 'workloads / deployment-kernel'];
+  assert.throws(() => assertJobs(names.map(name => ({ name: name.replace('workloads / ', 'workloads / Focused '), status: 'completed', conclusion: 'success' }))));
+});
