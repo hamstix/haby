@@ -35,11 +35,16 @@ $records = @(
  'Q243 configured retirement WaitReturned true false false prerequisite-incomplete Complete',
  'Q243 configured retirement Condition U11Applied false',
  'Q243 configured retirement Primary Condition',
+ 'Q243 configured retirement ReadinessInvalid CountsInconsistent 1 2 2 2 1 1 1 2 M M',
+ 'Q243 configured retirement ReadinessInvalid JsonDecode 1 2 M M M M M M M M',
  'Q243 configured retirement OwnedFinalizer false',
  'Q243 configured retirement NamespaceCleanup Canceled')
 $result = Read-QualificationWorkloadEvidence configured ($records -join "`n") ''
 if ($result.Status -cne 'valid' -or -not $result.HasFailure) { throw 'Closed retirement records were not retained.' }
 foreach ($bad in @('Q243 configured retirement Closure protected protected',
+ 'Q243 configured retirement ReadinessInvalid protected 1 2 2 2 1 1 1 1 M M',
+ 'Q243 configured retirement ReadinessInvalid CountsInconsistent protected 2 2 2 1 1 1 1 M M',
+ 'Q243 configured retirement ReadinessInvalid CountsInconsistent 1 2 2 2 1 1 1 1 M',
  'Q243 configured retirement WaitMembers 17 1 0 false Unknown',
  'Q243 configured retirement WaitMembers 0 1 0 false Unknown',
  'Q243 configured retirement Member 16 Pending rollout-pending Active true false Unknown',
@@ -58,14 +63,14 @@ foreach ($bad in @('Q243 configured retirement Closure protected protected',
 if ($MemberTrxPath) {
  [xml]$trx = Get-Content -LiteralPath $MemberTrxPath -Raw
  $actual = @($trx.SelectNodes('//*[local-name()="StdOut"]') | ForEach-Object { $_.InnerText -split "`r?`n" } |
-     Where-Object { $_ -cmatch '^Q243 configured retirement (WaitReturned |WaitMembers |Member |MembersOverflow$)' })
+     Where-Object { $_ -cmatch '^Q243 configured retirement (WaitReturned |WaitMembers |Member |ReadinessInvalid |MembersOverflow$)' })
  if ($actual.Count -lt 18) { throw 'Actual formatter member records missing.' }
  $roundtrip = Read-QualificationWorkloadEvidence configured ((@('Q243 configured entry start') + $actual) -join "`n") ''
  if ($roundtrip.Status -cne 'valid' -or $roundtrip.Records.Count -ne $actual.Count + 1) { throw 'Actual formatter records lost at sanitizer boundary.' }
  foreach ($line in $actual) {
   if (('Diagnostic workload: ' + $line.Substring(5)) -cnotin $roundtrip.Records) { throw 'Actual formatter member record changed.' }
  }
- foreach ($required in @(' Pending status-invalid ', ' Pending rollout-pending Expired ', ' Refused attempt-superseded ',
+ foreach ($required in @(' ReadinessInvalid CountsInconsistent ', ' Pending status-invalid ', ' Pending rollout-pending Expired ', ' Refused attempt-superseded ',
      ' Refused runtime-authority-unavailable ', ' Unavailable api-access-denied ', ' Member 0 Ready ready ', ' WaitMembers 0 0 0 ')) {
   if (-not ($actual | Where-Object { $_.Contains($required, [StringComparison]::Ordinal) })) { throw 'Actual member branch missing from roundtrip.' }
  }

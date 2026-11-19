@@ -6,8 +6,16 @@ using k8s.Models;
 internal static class ConfiguredRetirementDiagnostics
 {
     // One instance belongs to the configured UPDATE caller, across reconstructed actions.
-    internal sealed class Output
+    internal sealed class Output(Action<string>? readinessReport = null)
     {
+        private bool readinessSeen;
+        internal bool ReadinessActive { get; set; }
+        internal void Readiness(ReadinessInvalidDiagnostic value)
+        {
+            if (!ReadinessActive || readinessSeen) return;
+            readinessSeen = true;
+            (readinessReport ?? Console.WriteLine)(ReadinessRecord(value));
+        }
         private bool recipientSeen, recipientFailureSeen, completionFailureSeen;
         internal void Recipient(DeploymentRecipientDiagnostic value)
         {
@@ -25,6 +33,15 @@ internal static class ConfiguredRetirementDiagnostics
             completionFailureSeen = true;
             Console.WriteLine(Closure(stage, predicate));
         }
+    }
+    internal static string ReadinessRecord(ReadinessInvalidDiagnostic value)
+    {
+        var parts = value.Scalars.Split(' ');
+        var valid = parts.Length == 10 && parts.All(x => x is "M" or "X" ||
+            long.TryParse(x, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var n) &&
+            n.ToString(System.Globalization.CultureInfo.InvariantCulture) == x);
+        return "Q243 configured retirement ReadinessInvalid " + (Enum.IsDefined(value.Stage) ? value.Stage.ToString() : "Unknown") + " " +
+            (valid ? value.Scalars : "X X X X X X X X X X");
     }
     private static readonly string[] Stages = ["Unknown", "Begin", "Recipients", "ClosureSource", "CaptureSubmitted", "ObsoleteProgress", "RetirementMarker", "CurrentRuntime", "ConfigurationComplete", "FreshSamples", "RetirementStart", "Revoke", "Publications", "CatalogHash", "SamplesHash", "AppliedCas", "CloseRequest", "PrerequisiteIncomplete"];
     private static readonly string[] Predicates = ["Unknown", "InternalUPDATECompletionRequiresAnUpdateInventory", "UPDATEInventoryRequired", "UpdateExpectedAppliedChanged", "UpdateCompletionExceedsCheckpointBound", "UpdateAppliedCompareAndSwapFailed", "UpdateInventoryMissing", "UpdateGenerationSuperseded", "UpdateAttemptsChanged", "ObsoleteInventoryChanged", "UnretiredPublicationChanged", "RetirementProgressChanged", "RetirementStartMismatch", "RetirementStartRecipientEvidenceInvalid", "ConfigurationAuthorityRequired", "RetirementNotStarted", "FrozenObsoletePermissionMismatch", "ObsoletePublicationHasAnActiveLiveReference", "RetirementProgressMismatch", "CurrentObsoletePermissionNoLongerMatchesInventory", "FrozenCompletionInventoryRequired", "CompletionProofUnavailable", "CompletionProofCorrupt", "CompletionProofOriginMismatch", "CompletionReadinessEvidenceChanged", "CompletionPrerequisiteEvidenceMismatch", "CompletionRequestUnavailable", "CompletionRequestOutcomeMismatch", "ReadinessSampleExceedsBound", "ReadinessSampleCoverageMismatch", "FreshCompleteSetReadinessRequired", "FreshReadinessSampleOriginMismatch", "CompletionCheckpointReferenceMismatch", "BindingBoundExceeded", "PublicationBoundExceeded", "CurrentPublicationPrerequisiteUnavailable", "CompletionPrerequisiteTextExceedsBound", "UnexpectedActionInventory", "CompleteActionEvidenceRequired", "ManagedInventoryBoundScopeMismatch", "PreparationInventoryBoundExceeded", "CompletionPublicationCoverageMismatch", "PublicationOriginRequired", "RetainedPublicationEvidenceMismatch", "CompletionEvidenceExceedsBound", "FrozenUpdateRequired", "UpdateCompletionCorrupt", "UpdateCompletionMissing", "UpdateCompletionOriginMismatch", "UpdateCompletionPrerequisitesChanged", "UpdateCompletionRequestMismatch", "CurrentObjectEvidenceExceedsBound", "CompleteUpdateCurrentObjectEvidenceRequired", "CurrentObjectReceiptMismatch", "RetirementStartEvidenceMismatch", "RetirementStartOriginMismatch", "ExactObsoleteRevocationProofMismatch"];

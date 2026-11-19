@@ -53,15 +53,21 @@ internal static class ConfiguredUpdateRetirement
         Func<InternalDurableActions> actions, DurableChangeSetCommit accepted, DeploymentReceipt prior, RuntimeBootstrap target,
         V1Pod held, ConcurrentQueue<Guid> requests,
         Func<CancellationToken, Action<DeploymentRecipientDiagnostic>, Task<RecipientObservation>> recipients,
-        Func<RecipientObservation, bool> validateRecipients, Func<CancellationToken, Task> drain, CancellationToken token, ConfiguredLifecycle lifetime)
+        Func<RecipientObservation, bool> validateRecipients, Func<CancellationToken, Task> drain, CancellationToken token, ConfiguredLifecycle lifetime, ConfiguredRetirementDiagnostics.Output diagnostics)
     {
         Console.WriteLine("Q243 configured update-retirement-ready start");
         var options = new RolloutOptions(MaximumCalls: 128, MaximumRounds: 128, PollMilliseconds: 250, RequestMilliseconds: 60000);
         using var completionBudget = CancellationTokenSource.CreateLinkedTokenSource(token);
         completionBudget.CancelAfter(TimeSpan.FromMilliseconds(options.RequestMilliseconds));
         var completionToken = completionBudget.Token;
-        var waiting = await ConfiguredRetirementDiagnostics.WaitAsync(() => actions().WaitUpdateAsync(accepted,
-            "configured-update-held-recipient", "qualification", options, new(), completionToken), accepted.Generation.Value);
+        RolloutResult waiting;
+        diagnostics.ReadinessActive = true;
+        try
+        {
+            waiting = await ConfiguredRetirementDiagnostics.WaitAsync(() => actions().WaitUpdateAsync(accepted,
+                "configured-update-held-recipient", "qualification", options, new(), completionToken), accepted.Generation.Value);
+        }
+        finally { diagnostics.ReadinessActive = false; }
         var old = await ConfiguredRetirementDiagnostics.ReadHeldAsync(() =>
             admin.CoreV1.ReadNamespacedPodAsync(held.Metadata.Name, prior.Namespace, cancellationToken: completionToken));
         (string Name, bool Value)[] heldConditions =

@@ -95,7 +95,7 @@ internal static class ConfiguredDeploymentUpdateCases
             DeploymentKernel? recipientKernel = null;
             var diagnostics = new ConfiguredRetirementDiagnostics.Output();
             var update = new InternalDeploymentAction(secrets, connection => recipientKernel = new DeploymentKernel(connection.Binding,
-                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct)), update: true, recipientDiagnostic: diagnostics.Recipient);
+                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CapturePatch(wire)], ct), diagnostics.Readiness), update: true, recipientDiagnostic: diagnostics.Recipient);
             var recordedUpdate = new ConfiguredDeploymentUpdateHandler(update,
                 (phase, result) => Console.WriteLine(ConfiguredDeploymentUpdateDiagnostics.Delegated(phase, result, wire.Writes)));
             var loseResponse = true;
@@ -231,7 +231,7 @@ internal static class ConfiguredDeploymentUpdateCases
             await ConfiguredUpdateRetirement.CompleteAsync(admin, contexts, Actions, accepted, previous, target, held, requests,
                 (ct, diagnostic) => (recipientKernel ?? throw new InvalidOperationException("Confirmed recipient kernel unavailable."))
                     .RecipientsAsync(intent, DeploymentIntents.DecodeReceipt(result.Receipt!), new(), ct, diagnostic),
-                sample => update.ValidateRecipients(DeploymentIntents.Encode(intent), result.Receipt!, sample), drain, token, lifetime);
+                sample => update.ValidateRecipients(DeploymentIntents.Encode(intent), result.Receipt!, sample), drain, token, lifetime, diagnostics);
         }
         catch (Exception error)
         {

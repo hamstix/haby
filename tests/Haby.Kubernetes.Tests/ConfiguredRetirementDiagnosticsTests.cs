@@ -38,6 +38,17 @@ public sealed class ConfiguredRetirementDiagnosticsTests
     [Fact]
     public async Task Held_read_and_U09_diagnostics_preserve_results_exceptions_and_closed_booleans()
     {
+        var sample = new ReadinessInvalidDiagnostic(ReadinessInvalidStage.CountsInconsistent, "1 2 2 2 1 1 1 2 M M");
+        var records = new List<string>();
+        var output = new ConfiguredRetirementDiagnostics.Output(records.Add);
+        output.Readiness(sample); Assert.Empty(records);
+        output.ReadinessActive = true;
+        output.Readiness(sample); output.Readiness(sample);
+        output.ReadinessActive = false; output.Readiness(sample);
+        Assert.Equal(ConfiguredRetirementDiagnostics.ReadinessRecord(sample), Assert.Single(records));
+        Console.WriteLine(Assert.Single(records));
+        var hostile = ConfiguredRetirementDiagnostics.ReadinessRecord(new((ReadinessInvalidStage)999, "protected-secret"));
+        Assert.Equal("Q243 configured retirement ReadinessInvalid Unknown X X X X X X X X X X", hostile);
         var pod = new k8s.Models.V1Pod();
         Assert.Same(pod, await ConfiguredRetirementDiagnostics.ReadHeldAsync(() => Task.FromResult(pod)));
         var error = new IOException("protected-message");

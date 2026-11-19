@@ -470,6 +470,10 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
                 }elseif($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','DrainCleanup','HeldReadThrew','Unknown')){
                     $shape=$parts.Count -eq 5 -and $parts[4] -cin @('Canceled','Api','Data','Timeout','Condition','Unknown')
                 }elseif($phase -ceq 'OwnedFinalizer'){$shape=$parts.Count -eq 5 -and $parts[4] -cin @('true','false','unknown')}
+                elseif($phase -ceq 'ReadinessInvalid'){
+                    $shape=$parts.Count -eq 15 -and $parts[4] -cin @('Generation','StatusShape','PausedShape','ConditionsShape','ConditionShape','ObservedGeneration','Replicas','UpdatedReplicas','ReadyReplicas','AvailableReplicas','UnavailableReplicas','TerminatingReplicas','GenerationBehindReceipt','CountsInconsistent','UnavailableMismatch','JsonDecode','Unknown') -and
+                        @($parts[5..14] | Where-Object {$_ -cnotmatch '^(M|X|-?(0|[1-9][0-9]{0,18}))$'}).Count -eq 0
+                }
                 elseif($phase -ceq 'Condition'){$shape=$parts.Count -eq 6 -and $parts[4] -cin @('U09Ready','U09NotApplied','U09OldRecipients','U09HeldUid','U09Terminating','U11Ready','U11Applied','U11Generation','Unknown') -and $parts[5] -cin @('true','false')}
                 if(!$shape){return $invalid}
                 if($phase -cin @('WaitThrew','Primary','ReleaseCleanup','NamespaceCleanup','RecipientWaitExpired','DrainOwnershipRefused','DrainExhausted','DrainCleanup','HeldReadThrew','MembersOverflow') -or ($phase -ceq 'Condition' -and $parts[5] -ceq 'false')){$hasFailure=$true}

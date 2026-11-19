@@ -53,6 +53,21 @@ public sealed class DeploymentReadinessTests
             obj["status"]![field] = JsonNode.Parse(value);
             var result = DeploymentReadiness.Evaluate(obj, intent, receipt);
             Assert.Equal(RolloutOutcome.Pending, result.Outcome); Assert.Equal("status-invalid", result.Code);
+            var samples = new List<ReadinessInvalidDiagnostic>();
+            Assert.Equal(result, DeploymentReadiness.Evaluate(obj, intent, receipt, samples.Add));
+            var sample = Assert.Single(samples);
+            var expected = field switch
+            {
+                "replicas" => ReadinessInvalidStage.Replicas,
+                "updatedReplicas" => ReadinessInvalidStage.UpdatedReplicas,
+                "readyReplicas" => ReadinessInvalidStage.ReadyReplicas,
+                "availableReplicas" => ReadinessInvalidStage.AvailableReplicas,
+                "unavailableReplicas" => ReadinessInvalidStage.UnavailableReplicas,
+                _ => ReadinessInvalidStage.TerminatingReplicas
+            };
+            Assert.Equal(expected, sample.Stage); Assert.Equal(10, sample.Scalars.Split(' ').Length);
+            Assert.DoesNotContain("true", sample.Scalars); Assert.DoesNotContain('"', sample.Scalars);
+            Assert.Equal(result, DeploymentReadiness.Evaluate(obj, intent, receipt, _ => throw new OperationCanceledException("protected")));
         }
     }
     [Theory]
@@ -99,7 +114,26 @@ public sealed class DeploymentReadinessTests
             case "negative-controller": obj["status"]!["observedGeneration"] = -1; break;
             case "missing-generation": obj["metadata"]!.AsObject().Remove("generation"); break;
         }
-        Assert.NotEqual(RolloutOutcome.Ready, DeploymentReadiness.Evaluate(obj, intent, receipt).Outcome);
+        var baseline = DeploymentReadiness.Evaluate(obj, intent, receipt);
+        var samples = new List<ReadinessInvalidDiagnostic>();
+        Assert.NotEqual(RolloutOutcome.Ready, baseline.Outcome);
+        Assert.Equal(baseline, DeploymentReadiness.Evaluate(obj, intent, receipt, samples.Add));
+        if (baseline.Code == "status-invalid")
+        {
+            var expected = scenario switch
+            {
+                "available-over-ready" or "updated-over-total" or "future-controller" => ReadinessInvalidStage.CountsInconsistent,
+                "missing-generation" => ReadinessInvalidStage.GenerationBehindReceipt,
+                "unavailable-contradicts" => ReadinessInvalidStage.UnavailableMismatch,
+                "duplicate-conditions" => ReadinessInvalidStage.ConditionShape,
+                "malformed-conditions" => ReadinessInvalidStage.ConditionsShape,
+                "malformed-paused" => ReadinessInvalidStage.PausedShape,
+                "malformed-controller" or "negative-controller" => ReadinessInvalidStage.ObservedGeneration,
+                _ => throw new InvalidOperationException("Unclassified invalid fixture.")
+            };
+            Assert.Equal(expected, Assert.Single(samples).Stage);
+        }
+        else Assert.Empty(samples);
     }
     [Theory]
     [InlineData("Available", "False")]
@@ -183,6 +217,28 @@ public sealed class DeploymentReadinessTests
         var observed = await kernel.ReadinessAsync(intent, receipt, default);
         Assert.Equal(outcome, observed.Outcome.ToString()); Assert.Equal(temporary, observed.Temporary); Assert.Equal(1, api.Reads);
         Assert.DoesNotContain("PRIVATE", observed.Evidence ?? observed.Code);
+        if (status == 200)
+        {
+            obj["status"]!["unavailableReplicas"] = 1;
+            var samples = new List<ReadinessInvalidDiagnostic>();
+            var exactApi = new ReadOnlyApi(200, obj);
+            var diagnosticKernel = new DeploymentKernel(intent.Binding, _ => ValueTask.FromResult(new KernelClient(new k8s.Kubernetes(
+                new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, exactApi))), samples.Add);
+            var invalid = await diagnosticKernel.ReadinessAsync(intent, receipt, default);
+            Assert.Equal("status-invalid", invalid.Code); Assert.Equal(1, exactApi.Reads);
+            var sample = Assert.Single(samples);
+            Assert.Equal(ReadinessInvalidStage.UnavailableMismatch, sample.Stage);
+            Assert.Equal("1", sample.Scalars.Split(' ')[8]);
+            using var canceled = new CancellationTokenSource(); canceled.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => diagnosticKernel.ReadinessAsync(intent, receipt, canceled.Token));
+            Assert.Equal(1, exactApi.Reads); Assert.Single(samples);
+            var malformedApi = new ReadOnlyApi(200, obj, "{PRIVATE");
+            var malformed = new DeploymentKernel(intent.Binding, _ => ValueTask.FromResult(new KernelClient(new k8s.Kubernetes(
+                new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, malformedApi))), samples.Add);
+            Assert.Equal("status-invalid", (await malformed.ReadinessAsync(intent, receipt, default)).Code);
+            Assert.Equal(1, malformedApi.Reads); Assert.Equal(ReadinessInvalidStage.JsonDecode, samples[1].Stage);
+            Assert.DoesNotContain("PRIVATE", samples[1].Scalars);
+        }
     }
     [Fact]
     public async Task Batch_admission_is_after_connection_acquisition_and_immediately_before_the_actual_GET()
@@ -219,7 +275,7 @@ public sealed class DeploymentReadinessTests
     {
         public ValueTask<RolloutObservation> RunAsync(Func<CancellationToken, ValueTask<RolloutObservation>> read, CancellationToken token) => invoke(read, token);
     }
-    private sealed class ReadOnlyApi(int status, JsonObject obj) : DelegatingHandler
+    private sealed class ReadOnlyApi(int status, JsonObject obj, string? raw = null) : DelegatingHandler
     {
         internal int Reads;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -229,7 +285,7 @@ public sealed class DeploymentReadinessTests
             return Task.FromResult(new HttpResponseMessage((HttpStatusCode)status)
             {
                 RequestMessage = request,
-                Content = new StringContent(status == 200 ? obj.ToJsonString() : $$"""{"apiVersion":"v1","kind":"Status","status":"Failure","code":{{status}},"message":"PRIVATE"}""", Encoding.UTF8, "application/json")
+                Content = new StringContent(raw ?? (status == 200 ? obj.ToJsonString() : $$"""{"apiVersion":"v1","kind":"Status","status":"Failure","code":{{status}},"message":"PRIVATE"}"""), Encoding.UTF8, "application/json")
             });
         }
     }
