@@ -108,3 +108,32 @@ bypass an unauthenticated401 or enable a disabled ruleset wholesale. Pilot
 maintainer workflow-edit trust still applies: Actions app plus a context name is
 not workflow provenance. Ordinary docs routing remains lightweight; this phase
 neither activates a fast-only code route nor claims a docs-only runtime credit.
+
+## Scope-compatible final control, without routing activation
+
+The installed-control extension derives scope from the complete immutable
+base-to-tested-merge change using the existing trusted classifier, whitespace
+and local Markdown-link checks. It fetches Git data only; privileged jobs never
+check out or execute candidate code. There is no manual docs-mode override or
+new privileged trigger. Code/mixed/unknown/empty changes remain full; failed or
+missing classification never grants skip authority.
+
+A verified docs-only report has `runtimeExecuted=false`, `cleanup=not-applicable`
+and a documentation-check attestation without runtime case counts. Only the
+expected skipped build/api/workloads groups are permitted. Missing/canceled
+outcomes or unexpected runtime jobs fail closed. Invalid classification cannot
+produce a verified scope. Both docs and full paths bind classification to the
+same immutable identities and run, require the compact control publication and
+perform final live freshness before completing `Final qualification`.
+
+Build now exposes separate `full` validation and `runtime` outputs, but `runtime`
+is an exact alias of the existing routing output. Ordinary code therefore still
+runs every old expensive gate; ordinary docs remain lightweight, and explicit
+candidate calls remain full. No activation flag, remote variable or speculative
+disabled infrastructure is introduced. Future fast-only activation requires its
+own reviewed source SHA, owning protection snapshot and explicit approval.
+
+The new docs control must be accepted and installed on main before a real docs-
+only demonstration. Current installed full control can qualify the implementation
+candidate when released; earlier evidence cannot qualify a newer source/tree.
+Local pure Git/control regressions do not require PostgreSQL or Kubernetes runs.

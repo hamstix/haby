@@ -19,9 +19,10 @@ and the separately approved routing/protection transition.
 The existing workflow files gain a read-only reusable entrypoint. Their push/PR
 events, full-job conditions, fixed check names, commands, coverage assertions,
 images, timeouts and documentation-only route remain. An explicit reusable Build
-invocation requests all existing runtime gates, including for documentation; the
-ordinary docs-only PR route stays lightweight. Lightweight final documentation
-qualification belongs to the subsequent #263 transition.
+invocation requests all existing runtime gates. The original bootstrap also ran
+these for documentation. The #263 scope extension described below keeps the
+ordinary docs-only PR route lightweight and adds a trusted docs-only final path;
+it does not reduce automatic code checks or activate remote protection.
 
 ## Exact trigger and trust
 
@@ -65,10 +66,28 @@ code executed by this control receives no check-write token or repository secret
 No separate issuer/App/service is installed. A stronger writer threat model would
 require a separately approved trusted issuer or enforced workflow policy.
 
+## Trusted documentation-only final scope
+
+After immutable admission, prepare fetches only validated base/tested-merge Git
+objects into the installed-control checkout, without checking out candidate code
+or recursing into submodules. It uses the installed complete-change classifier,
+added-whitespace checker and practical Markdown-link checks. Scope comes only
+from this immutable base-to-merge result; dispatch inputs cannot choose it.
+Code, mixed, unknown or empty changes retain full scope. Missing/corrupt data or
+failed documentation validation fails closed, with raw Git/path output withheld.
+
+For docs-only scope the three runtime groups must be skipped and no runtime child
+job may appear. The report attests the actual lightweight checks with
+`runtimeExecuted=false`, `cleanup=not-applicable` and no case counts. It requires
+the same control upload, artifact identity and final live freshness before the
+same exact-HEAD check can succeed. Scope/classification/run identities are bound
+through reduction and publication. This path is usable only after its trusted
+control revision is installed on main; candidate code cannot install itself.
+
 ## Actual full result, coverage and cleanup
 
 The start job records `Final qualification` in progress on the exact PR HEAD.
-After the actual jobs finish, the trusted publisher checks both reusable outcomes
+For full scope, after the actual jobs finish, the trusted publisher checks both reusable outcomes
 and the eight individual required job outcomes from the current run attempt. Any
 failure, cancellation, skip, missing job or ambiguous result prevents success.
 The normal PR Dependency Review remains a separate ordinary check; it is not

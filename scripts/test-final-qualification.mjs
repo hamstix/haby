@@ -1,10 +1,11 @@
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { validateRequest, assertCandidate, assertCurrent, assertResults, assertJobs, artifactNames, validateEvidence, reduce, publish } from './final-qualification.mjs';
+import { validateRequest, assertCandidate, assertCurrent, assertResults, assertJobs, artifactNames, validateEvidence, reduce, publish, prepare, classifyCandidate } from './final-qualification.mjs';
 
 const sha = c => c.repeat(40);
 const request = { pr: '17', head: sha('a'), base: sha('b'), merge: sha('c'), tree: sha('d') };
@@ -53,7 +54,7 @@ test('missing artifacts and empty coverage cannot qualify', () => {
 });
 
 function fixture() {
-  const identity = validateRequest(environment, request);
+  const identity = classifiedIdentity(validateRequest(environment, request));
   const names = artifactNames(identity, 1);
   const artifacts = new Map(Object.values(names).map(name => [name, new Map()]));
   const plan = { entries: [] };
@@ -359,4 +360,167 @@ test('focused job and artifact identities never satisfy the installed final redu
   const names = ['build / validate', 'build / Native AOT (win-x64)', 'build / Native AOT (linux-x64)', 'build / postgresql-integration',
     'api / qualification', 'workloads / configured-deployment', 'workloads / durable-actions', 'workloads / deployment-kernel'];
   assert.throws(() => assertJobs(names.map(name => ({ name: name.replace('workloads / ', 'workloads / Focused '), status: 'completed', conclusion: 'success' }))));
+});
+
+function classifiedIdentity(identity, scope = 'full') {
+  return { ...identity, scope, classification: { before: identity.base, after: identity.merge, tree: identity.tree,
+    route: scope, changedEntries: 1, documentation: 'passed' } };
+}
+function docsAdapter(identity) {
+  const updates = []; const state = { main: identity.base, expired: false };
+  const jobs = ['prepare', 'start', 'publish', 'build', 'api', 'workloads'].map(name => ({ name,
+    status: name === 'publish' ? 'in_progress' : 'completed', conclusion: name === 'publish' ? null : ['build', 'api', 'workloads'].includes(name) ? 'skipped' : 'success' }));
+  const github = {
+    rest: {
+      actions: { listJobsForWorkflowRunAttempt: 'jobs', listWorkflowRunArtifacts: 'artifacts',
+        getArtifact: async () => ({ data: { id: 900, name: 'qualification-control-123-1', workflow_run: { id: 123 }, expired: state.expired, size_in_bytes: 1 } }) },
+      pulls: { get: async () => ({ data: pr }) }, git: { getCommit: async () => ({ data: commit }) },
+      repos: { getBranch: async () => ({ data: { commit: { sha: state.main } } }) },
+      checks: { get: async () => ({ data: { head_sha: identity.head, name: 'Final qualification', external_id: '123:1' } }), update: async value => updates.push(value) },
+    },
+    paginate: async method => { assert.equal(method, 'jobs', 'Docs path requested runtime artifacts.'); return jobs; },
+    request: async () => { throw new Error('PROTECTED-runtime-plan-must-not-be-requested'); },
+  };
+  return { github, jobs, updates, state };
+}
+test('trusted docs reduction verifies only lightweight checks with no runtime or cleanup credit', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'haby-docs-control-'));
+  try {
+    const identity = classifiedIdentity(validateRequest(environment, request), 'docs-only');
+    const { github } = docsAdapter(identity);
+    const result = await reduce(github, identity, { build: 'skipped', api: 'skipped', workloads: 'skipped' },
+      join(directory, 'NO-RUNTIME-ARTIFACTS'), 123, 1, join(directory, 'summary.json'));
+    assert.equal(result.outcome, 'verified'); assert.equal(result.scope, 'docs-only');
+    assert.equal(result.runtimeExecuted, false); assert.equal(result.cleanup, 'not-applicable');
+    assert.equal(result.gates.some(gate => 'cases' in gate), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+function gitCandidate(edit) {
+  const root = mkdtempSync(join(tmpdir(), 'haby-classification-'));
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Control fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'Control fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
+  const run = (...args) => execFileSync('git', ['-C', root, ...args], { env, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  run('init', '--initial-branch=main'); run('config', 'commit.gpgsign', 'false'); run('config', 'core.hooksPath', join(root, 'no-hooks'));
+  writeFileSync(join(root, 'README.md'), '# Base\n'); mkdirSync(join(root, 'docs'));
+  run('add', '.'); run('commit', '-m', 'base'); const base = run('rev-parse', 'HEAD');
+  edit(root, run); run('add', '-A'); run('commit', '-m', 'candidate');
+  const head = run('rev-parse', 'HEAD'); const tree = run('rev-parse', 'HEAD^{tree}');
+  const merge = run('commit-tree', tree, '-p', base, '-p', head, '-m', 'tested merge');
+  run('update-ref', 'refs/heads/candidate', head); run('update-ref', 'refs/heads/tested-merge', merge);
+  run('checkout', '--detach', base); run('update-ref', 'refs/heads/main', base); run('remote', 'add', 'origin', root);
+  const identity = { repository: environment.repository, control: base, pr: 17, head, base, merge, tree };
+  return { root, run, identity, cleanup: () => {
+    assert.ok(resolve(root).startsWith(resolve(tmpdir()) + (process.platform === 'win32' ? '\\' : '/')));
+    rmSync(root, { recursive: true });
+  } };
+}
+test('trusted immutable Git classification supports docs and conservatively retains full routes', () => {
+  for (const [name, edit, expected] of [
+    ['docs', root => writeFileSync(join(root, 'docs', 'guide.md'), '[Base](../README.md)\n'), 'docs-only'],
+    ['code', root => writeFileSync(join(root, 'source.cs'), 'code\n'), 'full'],
+    ['mixed', root => { writeFileSync(join(root, 'README.md'), '# Changed\n'); writeFileSync(join(root, 'source.cs'), 'code\n'); }, 'full'],
+    ['unknown', root => writeFileSync(join(root, 'notes.md'), '# Unknown path\n'), 'full'],
+    ['renamed outside docs', (root, run) => run('mv', 'README.md', 'notes.md'), 'full'],
+  ]) {
+    const f = gitCandidate(edit);
+    try {
+      const result = classifyCandidate(f.root, { ...f.identity, scope: expected === 'full' ? 'docs-only' : 'full' });
+      assert.equal(result.scope, expected, name); assert.equal(result.classification.documentation, 'passed');
+      assert.equal(result.classification.before, f.identity.base); assert.equal(result.classification.after, f.identity.merge);
+      assert.equal(f.run('rev-parse', 'HEAD'), f.identity.control, 'Candidate was checked out.');
+    } finally { f.cleanup(); }
+  }
+});
+test('failed documentation checks and unavailable or mismatched objects cannot authorize docs scope or leak Git output', () => {
+  for (const edit of [root => writeFileSync(join(root, 'README.md'), '[protected-secret](missing.md)\n'),
+    root => writeFileSync(join(root, 'README.md'), '# protected-secret trailing space \n')]) {
+    const f = gitCandidate(edit);
+    try { assert.throws(() => classifyCandidate(f.root, f.identity), error => error.message === 'Trusted classification unavailable or failed.'); }
+    finally { f.cleanup(); }
+  }
+  const f = gitCandidate(root => writeFileSync(join(root, 'README.md'), '# Valid\n'));
+  try {
+    for (const delta of [{ merge: sha('e') }, { tree: sha('e') }, { base: f.identity.head }, { head: f.identity.base }])
+      assert.throws(() => classifyCandidate(f.root, { ...f.identity, ...delta }));
+    writeFileSync(join(f.root, '.git', 'shallow'), f.identity.base + '\n');
+    assert.throws(() => classifyCandidate(f.root, f.identity));
+  } finally { f.cleanup(); }
+});
+test('prepare derives scope after installed checkout and immutable admission, ignoring manual scope input', async () => {
+  const f = gitCandidate(root => writeFileSync(join(root, 'README.md'), '# Docs change\n'));
+  const snapshot = { ...pr, head: { sha: f.identity.head }, base: { ...pr.base, sha: f.identity.base }, merge_commit_sha: f.identity.merge };
+  const github = { rest: { pulls: { get: async () => ({ data: snapshot }) },
+    git: { getCommit: async () => ({ data: { sha: f.identity.merge, tree: { sha: f.identity.tree }, parents: [{ sha: f.identity.base }, { sha: f.identity.head }] } }) },
+    repos: { getBranch: async () => ({ data: { commit: { sha: f.identity.base } } }), getCollaboratorPermissionLevel: async () => ({ data: { permission: 'write' } }) } } };
+  try {
+    const input = { ...f.identity, pr: '17', scope: 'full' };
+    assert.equal(validateRequest({ ...environment, control: f.identity.base }, input).scope, undefined);
+    const result = await prepare(github, { ...environment, control: f.identity.base }, input, 'maintainer', f.root);
+    assert.equal(result.scope, 'docs-only'); assert.equal(f.run('rev-parse', 'HEAD'), f.identity.base);
+    f.run('checkout', '--detach', f.identity.head);
+    await assert.rejects(prepare(github, { ...environment, control: f.identity.base }, input, 'maintainer', f.root));
+  } finally { f.cleanup(); }
+});
+
+test('docs reduction refuses missing classification, failed checks and unexpected runtime outcomes or jobs', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'haby-docs-negative-'));
+  try {
+    const identity = classifiedIdentity(validateRequest(environment, request), 'docs-only');
+    for (const bad of [validateRequest(environment, request), { ...identity, classification: undefined },
+      { ...identity, classification: { ...identity.classification, before: sha('e') } },
+      { ...identity, classification: { ...identity.classification, documentation: 'failed' } },
+      { ...identity, scope: 'protected-secret' }]) {
+      const { github } = docsAdapter(identity);
+      const result = await reduce(github, bad, { build: 'skipped', api: 'skipped', workloads: 'skipped' }, directory, 123, 1, join(directory, 'summary.json'));
+      assert.equal(result.outcome, 'failure'); assert.equal(result.primary.code, 'classification-incomplete');
+      assert.equal(result.scope, 'unknown'); assert.notEqual(result.cleanup, 'confirmed-by-required-gates');
+    }
+    for (const outcome of ['success', 'failure', 'cancelled', 'timed_out', undefined]) {
+      const { github } = docsAdapter(identity);
+      const result = await reduce(github, identity, { build: 'skipped', api: outcome, workloads: 'skipped' }, directory, 123, 1, join(directory, 'summary.json'));
+      assert.equal(result.outcome, 'failure'); assert.equal(result.primary.code, 'unexpected-docs-runtime');
+    }
+    const { github, jobs } = docsAdapter(identity); jobs.push({ name: 'workloads / deployment-kernel', status: 'completed', conclusion: 'success' });
+    assert.equal((await reduce(github, identity, { build: 'skipped', api: 'skipped', workloads: 'skipped' }, directory, 123, 1, join(directory, 'summary.json'))).outcome, 'failure');
+  } finally { rmSync(directory, { recursive: true }); }
+});
+test('docs publication binds scope, classification and run without any runtime cleanup credit', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'haby-docs-publish-'));
+  try {
+    const identity = classifiedIdentity(validateRequest(environment, request), 'docs-only');
+    const summary = join(directory, 'summary.json'); const adapter = docsAdapter(identity);
+    await reduce(adapter.github, identity, { build: 'skipped', api: 'skipped', workloads: 'skipped' }, directory, 123, 1, summary);
+    const saved = readFileSync(summary, 'utf8');
+    const uploaded = { reduction: 'success', upload: 'success', artifact: '900' };
+    await publish(adapter.github, identity, 123, 1, '9', summary, uploaded);
+    assert.equal(adapter.updates.at(-1).conclusion, 'success');
+    assert.match(adapter.updates.at(-1).output.summary, /runtimeExecuted=false; cleanup=not-applicable; no runtime coverage credit/);
+    for (const mutate of [value => { value.scope = 'full'; }, value => { value.requestedScope = 'full'; },
+      value => { value.runtimeExecuted = true; }, value => { value.cleanup = 'confirmed-by-required-gates'; },
+      value => { value.runId++; }, value => { value.attempt++; },
+      ...['repository', 'control', 'pr', 'head', 'base', 'merge', 'tree'].map(key => value => { value[key] = 'wrong'; }),
+      value => { value.classification.after = sha('e'); }, value => { value.classification.changedEntries++; },
+      value => { value.gates[0].cases = 0; }, value => { value.gates[0].checks = []; }]) {
+      const value = JSON.parse(saved); mutate(value); writeFileSync(summary, JSON.stringify(value));
+      await assert.rejects(publish(adapter.github, identity, 123, 1, '9', summary, uploaded));
+      assert.equal(adapter.updates.at(-1).conclusion, 'failure');
+      assert.doesNotMatch(adapter.updates.at(-1).output.summary, /"cleanup":"confirmed-by-required-gates"/);
+    }
+    writeFileSync(summary, saved);
+    for (const update of [{ ...uploaded, upload: 'failure' }, { ...uploaded, upload: 'cancelled' }, { ...uploaded, upload: 'skipped' }, { ...uploaded, artifact: '' }]) {
+      await assert.rejects(publish(adapter.github, identity, 123, 1, '9', summary, update));
+      assert.equal(adapter.updates.at(-1).conclusion, 'failure'); assert.match(adapter.updates.at(-1).output.summary, /not-applicable/);
+    }
+    adapter.state.expired = true;
+    await assert.rejects(publish(adapter.github, identity, 123, 1, '9', summary, uploaded));
+    assert.equal(adapter.updates.at(-1).conclusion, 'failure'); adapter.state.expired = false;
+    adapter.state.main = sha('e');
+    await assert.rejects(publish(adapter.github, identity, 123, 1, '9', summary, uploaded));
+    assert.match(adapter.updates.at(-1).output.summary, /stale-main/);
+    assert.match(adapter.updates.at(-1).output.summary, /not-applicable/);
+    const stale = await reduce(adapter.github, identity, { build: 'skipped', api: 'skipped', workloads: 'skipped' }, directory, 123, 1, summary);
+    assert.equal(stale.outcome, 'failure'); assert.equal(stale.primary.code, 'stale-main');
+    assert.equal(stale.runtimeExecuted, false); assert.equal(stale.cleanup, 'not-applicable');
+  } finally { rmSync(directory, { recursive: true }); }
 });
