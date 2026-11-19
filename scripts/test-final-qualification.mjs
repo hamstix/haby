@@ -524,3 +524,115 @@ test('docs publication binds scope, classification and run without any runtime c
     assert.equal(stale.runtimeExecuted, false); assert.equal(stale.cleanup, 'not-applicable');
   } finally { rmSync(directory, { recursive: true }); }
 });
+
+async function publisherFixture(scope) {
+  const directory = mkdtempSync(join(tmpdir(), 'haby-publisher-diagnostic-'));
+  const f = fixture(); const identity = classifiedIdentity(f.identity, scope);
+  const adapter = docsAdapter(identity);
+  if (scope === 'full') {
+    for (const [name, files] of f.artifacts) for (const [path, bytes] of files) {
+      const destination = join(directory, name, path); mkdirSync(join(destination, '..'), { recursive: true }); writeFileSync(destination, bytes);
+    }
+    const jobs = ['build / validate', 'build / Native AOT (win-x64)', 'build / Native AOT (linux-x64)', 'build / postgresql-integration',
+      'api / qualification', 'workloads / configured-deployment', 'workloads / durable-actions', 'workloads / deployment-kernel'];
+    adapter.github.paginate = async method => method === 'jobs' ? jobs.map(name => ({ name, status: 'completed', conclusion: 'success' })) :
+      Object.values(f.names).map(name => ({ name, expired: false, size_in_bytes: 1 }));
+    adapter.github.request = async () => ({ data: f.plan });
+  }
+  const summary = join(directory, 'summary.json');
+  const results = Object.fromEntries(['build', 'api', 'workloads'].map(key => [key, scope === 'full' ? 'success' : 'skipped']));
+  const reduction = await reduce(adapter.github, identity, results, directory, 123, 1, summary);
+  assert.equal(reduction.outcome, 'verified');
+  let calls = 0; let freshness = 0;
+  const getBranch = adapter.github.rest.repos.getBranch;
+  adapter.github.rest.repos.getBranch = async args => { freshness++; return getBranch(args); };
+  const artifact = { id: 900, name: 'qualification-control-123-1', workflow_run: { id: 123 }, expired: false, size_in_bytes: 1 };
+  let response = { data: artifact }; let thrown; let shouldThrow = false;
+  adapter.github.rest.actions.getArtifact = async args => {
+    calls++; assert.deepEqual(args, { owner: 'example', repo: 'project', artifact_id: 900 });
+    if (shouldThrow) throw thrown;
+    return response;
+  };
+  return { ...adapter, artifact, directory, summary,
+    setError: error => { thrown = error; shouldThrow = true; },
+    setResponse: value => { response = value; shouldThrow = false; },
+    counts: () => ({ calls, freshness }),
+    publish: (publication = { reduction: 'success', upload: 'success', artifact: '900' }) =>
+      publish(adapter.github, identity, 123, 1, '9', summary, publication),
+    cleanup: () => rmSync(directory, { recursive: true }),
+  };
+}
+
+test('publisher request diagnostics retain only safe structured facts and fail closed', async t => {
+  for (const scope of ['docs-only', 'full']) for (const [status, code, category] of [
+    [401, undefined, 'authentication'], [403, undefined, 'forbidden'], [404, undefined, 'not-found'],
+    [429, undefined, 'rate-limited'], [503, undefined, 'server-error'], [422, undefined, 'other-http'],
+    [undefined, 'ECONNRESET', 'transport'], [undefined, 'ETIMEDOUT', 'transport'],
+    [undefined, 'PROTECTED-unknown-code', 'unknown'], ['503', undefined, 'unknown'],
+    [99, undefined, 'unknown'], [600, undefined, 'unknown'], [503.5, undefined, 'unknown'],
+    [NaN, undefined, 'unknown'], [undefined, undefined, 'unknown'],
+  ]) await t.test(`${scope} ${String(status)} ${String(code)}`, async () => {
+    const f = await publisherFixture(scope);
+    try {
+      const error = Object.assign(new Error('PROTECTED-message'), { status, code, stack: 'PROTECTED-stack',
+        request: { headers: { authorization: 'PROTECTED-token' }, url: 'PROTECTED-url' },
+        response: { data: 'PROTECTED-body', headers: { secret: 'PROTECTED-header' } } });
+      f.setError(error); await assert.rejects(f.publish());
+      const update = f.updates.at(-1); assert.equal(update.conclusion, 'failure');
+      const failure = JSON.parse(update.output.summary.slice('Qualification did not pass: '.length));
+      assert.equal(failure.primary.code, 'api-or-data-unavailable'); assert.equal(failure.primary.stage, 'control-artifact');
+      assert.equal(failure.primary.gate, 'control'); assert.equal(failure.primary.member, 'qualification-control-123-1');
+      assert.equal(failure.primary.deadline, null);
+      assert.deepEqual(failure.primary.api, { operation: 'actions.getArtifact', httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null, category });
+      assert.equal(failure.cleanup, scope === 'full' ? 'confirmed-by-required-gates' : 'not-applicable');
+      assert.deepEqual(f.counts(), { calls: 1, freshness: 0 });
+      assert.doesNotMatch(JSON.stringify(f.updates) + readFileSync(f.summary, 'utf8'), /PROTECTED/);
+    } finally { f.cleanup(); }
+  });
+  for (const error of [null, 'PROTECTED-string', undefined]) await t.test(`nonobject ${String(error)}`, async () => {
+    const f = await publisherFixture('docs-only');
+    try {
+      f.setError(error); await assert.rejects(f.publish());
+      const output = f.updates.at(-1).output.summary;
+      const failure = JSON.parse(output.slice('Qualification did not pass: '.length));
+      assert.deepEqual(failure.primary.api, { operation: 'actions.getArtifact', httpStatus: null, category: 'unknown' });
+      assert.equal(f.updates.at(-1).conclusion, 'failure'); assert.deepEqual(f.counts(), { calls: 1, freshness: 0 });
+      assert.doesNotMatch(output, /PROTECTED/);
+    } finally { f.cleanup(); }
+  });
+});
+
+test('publisher metadata contract failures remain distinct from request errors', async t => {
+  for (const scope of ['docs-only', 'full']) for (const variant of ['response-null', 'data-missing', 'data-null', 'data-string', 'data-array', 'id', 'name', 'run', 'expired', 'size'])
+    await t.test(`${scope} ${variant}`, async () => {
+      const f = await publisherFixture(scope);
+      try {
+        const responses = { 'response-null': null, 'data-missing': {}, 'data-null': { data: null }, 'data-string': { data: 'PROTECTED-metadata' }, 'data-array': { data: [] } };
+        const changes = { id: { id: 901 }, name: { name: 'PROTECTED-other' }, run: { workflow_run: { id: 124 } }, expired: { expired: true }, size: { size_in_bytes: 0 } };
+        f.setResponse(variant in responses ? responses[variant] : { data: { ...f.artifact, ...changes[variant] } });
+        await assert.rejects(f.publish()); const update = f.updates.at(-1);
+        const failure = JSON.parse(update.output.summary.slice('Qualification did not pass: '.length));
+        assert.equal(update.conclusion, 'failure'); assert.equal(failure.primary.code, 'control-artifact-incomplete');
+        assert.equal(failure.primary.stage, 'control-artifact'); assert.equal(failure.primary.gate, 'control');
+        assert.equal(failure.primary.api, undefined); assert.deepEqual(f.counts(), { calls: 1, freshness: 0 });
+        assert.doesNotMatch(JSON.stringify(f.updates), /PROTECTED/);
+      } finally { f.cleanup(); }
+    });
+});
+
+test('publisher diagnostics preserve upload gate and final freshness in both scopes', async () => {
+  for (const scope of ['docs-only', 'full']) {
+    const f = await publisherFixture(scope);
+    try {
+      for (const publication of [{ reduction: 'failure', upload: 'success', artifact: '900' }, { reduction: 'success', upload: 'failure', artifact: '900' }]) {
+        await assert.rejects(f.publish(publication)); assert.equal(f.updates.at(-1).conclusion, 'failure');
+      }
+      assert.deepEqual(f.counts(), { calls: 0, freshness: 0 });
+      await f.publish(); assert.equal(f.updates.at(-1).conclusion, 'success');
+      assert.deepEqual(f.counts(), { calls: 1, freshness: 1 });
+      f.state.main = sha('e'); await assert.rejects(f.publish());
+      assert.equal(f.updates.at(-1).conclusion, 'failure'); assert.match(f.updates.at(-1).output.summary, /stale-main/);
+      assert.deepEqual(f.counts(), { calls: 2, freshness: 2 });
+    } finally { f.cleanup(); }
+  }
+});
