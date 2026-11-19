@@ -108,12 +108,18 @@ export function validateDocumentation(root, before, after) {
   if ([...current].some(([key, count]) => count > (baseline.get(key) ?? 0))) throw new Error('New broken local Markdown links (including incoming links to deleted or renamed targets).');
 }
 
+export function immutableRoute(root, before, after) {
+  if (git(root, 'rev-parse', '--is-shallow-repository').trim() !== 'false') throw new Error('Complete history required.');
+  before = commit(root, before); after = commit(root, after);
+  const changes = parseDiff(git(root, 'diff', '--raw', '-z', '--no-abbrev', '--no-ext-diff', '--no-textconv', '--find-renames', before, after, '--'));
+  validateDocumentation(root, before, after);
+  return { before, after, route: classify(changes), changedEntries: changes.length };
+}
+
 export function route(root, eventName, event) {
   if (git(root, 'rev-parse', '--is-shallow-repository').trim() !== 'false') throw new Error('Complete history required.');
   const range = eventRange(root, eventName, event);
-  const changes = parseDiff(git(root, 'diff', '--raw', '-z', '--no-abbrev', '--no-ext-diff', '--no-textconv', '--find-renames', range.before, range.after, '--'));
-  validateDocumentation(root, range.before, range.after);
-  return { ...range, route: classify(changes), changedEntries: changes.length };
+  return immutableRoute(root, range.before, range.after);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -122,7 +128,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(JSON.stringify(result));
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `full=${result.route === 'full'}\n`);
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-      `## CI routing\n${result.before} → ${result.after}: **${result.route}** (${result.changedEntries} entries).\n` +
+      `## CI routing\n${result.before} -> ${result.after}: **${result.route}** (${result.changedEntries} entries).\n` +
       (result.route === 'docs-only' ? 'Ordinary documentation only: solution/fast tests, PostgreSQL and both Native AOT jobs are intentionally skipped. No test-case, coverage or artifact credit. Dependency review is unchanged.\n' : 'Code, mixed or unknown paths: full existing applicable validation required.\n'));
   } catch {
     // Avoid echoing untrusted filenames or arbitrary Git diagnostics as workflow commands.

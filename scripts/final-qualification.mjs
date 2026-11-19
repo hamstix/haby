@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, lstatSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve, relative, isAbsolute, join } from 'node:path';
+import { git, immutableRoute } from './ci-change-routing.mjs';
 
 const sha = value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value) && !/^0+$/.test(value);
 class QualificationFailure extends Error {
@@ -40,6 +41,40 @@ export function assertCandidate(identity, pr, commit, permission, main) {
   requireThat(['write', 'maintain', 'admin'].includes(permission), 'Maintainer dispatch permission required.');
   assertCurrent(identity, pr, commit, main);
 }
+
+// Only prepare derives this record, using installed code and immutable Git data.
+// It is never accepted from workflow_dispatch inputs or runtime artifacts.
+export function classifyCandidate(root, identity) {
+  try {
+    requireThat(typeof root === 'string' && isAbsolute(root), 'Trusted workspace required.');
+    const parents = git(root, 'show', '-s', '--format=%P', identity.merge).trim().split(' ');
+    requireThat(parents.length === 2 && parents[0] === identity.base && parents[1] === identity.head &&
+      git(root, 'rev-parse', `${identity.merge}^{tree}`).trim() === identity.tree, 'Local tested merge identity mismatch.');
+    const classification = { ...immutableRoute(root, identity.base, identity.merge), tree: identity.tree, documentation: 'passed' };
+    return { ...identity, scope: classification.route, classification };
+  } catch {
+    throw new QualificationFailure('Trusted classification unavailable or failed.',
+      { code: 'classification-failed', stage: 'classification', gate: 'control', member: 'base-to-tested-merge' });
+  }
+}
+function assertClassification(identity) {
+  const value = identity.classification;
+  requireThat(['full', 'docs-only'].includes(identity.scope) && value && value.route === identity.scope &&
+    value.before === identity.base && value.after === identity.merge && value.tree === identity.tree &&
+    Number.isSafeInteger(value.changedEntries) && value.changedEntries >= (identity.scope === 'docs-only' ? 1 : 0) &&
+    value.changedEntries <= 1000000 && value.documentation === 'passed', 'Trusted classification missing or mismatched.',
+  { code: 'classification-incomplete', stage: 'classification', gate: 'control', member: 'bound-classification' });
+}
+function assertDocsResults(results, jobs) {
+  for (const key of ['build', 'api', 'workloads']) requireThat(results[key] === 'skipped', 'Docs runtime groups must be skipped.',
+    { code: 'unexpected-docs-runtime', gate: key, member: 'workflow-result', outcome: outcome(results[key]) });
+  for (const key of ['prepare', 'start']) requireThat(jobs.filter(job => job.name === key && job.status === 'completed' && job.conclusion === 'success').length === 1,
+    'Docs admission incomplete.', { code: 'docs-admission-incomplete', gate: 'control', member: key });
+  requireThat(jobs.every(job => ['prepare', 'start', 'publish'].includes(job.name) ||
+    (['build', 'api', 'workloads'].includes(job.name) && job.status === 'completed' && job.conclusion === 'skipped')),
+  'Unexpected docs execution.', { code: 'unexpected-docs-runtime', gate: 'control', member: 'job-results' });
+}
+const docsChecks = ['complete-change-classification', 'added-whitespace', 'local-markdown-links'];
 
 export function assertResults(results) {
   const missing = ['build', 'api', 'workloads'].find(name => results[name] !== 'success');
@@ -217,13 +252,23 @@ export async function current(github, identity) {
   return { pr, commit, main };
 }
 
-export async function prepare(github, environment, input, actor) {
+export async function prepare(github, environment, input, actor, root = process.env.GITHUB_WORKSPACE) {
   const identity = validateRequest(environment, input);
   const [owner, repo] = identity.repository.split('/');
   const { pr, commit, main } = await current(github, identity);
   const permission = (await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: actor })).data.permission;
   assertCandidate(identity, pr, commit, permission, main);
-  return identity;
+  try {
+    requireThat(typeof root === 'string' && isAbsolute(root) && git(root, 'rev-parse', 'HEAD').trim() === identity.control,
+      'Installed control checkout required.');
+    // Fetch Git objects only. Never check out or import candidate source in control.
+    git(root, 'fetch', '--no-tags', '--no-recurse-submodules', 'origin', identity.base, identity.merge);
+    return classifyCandidate(root, identity);
+  } catch {
+    // Git/doc diagnostics can contain untrusted paths or Markdown content.
+    throw new QualificationFailure('Trusted classification unavailable or failed.',
+      { code: 'classification-failed', stage: 'classification', gate: 'control', member: 'base-to-tested-merge' });
+  }
 }
 
 export function readArtifacts(directory, names) {
@@ -247,23 +292,33 @@ export function readArtifacts(directory, names) {
 
 export async function reduce(github, identity, results, directory, runId, attempt, summaryPath = 'qualification-summary.json') {
   const [owner, repo] = identity.repository.split('/');
-  let verified = false; let report = []; let failure = null; let stage = 'workflow-results'; let cleanupState = 'not-established';
+  let verified = false; let report = []; let failure = null; let stage = 'classification'; let cleanupState = 'not-established';
+  let scope = 'unknown'; let runtimeExecuted = null;
   try {
-    assertResults(results);
+    assertClassification(identity);
+    stage = 'workflow-results';
+    if (identity.scope === 'full') assertResults(results);
     stage = 'job-results';
     const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, { owner, repo, run_id: runId, attempt_number: attempt, per_page: 100 });
-    assertJobs(jobs);
-    stage = 'artifacts';
-    const actualArtifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: runId, per_page: 100 });
-    for (const [key, name] of Object.entries(artifactNames(identity, attempt))) requireThat(actualArtifacts.filter(item => item.name === name && !item.expired && item.size_in_bytes > 0).length === 1, 'Run artifact missing, expired or ambiguous.',
-      { code: 'missing-artifact', gate: key, member: name });
-    stage = 'coverage-plan';
-    const planResponse = await github.request('GET /repos/{owner}/{repo}/contents/{path}', { owner, repo, path: 'tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json', ref: identity.merge, headers: { accept: 'application/vnd.github.raw+json' } });
-    const plan = typeof planResponse.data === 'string' ? JSON.parse(planResponse.data) : planResponse.data;
-    requireThat(plan && Buffer.byteLength(JSON.stringify(plan)) <= 4 * 1024 * 1024, 'Coverage plan unavailable or exceeds bound.');
-    stage = 'evidence';
-    report = validateEvidence(identity, plan, readArtifacts(directory, artifactNames(identity, attempt)), attempt);
-    cleanupState = 'confirmed-by-required-gates';
+    if (identity.scope === 'docs-only') {
+      assertDocsResults(results, jobs);
+      scope = 'docs-only'; runtimeExecuted = false; cleanupState = 'not-applicable';
+      report = [{ gate: 'documentation', status: 'complete', changedEntries: identity.classification.changedEntries, checks: docsChecks }];
+    } else {
+      assertJobs(jobs);
+      stage = 'artifacts';
+      const actualArtifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: runId, per_page: 100 });
+      for (const [key, name] of Object.entries(artifactNames(identity, attempt))) requireThat(actualArtifacts.filter(item => item.name === name && !item.expired && item.size_in_bytes > 0).length === 1, 'Run artifact missing, expired or ambiguous.',
+        { code: 'missing-artifact', gate: key, member: name });
+      stage = 'coverage-plan';
+      const planResponse = await github.request('GET /repos/{owner}/{repo}/contents/{path}', { owner, repo, path: 'tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json', ref: identity.merge, headers: { accept: 'application/vnd.github.raw+json' } });
+      const plan = typeof planResponse.data === 'string' ? JSON.parse(planResponse.data) : planResponse.data;
+      requireThat(plan && Buffer.byteLength(JSON.stringify(plan)) <= 4 * 1024 * 1024, 'Coverage plan unavailable or exceeds bound.');
+      stage = 'evidence';
+      report = validateEvidence(identity, plan, readArtifacts(directory, artifactNames(identity, attempt)), attempt);
+      cleanupState = 'confirmed-by-required-gates';
+      scope = 'full'; runtimeExecuted = true;
+    }
     stage = 'freshness';
     await current(github, identity);
     verified = true;
@@ -272,8 +327,8 @@ export async function reduce(github, identity, results, directory, runId, attemp
     failure = boundedFailure(error, stage);
     if (failure.cleanup === 'not-established') failure.cleanup = cleanupState;
   }
-  const reduction = { ...identity, runId, attempt, outcome: verified ? 'verified' : 'failure', gates: report,
-    primary: failure?.primary ?? null, cleanup: failure?.cleanup ?? 'confirmed-by-required-gates' };
+  const reduction = { ...identity, requestedScope: identity.scope ?? null, scope, runtimeExecuted, runId, attempt, outcome: verified ? 'verified' : 'failure', gates: report,
+    primary: failure?.primary ?? null, cleanup: failure?.cleanup ?? cleanupState };
   writeFileSync(summaryPath, JSON.stringify(reduction, null, 2) + '\n');
   return reduction;
 }
@@ -282,12 +337,26 @@ export async function publish(github, identity, runId, attempt, checkId, summary
   const [owner, repo] = identity.repository.split('/');
   let conclusion = 'failure'; let summary = 'Qualification failed, is stale or has incomplete publication.'; let failure = null; let stage = 'control-summary'; let cleanupState = 'not-established';
   try {
+    assertClassification(identity);
     const reduction = JSON.parse(readFileSync(summaryPath, 'utf8'));
     requireThat(reduction.runId === runId && reduction.attempt === attempt &&
-      ['repository', 'control', 'pr', 'head', 'base', 'merge', 'tree'].every(key => reduction[key] === identity[key]), 'Reduction is incomplete or belongs to another candidate.');
-    if (reduction.cleanup === 'confirmed-by-required-gates') cleanupState = reduction.cleanup;
+      ['repository', 'control', 'pr', 'head', 'base', 'merge', 'tree'].every(key => reduction[key] === identity[key]) &&
+      reduction.requestedScope === identity.scope, 'Reduction is incomplete or belongs to another candidate.');
+    if (identity.scope === 'docs-only') requireThat(['not-applicable', 'not-established'].includes(reduction.cleanup),
+      'Docs cleanup cannot claim runtime proof.', { code: 'scope-mismatch', gate: 'control', member: 'cleanup' });
+    if (reduction.cleanup === (identity.scope === 'docs-only' ? 'not-applicable' : 'confirmed-by-required-gates')) cleanupState = reduction.cleanup;
     if (reduction.outcome !== 'verified' && reduction.primary) failure = { primary: reduction.primary, cleanup: reduction.cleanup };
     requireThat(reduction.outcome === 'verified', 'Reduction failed.', { code: 'reduction-incomplete', member: 'qualification-summary.json' });
+    assertClassification(reduction);
+    requireThat(reduction.scope === identity.scope && ['before', 'after', 'tree', 'route', 'changedEntries', 'documentation']
+      .every(key => reduction.classification[key] === identity.classification[key]) &&
+      reduction.runtimeExecuted === (identity.scope === 'full') &&
+      reduction.cleanup === (identity.scope === 'full' ? 'confirmed-by-required-gates' : 'not-applicable'),
+    'Reduction scope or execution attestation mismatch.', { code: 'scope-mismatch', gate: 'control', member: 'qualification-summary.json' });
+    if (identity.scope === 'docs-only') requireThat(reduction.gates?.length === 1 && reduction.gates[0].gate === 'documentation' &&
+      reduction.gates[0].status === 'complete' && reduction.gates[0].changedEntries === identity.classification.changedEntries &&
+      JSON.stringify(reduction.gates[0].checks) === JSON.stringify(docsChecks) && !('cases' in reduction.gates[0]),
+    'Docs attestation incomplete.', { code: 'scope-mismatch', gate: 'control', member: 'documentation-checks' });
     stage = 'publication';
     requireThat(publication?.reduction === 'success' && publication?.upload === 'success' && /^[1-9][0-9]*$/.test(publication?.artifact ?? ''), 'Required control artifact publication failed or was canceled.',
       { code: 'control-upload-incomplete', gate: 'control', member: 'qualification-summary.json', outcome: outcome(publication?.reduction !== 'success' ? publication?.reduction : publication?.upload) });
@@ -298,7 +367,9 @@ export async function publish(github, identity, runId, attempt, checkId, summary
     { code: 'control-artifact-incomplete', gate: 'control', member: `qualification-control-${runId}-${attempt}` });
     stage = 'freshness';
     await current(github, identity);
-    conclusion = 'success'; summary = 'Complete existing qualification and required control publication passed on the current exact HEAD/base/tested merge tree. Pilot maintainer trust applies; this is not architect merge approval.';
+    conclusion = 'success'; summary = identity.scope === 'docs-only'
+      ? 'Documentation-only qualification and required control publication passed on the current exact HEAD/base/tested merge tree. runtimeExecuted=false; cleanup=not-applicable; no runtime coverage credit. Pilot maintainer trust applies; this is not architect merge approval.'
+      : 'Complete existing qualification and required control publication passed on the current exact HEAD/base/tested merge tree. Pilot maintainer trust applies; this is not architect merge approval.';
   } catch (error) {
     // Completion never grants green credit for reduction/upload/freshness failure.
     failure ??= boundedFailure(error, stage);

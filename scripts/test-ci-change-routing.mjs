@@ -120,7 +120,7 @@ test('workflow keeps mandatory gate, names, conditions and permissions', () => {
   assert.match(workflow, /else\s+node \.\/scripts\/ci-change-routing.mjs\s+fi/);
   assert.match(workflow, /echo 'full=true' >> "\$GITHUB_OUTPUT"/);
   for (const id of ['native-aot-windows', 'native-aot-linux', 'postgresql-integration']) {
-    assert.match(workflow, new RegExp(`  ${id}:\\r?\\n    needs: validate\\r?\\n    if: needs.validate.outputs.full == 'true'`));
+    assert.match(workflow, new RegExp(`  ${id}:\\r?\\n    needs: validate\\r?\\n    if: needs.validate.outputs.runtime == 'true'`));
   }
   assert.match(workflow, /name: Native AOT \(win-x64\)/);
   assert.match(workflow, /name: Native AOT \(linux-x64\)/);
@@ -157,7 +157,7 @@ function workflowExpression(expression, context) {
     const token = tokens[index++];
     if (token === '(') { const value = or(); assert.equal(tokens[index++], ')'); return value; }
     if (token?.startsWith("'")) return token.slice(1, -1);
-    assert.match(token ?? '', /^(github|inputs)\.[A-Za-z0-9_.]+$/);
+    assert.match(token ?? '', /^(github|inputs|needs|steps)\.[A-Za-z0-9_.]+$/);
     return token.split('.').reduce((value, key) => value?.[key], context) ?? '';
   };
   const equality = () => {
@@ -234,4 +234,32 @@ test('focused admission agrees with case-insensitive workflow string identity co
   const route = workloadRoute('workflow_dispatch', { contour: 'DEPLOYMENT-KERNEL', expected_head: 'A'.repeat(40) });
   assert.equal(route.find(job => job.id === 'validate-focused-selection').admitted, true);
   assert.deepEqual(route.filter(job => workloadIds.includes(job.id) && job.enabled).map(job => job.id), ['deployment-kernel']);
+});
+
+test('runtime output is a legacy alias and does not activate fast-only ordinary routes', () => {
+  const source = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8');
+  const alias = source.match(/^      runtime: \$\{\{ (.+) \}\}/m)?.[1]; assert.ok(alias);
+  const gates = [...source.matchAll(/^    if: (needs\.validate\.outputs\.runtime == 'true')/gm)]; assert.equal(gates.length, 3);
+  for (const full of ['true', 'false', '']) {
+    const runtime = workflowExpression(alias, { steps: { routing: { outputs: { full } } } });
+    assert.equal(runtime, full);
+    for (const gate of gates) assert.equal(Boolean(workflowExpression(gate[1], { needs: { validate: { outputs: { runtime } } } })), full === 'true');
+  }
+});
+
+test('installed workflow derives scope in trusted prepare and gates only runtime groups', () => {
+  const source = readFileSync(new URL('../.github/workflows/final-qualification.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  assert.ok(source.includes('scope: ${{ steps.candidate.outputs.scope }}'));
+  assert.ok(source.includes("core.setOutput('scope', identity.scope)"));
+  assert.ok(source.includes('fetch-depth: 0'));
+  assert.equal((source.match(/^      scope:/gm) ?? []).length, 1);
+  const groups = ['build', 'api', 'workloads'].map(id => source.split(`  ${id}:\n`)[1].match(/^    if: (.+)$/m)[1]);
+  assert.equal(groups.length, 3);
+  const download = source.split("name: Download only this invocation's evidence")[1].match(/^        if: (.+)$/m)[1];
+  for (const scope of ['full', 'docs-only', '', 'unknown']) {
+    const context = { needs: { prepare: { outputs: { scope } } } };
+    for (const condition of [...groups, download]) assert.equal(Boolean(workflowExpression(condition, context)), scope === 'full');
+  }
+  assert.ok(source.includes("if (identity.scope === 'full' && process.env.DOWNLOAD !== 'success') results.build = 'failure'"));
+  assert.ok(source.includes("if: always() && needs.prepare.result == 'success' && needs.start.result == 'success'"));
 });

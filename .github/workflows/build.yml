@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.routing.outputs.full }}
+      # Legacy alias only: ordinary expensive routing is NOT activated here.
+      runtime: ${{ steps.routing.outputs.full }}
 
     steps:
       - name: Check out repository
@@ -144,7 +146,7 @@ jobs:
   # Fixed names exist even when job conditions skip before matrix expansion.
   native-aot-windows:
     needs: validate
-    if: needs.validate.outputs.full == 'true'
+    if: needs.validate.outputs.runtime == 'true'
     name: Native AOT (win-x64)
     runs-on: windows-latest
     env:
@@ -237,7 +239,7 @@ jobs:
 
   native-aot-linux:
     needs: validate
-    if: needs.validate.outputs.full == 'true'
+    if: needs.validate.outputs.runtime == 'true'
     name: Native AOT (linux-x64)
     runs-on: ubuntu-latest
     env:
@@ -265,7 +267,7 @@ jobs:
 
   postgresql-integration:
     needs: validate
-    if: needs.validate.outputs.full == 'true'
+    if: needs.validate.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
