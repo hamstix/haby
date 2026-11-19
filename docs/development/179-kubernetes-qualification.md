@@ -47,7 +47,7 @@ hook with explicit custom-root chain validation, server-auth EKU and rejection o
 missing certificates or hostname mismatch. Redirects are disabled. A repeated real
 mismatch probe now refuses. This is qualification-only code, not a production fix.
 Revocation checking is disabled for the disposable private CA; production revocation
-policy is now implemented separately by the [#200 adapter kernel](200-deployment-kernel.md): Online revocation fails closed for system and custom-root trust. The qualification factory remains a disposable-CA fixture. Real untrusted-CA and mismatched client-key probes refuse through this same fixture factory.
+policy follows the [explicit Provider TLS contract](261-kubernetes-provider-tls.md): omitted Online remains fail-closed, and explicit operator choices are separate from fixture transport. The qualification factory remains a disposable-CA fixture. Real untrusted-CA and mismatched client-key probes refuse through this same fixture factory.
 
 ## Runtime and API evidence
 

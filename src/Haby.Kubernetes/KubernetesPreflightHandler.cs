@@ -27,6 +27,11 @@ public sealed class KubernetesPreflightHandler : ProviderPreflightHandler<Kubern
     public override async ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment,
         KubernetesProviderConfiguration configuration, CancellationToken cancellationToken)
     {
+        ProviderPreflightResult Result(ProviderPreflightOutcome outcome, ProviderConnectionDiagnostic? diagnostic = null) => new(outcome)
+        {
+            ConnectionDiagnostic = diagnostic,
+            ServerCertificateValidationDisabled = configuration.Tls.Mode == KubernetesTlsMode.Insecure,
+        };
         cancellationToken.ThrowIfCancellationRequested();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(10));
@@ -37,22 +42,22 @@ public sealed class KubernetesPreflightHandler : ProviderPreflightHandler<Kubern
             // The review is discarded by the API server; it creates no persistent probe object.
             var review = await client.Client.AuthenticationV1.CreateSelfSubjectReviewAsync(new V1SelfSubjectReview(), cancellationToken: deadline.Token);
             cancellationToken.ThrowIfCancellationRequested();
-            if (deadline.IsCancellationRequested) return new(ProviderPreflightOutcome.DeadlineExceeded);
+            if (deadline.IsCancellationRequested) return Result(ProviderPreflightOutcome.DeadlineExceeded);
             var user = review.Status?.UserInfo;
-            return new(user is not null && !string.IsNullOrWhiteSpace(user.Username) && user.Username != "system:anonymous" &&
+            return Result(user is not null && !string.IsNullOrWhiteSpace(user.Username) && user.Username != "system:anonymous" &&
                 user.Groups?.Contains("system:unauthenticated", StringComparer.Ordinal) != true
                 ? ProviderPreflightOutcome.Ready : ProviderPreflightOutcome.AuthenticationFailed);
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested) { throw new OperationCanceledException(cancellationToken); }
-        catch (Exception) when (deadline.IsCancellationRequested) { return new(ProviderPreflightOutcome.DeadlineExceeded); }
+        catch (Exception) when (deadline.IsCancellationRequested) { return Result(ProviderPreflightOutcome.DeadlineExceeded); }
         catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.Unauthorized)
-        { return new(ProviderPreflightOutcome.AuthenticationFailed); }
+        { return Result(ProviderPreflightOutcome.AuthenticationFailed); }
         catch (HttpOperationException error) when (error.Response.StatusCode == HttpStatusCode.Forbidden)
-        { return new(ProviderPreflightOutcome.InsufficientPrivilege); }
+        { return Result(ProviderPreflightOutcome.InsufficientPrivilege); }
         catch (Contracts.WorkloadContractException error) when (error.Code == "credential-unavailable")
-        { return new(ProviderPreflightOutcome.SecretUnavailable); }
+        { return Result(ProviderPreflightOutcome.SecretUnavailable); }
         catch (Exception error) when (error is ArgumentException or CryptographicException or FormatException)
-        { return new(ProviderPreflightOutcome.ConfigurationUnavailable); }
-        catch (Exception) { return new(ProviderPreflightOutcome.ServerUnavailable); }
+        { return Result(ProviderPreflightOutcome.ConfigurationUnavailable); }
+        catch (Exception error) { return Result(ProviderPreflightOutcome.ServerUnavailable, KubernetesTlsFailure.Find(error)); }
     }
 }

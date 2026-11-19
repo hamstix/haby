@@ -3,7 +3,7 @@ using Haby.Operator.Contracts;
 namespace Haby.Cli;
 
 internal sealed record CliProviderAliasData(string Alias, string InstanceId, long Revision);
-internal sealed record CliProviderAccessData(string? Preflight, CliProviderAliasData? Binding);
+internal sealed record CliProviderAccessData(string? Preflight, CliProviderAliasData? Binding, string? ConnectionDiagnostic, string? Warning);
 internal static class ProviderAccessPresentation
 {
     internal static string Outcome(ProviderAccessStatus value) => value switch
@@ -58,7 +58,24 @@ internal static class ProviderAccessPresentation
                 throw new InvalidDataException("Invalid alias metadata.");
             binding = new(b.Alias, b.InstanceId, b.Revision);
         }
-        return new(reply.HasPreflight ? Preflight(reply.Preflight) : null, binding);
+        if (!reply.HasPreflight && (reply.HasConnectionDiagnostic || reply.ServerCertificateValidationDisabled))
+            throw new InvalidDataException("Connection diagnostics without preflight.");
+        if (reply.HasConnectionDiagnostic && (reply.Status != ProviderAccessStatus.PreflightFailed || reply.Preflight != ProviderPreflightStatus.ServerUnavailable))
+            throw new InvalidDataException("Connection diagnostic contradicts preflight outcome.");
+        var diagnostic = reply.HasConnectionDiagnostic ? reply.ConnectionDiagnostic switch
+        {
+            ProviderConnectionDiagnosticCode.TlsValidationFailed => "tls-validation-failed",
+            ProviderConnectionDiagnosticCode.TlsTrustFailed => "tls-trust-failed",
+            ProviderConnectionDiagnosticCode.TlsNameMismatch => "tls-name-mismatch",
+            ProviderConnectionDiagnosticCode.TlsCertificateTimeInvalid => "tls-certificate-time-invalid",
+            ProviderConnectionDiagnosticCode.TlsCertificateRevoked => "tls-certificate-revoked",
+            ProviderConnectionDiagnosticCode.TlsRevocationUnavailable => "tls-revocation-unavailable",
+            ProviderConnectionDiagnosticCode.DnsUnavailable => "dns-unavailable",
+            ProviderConnectionDiagnosticCode.ConnectionUnavailable => "connection-unavailable",
+            _ => throw new InvalidDataException("Unknown connection diagnostic."),
+        } : null;
+        return new(reply.HasPreflight ? Preflight(reply.Preflight) : null, binding, diagnostic,
+            reply.ServerCertificateValidationDisabled ? "Server certificate validation is explicitly disabled." : null);
     }
 }
 internal sealed partial class CliJsonPresenter
@@ -78,6 +95,8 @@ internal sealed partial class CliTextPresenter
         var data = ProviderAccessPresentation.Data(command, reply);
         _output.WriteLine(ProviderAccessPresentation.Outcome(reply.Status));
         if (data.Preflight is not null) _output.WriteLine($"preflight: {data.Preflight}");
+        if (data.ConnectionDiagnostic is not null) _output.WriteLine($"connection: {data.ConnectionDiagnostic}");
+        if (data.Warning is not null) _output.WriteLine($"WARNING: {data.Warning}");
         if (data.Binding is { } b) _output.WriteLine($"{b.Alias} {b.InstanceId} revision {b.Revision}");
         return ProviderAccessPresentation.Exit(reply.Status);
     }

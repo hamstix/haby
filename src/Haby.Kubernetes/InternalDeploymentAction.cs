@@ -153,7 +153,7 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         var config = new KubernetesProviderConfigurationCodec().DecodeTyped(context.Configuration.PayloadJson);
         var binding = new KubernetesBinding(context.Provider.Environment.ToString(), context.Provider.Instance.ToString(),
             context.Provider.Configuration.Value, context.Provider.Implementation.Value);
-        var connection = new KubernetesConnection(binding, config.Endpoint, config.ServerCaPem, config.BearerToken, config.ClientCertificate, config.ClientPrivateKey);
+        var connection = new KubernetesConnection(binding, config.Endpoint, config.ServerCaPem, config.BearerToken, config.ClientCertificate, config.ClientPrivateKey, config.Tls);
         return fixtureKernel?.Invoke(connection) ?? new(connection, secrets);
     }
     private static InternalActionResult Result(KernelResult result) => new(result.Outcome switch

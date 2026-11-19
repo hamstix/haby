@@ -91,11 +91,12 @@ intent/dispatch linkage.
 
 Use exactly KubernetesClient 19.0.2 behind this adapter. Explicit HTTPS and either
 bearer or mTLS exact SecretRefs resolve through the scoped secret store. No
-kubeconfig, ambient context, exec auth, redirect or insecure trust option exists.
-Both system and custom-root trust validate hostname, chain, server-auth usage and
-Online revocation fail-closed. Missing revocation evidence is a failure, not a
-reason to fall back. Disposable CA `NoCheck` is an internal fixture seam, never a
-Provider setting. The third-party SDK serialization/reflection remains isolated
+kubeconfig, ambient context, exec auth or redirect is used. The
+[explicit Provider TLS policy](261-kubernetes-provider-tls.md) preserves Online
+when omitted and admits typed offline/noCheck or explicit insecure choices.
+NoCheck retains chain/name/time/server-auth validation; unavailable revocation
+fails closed without fallback. The disposable fixture factory remains separate
+from explicit operator policy. The third-party SDK serialization/reflection remains isolated
 from Haby-owned source-generated DTOs and the CLI Native AOT dependency graph.
 The SDK's `KubernetesJson` handles its own `V1Deployment` DTOs at the transport
 boundary. Haby writes JSON Patch and create projections with JSON DOM nodes and
