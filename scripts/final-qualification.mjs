@@ -11,8 +11,19 @@ const requireThat = (value, message, details) => { if (!value) throw new Qualifi
 function boundedFailure(error, stage) {
   const detail = error instanceof QualificationFailure ? error.details : { code: 'api-or-data-unavailable' };
   return { primary: { code: detail.code ?? 'contract-mismatch', stage: detail.stage ?? stage,
-    gate: detail.gate ?? null, member: detail.member ?? null, outcome: detail.outcome ?? 'failure', deadline: null },
+    gate: detail.gate ?? null, member: detail.member ?? null, outcome: detail.outcome ?? 'failure', deadline: null,
+    ...(detail.api ? { api: detail.api } : {}) },
   cleanup: detail.cleanup ?? 'not-established' };
+}
+function artifactRequestDiagnostic(error) {
+  const status = error?.status;
+  const httpStatus = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+  const transportCodes = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EPIPE'];
+  const category = httpStatus === 401 ? 'authentication' : httpStatus === 403 ? 'forbidden' :
+    httpStatus === 404 ? 'not-found' : httpStatus === 429 ? 'rate-limited' :
+      httpStatus >= 500 ? 'server-error' : httpStatus !== null ? 'other-http' :
+        transportCodes.includes(error?.code) ? 'transport' : 'unknown';
+  return { operation: 'actions.getArtifact', httpStatus, category };
 }
 const outcome = value => ['failure', 'cancelled', 'skipped', 'timed_out', 'action_required', 'neutral'].includes(value) ? value : 'missing-or-incomplete';
 
@@ -361,8 +372,16 @@ export async function publish(github, identity, runId, attempt, checkId, summary
     requireThat(publication?.reduction === 'success' && publication?.upload === 'success' && /^[1-9][0-9]*$/.test(publication?.artifact ?? ''), 'Required control artifact publication failed or was canceled.',
       { code: 'control-upload-incomplete', gate: 'control', member: 'qualification-summary.json', outcome: outcome(publication?.reduction !== 'success' ? publication?.reduction : publication?.upload) });
     stage = 'control-artifact';
-    const artifact = (await github.rest.actions.getArtifact({ owner, repo, artifact_id: Number(publication.artifact) })).data;
-    requireThat(artifact.id === Number(publication.artifact) && artifact.name === `qualification-control-${runId}-${attempt}` &&
+    let response;
+    try {
+      response = await github.rest.actions.getArtifact({ owner, repo, artifact_id: Number(publication.artifact) });
+    } catch (error) {
+      // Keep only closed structured facts; API messages, bodies and headers may contain secrets.
+      throw new QualificationFailure('Control artifact request failed.', { code: 'api-or-data-unavailable',
+        gate: 'control', member: `qualification-control-${runId}-${attempt}`, api: artifactRequestDiagnostic(error) });
+    }
+    const artifact = response?.data;
+    requireThat(artifact && typeof artifact === 'object' && !Array.isArray(artifact) && artifact.id === Number(publication.artifact) && artifact.name === `qualification-control-${runId}-${attempt}` &&
       artifact.workflow_run?.id === runId && artifact.expired === false && artifact.size_in_bytes > 0, 'Required control artifact is missing or belongs to another invocation.',
     { code: 'control-artifact-incomplete', gate: 'control', member: `qualification-control-${runId}-${attempt}` });
     stage = 'freshness';
