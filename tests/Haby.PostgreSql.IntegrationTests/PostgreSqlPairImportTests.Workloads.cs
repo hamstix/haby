@@ -107,9 +107,20 @@ public sealed partial class PostgreSqlPairImportTests
         }
         await OwnedPassword(pair, pair.Password);
         Assert.Equal(InternalActionOutcome.Confirmed, (await actions.ExecuteAsync(key, default)).Outcome);
-        await OwnedPassword(pair, "changed-before-applied");
         var options = new RolloutOptions(MaximumRounds: 1);
         var clock = services.GetRequiredService<TimeProvider>();
+        using (var cancellation = new CancellationTokenSource())
+        {
+            await using var canceled = WorkloadServices(setup.Connection, new CancelReuse(cancellation));
+            var canceledActions = WorkloadActions(canceled, fixture, WorkloadConfiguration(canceled));
+            var closed = await canceledActions.ObserveOperatorRolloutAsync(accepted, "cancel-ready-verification", "tester", options,
+                clock.GetTimestamp(), TimeSpan.FromSeconds(30), cancellation.Token, cancellation.Token);
+            Assert.Equal(RolloutStop.Canceled, closed.Stop);
+            await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+            Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            Assert.False(await verify.GenerationStageCheckpoints.AnyAsync(x => x.Generation == 2 && x.Stage == "RolloutReady"));
+        }
+        await OwnedPassword(pair, "changed-before-applied");
         await Assert.ThrowsAsync<InvalidDataException>(() => actions.ObserveOperatorRolloutAsync(accepted, "refuse-applied", "tester", options,
             clock.GetTimestamp(), TimeSpan.FromSeconds(30), default, default).AsTask());
         await using (var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())

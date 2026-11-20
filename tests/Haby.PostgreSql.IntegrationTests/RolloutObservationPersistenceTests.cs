@@ -147,6 +147,12 @@ public sealed partial class DurableDeploymentPlanningTests
         deployment.BeforeRead = token => { cancel.Cancel(); return Task.FromCanceled(token); };
         var canceled = await actions.ObserveRolloutAsync(scenario.Commit, "cancel", OneRound, cancel.Token);
         Assert.Equal(RolloutStop.Canceled, canceled.Stop); Assert.Equal(first.Members[0].Deadline, canceled.Members[0].Deadline);
+        await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+        {
+            Assert.False(await verify.GenerationStageCheckpoints.AnyAsync(x => x.Stage == "RolloutReady"));
+            Assert.Null((await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+            Assert.True(await verify.ObservationRecords.AnyAsync(x => x.Kind == "Read" && x.FinishedAt != null && x.Payload != null));
+        }
         deployment.BeforeRead = null;
         await Assert.ThrowsAsync<InvalidDataException>(async () => await actions.ObserveRolloutAsync(scenario.Commit, "first", OneRound with { MaximumCalls = 1 }, default));
         var reads = deployment.ReadinessReads;

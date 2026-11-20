@@ -278,7 +278,7 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);
         var catalog = host.Services.GetRequiredService<ManifestContractCatalog>();
         Assert.IsType<ValidateApplicationManifestResult.Valid>(ValidateApplicationManifest.Execute(PostgreSqlPairPlanningTests.Bytes(PostgreSqlPairPlanningTests.Example()), catalog));
-        Assert.Equal(2, host.Services.GetServices<IDurableActionAdmissionHandler>().Count());
-        Assert.Equal(5, host.Services.GetServices<IDurableActionHandler>().Count());
+        Assert.Equal(4, host.Services.GetServices<IDurableActionAdmissionHandler>().Count());
+        Assert.Equal(7, host.Services.GetServices<IDurableActionHandler>().Count());
     }
 }
