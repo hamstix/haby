@@ -24,6 +24,48 @@ public sealed class DeploymentReadinessTests
         return obj;
     }
     [Theory]
+    [InlineData(2, 1, 2, 1, 1, 0)]
+    [InlineData(2, 1, 0, 0, 2, 1)]
+    [InlineData(0, 0, 0, 0, 2, 0)]
+    [InlineData(1, 1, 1, 1, 1, 0)]
+    public void ReplicaSet_derived_unavailable_during_surge_is_pending_until_target_counts_converge(
+        int total, int updated, int ready, int available, int unavailable, int terminating)
+    {
+        var intent = ConfiguredDeploymentTests.Intent(); var obj = ReadyObject(intent);
+        obj["metadata"]!["generation"] = 3;
+        obj["status"] = new JsonObject
+        {
+            ["observedGeneration"] = 3,
+            ["replicas"] = total,
+            ["updatedReplicas"] = updated,
+            ["readyReplicas"] = ready,
+            ["availableReplicas"] = available,
+            ["unavailableReplicas"] = unavailable,
+            ["terminatingReplicas"] = terminating
+        };
+        var receipt = DeploymentObjects.Receipt(obj, intent, ConfirmationSource.Response);
+        var pending = DeploymentReadiness.Evaluate(obj, intent, receipt);
+        Assert.Equal(RolloutOutcome.Pending, pending.Outcome);
+        Assert.Equal("rollout-pending", pending.Code);
+        Assert.True(DeploymentReadiness.Validate(DeploymentIntents.Encode(intent), DeploymentIntents.Encode(receipt), pending));
+
+        obj["status"]!["observedGeneration"] = 4;
+        Assert.Equal("status-invalid", DeploymentReadiness.Evaluate(obj, intent, receipt).Code);
+        obj["status"]!["observedGeneration"] = 3;
+        obj["status"]!["unavailableReplicas"] = -1;
+        Assert.Equal("status-invalid", DeploymentReadiness.Evaluate(obj, intent, receipt).Code);
+        obj["status"]!["unavailableReplicas"] = 1;
+        obj["status"]!["replicas"] = 1; obj["status"]!["updatedReplicas"] = 1;
+        obj["status"]!["readyReplicas"] = 1; obj["status"]!["availableReplicas"] = 1;
+        Assert.Equal("rollout-pending", DeploymentReadiness.Evaluate(obj, intent, receipt).Code);
+        obj["status"]!["unavailableReplicas"] = 0; obj["status"]!["terminatingReplicas"] = 0;
+        var complete = DeploymentReadiness.Evaluate(obj, intent, receipt);
+        Assert.Equal(RolloutOutcome.Ready, complete.Outcome);
+        Assert.True(DeploymentReadiness.Validate(DeploymentIntents.Encode(intent), DeploymentIntents.Encode(receipt), complete));
+        obj["metadata"]!["uid"] = "replacement";
+        Assert.Equal(RolloutOutcome.Conflict, DeploymentReadiness.Evaluate(obj, intent, receipt).Outcome);
+    }
+    [Theory]
     [InlineData("replicas")]
     [InlineData("updatedReplicas")]
     [InlineData("readyReplicas")]
