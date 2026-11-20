@@ -253,8 +253,8 @@ public sealed partial class DurableDeploymentPlanningTests
         await using (var downgrade = await contexts.CreateDbContextAsync())
             await downgrade.GetService<IMigrator>().MigrateAsync("20261116130234_InitialRetirementCompletion");
         var before = await ReadMigrationHistory(contexts);
-        var refusal = await Assert.ThrowsAsync<Npgsql.PostgresException>(() => services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
-        Assert.Equal("P0001", refusal.SqlState);
+        var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() => services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
+        Assert.Equal("Superseded Resource provenance requires an explicitly initialized fresh catalog; external resources remain unchanged.", refusal.Message);
         await using var verify = await contexts.CreateDbContextAsync();
         Assert.Equal(before, (await verify.Database.GetAppliedMigrationsAsync()).ToArray());
         Assert.Equal(1, await verify.ApplicationDeployments.AsNoTracking().Select(x => x.AppliedGeneration).SingleAsync());

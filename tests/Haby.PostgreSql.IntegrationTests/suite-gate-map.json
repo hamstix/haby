@@ -4,7 +4,7 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 104,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1232,
+  "currentPostgresql": 1255,
   "currentFast": 2079,
   "currentKubernetesApiObjects": 29,
   "currentKubernetesDurableActions": 36,
