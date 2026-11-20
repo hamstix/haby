@@ -11,16 +11,17 @@ namespace Haby.Kubernetes;
 
 /// <summary>Explicit HTTPS and exactly one scoped credential alternative; no ambient configuration.</summary>
 public sealed record KubernetesConnection(KubernetesBinding Binding, Uri Endpoint, string? ServerCaPem,
-    SecretRef? BearerToken, SecretRef? ClientCertificate, SecretRef? ClientPrivateKey)
+    SecretRef? BearerToken, SecretRef? ClientCertificate, SecretRef? ClientPrivateKey, KubernetesTlsPolicy? Tls = null)
 {
     public override string ToString() => nameof(KubernetesConnection);
     internal void Validate()
     {
         DeploymentIntents.Binding(Binding);
-        ValidateAccess(Endpoint, ServerCaPem, BearerToken, ClientCertificate, ClientPrivateKey);
+        ValidateAccess(Endpoint, ServerCaPem, BearerToken, ClientCertificate, ClientPrivateKey, Tls);
     }
-    internal static void ValidateAccess(Uri Endpoint, string? ServerCaPem, SecretRef? BearerToken, SecretRef? ClientCertificate, SecretRef? ClientPrivateKey)
+    internal static void ValidateAccess(Uri Endpoint, string? ServerCaPem, SecretRef? BearerToken, SecretRef? ClientCertificate, SecretRef? ClientPrivateKey, KubernetesTlsPolicy? Tls = null)
     {
+        _ = KubernetesTlsPolicy.Normalize(Tls, ServerCaPem);
         Need(Endpoint is { IsAbsoluteUri: true, Scheme: "https" } && string.IsNullOrEmpty(Endpoint.UserInfo) &&
             string.IsNullOrEmpty(Endpoint.Query) && string.IsNullOrEmpty(Endpoint.Fragment) && Endpoint.AbsolutePath == "/", "endpoint");
         Need(BearerToken is not null && ClientCertificate is null && ClientPrivateKey is null ||
@@ -79,7 +80,7 @@ internal static class KubernetesClientFactory
     {
         c.Validate();
         return CreateCore(EnvironmentRecordId.Parse(c.Binding.Environment),
-            new(c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey),
+            new(c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey, c.Tls),
             secrets, disposableFixture, handlers, fixtureServerName, token);
     }
 
@@ -87,7 +88,8 @@ internal static class KubernetesClientFactory
         KubernetesProviderConfiguration c, ISecretStore secrets,
         bool disposableFixture, DelegatingHandler[] handlers, string? fixtureServerName, CancellationToken token)
     {
-        KubernetesConnection.ValidateAccess(c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey);
+        KubernetesConnection.ValidateAccess(c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey, c.Tls);
+        var policy = KubernetesTlsPolicy.Normalize(c.Tls, c.ServerCaPem);
         token.ThrowIfCancellationRequested();
         var definition = new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator);
         async ValueTask<byte[]> Resolve(SecretRef reference)
@@ -113,6 +115,18 @@ internal static class KubernetesClientFactory
                 var key = await Resolve(c.ClientPrivateKey!); buffers.Add(key);
                 certificate = X509Certificate2.CreateFromPem(Encoding.UTF8.GetString(cert), Encoding.UTF8.GetString(key));
                 Need(certificate.HasPrivateKey, "credential-key");
+                if (OperatingSystem.IsWindows())
+                {
+                    // Schannel requires a temporary platform key association. No PersistKeySet:
+                    // disposing the lease removes it; the intermediate private buffer is erased.
+                    var pkcs12 = certificate.Export(X509ContentType.Pkcs12);
+                    try
+                    {
+                        var platformCertificate = X509CertificateLoader.LoadPkcs12(pkcs12, null, X509KeyStorageFlags.DefaultKeySet);
+                        certificate.Dispose(); certificate = platformCertificate;
+                    }
+                    finally { CryptographicOperations.ZeroMemory(pkcs12); }
+                }
             }
             var clientCertificate = certificate;
             var client = new k8s.Kubernetes(new KubernetesClientConfiguration
@@ -125,9 +139,14 @@ internal static class KubernetesClientFactory
                 FirstMessageHandlerSetup = handler =>
                 {
                     handler.AllowAutoRedirect = false;
-                    handler.SslOptions.CertificateRevocationCheckMode = disposableFixture ? X509RevocationMode.NoCheck : X509RevocationMode.Online;
+                    handler.SslOptions.CertificateRevocationCheckMode = disposableFixture ? X509RevocationMode.NoCheck : policy.CertificateRevocation;
                     handler.SslOptions.RemoteCertificateValidationCallback = (_, cert, _, errors) =>
-                        ValidateServer(cert, errors, roots, disposableFixture);
+                    {
+                        if (policy.Mode == KubernetesTlsMode.Insecure) return true;
+                        if (ServerFailure(cert, errors, roots, disposableFixture, policy) is { } failure)
+                            throw new KubernetesTlsFailure(failure);
+                        return true;
+                    };
                     if (clientCertificate is not null)
                     {
                         handler.SslOptions.ClientCertificates!.Add(clientCertificate);
@@ -145,23 +164,36 @@ internal static class KubernetesClientFactory
     }
 
     internal static bool ValidateServer(X509Certificate? certificate, SslPolicyErrors errors,
-        X509Certificate2Collection roots, bool disposableFixture = false)
+        X509Certificate2Collection roots, bool disposableFixture = false, KubernetesTlsPolicy? tls = null) =>
+        ServerFailure(certificate, errors, roots, disposableFixture, tls) is null;
+
+    private static ProviderConnectionDiagnostic? ServerFailure(X509Certificate? certificate, SslPolicyErrors errors,
+        X509Certificate2Collection roots, bool disposableFixture, KubernetesTlsPolicy? tls)
     {
-        if (certificate is not X509Certificate2 leaf || (errors & (SslPolicyErrors.RemoteCertificateNameMismatch | SslPolicyErrors.RemoteCertificateNotAvailable)) != 0) return false;
+        if (certificate is not X509Certificate2 leaf || (errors & SslPolicyErrors.RemoteCertificateNotAvailable) != 0)
+            return ProviderConnectionDiagnostic.TlsValidationFailed;
+        if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0) return ProviderConnectionDiagnostic.TlsNameMismatch;
         try
         {
             using var chain = new X509Chain();
-            ConfigureChain(chain.ChainPolicy, roots, disposableFixture);
-            return chain.Build(leaf) && (disposableFixture || chain.ChainElements.Count > 1);
+            ConfigureChain(chain.ChainPolicy, roots, disposableFixture, tls);
+            if (chain.Build(leaf)) return disposableFixture || chain.ChainElements.Count > 1 ? null : ProviderConnectionDiagnostic.TlsTrustFailed;
+            var flags = chain.ChainStatus.Aggregate(X509ChainStatusFlags.NoError, (all, item) => all | item.Status);
+            if ((flags & X509ChainStatusFlags.Revoked) != 0) return ProviderConnectionDiagnostic.TlsCertificateRevoked;
+            if ((flags & X509ChainStatusFlags.NotTimeValid) != 0) return ProviderConnectionDiagnostic.TlsCertificateTimeInvalid;
+            if ((flags & (X509ChainStatusFlags.UntrustedRoot | X509ChainStatusFlags.PartialChain | X509ChainStatusFlags.NotSignatureValid | X509ChainStatusFlags.ExplicitDistrust)) != 0) return ProviderConnectionDiagnostic.TlsTrustFailed;
+            if ((flags & (X509ChainStatusFlags.RevocationStatusUnknown | X509ChainStatusFlags.OfflineRevocation)) != 0)
+                return ProviderConnectionDiagnostic.TlsRevocationUnavailable;
+            return ProviderConnectionDiagnostic.TlsValidationFailed;
         }
-        catch (CryptographicException) { return false; }
+        catch (CryptographicException) { return ProviderConnectionDiagnostic.TlsValidationFailed; }
     }
 
-    internal static void ConfigureChain(X509ChainPolicy policy, X509Certificate2Collection roots, bool disposableFixture = false)
+    internal static void ConfigureChain(X509ChainPolicy policy, X509Certificate2Collection roots, bool disposableFixture = false, KubernetesTlsPolicy? tls = null)
     {
         if (roots.Count > 0) { policy.TrustMode = X509ChainTrustMode.CustomRootTrust; policy.CustomTrustStore.AddRange(roots); }
         policy.ApplicationPolicy.Add(new Oid("1.3.6.1.5.5.7.3.1"));
-        policy.RevocationMode = disposableFixture ? X509RevocationMode.NoCheck : X509RevocationMode.Online;
+        policy.RevocationMode = disposableFixture ? X509RevocationMode.NoCheck : (tls ?? new(KubernetesTlsMode.System, KubernetesRevocationMode.Online)).CertificateRevocation;
         policy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
         policy.VerificationFlags = X509VerificationFlags.NoFlag;
         policy.UrlRetrievalTimeout = TimeSpan.FromSeconds(2);

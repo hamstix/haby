@@ -109,7 +109,7 @@ public sealed class ProviderAdministrationTests
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=Provider Test CA", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         using var ca = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
-        var codec = new KubernetesProviderConfigurationCodec(); var configuration = Configuration() with { ServerCaPem = ca.ExportCertificatePem() };
+        var codec = new KubernetesProviderConfigurationCodec(); var configuration = Configuration() with { ServerCaPem = ca.ExportCertificatePem(), Tls = new(KubernetesTlsMode.CustomCa, KubernetesRevocationMode.Online) };
         Assert.Equal(configuration, codec.DecodeTyped(codec.Encode(configuration).PayloadJson));
         Assert.ThrowsAny<ArgumentException>(() => codec.Encode(configuration with { ServerCaPem = configuration.ServerCaPem + key.ExportPkcs8PrivateKeyPem() }));
         Assert.ThrowsAny<ArgumentException>(() => codec.Encode(configuration with { ServerCaPem = configuration.ServerCaPem + "trailing-data" }));

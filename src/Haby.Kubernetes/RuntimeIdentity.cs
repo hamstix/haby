@@ -115,7 +115,7 @@ internal sealed class InternalRuntimeIdentityAction(ISecretStore secrets,
         var config = new KubernetesProviderConfigurationCodec().DecodeTyped(context.Configuration.PayloadJson);
         var binding = new KubernetesBinding(context.Provider.Environment.ToString(), context.Provider.Instance.ToString(),
             context.Provider.Configuration.Value, context.Provider.Implementation.Value);
-        var connection = new KubernetesConnection(binding, config.Endpoint, config.ServerCaPem, config.BearerToken, config.ClientCertificate, config.ClientPrivateKey);
+        var connection = new KubernetesConnection(binding, config.Endpoint, config.ServerCaPem, config.BearerToken, config.ClientCertificate, config.ClientPrivateKey, config.Tls);
         return fixtureConnection?.Invoke(connection, token) ?? KubernetesClientFactory.Create(connection, secrets, token);
     }
     public ValueTask<InternalActionResult> ExecuteAsync(InternalActionContext context, string payload, CancellationToken token) => Run(context, payload, false, token);

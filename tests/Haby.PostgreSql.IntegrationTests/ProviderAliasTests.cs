@@ -47,13 +47,17 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
             var check = services.GetRequiredService<IProviderRevisionPreflight>();
             var before = await DatabaseCountAsync(fixture.ConnectionString);
             Assert.Equal(ProviderPreflightOutcome.Ready, (await check.CheckAsync(environment, first, default)).Outcome);
-            var aliases = services.GetRequiredService<IProviderAliasStore>();
-            Assert.Equal(ProviderAliasChangeOutcome.Changed,
-                (await aliases.ChangeAsync(environment, alias, null, first, "test-runner", default)).Outcome);
-            Assert.Equal(ProviderAliasChangeOutcome.Changed,
-                (await aliases.ChangeAsync(environment, alias, first, second, "test-runner", default)).Outcome);
-            Assert.Equal(ProviderAliasChangeOutcome.Unchanged,
-                (await aliases.ChangeAsync(environment, alias, second, second, "test-runner", default)).Outcome);
+            // The real preflight still runs; synthetic safe metadata exercises its delivery.
+            var aliases = new PostgreSqlProviderAliasStore(factory, new WarningPreflight(check), TimeProvider.System);
+            var initial = await aliases.ChangeAsync(environment, alias, null, first, "test-runner", default);
+            Assert.Equal(ProviderAliasChangeOutcome.Changed, initial.Outcome);
+            Assert.True(initial.Preflight?.ServerCertificateValidationDisabled is true);
+            var changed = await aliases.ChangeAsync(environment, alias, first, second, "test-runner", default);
+            Assert.Equal(ProviderAliasChangeOutcome.Changed, changed.Outcome);
+            Assert.True(changed.Preflight?.ServerCertificateValidationDisabled is true);
+            var unchanged = await aliases.ChangeAsync(environment, alias, second, second, "test-runner", default);
+            Assert.Equal(ProviderAliasChangeOutcome.Unchanged, unchanged.Outcome);
+            Assert.True(unchanged.Preflight?.ServerCertificateValidationDisabled is true);
             Assert.Equal(ProviderAliasChangeOutcome.StaleExpectation,
                 (await aliases.ChangeAsync(environment, alias, first, first, "test-runner", default)).Outcome);
             Assert.Equal(ProviderAliasChangeOutcome.InstanceAlreadyBound,
@@ -322,6 +326,12 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
             await sleep.ExecuteNonQueryAsync(cancellationToken);
             return null;
         }
+    }
+
+    private sealed class WarningPreflight(IProviderRevisionPreflight actual) : IProviderRevisionPreflight
+    {
+        public async ValueTask<ProviderPreflightResult> CheckAsync(EnvironmentRecordId environment, ProviderAliasBinding target, CancellationToken token) =>
+            (await actual.CheckAsync(environment, target, token)) with { ServerCertificateValidationDisabled = true };
     }
 
     private static ProviderConfigurationRevisionNumber Number(long value) => ProviderConfigurationRevisionNumber.Create(value);

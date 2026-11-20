@@ -79,7 +79,7 @@ public sealed class PostgreSqlProviderAliasStore(
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     await transaction.CommitAsync(CancellationToken.None);
-                    return new(ProviderAliasChangeOutcome.Unchanged);
+                    return new(ProviderAliasChangeOutcome.Unchanged, check);
                 }
             }
 
@@ -98,7 +98,7 @@ public sealed class PostgreSqlProviderAliasStore(
             await context.SaveChangesAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
-            return new(ProviderAliasChangeOutcome.Changed);
+            return new(ProviderAliasChangeOutcome.Changed, check);
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         { throw new OperationCanceledException(cancellationToken); }

@@ -88,9 +88,10 @@ Terminal replay validates and returns the original durable receipt without API
 work. A lost completion response does not reopen the action.
 
 The closed `haby.kubernetes.connection/v1` configuration codec pins explicit
-HTTPS, trust roots and either bearer or mTLS exact SecretRefs. It has no ambient
-kubeconfig, insecure trust or revocation setting. Production revocation remains
-Online and fail-closed; the existing NoCheck fixture factory remains internal.
+HTTPS, normalized [Provider TLS policy](261-kubernetes-provider-tls.md), exact
+trust roots and either bearer or mTLS exact SecretRefs in current payload format 2.
+There is no ambient kubeconfig or automatic policy downgrade. Omitted revocation
+remains Online; the disposable NoCheck fixture factory remains internal.
 No resolved credentials or raw API response is persisted in intent/history.
 
 ## Validation and qualification

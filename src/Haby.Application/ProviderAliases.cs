@@ -23,10 +23,25 @@ public enum ProviderPreflightOutcome
     HandlerUnavailable
 }
 
+/// <summary>Closed transport facts only; never inferred from driver message text.</summary>
+public enum ProviderConnectionDiagnostic
+{
+    TlsValidationFailed = 1,
+    TlsTrustFailed,
+    TlsNameMismatch,
+    TlsCertificateTimeInvalid,
+    TlsCertificateRevoked,
+    TlsRevocationUnavailable,
+    DnsUnavailable,
+    ConnectionUnavailable
+}
+
 /// <summary>Bounded, value-free point-in-time evidence. No driver detail crosses this boundary.</summary>
 public readonly record struct ProviderPreflightResult(ProviderPreflightOutcome Outcome)
 {
     public bool IsReady => Outcome == ProviderPreflightOutcome.Ready;
+    public ProviderConnectionDiagnostic? ConnectionDiagnostic { get; init; }
+    public bool ServerCertificateValidationDisabled { get; init; }
 }
 
 public interface IProviderRevisionPreflight

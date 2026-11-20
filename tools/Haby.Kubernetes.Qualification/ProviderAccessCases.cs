@@ -26,7 +26,7 @@ internal static class ProviderAccessCases
         ValueTask<KernelClient> Fixture(EnvironmentRecordId scope, KubernetesProviderConfiguration c, CancellationToken ct)
         {
             if (scope != environment) throw new InvalidOperationException("Qualification scope mismatch.");
-            return KubernetesClientFactory.CreateFixture(new(binding, c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey), secrets, [], ct);
+            return KubernetesClientFactory.CreateFixture(new(binding, c.Endpoint, c.ServerCaPem, c.BearerToken, c.ClientCertificate, c.ClientPrivateKey, c.Tls), secrets, [], ct);
         }
         var handler = new KubernetesPreflightHandler(codec, Fixture);
         using (var client = await Fixture(environment, configuration, token))
@@ -43,7 +43,7 @@ internal static class ProviderAccessCases
         }
         Check((await handler.CheckTypedAsync(environment, mutual, token)).IsReady, "P04-mtls-access-only-fixture-TLS");
         Check((await handler.CheckTypedAsync(environment, configuration with { BearerToken = invalid }, token)).Outcome == ProviderPreflightOutcome.AuthenticationFailed, "P05-invalid-bearer");
-        Check((await handler.CheckTypedAsync(environment, configuration with { ServerCaPem = null }, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P06-untrusted-server");
+        Check((await handler.CheckTypedAsync(environment, configuration with { ServerCaPem = null, Tls = new(KubernetesTlsMode.System, KubernetesRevocationMode.Online) }, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P06-untrusted-server");
         using var rsa = RSA.Create(2048);
         var wrongKey = secrets.Add(Encoding.UTF8.GetBytes(rsa.ExportPkcs8PrivateKeyPem()));
         Check((await handler.CheckTypedAsync(environment, mutual with { ClientPrivateKey = wrongKey }, token)).Outcome == ProviderPreflightOutcome.ConfigurationUnavailable, "P07-mismatched-client-key");

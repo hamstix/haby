@@ -251,7 +251,7 @@ public sealed partial class DurableDeploymentPlanningTests
     private sealed class RuntimeRpcIdentity : IRuntimeAuthenticator
     {
         public RuntimeAuthenticatorContract Contract => new("haby.kubernetes.token-review/v1", "haby.kubernetes.runtime-validation/v1", 1,
-            Haby.Kubernetes.KubernetesProviderConfigurationCodec.Kind, Haby.Kubernetes.KubernetesProviderConfigurationCodec.Shape, 1,
+            Haby.Kubernetes.KubernetesProviderConfigurationCodec.Kind, Haby.Kubernetes.KubernetesProviderConfigurationCodec.Shape, 2,
             Haby.Kubernetes.KubernetesProviderConfigurationCodec.Implementation);
         public bool Validate(RuntimeTrust trust) => trust.Authenticator == Contract.Authenticator;
         public ValueTask<RuntimeAuthenticationOutcome> AuthenticateAsync(RuntimeTrust trust, ReadOnlyMemory<byte> credential, CancellationToken token) =>

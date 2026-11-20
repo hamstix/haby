@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-18
 - Implementation: Not implemented by this documentation; tracked in [issue #261](https://github.com/hamstix/haby/issues/261)
-- Release order: After issue #259 and test-cycle separation #263 (ADR-061); no concurrent TLS implementation
+- Functional release, 2026-11-19: coding and focused local validation authorized from main after #259; remaining #263 optimization/activation is not a coding prerequisite. Mandatory qualification before merge and the separate #276 publisher block remain.
 
 ## Context
 
@@ -103,7 +103,9 @@ an operator guide with platform limits and the fresh-catalog boundary.
 
 ## Sequencing and limits
 
-Issue #261 follows merged #259, test-cycle separation #263 under ADR-061 and this accepted documentation. It does not open
+The 2026-11-19 functional release supersedes the earlier requirement to finish
+#263 activation before TLS coding. ADR-061 exact-candidate qualification remains
+mandatory before merge. Issue #261 does not open
 public UPDATE or complete P3. Afterwards retain the successive ordinary UPDATE
 proof (initial to update1 Applied to update2 Applied), ADR-052 corrective work,
 integrated rehearsal and public operational UPDATE dependencies. ADR-059 CLI
