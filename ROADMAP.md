@@ -17,7 +17,7 @@ and independently reviewable PRs.
 | P1 - Resource provisioning pilot | Delivered within the isolated PostgreSQL pilot | Prepare an Environment, import an Application, Plan/commit/execute, create its database and generated application login, and grant database-owner access. |
 | P2 - Application configuration | Functionally delivered within the bounded PostgreSQL profile | Generate exact configuration documents from applied Resource outputs and shared Profiles; let an explicitly authorized application client retrieve and use them. |
 | P3 - Workload lifecycle | In progress: internal durable CREATE, configuration delivery and readiness; operator desired-state admission and bounded public submission delivered | Deploy an Application to Kubernetes, deliver its configuration, update it and safely remove its managed workload objects. |
-| P4 - Standard Providers | Planned | Add RabbitMQ, Redis and HTTP/auth integrations and extend PostgreSQL through complete tested application scenarios. |
+| P4 - Standard Providers | Planned | Add admitted standard integrations and extend PostgreSQL through complete tested application scenarios; upstream Redis implementation is excluded. |
 
 P1 is a working checkpoint, not a claim that configuration delivery, all
 Providers, general recovery or a complete production release are finished.
@@ -363,6 +363,21 @@ authorization rules. Contract acceptance never enables an incomplete executor.
 - [x] Accept [ADR-062](docs/adr/0062-existing-resource-import-and-attachment.md): standard Provider-neutral existing Resource import/attachment, Imported provenance and enforced use-and-retain authority.
 - [ ] Deliver [#267](https://github.com/hamstix/haby/issues/267) immediately after #265 -> #263 -> TLS #261, before public CLI composition/NuGet and lower-priority feature work. Split [generic intent/capability/provenance/authority](docs/development/267-resource-import-authority.md), PostgreSQL pair plus protected credential, then API-only operator/restart/delivery rehearsal into bounded reviewed slices. Existing database-owner imports may preserve an administrator-owned public schema when effective permissions satisfy the declared contract; fresh creation remains unchanged. No external repair, ownership/grant/password mutation or deletion during import. Architecture acceptance is not implementation or P3 completion.
 
+### Resource capabilities and bounded Provider observation
+
+- [x] Accept [ADR-063](docs/adr/0063-resource-capabilities-rendering-and-provider-status.md): explicit Provision/Import/Reference capabilities; verified Resource use without provisioning; provenance and lifecycle authority separate from reusable typed outputs/rendering; explicit application-secret delivery authority.
+- [ ] Deliver [shared Reference #275](https://github.com/hamstix/haby/issues/275) through #267's common foundation, not a second import framework: exact per-type/mode schema, durable verification/receipt/confirmed outputs/retry/restart, no CREATE fallback and no external lifecycle authority. Sharing across Resources/Applications requires explicit adapter semantics and does not bypass ADR-062 Import conflicts. Removal affects internal association/delivery authorization only.
+- [ ] Preserve renderer defaults < exact Profile binding-rule options < Component Binding options, whole top-level replacement, closed typed validation and Plan-frozen effective values/origins. Reuse typed consumption contracts across supported modes, separate system access from application-deliverable exact SecretRefs and retain independent static Profile/secret projection semantics. Provider endpoint/credential and mandatory TLS are not Binding overrides.
+- [ ] Deliver [Provider status #274](https://github.com/hamstix/haby/issues/274) as a separate operator-admin, API-only endpoint/TLS/SYSTEM-credential login observation. Resolve current alias-bound revision once; unbound Providers report not-configured/not-selected rather than implicit latest. Return bounded safe per-Provider outcomes without management privilege, Resource/dbNum/workload or preflight-receipt claims. Resource/consumer checks may separately verify effective options.
+
+These are accepted contracts, not implemented upstream capabilities. Preserve
+#263 -> TLS #261 -> bounded PostgreSQL import #267 priority; #274/#275 do not
+reorder it or release runtime work. A private adapter may prepare typed codecs,
+consumer options, renderer and probe, but cannot fabricate durable CREATE or
+bypass shared Reference/application delivery authority. No additional generic SDK,
+runtime plugin loader, Kubernetes adoption or upstream Redis implementation is
+admitted by this decision. Parent #263 remains open; TLS #261 still waits for it.
+
 ## P4 - Standard Providers
 
 Status: planned. Goal: cover the external systems needed by real Applications
@@ -370,10 +385,10 @@ through complete Provider scenarios, preserving the shared Provider-neutral mode
 
 - [ ] Prioritize exact supported Resource/effect contracts from concrete adoption requirements before implementing each Provider.
 - [ ] Add RabbitMQ credentials and the queue/exchange/binding capabilities required by the first application scenario.
-- [ ] Add Redis access/configuration and supported ACL or logical-database capabilities appropriate to the target deployment.
+- Upstream Redis implementation is excluded. Product-neutral Redis examples in ADR-063 illustrate private, unregistered adapter contracts only; they are not a scheduled standard Provider delivery.
 - [ ] Add HTTP/auth configuration contracts, using configuration-only integration when no external provisioning effect is needed.
 - [ ] Extend PostgreSQL beyond the accepted initial pilot only through separately agreed policy and lifecycle slices.
-- [ ] For each Provider, supply its necessary credentials, confirmed typed outputs, configuration renderer/formatter and real-client integration evidence.
+- [ ] For each admitted Provider/capability, explicitly declare supported Provision/Import/Reference modes and supply purpose-authorized credentials, confirmed typed outputs, reusable configuration renderer/formatter and real-client evidence. A Resource need not create an external object; Reference still requires durable confirmation.
 - [ ] Prove each external effect's idempotency, dispatch/uncertainty behavior, restart and safe failures without inventing universal recovery or database requirements.
 - [ ] Keep shared persistence, operation infrastructure, Host/CLI metadata and configuration composition free of Provider-specific fields and branching.
 
