@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using Haby.Application;
@@ -16,12 +15,13 @@ public sealed class PostgreSqlReuseVerificationScopes
     internal sealed record OperationState(string Id, string State, Guid? Attempt, long Number, DateTimeOffset? Dispatched,
         DateTimeOffset? Finalized, string? Reason, string? Outcome, DateTimeOffset? AttemptFinished);
     internal sealed record Capture(string Fingerprint, OperationState? Operation, IReadOnlyList<Original> Originals);
-    private readonly ConcurrentDictionary<(Guid, long), Permit> permits = new();
+    private static readonly AsyncLocal<Permit?> active = new();
 
     internal sealed class Permit(PostgreSqlReuseVerificationScopes owner, Guid deployment, long generation, OperationId? operation,
         Capture capture, DurableActionAdmission admission, IExternalOperationOutputContract[] contracts,
-        IProviderConfigurationCodec[] codecs, CancellationToken token) : IDisposable
+        IProviderConfigurationCodec[] codecs, CancellationToken token, bool internalResourceStage) : IResourceReuseValidationScope
     {
+        internal PostgreSqlReuseVerificationScopes Owner => owner;
         internal Guid Deployment => deployment;
         internal long Generation => generation;
         internal OperationId? Operation => operation;
@@ -31,24 +31,30 @@ public sealed class PostgreSqlReuseVerificationScopes
         internal IExternalOperationOutputContract[] Contracts => contracts;
         internal IProviderConfigurationCodec[] Codecs => codecs;
         internal CancellationToken Token => token;
-        internal bool Begun;
+        internal bool InternalResourceStage => internalResourceStage;
+        internal bool Begun = capture.Operation?.State is nameof(DurableOperationState.Dispatching) or nameof(DurableOperationState.NeedsAttention);
         private int disposed;
+        private int activated;
+        private Permit? previous;
         internal bool IsDisposed => Volatile.Read(ref disposed) != 0;
+        public void Activate()
+        {
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            if (Interlocked.Exchange(ref activated, 1) != 0) throw new InvalidOperationException("Reuse scope is already active.");
+            previous = active.Value;
+            active.Value = this;
+        }
         public void Dispose()
         {
             Interlocked.Exchange(ref disposed, 1);
-            ((ICollection<KeyValuePair<(Guid, long), Permit>>)owner.permits).Remove(new((deployment, generation), this));
+            if (ReferenceEquals(active.Value, this)) active.Value = previous;
         }
         public override string ToString() => "[Resource reuse verification permit]";
     }
 
     internal Permit Create(Guid deployment, long generation, OperationId? operation, Capture capture, DurableActionAdmission admission,
-        IExternalOperationOutputContract[] contracts, IProviderConfigurationCodec[] codecs, CancellationToken token)
-    {
-        var permit = new Permit(this, deployment, generation, operation, capture, admission, contracts, codecs, token);
-        permits.AddOrUpdate((deployment, generation), permit, (_, previous) => { previous.Dispose(); return permit; });
-        return permit;
-    }
+        IExternalOperationOutputContract[] contracts, IProviderConfigurationCodec[] codecs, CancellationToken token, bool internalResourceStage)
+        => new(this, deployment, generation, operation, capture, admission, contracts, codecs, token, internalResourceStage);
 
     internal static async Task<bool> RequiresAsync(ManifestCatalogDbContext db, Guid deployment, long generation, CancellationToken token)
     {
@@ -62,45 +68,47 @@ public sealed class PostgreSqlReuseVerificationScopes
     internal static async Task<bool> BeforeAsync(ManifestCatalogDbContext db, Guid deployment, long generation,
         OperationId? operation, Transition transition, CancellationToken token, Guid? attempt = null)
     {
-        Permit? permit = null;
-        db.ReuseVerificationScopes?.permits.TryGetValue((deployment, generation), out permit);
-        if (permit is null) return !await RequiresAsync(db, deployment, generation, token);
-        if (permit.IsDisposed || permit.Token.IsCancellationRequested ||
+        var permit = active.Value;
+        if (permit is null || !ReferenceEquals(permit.Owner, db.ReuseVerificationScopes) || permit.Deployment != deployment || permit.Generation != generation)
+            return !await RequiresAsync(db, deployment, generation, token);
+        if (!ReferenceEquals(active.Value, permit) || permit.IsDisposed || permit.Token.IsCancellationRequested ||
             operation is not null && permit.Operation != operation || transition != Transition.Aggregate && permit.Operation is null ||
             transition == Transition.Begin && permit.Begun || transition is Transition.Marker or Transition.Completion && !permit.Begun ||
             attempt is not null && permit.State?.Attempt != attempt) return false;
         if (db.Database.CurrentTransaction is null) throw new InvalidOperationException("Reuse verification needs the owning transition transaction.");
         await DurableAggregateCompletion.LockAsync(db, deployment, token);
         await ResourceContinuity.LockAsync(db, deployment, token);
-        var captured = await ReadAsync(db, deployment, generation, permit.Operation, permit.Admission, permit.Contracts, permit.Codecs, token);
+        var captured = await ReadAsync(db, deployment, generation, permit.Operation, permit.Admission, permit.Contracts, permit.Codecs, token, internalResourceStage: permit.InternalResourceStage);
         return captured is not null && captured.Fingerprint == permit.Fingerprint && captured.Operation == permit.State &&
             !permit.Token.IsCancellationRequested && !permit.IsDisposed;
     }
 
     internal static async Task UpdatedAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token, bool begun = false)
     {
-        if (db.ReuseVerificationScopes?.permits.TryGetValue((Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value), out var permit) != true ||
-            permit is null || permit.Operation != key.OperationId || permit.IsDisposed) return;
+        var permit = active.Value;
+        if (permit is null || !ReferenceEquals(permit.Owner, db.ReuseVerificationScopes) || permit.Deployment != Guid.Parse(key.DeploymentId.ToString()) ||
+            permit.Generation != key.Generation.Value || permit.Operation != key.OperationId || permit.IsDisposed) return;
         permit.State = await OwnStateAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value, key.OperationId, token);
         if (begun) permit.Begun = true;
     }
 
     internal static async Task<Capture?> ReadAsync(ManifestCatalogDbContext db, Guid deployment, long generation, OperationId? operation,
         DurableActionAdmission admission, IExternalOperationOutputContract[] contracts, IProviderConfigurationCodec[] codecs, CancellationToken token,
-        bool validateMaterial = false)
+        bool validateMaterial = false, bool internalResourceStage = false)
     {
         try
         {
             var row = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deployment, token);
-            if (row is null || owner is null || owner.DesiredGeneration != generation) return null;
+            if (row is null || owner is null || owner.DesiredGeneration != generation || row.InternalEffects != internalResourceStage) return null;
             var inputs = row.Inputs(); var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
             if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint ||
-                operation is not null && graph.Nodes.All(x => x.Id != operation)) return null;
-            var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, generation, contracts, codecs, token, admission);
+                operation is not null && graph.Nodes.All(x => x.Id != operation) &&
+                    !(internalResourceStage && await db.ActionIntents.AsNoTracking().AnyAsync(x => x.DeploymentId == deployment && x.Generation == generation && x.OperationId == operation.Value, token))) return null;
+            var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, generation, contracts, codecs, token, admission, internalResourceStage: internalResourceStage, completedRead: internalResourceStage);
             if (metadata is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token) ||
                 !await ResourceContinuity.ValidateAsync(db, deployment, graph, token) ||
-                !await ResourceContinuity.ValidateOutputsAsync(db, deployment, graph, contracts, codecs, admission, inputs, token, validateMaterial: validateMaterial)) return null;
+                !await ResourceContinuity.ValidateOutputsAsync(db, deployment, graph, contracts, codecs, admission, internalResourceStage ? InternalResourceStage.Project(inputs) : inputs, token, validateMaterial: validateMaterial)) return null;
             var fields = new List<string> { deployment.ToString(), generation.ToString(CultureInfo.InvariantCulture), row.Fingerprint,
                 row.GraphJson, owner.DesiredGeneration.ToString(CultureInfo.InvariantCulture), owner.AppliedGeneration?.ToString(CultureInfo.InvariantCulture) ?? "-" };
             var originals = new List<Original>();
@@ -127,6 +135,21 @@ public sealed class PostgreSqlReuseVerificationScopes
                 if (receipt is null || receiptRow is null) return null;
                 fields.AddRange([receipt.Id.ToString(), receiptRow.Fingerprint]);
                 originals.Add(new(new(originalInputs, originalGraph, node, originalInputs.Configuration!.Manifest.Spec), receipt));
+            }
+            if (internalResourceStage)
+            {
+                foreach (var item in await db.ActionIntents.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation).OrderBy(x => x.OperationId).ToArrayAsync(token))
+                    fields.AddRange([item.OperationId, item.RequestId, item.Marker.ToString(), item.ManagedIdentity.ToString(), item.SubjectKind, item.Component, item.LocalId,
+                        item.SubjectContract, item.ProviderKind, item.ConfigurationContract, item.Implementation, item.ActionContract, item.InputFormat, item.OutputContract,
+                        item.ProviderId.ToString(), item.ConfigurationRevision.ToString(CultureInfo.InvariantCulture), ResourcesReadyCheckpointCodec.Hash(item.Payload), item.CheckpointId.ToString(), item.InputFingerprint]);
+                foreach (var exact in inputs.Providers.Entries.Values.DistinctBy(x => (x.Instance, x.Configuration)).OrderBy(x => x.Instance.ToString(), StringComparer.Ordinal).ThenBy(x => x.Configuration.Value))
+                {
+                    var instance = Guid.Parse(exact.Instance.ToString());
+                    var configuration = await db.ProviderConfigurationRevisions.AsNoTracking().SingleAsync(x => x.EnvironmentRecordId == row.EnvironmentRecordId &&
+                        x.ProviderInstanceId == instance && x.RevisionNumber == exact.Configuration.Value, token);
+                    fields.AddRange([instance.ToString(), configuration.ConfigurationShapeId, configuration.PayloadFormatVersion.ToString(CultureInfo.InvariantCulture),
+                        configuration.ImplementationId, configuration.IsSealed.ToString(), configuration.PayloadJson]);
+                }
             }
             var operations = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation)
                 .OrderBy(x => x.OperationId).ToArrayAsync(token);

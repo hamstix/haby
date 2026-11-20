@@ -129,6 +129,40 @@ public sealed partial class PostgreSqlPairImportTests
             ValueTask.FromResult(ResourceReuseValidationStatus.Connectivity);
     }
 
+    [Fact]
+    public async Task Independent_invocation_cannot_borrow_another_live_reuse_verification_scope()
+    {
+        var pair = await ExistingPair();
+        var setup = await AcceptedPair(pair);
+        var next = await Reuse(setup);
+        await using var services = Services(setup.Connection);
+        var journal = services.GetRequiredService<IDurableOperationJournal>();
+        var admission = services.GetRequiredService<DurableActionAdmission>();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<bool> flowed;
+        using (var validation = await journal.ValidateReuseAsync(next.DeploymentId, next.Generation, admission, default))
+        {
+            Assert.Equal(ResourceReuseValidationStatus.Confirmed, validation.Status);
+            validation.ActivateScope();
+            Task<bool> independent;
+            using (ExecutionContext.SuppressFlow())
+                independent = Task.Run(() => journal.TryCompleteGenerationAsync(next.DeploymentId, next.Generation, admission, default).AsTask());
+            Assert.False(await independent);
+            Assert.Equal(1, (await journal.ProgressAsync(next.DeploymentId, next.Generation, default))!.AppliedGeneration);
+            // An async child may retain an ExecutionContext, but disposal must revoke its authority too.
+            flowed = Task.Run(async () =>
+            {
+                await release.Task;
+                return await journal.TryCompleteGenerationAsync(next.DeploymentId, next.Generation, admission, default);
+            });
+        }
+        release.SetResult();
+        Assert.False(await flowed);
+        // A separate normal invocation must acquire its own verification and can complete.
+        Assert.Null((await services.GetRequiredService<DurableGenerationRunner>().RunAsync(next.DeploymentId, next.Generation, default)).StopOutcome);
+        await AssertOriginalReceipt(setup);
+    }
+
     private async Task<Setup> AcceptedPair(Pair pair)
     {
         var setup = await Prepare(pair, PostgreSqlTransportMode.Disable);

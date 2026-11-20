@@ -79,6 +79,21 @@ changes that preserve the contract do not conflict merely because raw ACL text
 differs. Historical receipts remain unchanged. Completed-generation observation and
 ordinary delivery do not acquire a continuous Provider health probe.
 
+The same explicit internal-stage acquisition applies to standard later workload
+deployment and bounded image updates. Configuration preparation and action intent
+acceptance verify outside their catalog transactions; action execution rechecks
+the exact intent/attempt before dispatch and confirmation. Readiness publication
+and both internal completion paths acquire/recheck before progress, including a
+fresh check before the update Applied compare-and-swap. A saved ResourcesReady
+checkpoint cannot replace this verification. All three Applied transition owners
+retain their existing runtime, readiness, retirement and catalog authority checks.
+
+Activation belongs to the current async invocation, with exact catalog-scope,
+generation and operation/attempt inputs. There is no generation-keyed global
+permit registry. Disposal revokes a scope even in a child ExecutionContext; a
+different invocation must obtain and activate its own verification. A scope is
+not durable authority and cannot bypass the owning catalog checks.
+
 UseAndRetain still forbids repair, rotation, deletion and authority transfer.
 Only unchanged pair reuse or supported retain-on-removal is admitted. A new manifest
 does not turn import authority into Provision authority.
@@ -114,3 +129,11 @@ The common connectivity retry test deliberately stubs the transport outcome; it 
 not evidence of a real network outage. Fast executor tests prove reuse refusal
 precedes a dependent handler, attempt and external effect. Focused runs are not a
 substitute for exact-revision CI, installed-final evidence or operational rehearsal.
+
+Internal workload cases import a real PostgreSQL pair, consume its normal rendered
+connection, deploy a configured workload and complete an image update through the
+existing internal paths. Their Kubernetes I/O uses the existing real adapter
+preparation/receipt/readiness fixtures; no live Kubernetes qualification is claimed.
+They separately test drift before dispatch, before initial Applied with saved
+ResourcesReady, at update Applied, cancellation, and restart without duplicate
+external writes.

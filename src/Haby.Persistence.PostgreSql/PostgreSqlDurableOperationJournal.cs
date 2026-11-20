@@ -17,18 +17,33 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
     IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null)
     : IDurableOperationJournal, IDurableOperationQuery
 {
-    public async ValueTask<ResourceReuseValidationResult> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
-        DurableActionAdmission admission, CancellationToken cancellationToken, OperationId? operation = null)
+    public ValueTask<ResourceReuseValidationResult> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+        DurableActionAdmission admission, CancellationToken cancellationToken, OperationId? operation = null) =>
+        ValidateReuseCoreAsync(deployment, generation, admission, cancellationToken, operation, false);
+
+    internal ValueTask<ResourceReuseValidationResult> ValidateInternalReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+        DurableActionAdmission admission, CancellationToken cancellationToken, OperationId? operation = null) =>
+        ValidateReuseCoreAsync(deployment, generation, admission, cancellationToken, operation, true);
+
+    private async ValueTask<ResourceReuseValidationResult> ValidateReuseCoreAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+        DurableActionAdmission admission, CancellationToken cancellationToken, OperationId? operation, bool internalResourceStage)
     {
         try
         {
             var id = Guid.Parse(deployment.ToString());
             var registrations = outputContracts.ToArray(); var typedCodecs = (codecs ?? []).ToArray();
+            if (internalResourceStage)
+            {
+                await using var check = await contexts.CreateDbContextAsync(cancellationToken);
+                // Preserve existing Provision/internal behavior. Explicit import capability is never optional.
+                if (!await PostgreSqlReuseVerificationScopes.RequiresAsync(check, id, generation.Value, cancellationToken))
+                    return new(ResourceReuseValidationStatus.Confirmed);
+            }
             PostgreSqlReuseVerificationScopes.Capture? before;
             await using (var read = await contexts.CreateDbContextAsync(cancellationToken))
             await using (var snapshot = await read.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken))
                 before = await PostgreSqlReuseVerificationScopes.ReadAsync(read, id, generation.Value, operation, admission, registrations,
-                    typedCodecs, cancellationToken, validateMaterial: true);
+                    typedCodecs, cancellationToken, validateMaterial: true, internalResourceStage: internalResourceStage);
             if (before is null) return new(ResourceReuseValidationStatus.InputUnavailable);
             if (before.Originals.Count == 0) return new(ResourceReuseValidationStatus.Confirmed);
             var verifiers = (reuseVerifiers ?? []).ToArray();
@@ -46,13 +61,13 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             await DurableAggregateCompletion.LockAsync(db, id, cancellationToken);
             await ResourceContinuity.LockAsync(db, id, cancellationToken);
-            var after = await PostgreSqlReuseVerificationScopes.ReadAsync(db, id, generation.Value, operation, admission, registrations, typedCodecs, cancellationToken);
+            var after = await PostgreSqlReuseVerificationScopes.ReadAsync(db, id, generation.Value, operation, admission, registrations, typedCodecs, cancellationToken, internalResourceStage: internalResourceStage);
             if (after is null || before.Fingerprint != after.Fingerprint || before.Operation != after.Operation || db.ReuseVerificationScopes is null)
                 return new(ResourceReuseValidationStatus.InputUnavailable);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             return new(ResourceReuseValidationStatus.Confirmed,
-                db.ReuseVerificationScopes.Create(id, generation.Value, operation, after, admission, registrations, typedCodecs, cancellationToken));
+                db.ReuseVerificationScopes.Create(id, generation.Value, operation, after, admission, registrations, typedCodecs, cancellationToken, internalResourceStage));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception e) when (e is InvalidDataException or System.Data.Common.DbException or IOException or InvalidOperationException or System.Text.Json.JsonException or ArgumentException)

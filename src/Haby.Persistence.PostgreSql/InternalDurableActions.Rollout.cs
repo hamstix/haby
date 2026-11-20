@@ -283,6 +283,10 @@ internal sealed partial class InternalDurableActions
     private async Task<(bool Current, bool Expired, RolloutResult? Completed)> PublishReadAsync(ObservationCall call, SubmittedMember member, Guid reservation,
         RolloutObservation observation, Dictionary<string, Guid> samples, Dictionary<string, RolloutObservation> observations, CancellationToken token, BatchReadBudget? batch = null)
     {
+        using var lifecycle = CancellationTokenSource.CreateLinkedTokenSource(token, call.LifecycleToken);
+        using var reuse = await VerifyReuseAsync(new(ApplicationDeploymentId.Parse(call.Set.Source.DeploymentId.ToString()),
+            DeploymentGeneration.Create(call.Set.Source.Generation), OperationId.Create("reuse-readiness")), lifecycle.Token, historical: true);
+        RequireReuse(reuse);
         var payload = RolloutJson.Encode(observation);
         if (Encoding.UTF8.GetByteCount(payload) > 16384) throw new InvalidDataException("Observation exceeds bound.");
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);

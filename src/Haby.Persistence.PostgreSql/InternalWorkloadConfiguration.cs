@@ -13,11 +13,15 @@ internal sealed record WorkloadConfigurationPreparation(IReadOnlyList<WorkloadCo
 internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCatalogDbContext> contexts,
     PostgreSqlDurableDeploymentPlanner planner, PostgreSqlConfigurationDocumentStore documents,
     IReadOnlyList<IInternalActionHandler> handlers, IEnumerable<IExternalOperationOutputContract> outputs,
-    IEnumerable<IProviderConfigurationCodec> codecs, DurableActionAdmission admission)
+    IEnumerable<IProviderConfigurationCodec> codecs, DurableActionAdmission admission, IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null)
 {
     internal async ValueTask<WorkloadConfigurationPreparation> PrepareAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token)
     {
         PostgreSqlDurableDeploymentPlanner.ValidateActor(actor);
+        using var reuse = await new PostgreSqlDurableOperationJournal(contexts, outputs, codecs, reuseVerifiers)
+            .ValidateInternalReuseAsync(accepted.DeploymentId, accepted.Generation, admission, token);
+        if (reuse.Status != ResourceReuseValidationStatus.Confirmed) throw new InvalidDataException($"Imported Resource reuse refused: {reuse.Status}.");
+        reuse.ActivateScope();
         var authority = new Authority(this, accepted);
         IReadOnlyDictionary<ProviderInput.Workload, IReadOnlyList<ManifestLocalId>> selection;
         await using (var db = await contexts.CreateDbContextAsync(token))
@@ -132,6 +136,8 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
         {
             var exact = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
             await InternalGenerationAuthority.RequireCurrentStageAsync(db, exact, token);
+            if (db.Database.CurrentTransaction is not null && !await PostgreSqlReuseVerificationScopes.BeforeAsync(db, exact.DeploymentId, exact.Generation,
+                null, PostgreSqlReuseVerificationScopes.Transition.Aggregate, token)) throw new InvalidDataException("Imported Resource reuse verification changed.");
             if (source.DeploymentId != exact.DeploymentId || source.Generation != exact.Generation || source.Fingerprint != exact.Fingerprint ||
                 target.Deployment != accepted.DeploymentId || target.Generation != accepted.Generation)
                 throw new InvalidDataException("Preparation source mismatch.");

@@ -14,7 +14,7 @@ internal sealed partial class InternalDurableActions(
     IDbContextFactory<ManifestCatalogDbContext> contexts, IEnumerable<IInternalActionHandler> registrations,
     IEnumerable<IProviderConfigurationCodec> codecs, IEnumerable<IExternalOperationOutputContract> resourceOutputs,
     DurableActionAdmission resourceAdmission, DurableOperationSerialization serialization, TimeProvider clock,
-    Action<InternalActionFault>? fault = null, InternalWorkloadConfiguration? configurationPreparation = null, Action<UpdateCompletionDiagnostic>? updateDiagnostic = null)
+    Action<InternalActionFault>? fault = null, InternalWorkloadConfiguration? configurationPreparation = null, Action<UpdateCompletionDiagnostic>? updateDiagnostic = null, IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null)
 {
     private readonly IInternalActionHandler[] handlers = ValidateRegistrations(registrations);
     private readonly IProviderConfigurationCodec[] typedCodecs = codecs.ToArray();
@@ -43,6 +43,8 @@ internal sealed partial class InternalDurableActions(
         _ = OperationId.Create(request);
         var key = new DurableOperationKey(accepted.DeploymentId, accepted.Generation, OperationId.Create("effect-" + request));
         // Metadata and exact handler checks precede Resource material preflight.
+        using var reuse = await VerifyReuseAsync(key, token);
+        RequireReuse(reuse);
         await using (var preflight = await contexts.CreateDbContextAsync(token))
         {
             var source = await InternalGenerationAuthority.RequireStageAsync(preflight, accepted, token);
@@ -70,6 +72,7 @@ internal sealed partial class InternalDurableActions(
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         await DurableAggregateCompletion.LockAsync(db, deployment, token);
         var generation = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
+        await RequireReuseTransitionAsync(db, deployment, key.Generation.Value, token);
         var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true)
             ?? throw new InvalidDataException("Resource-stage proof unavailable.");
         var old = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.RequestId == request, token);
@@ -152,6 +155,11 @@ internal sealed partial class InternalDurableActions(
         Loaded loaded;
         await using (var db = await contexts.CreateDbContextAsync(token)) loaded = await LoadAsync(db, key, token);
         if (loaded.Operation.State == nameof(DurableOperationState.Succeeded)) return await TerminalAsync(key, loaded, token);
+        using var reuse = await VerifyReuseAsync(key, token, operation: true);
+        if (reuse.Status != ResourceReuseValidationStatus.Confirmed)
+            return new(reuse.Status == ResourceReuseValidationStatus.Connectivity ? InternalActionOutcome.Unavailable : InternalActionOutcome.Refused,
+                reuse.Status switch { ResourceReuseValidationStatus.Conflict => "resource-reuse-conflict", ResourceReuseValidationStatus.Connectivity => "resource-reuse-connectivity", _ => "resource-reuse-unavailable" });
+        reuse.ActivateScope();
         var uncertain = loaded.Operation.State is nameof(DurableOperationState.Dispatching) or nameof(DurableOperationState.NeedsAttention);
         if (!uncertain && observationOnly) return new(InternalActionOutcome.NotConfirmed, "not-dispatched");
         if (uncertain)

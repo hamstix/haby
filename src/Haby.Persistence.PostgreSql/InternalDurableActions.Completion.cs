@@ -64,6 +64,7 @@ internal sealed partial class InternalDurableActions
             var existing = await InitialRetirementCompletion.RequireProofAsync(db, source, token);
             return result with { Applied = true, Retirement = existing.Id, AppliedGeneration = owner.AppliedGeneration, CompletionReason = "applied" };
         }
+        await RequireReuseTransitionAsync(db, source.DeploymentId, source.Generation, token);
         if (owner.AppliedGeneration != inventory.Document.PriorApplied) return result with { CompletionReason = "generation-superseded" };
         var resources = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == "ResourcesReady", token);
         var submitted = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.Id == current.Checkpoint, token);

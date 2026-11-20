@@ -65,6 +65,7 @@ internal static class DurableOperationTransitions
         if (await db.DurableOperationAttempts.Where(x => x.AttemptId == row.CurrentAttemptId && x.FinishedAt == null && x.DispatchedAt != null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.Outcome, nameof(DurableAttemptOutcome.Uncertain)).SetProperty(x => x.FinishedAt, at), token) != 1)
             throw new InvalidDataException("Uncertain attempt mismatch.");
+        await PostgreSqlReuseVerificationScopes.UpdatedAsync(db, key, token);
         return true;
     }
     internal static async Task<bool> ConfirmAsync(ManifestCatalogDbContext db, DurableOperationKey key, Guid attempt,

@@ -4,11 +4,22 @@ namespace Haby.Application;
 
 public enum ResourceReuseValidationStatus { Confirmed, Conflict, InputUnavailable, Connectivity }
 
+/// <summary>Explicit activation binds a returned verification to the caller's async invocation.</summary>
+public interface IResourceReuseValidationScope : IDisposable
+{
+    void Activate();
+}
+
 /// <summary>One execution invocation's verification scope, never a health cache or persisted receipt.
 /// Dispose it after that invocation's consequential transition or refusal.</summary>
 public sealed class ResourceReuseValidationResult(ResourceReuseValidationStatus status, IDisposable? scope = null) : IDisposable
 {
     public ResourceReuseValidationStatus Status { get; } = status;
+    public void ActivateScope()
+    {
+        if (Status != ResourceReuseValidationStatus.Confirmed) throw new InvalidOperationException("Reuse verification is not confirmed.");
+        if (scope is IResourceReuseValidationScope invocation) invocation.Activate();
+    }
     public DurableExecutionOutcome FailureOutcome => Status switch
     {
         ResourceReuseValidationStatus.Conflict => DurableExecutionOutcome.Failed,
