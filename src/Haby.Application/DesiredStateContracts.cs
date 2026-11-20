@@ -36,7 +36,10 @@ public abstract record DeploymentPrecondition
 
 /// <summary>Immutable intent for one Application in one explicit Environment.</summary>
 public sealed record DeploymentChangeSet(DeploymentChangeSetId Id, EnvironmentRecordId EnvironmentRecordId,
-    DeploymentChangeSetMember Member, DateTimeOffset CreatedAt, string ActorId);
+    DeploymentChangeSetMember Member, DateTimeOffset CreatedAt, string ActorId)
+{
+    public ResourceImportIntent? Import { get; init; }
+}
 
 /// <summary>Exact typed inputs captured by planning, with no live alias pointer.</summary>
 public sealed class DeploymentPlanningInputs : IEquatable<DeploymentPlanningInputs>

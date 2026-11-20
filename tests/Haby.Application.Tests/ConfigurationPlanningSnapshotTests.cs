@@ -111,7 +111,7 @@ public sealed class ConfigurationPlanningSnapshotTests
             else parent[keys[^1]] = "corrupt";
             Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(node.ToJsonString(), Revision));
         }
-        Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(text.Replace("\"format\":3", "\"format\":3,\"format\":3", StringComparison.Ordinal), Revision));
+        Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(text.Replace("\"format\":4", "\"format\":4,\"format\":4", StringComparison.Ordinal), Revision));
     }
 
     [Fact]

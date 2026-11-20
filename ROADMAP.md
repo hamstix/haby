@@ -361,7 +361,7 @@ authorization rules. Contract acceptance never enables an incomplete executor.
 ### Existing Resource adoption priority
 
 - [x] Accept [ADR-062](docs/adr/0062-existing-resource-import-and-attachment.md): standard Provider-neutral existing Resource import/attachment, Imported provenance and enforced use-and-retain authority.
-- [ ] Deliver [#267](https://github.com/hamstix/haby/issues/267) immediately after #265 -> #263 -> TLS #261, before public CLI composition/NuGet and lower-priority feature work. Split generic intent/capability/provenance/authority, PostgreSQL pair plus protected credential, then API-only operator/restart/delivery rehearsal into bounded reviewed slices. Existing database-owner imports may preserve an administrator-owned public schema when effective permissions satisfy the declared contract; fresh creation remains unchanged. No external repair, ownership/grant/password mutation or deletion during import. Architecture acceptance is not implementation or P3 completion.
+- [ ] Deliver [#267](https://github.com/hamstix/haby/issues/267) immediately after #265 -> #263 -> TLS #261, before public CLI composition/NuGet and lower-priority feature work. Split [generic intent/capability/provenance/authority](docs/development/267-resource-import-authority.md), PostgreSQL pair plus protected credential, then API-only operator/restart/delivery rehearsal into bounded reviewed slices. Existing database-owner imports may preserve an administrator-owned public schema when effective permissions satisfy the declared contract; fresh creation remains unchanged. No external repair, ownership/grant/password mutation or deletion during import. Architecture acceptance is not implementation or P3 completion.
 
 ## P4 - Standard Providers
 

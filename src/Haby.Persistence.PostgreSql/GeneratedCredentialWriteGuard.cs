@@ -26,6 +26,10 @@ public sealed partial class ManifestCatalogDbContext
     private async Task ValidateGeneratedWritesAsync(bool asynchronous, CancellationToken cancellationToken)
     {
         ChangeTracker.DetectChanges();
+        if (ChangeTracker.Entries<ResourceManagementRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Resource management provenance and authority are immutable.");
+        if (ChangeTracker.Entries<DurableChangeSetRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("ChangeSet intent is immutable.");
         if (ChangeTracker.Entries<PlacementRevisionRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Placement revisions are immutable.");
         if (ChangeTracker.Entries<ResourceNamingPolicyRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))

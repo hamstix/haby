@@ -275,6 +275,11 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             throw new InvalidDataException("Stored create operation is inconsistent.");
         var inputs = joined.gen.Inputs();
         var node = DurableOperationGraphCodec.Decode(joined.gen.GraphJson).Nodes.Single(n => n.Id == key.OperationId);
+        var management = await context.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment &&
+            x.Resource == node.ResourceId.Value, cancellationToken);
+        if (management is null || management.SourceGeneration != generation ||
+            !ResourceContinuity.HasAcquisitionAuthority(management, inputs))
+            throw new InvalidDataException("Operation has no persisted Resource authority.");
         var provider = inputs.Providers.Resource(node.ResourceId);
         return new DurableOperation(key, ParseState(row.State),
             EnvironmentRecordId.Parse(joined.gen.EnvironmentRecordId.ToString()),

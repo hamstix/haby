@@ -7,9 +7,11 @@ public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, Envi
     ManifestRevisionRef Revision, ExactProviderResolutionSet Providers)
 {
     public ConfigurationPlanningSnapshot? Configuration { get; init; }
+    public ResourceImportIntent? Import { get; init; }
 
     public void Validate()
     {
+        Import?.Validate(Providers.Declaration.Spec);
         if (Providers.Environment != Environment || Configuration is { } frozen &&
             (frozen.Revision != Revision || !frozen.Manifest.Equals(Providers.Declaration)))
             throw new InvalidDataException("Durable Provider inputs do not match the accepted declaration.");
@@ -29,7 +31,7 @@ public sealed record DurablePlan(DeploymentPlanId Id, DeploymentChangeSetId Chan
 public enum DurableChangeSetCreateStatus
 {
     Created, EnvironmentNotFound, RevisionNotFound, RevisionNotOwnedByApplication,
-    ExpectedGenerationUnsupported
+    ExpectedGenerationUnsupported, ImportNotSupported
 }
 
 public sealed record DurableChangeSetCreateResult(DurableChangeSetCreateStatus Status, DeploymentChangeSet? ChangeSet = null);
@@ -37,7 +39,7 @@ public sealed record DurableChangeSetCreateResult(DurableChangeSetCreateStatus S
 public enum DurablePlanStatus
 {
     Planned, ChangeSetNotFound, ChangeSetStale, RevisionNotFound, AliasNotResolved,
-    ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape, ConfigurationRefused, PlanInputUnavailable
+    ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape, ConfigurationRefused, PlanInputUnavailable, ImportNotSupported
 }
 
 public sealed record DurablePlanResult(DurablePlanStatus Status, DurablePlan? Plan = null, ProfileExpansionResult? ConfigurationReport = null)
@@ -53,6 +55,11 @@ public enum DurablePlanCurrentStatus
 
 public interface IDurableDeploymentPlanner
 {
+    ValueTask<DurableChangeSetCreateResult> CreateImportChangeSetAsync(EnvironmentRecordId environment,
+        ApplicationRecordId application, ManifestRevisionRef revision, ResourceImportIntent intent,
+        string actorId, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new DurableChangeSetCreateResult(DurableChangeSetCreateStatus.ImportNotSupported));
+
     ValueTask<DurableChangeSetCreateResult> CreateChangeSetAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
         string actorId, CancellationToken cancellationToken);

@@ -21,7 +21,7 @@ public sealed class RetainedPairPlanningTests
         };
         var original = Spec(envelope); var target = Spec(Example()); var admission = PairAdmission();
         foreach (var id in new[] { "db-b", "login-b", "extra" })
-            Assert.True(admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, Inputs(), PostgreSqlPairPlanningTests.Configuration()));
+            Assert.True(admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, Inputs(), PostgreSqlPairPlanningTests.Configuration(), Inputs()));
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public sealed class RetainedPairPlanningTests
         resources["login-c"] = resources["login-b"]!.DeepClone(); resources["login-c"]!["properties"]!["databaseRef"] = "db-c";
         var original = Spec(envelope); var target = Spec(Example()); var admission = PairAdmission();
         foreach (var id in new[] { "db-b", "login-b", "db-c", "login-c" })
-            Assert.False(admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, Inputs(), PostgreSqlPairPlanningTests.Configuration()));
+            Assert.False(admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, Inputs(), PostgreSqlPairPlanningTests.Configuration(), Inputs()));
     }
 
     [Fact]
@@ -45,8 +45,8 @@ public sealed class RetainedPairPlanningTests
         Assert.Equal(2, retained.Length);
         foreach (var r in retained)
         {
-            Assert.True(admission.CanRetainResource(original, target, r.Resource, Provider, inputs, configuration));
-            Assert.True(admission.CanReuseResource(original, original, r.Resource, Provider, inputs, configuration));
+            Assert.True(admission.CanRetainResource(original, target, r.Resource, Provider, inputs, configuration, inputs));
+            Assert.True(admission.CanReuseResource(original, original, r.Resource, Provider, inputs, configuration, inputs));
         }
         var active = target.Resources.Keys.Select(k => new ResourceReuse(k, Guid.NewGuid(), 1, new string('A', 64))).ToArray();
         var graph = admission.PlanUpdate(target, Provider, inputs, configuration, active,
@@ -81,11 +81,11 @@ public sealed class RetainedPairPlanningTests
         }
         var target = Spec(envelope); var admission = PairAdmission(); var inputs = Inputs(); var configuration = PostgreSqlPairPlanningTests.Configuration();
         Assert.False(new[] { "db-b", "login-b" }.All(id => target.Resources.ContainsKey(ManifestLocalId.Create(id))
-            ? admission.CanReuseResource(original, target, ManifestLocalId.Create(id), Provider, inputs, configuration)
-            : admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, inputs, configuration)));
+            ? admission.CanReuseResource(original, target, ManifestLocalId.Create(id), Provider, inputs, configuration, inputs)
+            : admission.CanRetainResource(original, target, ManifestLocalId.Create(id), Provider, inputs, configuration, inputs)));
         // The unchanged database cannot authorize changed ownership or a changed peer.
         if (fault is "changed-peer" or "delete-peer" or "renamed-login")
-            Assert.False(admission.CanReuseResource(original, target, ManifestLocalId.Create("db-b"), Provider, inputs, configuration));
+            Assert.False(admission.CanReuseResource(original, target, ManifestLocalId.Create("db-b"), Provider, inputs, configuration, inputs));
     }
 
     private static DurableActionAdmission PairAdmission() => new(new(new IDurableActionAdmissionHandler[]

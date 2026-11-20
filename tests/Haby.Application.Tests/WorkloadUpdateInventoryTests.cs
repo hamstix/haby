@@ -7,7 +7,7 @@ namespace Haby.Application.Tests;
 public sealed class WorkloadUpdateInventoryTests
 {
     private static WorkloadUpdateDocument Valid() => new(1, Guid.CreateVersion7(), 1, 2, Guid.CreateVersion7(), Guid.CreateVersion7(),
-        "v5:" + new string('A', 64), Guid.CreateVersion7(), new string('B', 64),
+        "v6:" + new string('A', 64), Guid.CreateVersion7(), new string('B', 64),
         [new("api", "main", Guid.CreateVersion7(), "sample.target/v1", 1, "{}", "original", Guid.CreateVersion7(), null,
             new("sample.delta/v1", "{}"), ["settings"])], [], [], [], []);
 

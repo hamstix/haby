@@ -25,6 +25,7 @@ internal static partial class DurableAggregateCompletion
                 .SingleOrDefaultAsync(x => x.DeploymentId == target.DeploymentId && x.Generation == generation, token);
             if (source is null || source.EnvironmentRecordId != target.EnvironmentRecordId || source.ApplicationRecordId != target.ApplicationRecordId) return null;
             var inputs = source.Inputs();
+            if (!ResourceContinuity.HasAcquisitionAuthority(managed, inputs)) return null;
             var original = DurableOperationGraphCodec.Decode(source.GraphJson);
             if (original.ReusedResources.Any(x => x.Resource.Value == resource)) return null;
             var nodes = original.Nodes.Where(n => n.ResourceId.Value == resource).ToArray();

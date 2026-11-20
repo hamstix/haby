@@ -93,7 +93,7 @@ public static class ResourcesReadyCheckpointCodec
             r.Resource, r.ManagementId, r.SourceGeneration, r.SourceFingerprint, r.Retained, r.Reintroduced,
             r.Operations.Select(o => new OperationResultDocument(o.OperationId, o.AttemptId, o.AttemptNumber,
                 o.RecoveryDecisionId, o.Outputs.ToArray())).ToArray())).ToArray());
-    private static bool Fingerprint(string value) => value is { Length: 67 } && value.StartsWith("v5:", StringComparison.Ordinal) &&
+    private static bool Fingerprint(string value) => value is { Length: 67 } && value.StartsWith("v6:", StringComparison.Ordinal) &&
         value.AsSpan(3).ContainsAnyExcept("0123456789ABCDEF".AsSpan()) == false;
     private static void Validate(ResourceCheckpointDocument value)
     {

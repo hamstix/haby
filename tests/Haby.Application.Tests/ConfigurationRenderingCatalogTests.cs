@@ -48,6 +48,22 @@ public sealed class ConfigurationRenderingCatalogTests
     }
 
     [Fact]
+    public void Import_producer_mode_survives_frozen_pin_roundtrip_and_rejects_unknown_or_missing_mode()
+    {
+        var provision = new Definition(ResourceTypeId.Create("sample.resource/v1"), new([])).ProducerAction;
+        var imported = provision with { Admission = provision.Admission with { Mode = ResourceAcquisitionMode.ImportUseAndRetain } };
+        var snapshot = Snapshot(Catalog(producerAction: imported), changeProducers: nodes => nodes.Select(n => n with { Action = imported }).ToArray());
+        var encoded = ConfigurationPlanningSnapshotCodec.Encode(snapshot);
+        var restored = ConfigurationPlanningSnapshotCodec.Decode(encoded, snapshot.Revision);
+        Assert.Equal(imported, Assert.Single(restored.RenderPins).ProducerAction);
+        var invalid = JsonNode.Parse(encoded)!;
+        invalid["renderPins"]![0]!["producerAction"]!["mode"] = 99;
+        Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(invalid.ToJsonString(), snapshot.Revision));
+        invalid["renderPins"]![0]!["producerAction"]!.AsObject().Remove("mode");
+        Assert.Throws<InvalidDataException>(() => ConfigurationPlanningSnapshotCodec.Decode(invalid.ToJsonString(), snapshot.Revision));
+    }
+
+    [Fact]
     public void Same_renderer_contract_freezes_distinct_resource_scoped_producers()
     {
         var snapshot = Snapshot(Catalog(), two: true);

@@ -46,6 +46,11 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
                 row.NormalizedModelVersion != Haby.Domain.NormalizedApplicationManifest.CurrentModelVersion ||
                 row.SnapshotFormatVersion != Haby.Application.NormalizedSnapshotCodec.FormatVersion, cancellationToken))
             throw new InvalidOperationException("Unsupported normalized manifest model. Explicitly initialize a fresh catalog; external resources remain unchanged.");
+        var importBaseLength = Array.FindIndex(expected, x => x.EndsWith("_PersistResourceImportAuthority", StringComparison.Ordinal)) + 1;
+        if (applied.Length >= currentBaseLength && applied.Length < importBaseLength &&
+            (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
+             await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
+            throw new InvalidOperationException("Superseded Resource provenance requires an explicitly initialized fresh catalog; external resources remain unchanged.");
         await context.Database.MigrateAsync(cancellationToken);
         if (await context.DurablePlans.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken) ||
             await context.DeploymentGenerations.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken))

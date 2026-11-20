@@ -12,6 +12,7 @@ internal static class ConfigurationRenderPinCodec
         w.WriteStartArray();
         foreach (var p in pins)
         {
+            if (!Enum.IsDefined(p.ProducerAction.Admission.Mode)) throw new InvalidDataException("Invalid producer acquisition mode.");
             w.WriteStartObject(); w.WriteString("component"u8, p.Component.Value); w.WriteNumber("request"u8, p.Request);
             w.WriteString("renderer"u8, p.Renderer.Value); w.WriteString("rendererImplementation"u8, p.RendererImplementation.Value);
             w.WriteString("formatter"u8, p.Formatter.Value); w.WriteString("formatterImplementation"u8, p.FormatterImplementation.Value);
@@ -22,6 +23,7 @@ internal static class ConfigurationRenderPinCodec
             w.WriteString("provider"u8, p.ProducerAction.Admission.ProviderKind.Value);
             w.WriteString("configuration"u8, p.ProducerAction.Admission.ConfigurationContract.Value);
             w.WriteString("implementation"u8, p.ProducerAction.Admission.ImplementationId.Value);
+            w.WriteNumber("mode"u8, (int)p.ProducerAction.Admission.Mode);
             w.WriteString("action"u8, p.ProducerAction.ActionContract.Value); w.WriteEndObject();
             Value("defaults", p.Defaults); Value("options", p.Options);
             w.WriteStartObject("origins"u8);
@@ -46,10 +48,18 @@ internal static class ConfigurationRenderPinCodec
                     "Binding" => ProfileOptionScope.Binding,
                     _ => throw new InvalidDataException()
                 }, StringComparer.Ordinal))).ToImmutableArray();
-    private static DurableActionExecutionKey Action(JsonElement a) => new(new(
-        ResourceTypeId.Create(a.GetProperty("resource"u8).GetString()!), ProviderKindId.Create(a.GetProperty("provider"u8).GetString()!),
-        ProviderConfigurationContractId.Create(a.GetProperty("configuration"u8).GetString()!), ProviderImplementationId.Create(a.GetProperty("implementation"u8).GetString()!)),
-        OperationContractId.Create(a.GetProperty("action"u8).GetString()!));
+    private static DurableActionExecutionKey Action(JsonElement a)
+    {
+        var mode = a.GetProperty("mode"u8).GetInt32() switch
+        {
+            0 => ResourceAcquisitionMode.Provision,
+            1 => ResourceAcquisitionMode.ImportUseAndRetain,
+            _ => throw new InvalidDataException("Invalid producer acquisition mode.")
+        };
+        return new(new(ResourceTypeId.Create(a.GetProperty("resource"u8).GetString()!), ProviderKindId.Create(a.GetProperty("provider"u8).GetString()!),
+            ProviderConfigurationContractId.Create(a.GetProperty("configuration"u8).GetString()!), ProviderImplementationId.Create(a.GetProperty("implementation"u8).GetString()!))
+        { Mode = mode }, OperationContractId.Create(a.GetProperty("action"u8).GetString()!));
+    }
     private static ConfigurationObject Object(JsonElement p, string key) =>
         ConfigurationValueMapper.FromValidatedJson(p.GetProperty(key)) as ConfigurationObject ?? throw new InvalidDataException();
 
