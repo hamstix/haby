@@ -278,10 +278,16 @@ public sealed partial class ExactActionAdmissionTests
     private sealed class OutputFactory(string connection, IInterceptor? interceptor = null, bool failReread = false)
         : IDbContextFactory<ManifestCatalogDbContext>
     {
-        private int count;
+        private int failedRereads;
+        internal int FailedRereads => Volatile.Read(ref failedRereads);
         public ManifestCatalogDbContext CreateDbContext()
         {
-            if (Interlocked.Increment(ref count) > 1 && failReread) throw new IOException("Private storage details.");
+            // Verification can create contexts before commit; inject only the actual lost-response reread.
+            if (failReread && interceptor is OutputLostCommit { Thrown: true })
+            {
+                Interlocked.Increment(ref failedRereads);
+                throw new IOException("Private storage details.");
+            }
             var builder = new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(connection);
             if (interceptor is not null) builder.AddInterceptors(interceptor);
             return new(builder.Options);
@@ -447,10 +453,17 @@ public sealed partial class ExactActionAdmissionTests
         var original = await CredentialBytes(services, producer, output.Reference);
         var started = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(producer, DateTimeOffset.UtcNow, default));
         var lost = new OutputLostCommit();
-        var outputs = new PostgreSqlGeneratedCredentialOperations(new OutputFactory(scenario.Connection, lost, failReread),
-            services.GetRequiredService<ISecretStore>());
+        var factory = new OutputFactory(scenario.Connection, lost, failReread);
+        var outputs = new PostgreSqlGeneratedCredentialOperations(factory, services.GetRequiredService<ISecretStore>());
         Assert.Equal(!failReread, await outputs.CompleteAsync(producer, started.AttemptId, output, DateTimeOffset.UtcNow, default));
         Assert.True(lost.Thrown);
+        Assert.Equal(failReread ? 1 : 0, factory.FailedRereads);
+        await using (var persisted = OutputContext(scenario.Connection))
+        {
+            Assert.Equal("Succeeded", (await persisted.DurableOperations.AsNoTracking().SingleAsync(r => r.OperationId == producer.OperationId.Value)).State);
+            Assert.Equal(1, await persisted.OperationOutputs.CountAsync());
+            Assert.Equal(1, await persisted.GeneratedCredentialCreationAudits.CountAsync());
+        }
         Assert.Equal(DurableExecutionOutcome.Succeeded, (await services.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(producer, default)).Outcome);
         Assert.Equal(output, await ordinary.ConsumeAsync(ConsumerKey(scenario.Commit), PasswordSelector, default));
         Assert.True(Enumerable.SequenceEqual(original, await CredentialBytes(services, producer, output.Reference)), "Ambiguous commit retains exact material.");
