@@ -43,18 +43,33 @@ public sealed partial class ManifestOperatorService
             },
             Binding = result.Alias is { } alias ? new() { Alias = alias.Alias.Value, InstanceId = alias.Binding.InstanceId.ToString(), Revision = alias.Binding.RevisionNumber.Value } : null
         };
-        if (result.Preflight is { } check) reply.Preflight = check.Outcome switch
+        if (result.Preflight is { } check)
         {
-            ProviderPreflightOutcome.Ready => ProviderPreflightStatus.Ready,
-            ProviderPreflightOutcome.RevisionUnavailable => ProviderPreflightStatus.RevisionUnavailable,
-            ProviderPreflightOutcome.SecretUnavailable => ProviderPreflightStatus.SecretUnavailable,
-            ProviderPreflightOutcome.AuthenticationFailed => ProviderPreflightStatus.AuthenticationFailed,
-            ProviderPreflightOutcome.ServerUnavailable => ProviderPreflightStatus.ServerUnavailable,
-            ProviderPreflightOutcome.InsufficientPrivilege => ProviderPreflightStatus.InsufficientPrivilege,
-            ProviderPreflightOutcome.DeadlineExceeded => ProviderPreflightStatus.DeadlineExceeded,
-            ProviderPreflightOutcome.HandlerUnavailable => ProviderPreflightStatus.HandlerUnavailable,
-            _ => ProviderPreflightStatus.ConfigurationUnavailable
-        };
+            reply.ServerCertificateValidationDisabled = check.ServerCertificateValidationDisabled;
+            if (check.ConnectionDiagnostic is { } diagnostic) reply.ConnectionDiagnostic = diagnostic switch
+            {
+                ProviderConnectionDiagnostic.TlsTrustFailed => ProviderConnectionDiagnosticCode.TlsTrustFailed,
+                ProviderConnectionDiagnostic.TlsNameMismatch => ProviderConnectionDiagnosticCode.TlsNameMismatch,
+                ProviderConnectionDiagnostic.TlsCertificateTimeInvalid => ProviderConnectionDiagnosticCode.TlsCertificateTimeInvalid,
+                ProviderConnectionDiagnostic.TlsCertificateRevoked => ProviderConnectionDiagnosticCode.TlsCertificateRevoked,
+                ProviderConnectionDiagnostic.TlsRevocationUnavailable => ProviderConnectionDiagnosticCode.TlsRevocationUnavailable,
+                ProviderConnectionDiagnostic.DnsUnavailable => ProviderConnectionDiagnosticCode.DnsUnavailable,
+                ProviderConnectionDiagnostic.ConnectionUnavailable => ProviderConnectionDiagnosticCode.ConnectionUnavailable,
+                _ => ProviderConnectionDiagnosticCode.TlsValidationFailed,
+            };
+            reply.Preflight = check.Outcome switch
+            {
+                ProviderPreflightOutcome.Ready => ProviderPreflightStatus.Ready,
+                ProviderPreflightOutcome.RevisionUnavailable => ProviderPreflightStatus.RevisionUnavailable,
+                ProviderPreflightOutcome.SecretUnavailable => ProviderPreflightStatus.SecretUnavailable,
+                ProviderPreflightOutcome.AuthenticationFailed => ProviderPreflightStatus.AuthenticationFailed,
+                ProviderPreflightOutcome.ServerUnavailable => ProviderPreflightStatus.ServerUnavailable,
+                ProviderPreflightOutcome.InsufficientPrivilege => ProviderPreflightStatus.InsufficientPrivilege,
+                ProviderPreflightOutcome.DeadlineExceeded => ProviderPreflightStatus.DeadlineExceeded,
+                ProviderPreflightOutcome.HandlerUnavailable => ProviderPreflightStatus.HandlerUnavailable,
+                _ => ProviderPreflightStatus.ConfigurationUnavailable
+            };
+        }
         return reply;
     }
 }

@@ -11,7 +11,7 @@ internal sealed class KubernetesRuntimeAuthenticator(ISecretStore secrets,
     Func<KubernetesConnection, DelegatingHandler[], CancellationToken, ValueTask<KernelClient>>? fixture = null) : IRuntimeAuthenticator
 {
     public RuntimeAuthenticatorContract Contract { get; } = new("haby.kubernetes.token-review/v1", RuntimeIdentityCodec.ValidationContract, 1,
-        KubernetesProviderConfigurationCodec.Kind, KubernetesProviderConfigurationCodec.Shape, 1, KubernetesProviderConfigurationCodec.Implementation);
+        KubernetesProviderConfigurationCodec.Kind, KubernetesProviderConfigurationCodec.Shape, 2, KubernetesProviderConfigurationCodec.Implementation);
 
     private static (RuntimeValidationContext Validation, RuntimeAccountReceipt Receipt, KubernetesConnection Connection) Decode(RuntimeTrust trust)
     {
@@ -31,7 +31,7 @@ internal sealed class KubernetesRuntimeAuthenticator(ISecretStore secrets,
             value.Namespace != original.Namespace || value.ServiceAccountUid != receipt.Uid || value.Mode != "service-account-bound")
             throw new InvalidDataException("Runtime trust metadata mismatch.");
         var config = new KubernetesProviderConfigurationCodec().DecodeTyped(trust.ConfigurationPayload);
-        var connection = new KubernetesConnection(value.Binding, config.Endpoint, config.ServerCaPem, config.BearerToken, config.ClientCertificate, config.ClientPrivateKey);
+        var connection = new KubernetesConnection(value.Binding, config.Endpoint, config.ServerCaPem, config.BearerToken, config.ClientCertificate, config.ClientPrivateKey, config.Tls);
         connection.Validate();
         return (value, receipt, connection);
     }

@@ -709,10 +709,23 @@ message ProviderAliasMetadata {
   string instance_id = 2;
   int64 revision = 3;
 }
+enum ProviderConnectionDiagnosticCode {
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_UNSPECIFIED = 0;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_TLS_VALIDATION_FAILED = 1;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_TLS_TRUST_FAILED = 2;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_TLS_NAME_MISMATCH = 3;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_TLS_CERTIFICATE_TIME_INVALID = 4;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_TLS_CERTIFICATE_REVOKED = 5;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_TLS_REVOCATION_UNAVAILABLE = 6;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_DNS_UNAVAILABLE = 7;
+  PROVIDER_CONNECTION_DIAGNOSTIC_CODE_CONNECTION_UNAVAILABLE = 8;
+}
 message ProviderAccessReply {
   ProviderAccessStatus status = 1;
   optional ProviderPreflightStatus preflight = 2;
   ProviderAliasMetadata binding = 3;
+  optional ProviderConnectionDiagnosticCode connection_diagnostic = 4;
+  bool server_certificate_validation_disabled = 5;
 }
 
 // Persisted metadata only. No action inputs, output payloads or material.

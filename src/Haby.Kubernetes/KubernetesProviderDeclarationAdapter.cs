@@ -20,8 +20,14 @@ public sealed class KubernetesProviderDeclarationAdapter(KubernetesProviderConfi
             ?? throw new ArgumentException("Invalid Kubernetes properties.");
         if (properties.TryGetProperty("serverCaPem"u8, out var ca) && ca.ValueKind == JsonValueKind.Null)
             throw new ArgumentException("Invalid Kubernetes trust roots.");
+        if (properties.TryGetProperty("tls"u8, out var tls))
+        {
+            if (tls.ValueKind != JsonValueKind.Object ||
+                tls.TryGetProperty("revocation"u8, out var revocation) && revocation.ValueKind == JsonValueKind.Null)
+                throw new ArgumentException("Invalid Kubernetes TLS policy.");
+        }
         _ = codec.Encode(new(new Uri(value.Endpoint, UriKind.Absolute), value.ServerCaPem,
-            new(SecretId.New(), SecretVersionId.New()), null, null));
+            new(SecretId.New(), SecretVersionId.New()), null, null, Policy(value)));
         return value;
     }
 
@@ -34,10 +40,13 @@ public sealed class KubernetesProviderDeclarationAdapter(KubernetesProviderConfi
         secrets.TryGetValue("client-certificate", out var certificate);
         secrets.TryGetValue("client-private-key", out var key);
         var configuration = new KubernetesProviderConfiguration(new Uri(value.Endpoint, UriKind.Absolute),
-            value.ServerCaPem, bearer, certificate, key);
+            value.ServerCaPem, bearer, certificate, key, Policy(value));
         _ = codec.Encode(configuration);
         return configuration;
     }
+
+    private static KubernetesTlsPolicy? Policy(KubernetesDeclarationProperties value) => value.Tls is null ? null :
+        KubernetesTlsPolicy.Parse(value.Tls.Mode, value.Tls.Revocation, value.ServerCaPem);
 
     public bool CanReplace(ProviderAdapterKey previous) => previous == Key;
     public bool Equivalent(object previous, object candidate) =>
@@ -51,8 +60,16 @@ internal sealed class KubernetesDeclarationProperties
 {
     public required string Endpoint { get; init; }
     public string? ServerCaPem { get; init; }
+    public KubernetesDeclarationTls? Tls { get; init; }
 }
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed class KubernetesDeclarationTls
+{
+    public required string Mode { get; init; }
+    public string? Revocation { get; init; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(KubernetesDeclarationProperties))]
 internal partial class DeclarationJson : JsonSerializerContext;

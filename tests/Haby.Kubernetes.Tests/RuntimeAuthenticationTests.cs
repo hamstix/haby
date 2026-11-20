@@ -10,14 +10,19 @@ namespace Haby.Kubernetes.Tests;
 
 public sealed class RuntimeAuthenticationTests
 {
-    private static RuntimeTrust Trust()
+    private static RuntimeTrust Trust(KubernetesTlsPolicy? tls = null)
     {
         var context = InternalDeploymentPlacementTests.Contexts(false, configured: true)[0] with { InstallationId = Guid.NewGuid() };
+        if (tls is not null)
+        {
+            var codec = new KubernetesProviderConfigurationCodec();
+            context = context with { Configuration = codec.Encode(codec.DecodeTyped(context.Configuration.PayloadJson) with { Tls = tls }) };
+        }
         var handler = new InternalRuntimeIdentityAction(null!);
         var receipt = new RuntimeAccountReceipt(RuntimeIdentityCodec.Decode(handler.Prepare(context)), "expected-uid", false, ConfirmationSource.Response);
         return new(Guid.NewGuid(), context.InstallationId, Guid.Parse(context.Provider.Environment.ToString()), context.ManagedIdentity,
             Guid.Parse(context.Provider.Instance.ToString()), context.Provider.Configuration.Value, context.Provider.Implementation.Value,
-            KubernetesProviderConfigurationCodec.Kind, KubernetesProviderConfigurationCodec.Shape, 1, context.Configuration.PayloadJson,
+            KubernetesProviderConfigurationCodec.Kind, KubernetesProviderConfigurationCodec.Shape, 2, context.Configuration.PayloadJson,
             "haby.kubernetes.token-review/v1", RuntimeIdentityCodec.Audience(receipt.Intent), RuntimeIdentityCodec.ValidationContract, 1,
             RuntimeIdentityCodec.Validation(receipt), handler.Contract.OutputContract, 1, RuntimeIdentityCodec.Encode(receipt), false);
     }
@@ -26,6 +31,21 @@ public sealed class RuntimeAuthenticationTests
         // Use the real bounded response handler before the pinned SDK parses either success or error.
         return ValueTask.FromResult(new KernelClient(new k8s.Kubernetes(new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, [.. handlers, api])));
     });
+
+    [Fact]
+    public async Task TokenReview_factory_uses_frozen_format_two_policy_after_reload()
+    {
+        var expected = new KubernetesTlsPolicy(KubernetesTlsMode.System, KubernetesRevocationMode.Offline);
+        var trust = Trust(expected); KubernetesTlsPolicy? seen = null;
+        var adapter = new KubernetesRuntimeAuthenticator(null!, (connection, _, _) =>
+        {
+            seen = connection.Tls;
+            return ValueTask.FromException<KernelClient>(new IOException("test-only unavailable"));
+        });
+        Assert.True(adapter.Validate(trust));
+        Assert.Equal(RuntimeAuthenticationOutcome.Unavailable, await adapter.AuthenticateAsync(trust, "transient"u8.ToArray(), default));
+        Assert.Equal(expected, seen);
+    }
 
     [Fact]
     public async Task One_call_uses_persisted_audience_and_authenticated_fields_without_returning_token()

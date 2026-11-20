@@ -1,13 +1,9 @@
 # Kubernetes Provider administration
 
-> Accepted policy amendment: [ADR-060](../adr/0060-explicit-kubernetes-provider-tls-policy.md)
-> authorizes explicit Kubernetes Provider trust and revocation modes in issue #261,
-> immediately after #259. Earlier mandatory-Online wording below describes the
-> current implementation and remains the omitted-policy default. The accepted
-> operator policy capability is not a fixture exception; it must cover TokenReview
-> and all other production factories. It is not implemented by this documentation.
-> The maintainer selected explicit fresh-catalog format 2, without automatic reset,
-> backfill, legacy v1 reading or adoption of existing external resources.
+> [Explicit TLS policy](261-kubernetes-provider-tls.md) implements ADR-060 with
+> Online defaults, typed trust/revocation choices and current format 2. Read its
+> immutable revision, platform/cache and explicit fresh-catalog boundaries before
+> replacing an installation. No automatic reset, v1 reader or external adoption.
 
 Kubernetes Provider preparation uses the authenticated operator Host and the
 existing API-only `habyctl provider` commands. It prepares immutable,
@@ -28,18 +24,19 @@ The [bearer example](examples/204-kubernetes-bearer.json) selects `bearer-token`
 The [mTLS example](examples/204-kubernetes-mtls.json) selects both
 `client-certificate` and `client-private-key`. These alternatives are mutually
 exclusive; empty, incomplete, mixed and unknown slot sets refuse. Properties
-contain required `endpoint` and optional `serverCaPem` only. Unknown properties,
+contain required `endpoint`, optional `serverCaPem` and optional typed `tls`.
+The TLS object requires an explicit mode when supplied. Unknown properties,
 explicit null, malformed PEM, credential properties and namespace refuse.
 
 `endpoint` is an explicit HTTPS origin, with no user information, query,
 fragment or path beyond `/`. Omit `serverCaPem` to use system roots, or provide
 one or more PEM certificates for explicit custom root trust. The CA is public
 trust material, never a client private key. Use an identity/hostname matching
-the server certificate. Neither trust mode disables hostname, validity, server
-authentication purpose or revocation checks. Production uses Online revocation
-with fail-closed chain validation; deploy certificates whose revocation
-information is available to the Host. Unavailable revocation information causes
-check failure. No operator option selects NoCheck or insecure transport.
+the server certificate. Omitted policy validates hostname, validity, server-auth
+usage and Online revocation fail-closed. Explicit `tls` selects the accepted
+system/customCa revocation choices or deliberate insecure policy as described in
+the TLS guide; NoCheck disables revocation only. Unavailable revocation fails
+rather than selecting a weaker policy. There is no automatic downgrade.
 
 ```text
 habyctl provider apply --file kubernetes-provider.json --environment staging
