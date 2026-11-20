@@ -83,6 +83,7 @@ internal static partial class DurableAggregateCompletion
                 var row = number == generation ? root : await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == number, token);
                 if (row is null || row.ApplicationRecordId != owner.ApplicationRecordId || row.EnvironmentRecordId != owner.EnvironmentRecordId || row.Presence != nameof(DesiredPresence.Present)) return null;
                 var inputs = row.Inputs();
+                if (managed.Where(x => x.SourceGeneration == number).Any(x => !ResourceContinuity.HasAcquisitionAuthority(x, inputs))) return null;
                 var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
                 graph.ValidateReferences(inputs);
                 if (inputs.Configuration is not { } configuration || row.InternalEffects && purpose != EvidencePurpose.InternalResourceStage || !row.InternalEffects && configuration.Manifest.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||

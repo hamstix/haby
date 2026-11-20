@@ -99,6 +99,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         try
         {
             inputs = plan.Inputs();
+            if (!Equals(inputs.Import, ResourceImportIntentCodec.Decode(change.ImportIntentJson))) return new DurableCommitResult.PlanInputUnavailable();
             graph = DurableOperationGraphCodec.Decode(plan.GraphJson);
             if (graph.WorkloadUpdate is not null && mode != DeploymentAdmissionMode.Internal) return new DurableCommitResult.UnsupportedShape();
             var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(x =>
@@ -304,7 +305,9 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 Application = change.ApplicationRecordId,
                 Resource = resource.Value,
                 Deployment = deploymentGuid,
-                SourceGeneration = generation
+                SourceGeneration = generation,
+                Origin = inputs.Import is null ? ResourceOrigin.Provisioned : ResourceOrigin.Imported,
+                Authority = inputs.Import is null ? ResourceLifecycleAuthority.Provisioned : ResourceLifecycleAuthority.UseAndRetain
             });
         await context.SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();

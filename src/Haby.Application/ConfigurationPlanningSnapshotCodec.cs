@@ -7,7 +7,7 @@ namespace Haby.Application;
 /// <summary>Closed current planning format, with explicit frozen capability inputs and a checked saved layout.</summary>
 internal static class ConfigurationPlanningSnapshotCodec
 {
-    internal const int Version = 3;
+    internal const int Version = 4;
     internal static string Encode(ConfigurationPlanningSnapshot snapshot)
     {
         using var stream = new MemoryStream();

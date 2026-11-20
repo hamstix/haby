@@ -9,6 +9,8 @@ namespace Haby.Application;
 public sealed record DurableActionAdmissionKey(ResourceTypeId ResourceContract, ProviderKindId ProviderKind,
     ProviderConfigurationContractId ConfigurationContract, ProviderImplementationId ImplementationId)
 {
+    public ResourceAcquisitionMode Mode { get; init; }
+
     public DurableActionAdmissionKey(ResourceTypeId resourceContract, ProviderAdapterKey provider)
         : this(resourceContract, ProviderKindId.Create(provider.ProviderKind),
             ProviderConfigurationContractId.Create(provider.ConfigurationContract), ProviderImplementationId.Create(provider.ImplementationId))
@@ -120,13 +122,13 @@ public sealed class DurableActionRegistry
             var key = handler.Key;
             if (key?.Admission?.ResourceContract is null || key.ActionContract is null ||
                 key.Admission.ProviderKind is null || key.Admission.ConfigurationContract is null ||
-                key.Admission.ImplementationId is null ||
+                key.Admission.ImplementationId is null || !Enum.IsDefined(key.Admission.Mode) ||
                 !admissions.TryAdd(key.Admission, handler))
                 throw new InvalidOperationException("Durable action registration is invalid or ambiguous.");
         }
         foreach (var executor in executors)
             if (executor.Key is not { } key || key.Admission?.ResourceContract is null || key.ActionContract is null ||
-                key.Admission.ProviderKind is null || key.Admission.ConfigurationContract is null || key.Admission.ImplementationId is null ||
+                key.Admission.ProviderKind is null || key.Admission.ConfigurationContract is null || key.Admission.ImplementationId is null || !Enum.IsDefined(key.Admission.Mode) ||
                 !handlers.TryAdd(key, executor))
                 throw new InvalidOperationException("Durable executor registration is invalid or ambiguous.");
     }
@@ -158,14 +160,17 @@ public sealed class DurableActionRegistry
 /// <summary>The same pure admission rule is used by durable Plan, Check and atomic Commit.</summary>
 public sealed class DurableActionAdmission(DurableActionRegistry registry)
 {
+    private static DurableActionAdmissionKey AdmissionKey(ResourceTypeId type, ProviderAdapterKey provider, DurablePlanningInputs inputs) =>
+        new(type, provider) { Mode = inputs.Import is null ? ResourceAcquisitionMode.Provision : ResourceAcquisitionMode.ImportUseAndRetain };
+
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target,
         ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
         accepted.Resources.All(r =>
             target.Resources.ContainsKey(r.Key) &&
-            registry.Find(new DurableActionAdmissionKey(r.Value.Type, provider)) is IDurableResourceReusePolicy policy &&
+            registry.Find(AdmissionKey(r.Value.Type, provider, inputs)) is IDurableResourceReusePolicy policy &&
             policy.CanReuse(accepted, target, r.Key, inputs, configuration)) &&
         target.Resources.Where(r => !accepted.Resources.ContainsKey(r.Key)).All(r =>
-            registry.Find(new DurableActionAdmissionKey(r.Value.Type, provider)) is IDurableResourceAdditionPolicy policy &&
+            registry.Find(AdmissionKey(r.Value.Type, provider, inputs)) is IDurableResourceAdditionPolicy policy &&
             policy.CanAdd(accepted, target, r.Key, inputs, configuration));
 
     public static bool SupportsPilotShape(NormalizedManifestSpec spec) => spec.Resources.Count is > 0 and <= 256 &&
@@ -178,11 +183,13 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
     public static ProviderAlias? SingleAlias(NormalizedManifestSpec spec) =>
         spec.Resources.Values.Select(r => r.ProviderRef).Distinct().Take(2).ToArray() is [var alias] ? alias : null;
 
-    public bool HasPlanningSupport(NormalizedManifestSpec spec, ProviderAdapterKey provider) =>
-        spec.Resources.Values.All(r => registry.Find(new DurableActionAdmissionKey(r.Type, provider)) is not null);
+    public bool HasPlanningSupport(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs? inputs = null,
+        IReadOnlySet<ManifestLocalId>? existingResources = null) =>
+        spec.Resources.Where(r => existingResources?.Contains(r.Key) != true).All(r => registry.Find(new DurableActionAdmissionKey(r.Value.Type, provider)
+        { Mode = inputs?.Import is null ? ResourceAcquisitionMode.Provision : ResourceAcquisitionMode.ImportUseAndRetain }) is not null);
 
     public DurablePlanStatus Admit(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration? configuration = null)
+        PreparedProviderConfiguration? configuration = null, IReadOnlySet<ManifestLocalId>? existingResources = null)
     {
         if (!SupportsPilotShape(spec)) return DurablePlanStatus.UnsupportedShape;
         inputs.Validate();
@@ -191,10 +198,10 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         var pilot = inputs.Providers.RequireUniformResourceProvider();
         if (SingleAlias(spec) != pilot.Alias || provider.ImplementationId != pilot.Implementation.Value)
             return DurablePlanStatus.ProviderRevisionUnavailable;
-        foreach (var resource in spec.Resources)
+        foreach (var resource in spec.Resources.Where(r => existingResources?.Contains(r.Key) != true))
         {
-            var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider));
-            if (handler is null) return DurablePlanStatus.ProviderCapabilityMismatch;
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs));
+            if (handler is null) return inputs.Import is null ? DurablePlanStatus.ProviderCapabilityMismatch : DurablePlanStatus.ImportNotSupported;
             var valid = handler is IDurableResourcePlanComposer composer && configuration is not null
                 ? composer.Validate(spec, resource.Key, inputs, configuration)
                 : spec.Resources.Count == 1 && SupportsConfigurationComponents(spec) && handler.Validate(resource.Key, resource.Value, inputs);
@@ -206,15 +213,15 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
             if (handler is IResourceNamingPolicyHandler naming && !naming.SupportsNaming(names.Policy))
                 return DurablePlanStatus.UnsupportedShape;
         }
-        return DurablePlanStatus.Planned;
+        return completeInputs ? DurablePlanStatus.Planned : DurablePlanStatus.PlanInputUnavailable;
     }
     public IReadOnlyList<DurableOperationNode> DescribeProducers(NormalizedManifestSpec spec, ProviderAdapterKey provider,
-        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, IReadOnlySet<ManifestLocalId>? existingResources = null)
     {
-        if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
-        return spec.Resources.SelectMany(r =>
+        if (Admit(spec, provider, inputs, configuration, existingResources) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
+        return spec.Resources.Where(r => existingResources?.Contains(r.Key) != true).SelectMany(r =>
         {
-            var handler = registry.Find(new DurableActionAdmissionKey(r.Value.Type, provider))!;
+            var handler = registry.Find(AdmissionKey(r.Value.Type, provider, inputs))!;
             return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
                 : handler.Plan(r.Key, r.Value, inputs);
         }).ToArray();
@@ -228,12 +235,12 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         var nodes = new List<DurableOperationNode>();
         foreach (var resource in spec.Resources.OrderBy(r => r.Key.Value, StringComparer.Ordinal))
         {
-            var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider))!;
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs))!;
             nodes.AddRange(handler is IDurableResourcePlanComposer composer && configuration is not null
                 ? composer.Plan(spec, resource.Key, inputs, configuration)
                 : handler.Plan(resource.Key, resource.Value, inputs));
         }
-        var graph = new DurableOperationGraph(nodes.Select(registry.FreezeEvidence));
+        var graph = new DurableOperationGraph(nodes.Select(registry.FreezeEvidence)) { Import = inputs.Import };
         graph.ValidateReferences(inputs);
         if (!ValidateGraph(spec, provider, inputs, configuration, graph))
             throw new InvalidDataException("Graph ownership or contracts are inconsistent.");
@@ -246,10 +253,10 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         graph.ValidateReferences(inputs);
         foreach (var node in graph.Nodes)
             if (!spec.Resources.TryGetValue(node.ResourceId, out var declared) ||
-                node.Action.Admission != new DurableActionAdmissionKey(declared.Type, provider)) return false;
+                node.Action.Admission != AdmissionKey(declared.Type, provider, inputs)) return false;
         foreach (var resource in spec.Resources)
         {
-            var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider))!;
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs))!;
             if (handler is IDurableResourcePlanComposer composer && configuration is not null)
             {
                 if (!composer.ValidateGraph(spec, resource.Key, inputs, configuration, graph)) return false;
@@ -263,10 +270,10 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
     public DurableOperationGraph PlanUpdate(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
         PreparedProviderConfiguration configuration, IReadOnlyList<ResourceReuse> reused, ResourceReuseBaseline baseline, IReadOnlyList<ResourceReuse>? retained = null)
     {
-        if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
+        if (Admit(spec, provider, inputs, configuration, reused.Select(x => x.Resource).ToHashSet()) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
         var nodes = spec.Resources.Where(r => !reused.Any(x => x.Resource == r.Key)).SelectMany(r =>
         {
-            var handler = registry.Find(new DurableActionAdmissionKey(r.Value.Type, provider))!;
+            var handler = registry.Find(AdmissionKey(r.Value.Type, provider, inputs))!;
             return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
                 : handler.Plan(r.Key, r.Value, inputs);
         });
@@ -274,11 +281,11 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         graph.ValidateReferences(inputs);
         if (!spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(reused.Select(r => r.Resource))) ||
             graph.Nodes.Any(n => !spec.Resources.TryGetValue(n.ResourceId, out var declared) ||
-                n.Action.Admission != new DurableActionAdmissionKey(declared.Type, provider)))
+                n.Action.Admission != AdmissionKey(declared.Type, provider, inputs)))
             throw new InvalidDataException("Graph Resource inventory is inconsistent.");
         foreach (var resource in spec.Resources.Where(r => !reused.Any(x => x.Resource == r.Key)))
         {
-            var handler = registry.Find(new DurableActionAdmissionKey(resource.Value.Type, provider))!;
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs))!;
             if (handler is IDurableResourcePlanComposer composer && !composer.ValidateGraph(spec, resource.Key, inputs, configuration, graph))
                 throw new InvalidDataException("Graph ownership or contracts are inconsistent.");
             if (handler is not IDurableResourcePlanComposer && graph.Nodes.Where(n => n.ResourceId == resource.Key).Any(n =>
@@ -290,26 +297,26 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
 
     public bool SameResourceNames(NormalizedManifestSpec spec, ManifestLocalId resource, ProviderAdapterKey provider,
         DurablePlanningInputs original, DurablePlanningInputs proposed, PreparedProviderConfiguration configuration) =>
-        registry.Find(new DurableActionAdmissionKey(spec.Resources[resource].Type, provider)) is IDurableResourceNamingCompatibility policy
+        registry.Find(AdmissionKey(spec.Resources[resource].Type, provider, original)) is IDurableResourceNamingCompatibility policy
             ? policy.SameNames(spec, resource, original, proposed, configuration)
             : original.Providers.Resource(resource).ResourceNaming() == proposed.Providers.Resource(resource).ResourceNaming();
 
     public bool CanReuseResource(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
-        ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurablePlanningInputs originalInputs) =>
         accepted.Resources.TryGetValue(resource, out var declared) &&
-        registry.Find(new DurableActionAdmissionKey(declared.Type, provider)) is IDurableResourceReusePolicy policy &&
+        registry.Find(AdmissionKey(declared.Type, provider, originalInputs)) is IDurableResourceReusePolicy policy &&
         policy.CanReuse(accepted, target, resource, inputs, configuration);
 
     public bool CanRetainResource(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
-        ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+        ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, DurablePlanningInputs originalInputs) =>
         original.Resources.TryGetValue(resource, out var declared) &&
-        registry.Find(new DurableActionAdmissionKey(declared.Type, provider)) is IDurableResourceRetentionPolicy policy &&
+        registry.Find(AdmissionKey(declared.Type, provider, originalInputs)) is IDurableResourceRetentionPolicy policy &&
         policy.CanRetain(original, target, resource, inputs, configuration);
 
     public bool CanAddResource(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
         ProviderAdapterKey provider, DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
         target.Resources.TryGetValue(resource, out var declared) &&
-        registry.Find(new DurableActionAdmissionKey(declared.Type, provider)) is IDurableResourceAdditionPolicy policy &&
+        registry.Find(AdmissionKey(declared.Type, provider, inputs)) is IDurableResourceAdditionPolicy policy &&
         policy.CanAdd(accepted, target, resource, inputs, configuration);
 
     // Validate original creation nodes against their own frozen declaration, including
@@ -324,5 +331,8 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         return expected.Equals(graph);
     }
 
-    public bool Supports(DurableOperationGraph graph) => graph.Nodes.All(n => registry.MatchesEvidence(n) && registry.Find(n.Action)?.Supports(n) == true);
+    public bool Supports(DurableOperationGraph graph) => graph.Nodes.All(n =>
+        (n.Action.Admission.Mode == ResourceAcquisitionMode.Provision ||
+         n.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain && n.RequiresExternalOutput && !GeneratedCredentialContracts.IsProducer(n)) &&
+        registry.MatchesEvidence(n) && registry.Find(n.Action)?.Supports(n) == true);
 }

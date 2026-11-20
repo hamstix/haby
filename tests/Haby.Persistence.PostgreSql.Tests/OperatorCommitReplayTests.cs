@@ -75,7 +75,7 @@ public sealed class OperatorCommitReplayTests
             SnapshotFormatVersion = DurableInputStorage.Version,
             ProviderInputsJson = "same-canonical-provider-inputs",
             ConfigurationJson = "same-canonical-configuration",
-            Fingerprint = "v5:" + new string('a', 64),
+            Fingerprint = "v6:" + new string('a', 64),
             GraphJson = DurableOperationGraphCodec.Encode(new([])),
             Presence = nameof(DesiredPresence.Present),
             ActorId = "creation-operator",
@@ -95,7 +95,7 @@ public sealed class OperatorCommitReplayTests
             ProviderInputsJson = generation.ProviderInputsJson,
             ConfigurationJson = generation.ConfigurationJson,
             GraphJson = DurableOperationGraphCodec.Encode(graph),
-            Fingerprint = "v5:" + new string('c', 64),
+            Fingerprint = "v6:" + new string('c', 64),
             ActorId = "plan-operator"
         };
         return (change, receipt, plan, generation);

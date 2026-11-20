@@ -94,5 +94,19 @@ public sealed class DurablePlannerGuardTests
             await planner.ClosePlanAsync(DeploymentPlanId.New(), "invalid\nactor", default));
     }
 
+    [Fact]
+    public void Resource_management_persists_explicit_origin_and_lifecycle_authority()
+    {
+        using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
+        var entity = db.Model.FindEntityType(typeof(ResourceManagementRow))!;
+        var origin = entity.FindProperty("Origin");
+        var authority = entity.FindProperty("Authority");
+        Assert.NotNull(origin);
+        Assert.NotNull(authority);
+        Assert.False(origin.IsNullable);
+        Assert.False(authority.IsNullable);
+        Assert.Null(origin.FindAnnotation("Relational:DefaultValue"));
+        Assert.Null(authority.FindAnnotation("Relational:DefaultValue"));
+    }
     private sealed class FixedClock : TimeProvider { }
 }

@@ -25,6 +25,14 @@ internal static class ResourceContinuity
     }
     internal static DurablePlanningInputs Inputs(DeploymentGenerationRow row) => row.Inputs();
 
+    internal static bool HasAcquisitionAuthority(ResourceManagementRow management, DurablePlanningInputs inputs) =>
+        management.Environment == Guid.Parse(inputs.Environment.ToString()) &&
+        management.Application == Guid.Parse(inputs.Revision.ApplicationRecordId.ToString()) &&
+        inputs.Providers.Declaration.Spec.Resources.Keys.Any(x => x.Value == management.Resource) &&
+        management.Origin == (inputs.Import is null ? ResourceOrigin.Provisioned : ResourceOrigin.Imported) &&
+        management.Authority == (inputs.Import is null ? ResourceLifecycleAuthority.Provisioned : ResourceLifecycleAuthority.UseAndRetain);
+
+
     internal static async Task<bool> ValidateOutputsAsync(ManifestCatalogDbContext db, Guid deployment,
         DurableOperationGraph reuse, IEnumerable<IExternalOperationOutputContract> registrations,
         IEnumerable<IProviderConfigurationCodec> codecs, DurableActionAdmission admission, DurablePlanningInputs target, CancellationToken token, bool validateMaterial = false, long? creationGeneration = null)
@@ -58,9 +66,19 @@ internal static class ResourceContinuity
             var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
             if (!admission.Supports(graph) || !admission.ValidateCreationGraph(inputs.Configuration!.Manifest.Spec, adapter, inputs, configuration, graph)) return false;
             foreach (var requirement in reuse.ReusedResources.Where(x => x.SourceGeneration == generation))
-                if (!admission.CanReuseResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration)) return false;
+            {
+                var management = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == requirement.ManagementId, token);
+                if (management is null) return false;
+                if (management.Authority == ResourceLifecycleAuthority.UseAndRetain)
+                {
+                    var a = inputs.Configuration!.Manifest.Spec.Resources[requirement.Resource];
+                    if (!target.Configuration!.Manifest.Spec.Resources.TryGetValue(requirement.Resource, out var b) ||
+                        a.Type != b.Type || a.ProviderRef != b.ProviderRef || a.DeletionPolicy != b.DeletionPolicy || !a.Properties.Equals(b.Properties)) return false;
+                }
+                if (!admission.CanReuseResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration, inputs)) return false;
+            }
             foreach (var requirement in reuse.RetainedResources.Where(x => x.SourceGeneration == generation))
-                if (!admission.CanRetainResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration)) return false;
+                if (!admission.CanRetainResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration, inputs)) return false;
             var all = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation).ToArrayAsync(token);
             var references = all.Select(x => new ConfirmedOperationOutput(OperationId.Create(x.OperationId), new(x.Contract, x.Key, x.Payload))).ToArray();
             foreach (var node in graph.Nodes)
@@ -96,7 +114,10 @@ internal static class ResourceContinuity
         if (source is null || source.EnvironmentRecordId != management.Environment || source.ApplicationRecordId != management.Application)
             return null;
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
-        _ = Inputs(source);
+        var inputs = Inputs(source);
+        var imported = inputs.Import is not null;
+        if (management.Origin != (imported ? ResourceOrigin.Imported : ResourceOrigin.Provisioned) ||
+            management.Authority != (imported ? ResourceLifecycleAuthority.UseAndRetain : ResourceLifecycleAuthority.Provisioned)) return null;
         // The creation generation may contain reused peers. Its aggregate must have
         // completed; inspect this Resource's original nodes directly, never recurse.
         if (requireApplied && !await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == management.Deployment &&
@@ -108,8 +129,10 @@ internal static class ResourceContinuity
             await db.DurableOperations.AnyAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation &&
                 (!ids.Contains(x.OperationId) || x.State != nameof(DurableOperationState.Succeeded)), token)) return null;
         var nodes = graph.Nodes.Where(x => x.ResourceId.Value == management.Resource).ToArray();
-        if (nodes.Length == 0) return null;
-        var fields = new List<string> { source.Fingerprint, management.Id.ToString(), management.Resource };
+        if (nodes.Length == 0 || nodes.Any(n => n.Action.Admission.Mode !=
+            (imported ? ResourceAcquisitionMode.ImportUseAndRetain : ResourceAcquisitionMode.Provision) ||
+            imported && (!n.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(n)))) return null;
+        var fields = new List<string> { source.Fingerprint, management.Id.ToString(), management.Resource, management.Origin.ToString(), management.Authority.ToString() };
         foreach (var node in nodes)
         {
             var operation = await db.DurableOperations.AsNoTracking().SingleOrDefaultAsync(x =>
@@ -123,6 +146,8 @@ internal static class ResourceContinuity
             fields.Add(node.Id.Value); fields.Add(attempt.ToString());
             var outputs = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId &&
                 x.Generation == source.Generation && x.OperationId == node.Id.Value).OrderBy(x => x.Contract).ThenBy(x => x.Key).ToArrayAsync(token);
+            if (node.RequiresExternalOutput && (node.RequiredOutput is null || outputs.Length != 1 ||
+                outputs[0].Contract != node.RequiredOutput.Contract || outputs[0].Key != node.RequiredOutput.Key)) return null;
             foreach (var output in outputs) { fields.Add(output.Contract); fields.Add(output.Key); fields.Add(output.Payload); }
             // Every declared consumer selector must have its exact original producer output.
             foreach (var selector in graph.Nodes.SelectMany(x => x.OutputReferences).Where(x => x.ProducerOperationId == node.Id))
@@ -154,7 +179,8 @@ internal static class ResourceContinuity
                 await EvidenceAsync(db, managed, token) != reuse.EvidenceFingerprint) return false;
             if (graph.ReusedResources.Contains(reuse) && reuse.Reintroduced != previousGraph.RetainedResources.Any(x => x.Resource == reuse.Resource)) return false;
             var original = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == reuse.SourceGeneration, token);
-            var originalProvider = Inputs(original).Providers.Resource(reuse.Resource);
+            var originalInputs = Inputs(original);
+            var originalProvider = originalInputs.Providers.Resource(reuse.Resource);
             if (originalProvider.Instance != previousProvider.Instance || originalProvider.Configuration != previousProvider.Configuration ||
                 originalProvider.Implementation != previousProvider.Implementation) return false;
         }
