@@ -53,7 +53,7 @@ internal static class DeploymentReadiness
     }
     private static bool ValidCounts(DeploymentStatusEvidence e) => e.Generation > 0 && e.ObservedGeneration >= 0 && e.ObservedGeneration <= e.Generation &&
         e.Total >= 0 && e.Updated >= 0 && e.Ready >= 0 && e.Available >= 0 && e.Unavailable >= 0 &&
-        e.Updated <= e.Total && e.Ready <= e.Total && e.Available <= e.Ready && e.Unavailable <= e.Desired && e.Terminating is not < 0;
+        e.Updated <= e.Total && e.Ready <= e.Total && e.Available <= e.Ready && e.Terminating is not < 0;
     private static RolloutObservation Result(DeploymentStatusEvidence e)
     {
         var ready = !e.Paused && !e.Deleting && e.ObservedGeneration >= e.Generation &&
@@ -102,8 +102,9 @@ internal static class DeploymentReadiness
                 Count("readyReplicas"), Count("availableReplicas"), Count("unavailableReplicas"),
                 status?["terminatingReplicas"] is null ? null : Count("terminatingReplicas"), paused,
                 obj["metadata"]?["deletionTimestamp"] is not null, flags);
-            if (generation < receipt.KubernetesGeneration || !ValidCounts(evidence) ||
-                status?["unavailableReplicas"] is not null && evidence.Unavailable != Math.Max(evidence.Desired - evidence.Available, 0)) throw new FormatException();
+            // Kubernetes derives unavailable replicas from ReplicaSet desired totals, which can exceed
+            // Deployment replicas during surge. Strict target completion remains in Result.
+            if (generation < receipt.KubernetesGeneration || !ValidCounts(evidence)) throw new FormatException();
             return Result(evidence);
         }
         catch (Exception error) when (error is InvalidOperationException or FormatException or OverflowException or ArgumentException)

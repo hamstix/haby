@@ -5,7 +5,7 @@
   "nativePerPlatform": 104,
   "regularFullRetainsQualification": true,
   "currentPostgresql": 1229,
-  "currentFast": 1998,
+  "currentFast": 2002,
   "currentKubernetesApiObjects": 29,
   "currentKubernetesDurableActions": 36,
   "currentKubernetesProviderAccess": 10,
@@ -3641,6 +3641,10 @@
     {"method":"Haby.Kubernetes.Qualification.ConfiguredDeploymentCases.Run","case":"a228008f3308e6a9560db7c564d73fefc8112faec61e4acfafaa64bfd9741be2","suite":"api-consumer","gate":"kubernetes-configured-deployment","trigger":"every-change","scenario":"C13-configured-Deployment-Pod-ports-probes-defaults","addedFor245":true},
     {"method":"Haby.Kubernetes.Qualification.ConfiguredDeploymentCases.Run","case":"4c8d5b94083b3a90433ffffc8ef339ba7cff5f7f6f5f17f0ba0bba54ee560bdc","suite":"api-consumer","gate":"kubernetes-configured-deployment","trigger":"every-change","scenario":"R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied","addedFor245":true},
     {"method":"Haby.Kubernetes.Tests.PortsAndProbesTests.Frozen_named_port_order_remains_ordinal_across_codec_reload","case":"d5148e9f2b4785fc14c17bf589b123f29d6e482a6a8f6d8726f25585491ec2af","suite":"fast","gate":"validate","trigger":"every-change","addedFor245":true},
-    {"method":"Haby.Kubernetes.Tests.PortsAndProbesTests.Omitted_default_HTTP_root_path_matches_only_an_explicit_root_target","case":"06b9fc39a9c10a12ea174d1fd67546c78fd595c3b4c85c07e1ea277e92d71f9c","suite":"fast","gate":"validate","trigger":"every-change","addedFor245":true}
+    {"method":"Haby.Kubernetes.Tests.PortsAndProbesTests.Omitted_default_HTTP_root_path_matches_only_an_explicit_root_target","case":"06b9fc39a9c10a12ea174d1fd67546c78fd595c3b4c85c07e1ea277e92d71f9c","suite":"fast","gate":"validate","trigger":"every-change","addedFor245":true},
+    {"method":"Haby.Kubernetes.Tests.DeploymentReadinessTests.ReplicaSet_derived_unavailable_during_surge_is_pending_until_target_counts_converge","case":"20fcaa50891eb0119d42fb29c13d2215922f96ae51ddd28f5531b605a6d9341a","suite":"fast","gate":"validate","trigger":"every-change"},
+    {"method":"Haby.Kubernetes.Tests.DeploymentReadinessTests.ReplicaSet_derived_unavailable_during_surge_is_pending_until_target_counts_converge","case":"770d0f6bb4c98d699f0c312f156f0be21f505f53fe7d48052cd083ca2f68754a","suite":"fast","gate":"validate","trigger":"every-change"},
+    {"method":"Haby.Kubernetes.Tests.DeploymentReadinessTests.ReplicaSet_derived_unavailable_during_surge_is_pending_until_target_counts_converge","case":"814cb471b134c1acc587ab50121b3cc0be2e73966fe520b1174a33af75e67bb2","suite":"fast","gate":"validate","trigger":"every-change"},
+    {"method":"Haby.Kubernetes.Tests.DeploymentReadinessTests.ReplicaSet_derived_unavailable_during_surge_is_pending_until_target_counts_converge","case":"9c99711d5ae01648ddbe4523d92116f3d45dad0ebb2b1b796fe91a6fb2fbf0d9","suite":"fast","gate":"validate","trigger":"every-change"}
   ]
 }
