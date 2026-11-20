@@ -29,13 +29,12 @@ internal sealed partial class InternalDurableActions
     {
         if (result.Status != ResourceReuseValidationStatus.Confirmed)
             throw new InvalidDataException($"Imported Resource reuse refused: {result.Status}.");
-        result.ActivateScope();
     }
 
-    private static async Task RequireReuseTransitionAsync(ManifestCatalogDbContext db, Guid deployment, long generation, CancellationToken token)
+    private static async Task RequireReuseTransitionAsync(ManifestCatalogDbContext db, Guid deployment, long generation, CancellationToken token, ResourceReuseValidationResult verification)
     {
         if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(db, deployment, generation, null,
-            PostgreSqlReuseVerificationScopes.Transition.Aggregate, token))
+            PostgreSqlReuseVerificationScopes.Transition.Aggregate, token, verification: verification))
             throw new InvalidDataException("Imported Resource reuse verification changed.");
     }
 }

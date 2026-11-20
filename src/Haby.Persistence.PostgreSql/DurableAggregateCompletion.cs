@@ -16,7 +16,7 @@ internal static partial class DurableAggregateCompletion
     // Recovery decisions deliberately use TryAdvanceAsync directly instead.
     internal static async Task<bool> TryAdvanceConfirmedAsync(ManifestCatalogDbContext context, Guid deployment,
         long generation, CancellationToken token, IEnumerable<IExternalOperationOutputContract>? contracts = null,
-        IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null)
+        IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null, ResourceReuseValidationResult? verification = null)
     {
         var transaction = context.Database.CurrentTransaction ?? throw new InvalidOperationException("Completion requires a transaction.");
         const string savepoint = "haby_resources_ready";
@@ -25,7 +25,7 @@ internal static partial class DurableAggregateCompletion
         bool advanced;
         try
         {
-            advanced = await TryAdvanceAsync(context, deployment, generation, token, contracts, codecs: codecs, prepared: prepared);
+            advanced = await TryAdvanceAsync(context, deployment, generation, token, contracts, codecs: codecs, prepared: prepared, verification: verification);
         }
         catch (Exception error) when (error is PostgresException or DbUpdateException { InnerException: PostgresException })
         {
@@ -47,7 +47,7 @@ internal static partial class DurableAggregateCompletion
 
     internal static async Task<bool> TryAdvanceAsync(ManifestCatalogDbContext context, Guid deployment,
         long generation, CancellationToken token, IEnumerable<IExternalOperationOutputContract>? contracts = null,
-        DurableActionAdmission? admission = null, IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null, bool internalResourceStage = false)
+        DurableActionAdmission? admission = null, IEnumerable<IProviderConfigurationCodec>? codecs = null, ReadinessPreparation? prepared = null, bool internalResourceStage = false, ResourceReuseValidationResult? verification = null)
     {
         await LockAsync(context, deployment, token);
         var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(r => r.Id == deployment, token);
@@ -67,7 +67,7 @@ internal static partial class DurableAggregateCompletion
             var stored = await ReadAsync(context, source, token, internalResourceStage);
             if (stored is not null) return internalResourceStage || owner.AppliedGeneration >= generation;
             if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(context, deployment, generation, null,
-                PostgreSqlReuseVerificationScopes.Transition.Aggregate, token)) return false;
+                PostgreSqlReuseVerificationScopes.Transition.Aggregate, token, verification: verification)) return false;
             if (emptyStage && await context.ActionIntents.AsNoTracking().AnyAsync(x => x.DeploymentId == deployment && x.Generation == generation, token)) return false;
             // Applied is never an authority for backfilling evidence.
             if (owner.DesiredGeneration != generation || owner.AppliedGeneration >= generation ||

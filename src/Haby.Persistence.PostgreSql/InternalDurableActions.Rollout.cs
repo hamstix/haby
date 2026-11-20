@@ -301,14 +301,14 @@ internal sealed partial class InternalDurableActions
         if (latest.Id == member.Attempt.Id)
         {
             samples[member.Subject] = reservation; observations[member.Subject] = observation;
-            completed = await FinishRoundAsync(db, call, samples, observations, token);
+            completed = await FinishRoundAsync(db, call, samples, observations, token, reuse);
         }
         await db.SaveChangesAsync(token);
         if (completed?.Applied == true) call.LifecycleToken.ThrowIfCancellationRequested();
         await CommitRolloutAsync(tx, token, batch); return (latest.Id == member.Attempt.Id, expired, completed);
     }
     private async Task<RolloutResult?> FinishRoundAsync(ManifestCatalogDbContext db, ObservationCall call, Dictionary<string, Guid> samples,
-        Dictionary<string, RolloutObservation> observations, CancellationToken token)
+        Dictionary<string, RolloutObservation> observations, CancellationToken token, ResourceReuseValidationResult verification)
     {
         if (call.Set.Checkpoint is null || samples.Count != call.Set.Targets.Length || observations.Count != call.Set.Targets.Length ||
             observations.Values.Any(x => x.Outcome != RolloutOutcome.Ready)) return null;
@@ -325,7 +325,7 @@ internal sealed partial class InternalDurableActions
         {
             var transaction = db.Database.CurrentTransaction!;
             await transaction.CreateSavepointAsync("initial_completion", token);
-            try { result = await CompleteInitialAsync(db, call, current, proof, result, token); }
+            try { result = await CompleteInitialAsync(db, call, current, proof, result, token, verification); }
             catch (InvalidDataException)
             {
                 await transaction.RollbackToSavepointAsync("initial_completion", token);

@@ -7,7 +7,7 @@ namespace Haby.Persistence.PostgreSql;
 internal sealed partial class InternalDurableActions
 {
     private async Task<RolloutResult> CompleteInitialAsync(ManifestCatalogDbContext db, ObservationCall call,
-        SubmittedSet current, ReadyProof fresh, RolloutResult result, CancellationToken token)
+        SubmittedSet current, ReadyProof fresh, RolloutResult result, CancellationToken token, ResourceReuseValidationResult verification)
     {
         var source = current.Source;
         var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
@@ -64,7 +64,7 @@ internal sealed partial class InternalDurableActions
             var existing = await InitialRetirementCompletion.RequireProofAsync(db, source, token);
             return result with { Applied = true, Retirement = existing.Id, AppliedGeneration = owner.AppliedGeneration, CompletionReason = "applied" };
         }
-        await RequireReuseTransitionAsync(db, source.DeploymentId, source.Generation, token);
+        await RequireReuseTransitionAsync(db, source.DeploymentId, source.Generation, token, verification);
         if (owner.AppliedGeneration != inventory.Document.PriorApplied) return result with { CompletionReason = "generation-superseded" };
         var resources = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == "ResourcesReady", token);
         var submitted = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.Id == current.Checkpoint, token);

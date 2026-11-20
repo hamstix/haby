@@ -68,7 +68,6 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
             : new ResourceReuseValidationResult(ResourceReuseValidationStatus.Confirmed);
         if (reuse.Status != ResourceReuseValidationStatus.Confirmed)
             return new(reuse.FailureOutcome, operation) { ReuseStatus = reuse.Status };
-        reuse.ActivateScope();
         if (operation.Node.Dependencies.Any(dependency => !progress.Nodes.Any(n =>
             n.Operation.Key.OperationId == dependency && n.Operation.State == DurableOperationState.Succeeded)))
             return new(DurableExecutionOutcome.Blocked, operation);

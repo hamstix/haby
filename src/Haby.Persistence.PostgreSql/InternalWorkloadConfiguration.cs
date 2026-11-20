@@ -21,8 +21,7 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
         using var reuse = await new PostgreSqlDurableOperationJournal(contexts, outputs, codecs, reuseVerifiers)
             .ValidateInternalReuseAsync(accepted.DeploymentId, accepted.Generation, admission, token);
         if (reuse.Status != ResourceReuseValidationStatus.Confirmed) throw new InvalidDataException($"Imported Resource reuse refused: {reuse.Status}.");
-        reuse.ActivateScope();
-        var authority = new Authority(this, accepted);
+        var authority = new Authority(this, accepted, reuse);
         IReadOnlyDictionary<ProviderInput.Workload, IReadOnlyList<ManifestLocalId>> selection;
         await using (var db = await contexts.CreateDbContextAsync(token))
         {
@@ -42,7 +41,7 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
                     (await db.WorkloadConfigurationRecipients.AnyAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token) ||
                     await db.ConfigurationDocuments.AnyAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token) ||
                     !await DurableAggregateCompletion.TryAdvanceAsync(db, source.DeploymentId, source.Generation, token,
-                        outputs, admission, codecs, prepared, internalResourceStage: true)))
+                        outputs, admission, codecs, prepared, internalResourceStage: true, verification: reuse)))
                     throw new InvalidDataException("Resource-stage proof unavailable or missing after preparation.");
                 token.ThrowIfCancellationRequested(); await transaction.CommitAsync(CancellationToken.None);
             }
@@ -129,7 +128,7 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
                 ConfigurationDocumentRevisionId.Parse(x.RevisionId.ToString()))).ToArray();
     }
 
-    internal sealed class Authority(InternalWorkloadConfiguration owner, DurableChangeSetCommit accepted)
+    internal sealed class Authority(InternalWorkloadConfiguration owner, DurableChangeSetCommit accepted, ResourceReuseValidationResult? verification = null)
     {
         internal async Task<(ResourcesReadyCheckpoint Proof, ProviderInput.Workload[] Recipients)> RequireAsync(
             ManifestCatalogDbContext db, DeploymentGenerationRow source, ConfigurationDocumentTarget target, CancellationToken token)
@@ -137,7 +136,7 @@ internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCa
             var exact = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
             await InternalGenerationAuthority.RequireCurrentStageAsync(db, exact, token);
             if (db.Database.CurrentTransaction is not null && !await PostgreSqlReuseVerificationScopes.BeforeAsync(db, exact.DeploymentId, exact.Generation,
-                null, PostgreSqlReuseVerificationScopes.Transition.Aggregate, token)) throw new InvalidDataException("Imported Resource reuse verification changed.");
+                null, PostgreSqlReuseVerificationScopes.Transition.Aggregate, token, verification: verification)) throw new InvalidDataException("Imported Resource reuse verification changed.");
             if (source.DeploymentId != exact.DeploymentId || source.Generation != exact.Generation || source.Fingerprint != exact.Fingerprint ||
                 target.Deployment != accepted.DeploymentId || target.Generation != accepted.Generation)
                 throw new InvalidDataException("Preparation source mismatch.");

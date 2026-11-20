@@ -135,7 +135,8 @@ public sealed partial class PostgreSqlPairImportTests
         var pair = await ExistingPair();
         var setup = await AcceptedPair(pair);
         var next = await Reuse(setup);
-        await using var services = Services(setup.Connection);
+        var probes = new CountReuse();
+        await using var services = Services(setup.Connection, probes);
         var journal = services.GetRequiredService<IDurableOperationJournal>();
         var admission = services.GetRequiredService<DurableActionAdmission>();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -143,22 +144,33 @@ public sealed partial class PostgreSqlPairImportTests
         using (var validation = await journal.ValidateReuseAsync(next.DeploymentId, next.Generation, admission, default))
         {
             Assert.Equal(ResourceReuseValidationStatus.Confirmed, validation.Status);
-            validation.ActivateScope();
+            Assert.NotNull(validation.Scope);
+            await OwnedPassword(pair, "changed-while-parent-proof-live");
+            // Ordinary Task.Run inherits ExecutionContext: it must not borrow the parent's LIVE proof.
+            Assert.False(await Task.Run(() => journal.TryCompleteGenerationAsync(next.DeploymentId, next.Generation, admission, default).AsTask()));
             Task<bool> independent;
             using (ExecutionContext.SuppressFlow())
                 independent = Task.Run(() => journal.TryCompleteGenerationAsync(next.DeploymentId, next.Generation, admission, default).AsTask());
             Assert.False(await independent);
             Assert.Equal(1, (await journal.ProgressAsync(next.DeploymentId, next.Generation, default))!.AppliedGeneration);
-            // An async child may retain an ExecutionContext, but disposal must revoke its authority too.
+            await OwnedPassword(pair, pair.Password);
+            var before = probes.Count;
+            Assert.True(await Task.Run(() => journal.TryCompleteGenerationAsync(next.DeploymentId, next.Generation, admission, default).AsTask()));
+            Assert.True(probes.Count > before); // LIVE-parent independent success performs its OWN fresh verification.
+            Assert.Equal(2, (await journal.ProgressAsync(next.DeploymentId, next.Generation, default))!.AppliedGeneration);
+            await OwnedPassword(pair, "changed-after-independent-completion");
+            // After completion a delayed child reads historical proof, never borrows a parent proof or probes PG.
             flowed = Task.Run(async () =>
             {
                 await release.Task;
                 return await journal.TryCompleteGenerationAsync(next.DeploymentId, next.Generation, admission, default);
             });
         }
+        var completedProbes = probes.Count;
         release.SetResult();
-        Assert.False(await flowed);
-        // A separate normal invocation must acquire its own verification and can complete.
+        Assert.True(await flowed);
+        Assert.Equal(completedProbes, probes.Count);
+        Assert.Equal(2, (await journal.ProgressAsync(next.DeploymentId, next.Generation, default))!.AppliedGeneration);
         Assert.Null((await services.GetRequiredService<DurableGenerationRunner>().RunAsync(next.DeploymentId, next.Generation, default)).StopOutcome);
         await AssertOriginalReceipt(setup);
     }

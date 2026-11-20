@@ -15,11 +15,10 @@ public sealed class PostgreSqlReuseVerificationScopes
     internal sealed record OperationState(string Id, string State, Guid? Attempt, long Number, DateTimeOffset? Dispatched,
         DateTimeOffset? Finalized, string? Reason, string? Outcome, DateTimeOffset? AttemptFinished);
     internal sealed record Capture(string Fingerprint, OperationState? Operation, IReadOnlyList<Original> Originals);
-    private static readonly AsyncLocal<Permit?> active = new();
 
     internal sealed class Permit(PostgreSqlReuseVerificationScopes owner, Guid deployment, long generation, OperationId? operation,
         Capture capture, DurableActionAdmission admission, IExternalOperationOutputContract[] contracts,
-        IProviderConfigurationCodec[] codecs, CancellationToken token, bool internalResourceStage) : IResourceReuseValidationScope
+        IProviderConfigurationCodec[] codecs, CancellationToken token, bool internalResourceStage) : IDisposable
     {
         internal PostgreSqlReuseVerificationScopes Owner => owner;
         internal Guid Deployment => deployment;
@@ -34,20 +33,10 @@ public sealed class PostgreSqlReuseVerificationScopes
         internal bool InternalResourceStage => internalResourceStage;
         internal bool Begun = capture.Operation?.State is nameof(DurableOperationState.Dispatching) or nameof(DurableOperationState.NeedsAttention);
         private int disposed;
-        private int activated;
-        private Permit? previous;
         internal bool IsDisposed => Volatile.Read(ref disposed) != 0;
-        public void Activate()
-        {
-            ObjectDisposedException.ThrowIf(IsDisposed, this);
-            if (Interlocked.Exchange(ref activated, 1) != 0) throw new InvalidOperationException("Reuse scope is already active.");
-            previous = active.Value;
-            active.Value = this;
-        }
         public void Dispose()
         {
             Interlocked.Exchange(ref disposed, 1);
-            if (ReferenceEquals(active.Value, this)) active.Value = previous;
         }
         public override string ToString() => "[Resource reuse verification permit]";
     }
@@ -55,6 +44,30 @@ public sealed class PostgreSqlReuseVerificationScopes
     internal Permit Create(Guid deployment, long generation, OperationId? operation, Capture capture, DurableActionAdmission admission,
         IExternalOperationOutputContract[] contracts, IProviderConfigurationCodec[] codecs, CancellationToken token, bool internalResourceStage)
         => new(this, deployment, generation, operation, capture, admission, contracts, codecs, token, internalResourceStage);
+
+    internal static async ValueTask<ResourceReuseValidationResult> VerifyAsync(IDbContextFactory<ManifestCatalogDbContext> contexts,
+        IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec> codecs,
+        IEnumerable<IDurableResourceReuseVerifier> verifiers, Func<DurableActionAdmission>? admission,
+        ApplicationDeploymentId deployment, DeploymentGeneration generation,
+        CancellationToken token, OperationId? operation = null, Guid? attempt = null)
+    {
+        await using (var db = await contexts.CreateDbContextAsync(token))
+            if (!await RequiresAsync(db, Guid.Parse(deployment.ToString()), generation.Value, token))
+                return new(ResourceReuseValidationStatus.Confirmed);
+        if (admission is null) return new(ResourceReuseValidationStatus.InputUnavailable);
+        DurableActionAdmission exact;
+        try { exact = admission(); }
+        catch (InvalidOperationException) { return new(ResourceReuseValidationStatus.InputUnavailable); }
+        if (exact is null) return new(ResourceReuseValidationStatus.InputUnavailable);
+        var result = await new PostgreSqlDurableOperationJournal(contexts, contracts, codecs, verifiers)
+            .ValidateReuseAsync(deployment, generation, exact, token, operation);
+        if (attempt is { } expected && result.Scope is Permit permit)
+        {
+            if (permit.State?.Attempt != expected) { result.Dispose(); return new(ResourceReuseValidationStatus.InputUnavailable); }
+            permit.Begun = true;
+        }
+        return result;
+    }
 
     internal static async Task<bool> RequiresAsync(ManifestCatalogDbContext db, Guid deployment, long generation, CancellationToken token)
     {
@@ -66,12 +79,12 @@ public sealed class PostgreSqlReuseVerificationScopes
     }
 
     internal static async Task<bool> BeforeAsync(ManifestCatalogDbContext db, Guid deployment, long generation,
-        OperationId? operation, Transition transition, CancellationToken token, Guid? attempt = null)
+        OperationId? operation, Transition transition, CancellationToken token, Guid? attempt = null, ResourceReuseValidationResult? verification = null)
     {
-        var permit = active.Value;
+        var permit = verification?.Status == ResourceReuseValidationStatus.Confirmed ? verification.Scope as Permit : null;
         if (permit is null || !ReferenceEquals(permit.Owner, db.ReuseVerificationScopes) || permit.Deployment != deployment || permit.Generation != generation)
             return !await RequiresAsync(db, deployment, generation, token);
-        if (!ReferenceEquals(active.Value, permit) || permit.IsDisposed || permit.Token.IsCancellationRequested ||
+        if (permit.IsDisposed || permit.Token.IsCancellationRequested ||
             operation is not null && permit.Operation != operation || transition != Transition.Aggregate && permit.Operation is null ||
             transition == Transition.Begin && permit.Begun || transition is Transition.Marker or Transition.Completion && !permit.Begun ||
             attempt is not null && permit.State?.Attempt != attempt) return false;
@@ -83,9 +96,9 @@ public sealed class PostgreSqlReuseVerificationScopes
             !permit.Token.IsCancellationRequested && !permit.IsDisposed;
     }
 
-    internal static async Task UpdatedAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token, bool begun = false)
+    internal static async Task UpdatedAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token, bool begun = false, ResourceReuseValidationResult? verification = null)
     {
-        var permit = active.Value;
+        var permit = verification?.Status == ResourceReuseValidationStatus.Confirmed ? verification.Scope as Permit : null;
         if (permit is null || !ReferenceEquals(permit.Owner, db.ReuseVerificationScopes) || permit.Deployment != Guid.Parse(key.DeploymentId.ToString()) ||
             permit.Generation != key.Generation.Value || permit.Operation != key.OperationId || permit.IsDisposed) return;
         permit.State = await OwnStateAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value, key.OperationId, token);

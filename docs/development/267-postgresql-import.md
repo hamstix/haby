@@ -88,11 +88,15 @@ fresh check before the update Applied compare-and-swap. A saved ResourcesReady
 checkpoint cannot replace this verification. All three Applied transition owners
 retain their existing runtime, readiness, retirement and catalog authority checks.
 
-Activation belongs to the current async invocation, with exact catalog-scope,
-generation and operation/attempt inputs. There is no generation-keyed global
-permit registry. Disposal revokes a scope even in a child ExecutionContext; a
-different invocation must obtain and activate its own verification. A scope is
-not durable authority and cannot bypass the owning catalog checks.
+Proof ownership is explicit, with exact catalog-scope, generation and
+operation/attempt inputs. There is no global registry, AsyncLocal activation or
+ambient authority. Each public consequential journal, output or credential
+completion entry acquires its own fresh verification before catalog locks.
+Internal owners forward their lexical local proof through private transition
+and completion calls. An ordinary child task cannot borrow a parent's live proof;
+a valid independent call can succeed after its own new verification. Disposal
+revokes a proof, and owning catalog checks remain mandatory. Public interfaces
+and operation-key identity are unchanged.
 
 UseAndRetain still forbids repair, rotation, deletion and authority transfer.
 Only unchanged pair reuse or supported retain-on-removal is admitted. A new manifest

@@ -8,7 +8,8 @@ namespace Haby.Persistence.PostgreSql;
 /// <summary>Internal catalog-only producer completion and exact, owner-scoped consumption.</summary>
 public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<ManifestCatalogDbContext> contexts,
     ISecretStore secrets, IEnumerable<IExternalOperationOutputContract>? contracts = null,
-    IEnumerable<IProviderConfigurationCodec>? codecs = null) : IGeneratedCredentialOperations
+    IEnumerable<IProviderConfigurationCodec>? codecs = null, IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null,
+    Func<DurableActionAdmission>? admissionFactory = null) : IGeneratedCredentialOperations
 {
     private readonly PostgreSqlGeneratedCredentialReader reader = new(contexts, secrets);
 
@@ -29,6 +30,9 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
                 r.Generation == producer.Generation.Value && r.OperationId == producer.OperationId.Value, cancellationToken);
             if (previous?.State == nameof(DurableOperationState.Succeeded))
                 return await PostgreSqlGeneratedCredentialReader.ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
+            using var verification = await PostgreSqlReuseVerificationScopes.VerifyAsync(contexts, contracts ?? [], codecs ?? [], reuseVerifiers ?? [],
+                admissionFactory, producer.DeploymentId, producer.Generation, cancellationToken, producer.OperationId, attempt);
+            if (verification.Status != ResourceReuseValidationStatus.Confirmed) return false;
             var dependencyIds = accepted.Value.Node.Dependencies.Select(d => d.Value).ToArray();
             if (!await DependenciesReadyAsync(context, producer, dependencyIds, cancellationToken)) return false;
             var pending = new DurableAggregateCompletion.PendingResult(producer, attempt,
@@ -44,7 +48,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
             await DurableAggregateCompletion.LockAsync(context, deployment, cancellationToken);
             if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(context, deployment, producer.Generation.Value, producer.OperationId,
-                PostgreSqlReuseVerificationScopes.Transition.Completion, cancellationToken, attempt)) return false;
+                PostgreSqlReuseVerificationScopes.Transition.Completion, cancellationToken, attempt, verification)) return false;
             if (await context.DurableOperations.AnyAsync(r => r.DeploymentId == deployment && r.Generation == producer.Generation.Value &&
                 r.OperationId == producer.OperationId.Value && r.State == nameof(DurableOperationState.Succeeded), cancellationToken))
                 return await PostgreSqlGeneratedCredentialReader.ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
@@ -90,8 +94,8 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.FinishedAt, at)
                     .SetProperty(r => r.Outcome, nameof(DurableAttemptOutcome.Succeeded)), cancellationToken);
             if (closed != 1) return false;
-            await PostgreSqlReuseVerificationScopes.UpdatedAsync(context, producer, cancellationToken);
-            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs, prepared);
+            await PostgreSqlReuseVerificationScopes.UpdatedAsync(context, producer, cancellationToken, verification: verification);
+            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs, prepared, verification);
             cancellationToken.ThrowIfCancellationRequested();
             committing = true;
             await transaction.CommitAsync(CancellationToken.None);

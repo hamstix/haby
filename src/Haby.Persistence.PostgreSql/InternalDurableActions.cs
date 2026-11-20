@@ -63,7 +63,7 @@ internal sealed partial class InternalDurableActions(
                 await DurableAggregateCompletion.LockAsync(preflight, source.DeploymentId, token);
                 source = await InternalGenerationAuthority.RequireStageAsync(preflight, accepted, token);
                 if (!await DurableAggregateCompletion.TryAdvanceAsync(preflight, source.DeploymentId, source.Generation, token,
-                    resourceOutputs, resourceAdmission, typedCodecs, prepared, internalResourceStage: true)) throw new InvalidDataException("Resource-stage proof refused.");
+                    resourceOutputs, resourceAdmission, typedCodecs, prepared, internalResourceStage: true, verification: reuse)) throw new InvalidDataException("Resource-stage proof refused.");
                 token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             }
         }
@@ -72,7 +72,7 @@ internal sealed partial class InternalDurableActions(
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         await DurableAggregateCompletion.LockAsync(db, deployment, token);
         var generation = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
-        await RequireReuseTransitionAsync(db, deployment, key.Generation.Value, token);
+        await RequireReuseTransitionAsync(db, deployment, key.Generation.Value, token, reuse);
         var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true)
             ?? throw new InvalidDataException("Resource-stage proof unavailable.");
         var old = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.RequestId == request, token);
@@ -159,7 +159,6 @@ internal sealed partial class InternalDurableActions(
         if (reuse.Status != ResourceReuseValidationStatus.Confirmed)
             return new(reuse.Status == ResourceReuseValidationStatus.Connectivity ? InternalActionOutcome.Unavailable : InternalActionOutcome.Refused,
                 reuse.Status switch { ResourceReuseValidationStatus.Conflict => "resource-reuse-conflict", ResourceReuseValidationStatus.Connectivity => "resource-reuse-connectivity", _ => "resource-reuse-unavailable" });
-        reuse.ActivateScope();
         var uncertain = loaded.Operation.State is nameof(DurableOperationState.Dispatching) or nameof(DurableOperationState.NeedsAttention);
         if (!uncertain && observationOnly) return new(InternalActionOutcome.NotConfirmed, "not-dispatched");
         if (uncertain)
@@ -172,12 +171,12 @@ internal sealed partial class InternalDurableActions(
                 loaded = await LoadAsync(db, key, token);
                 if (loaded.Operation.State == nameof(DurableOperationState.Succeeded)) return await TerminalAsync(db, loaded, token);
                 if (loaded.Operation.State == nameof(DurableOperationState.Dispatching))
-                    _ = await DurableOperationTransitions.RecoverAsync(db, key, Now(), token);
+                    _ = await DurableOperationTransitions.RecoverAsync(db, key, Now(), token, reuse);
                 token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             }
             // No catalog connection is retained over the API read.
             var observed = await loaded.Handler.ObserveAsync(loaded.Context, loaded.Intent.Payload, token);
-            return await PublishAsync(key, loaded, observed, true, token, actor);
+            return await PublishAsync(key, loaded, observed, true, token, actor, reuse);
         }
         if (loaded.Operation.State is not (nameof(DurableOperationState.Pending) or nameof(DurableOperationState.Preparing))) return new(InternalActionOutcome.Refused, "terminal-failure");
         await using (var db = await contexts.CreateDbContextAsync(token))
@@ -186,7 +185,7 @@ internal sealed partial class InternalDurableActions(
             await DurableAggregateCompletion.LockAsync(db, loaded.Intent.DeploymentId, token);
             loaded = await LoadAsync(db, key, token);
             await RequireCurrentRuntimeAsync(db, loaded.Context, token);
-            var begun = await DurableOperationTransitions.BeginAsync(db, key, Now(), token, actor)
+            var begun = await DurableOperationTransitions.BeginAsync(db, key, Now(), token, actor, reuse)
                 ?? throw new InvalidDataException("Action attempt refused.");
             token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             loaded = loaded with { Operation = begun };
@@ -198,14 +197,14 @@ internal sealed partial class InternalDurableActions(
             var exact = await LoadAsync(db, key, token);
             await RequireCurrentRuntimeAsync(db, exact.Context, token);
             if (exact.Intent.Payload != loaded.Intent.Payload || !await DurableOperationTransitions.MarkerAsync(db, key,
-                loaded.Operation.CurrentAttemptId!.Value, Now(), token)) throw new InvalidDataException("Dispatch barrier refused.");
+                loaded.Operation.CurrentAttemptId!.Value, Now(), token, reuse)) throw new InvalidDataException("Dispatch barrier refused.");
             fault?.Invoke(InternalActionFault.BeforeMarkerCommit);
             token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
         }
         fault?.Invoke(InternalActionFault.AfterMarkerCommit);
         var result = await loaded.Handler.ExecuteAsync(loaded.Context, loaded.Intent.Payload, token);
         fault?.Invoke(InternalActionFault.AfterExternalResult);
-        if (result.Outcome == InternalActionOutcome.Confirmed) return await PublishAsync(key, loaded, result, false, token, actor);
+        if (result.Outcome == InternalActionOutcome.Confirmed) return await PublishAsync(key, loaded, result, false, token, actor, reuse);
         // Even a pre-send or positively rejected kernel result cannot reopen this durable barrier.
         // Keeping it uncertain is conservative and permits observation, never another write.
         await using (var db = await contexts.CreateDbContextAsync(token))
@@ -213,13 +212,13 @@ internal sealed partial class InternalDurableActions(
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, loaded.Intent.DeploymentId, token);
             _ = await LoadAsync(db, key, token);
-            _ = await DurableOperationTransitions.RecoverAsync(db, key, Now(), token);
+            _ = await DurableOperationTransitions.RecoverAsync(db, key, Now(), token, reuse);
             await tx.CommitAsync(CancellationToken.None);
         }
         return result with { Receipt = null };
     }
 
-    private async ValueTask<InternalActionResult> PublishAsync(DurableOperationKey key, Loaded dispatched, InternalActionResult result, bool observation, CancellationToken token, string? actor = null)
+    private async ValueTask<InternalActionResult> PublishAsync(DurableOperationKey key, Loaded dispatched, InternalActionResult result, bool observation, CancellationToken token, string? actor, ResourceReuseValidationResult verification)
     {
         if (result.Code.Length is 0 or > 128 || result.Code.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '.')))
             throw new InvalidDataException("Invalid bounded action outcome.");
@@ -265,7 +264,7 @@ internal sealed partial class InternalDurableActions(
         if (confirmed)
         {
             if (!loaded.Handler.ValidateReceipt(loaded.Context, loaded.Intent.Payload, result.Receipt!, observation) ||
-                !await DurableOperationTransitions.ConfirmAsync(db, key, attempt, at, observation, token)) throw new InvalidDataException("Action completion refused.");
+                !await DurableOperationTransitions.ConfirmAsync(db, key, attempt, at, observation, token, verification)) throw new InvalidDataException("Action completion refused.");
             await AcceptIdentityAsync(db, loaded, result.Receipt!, token);
             await AcceptObjectAsync(db, loaded, result.Receipt!, token);
             db.OperationOutputs.Add(new()

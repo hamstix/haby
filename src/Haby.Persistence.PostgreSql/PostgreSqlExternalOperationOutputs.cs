@@ -7,7 +7,8 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Atomic external evidence, exact attempt closure and aggregate completion.</summary>
 public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec>? codecs = null) : IExternalOperationOutputs, IConfigurationOutputEvidence
+    IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec>? codecs = null,
+    IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null, Func<DurableActionAdmission>? admissionFactory = null) : IExternalOperationOutputs, IConfigurationOutputEvidence
 {
     public async ValueTask<AcceptedOperation?> FindAcceptedAsync(DurableOperationKey key, CancellationToken cancellationToken)
     {
@@ -47,6 +48,9 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 r.Generation == producer.Generation.Value && r.OperationId == producer.OperationId.Value, cancellationToken);
             if (previous?.State == nameof(DurableOperationState.Succeeded))
                 return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
+            using var verification = await PostgreSqlReuseVerificationScopes.VerifyAsync(contexts, contracts, codecs ?? [], reuseVerifiers ?? [],
+                admissionFactory, producer.DeploymentId, producer.Generation, cancellationToken, producer.OperationId, attempt);
+            if (verification.Status != ResourceReuseValidationStatus.Confirmed) return false;
             var pending = new DurableAggregateCompletion.PendingResult(producer, attempt, output);
             var metadata = await DurableAggregateCompletion.InspectPublicationAsync(context, pending, contracts, codecs ?? [], cancellationToken);
             if (metadata?.Candidate is not { } candidate || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(context, metadata, cancellationToken)) return false;
@@ -73,7 +77,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             if (!await context.DurableOperations.AsNoTracking().AnyAsync(r => r.DeploymentId == deployment && r.Generation == generation &&
                 r.OperationId == id && r.State == nameof(DurableOperationState.Dispatching) && r.CurrentAttemptId == attempt &&
                 r.AttemptNumber == candidate.AttemptNumber && r.DispatchedAt == candidate.DispatchedAt, cancellationToken) ||
-                !await DurableOperationTransitions.ConfirmAsync(context, producer, attempt, at, false, cancellationToken))
+                !await DurableOperationTransitions.ConfirmAsync(context, producer, attempt, at, false, cancellationToken, verification))
                 return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
             var existing = await OutputAsync(context, producer, output.Contract, output.Key, cancellationToken);
             if (existing is not null && existing.Payload != output.Payload) return false;
@@ -87,7 +91,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 Payload = output.Payload
             });
             await context.SaveChangesAsync(cancellationToken);
-            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs, prepared: prepared);
+            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs, prepared: prepared, verification: verification);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             return true;

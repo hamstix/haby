@@ -58,7 +58,6 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
                     : new ResourceReuseValidationResult(ResourceReuseValidationStatus.Confirmed);
                 if (reuse.Status != ResourceReuseValidationStatus.Confirmed)
                     return new(progress, StopOutcome: reuse.FailureOutcome) { ReuseStatus = reuse.Status };
-                reuse.ActivateScope();
                 var complete = await journal.TryCompleteGenerationAsync(deployment, generation, admission, cancellationToken);
                 return new(await ProgressAsync(deployment, generation, CancellationToken.None),
                     StopOutcome: complete ? null : DurableExecutionOutcome.InputUnavailable);
