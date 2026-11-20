@@ -22,6 +22,10 @@ internal static class ResourceContinuity
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT s.id FROM secrets s JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF s", token);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT v.id FROM secret_versions v JOIN generated_credential_slots s ON s.version_id = v.id JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF v", token);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT p.secret_version_id FROM secret_payloads p JOIN generated_credential_slots s ON s.version_id = p.secret_version_id JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF p", token);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT r.id FROM resource_import_receipts r WHERE r.deployment_id = {deployment} FOR SHARE", token);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT s.id FROM protected_application_credentials s JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF s", token);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT v.id FROM secret_versions v JOIN protected_application_credentials s ON s.version_id = v.id JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF v", token);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT p.secret_version_id FROM secret_payloads p JOIN protected_application_credentials s ON s.version_id = p.secret_version_id JOIN application_deployments d ON d.environment_record_id = s.environment_record_id AND d.application_record_id = s.application_record_id WHERE d.id = {deployment} FOR SHARE OF p", token);
     }
     internal static DurablePlanningInputs Inputs(DeploymentGenerationRow row) => row.Inputs();
 
@@ -83,6 +87,18 @@ internal static class ResourceContinuity
             var references = all.Select(x => new ConfirmedOperationOutput(OperationId.Create(x.OperationId), new(x.Contract, x.Key, x.Payload))).ToArray();
             foreach (var node in graph.Nodes)
             {
+                if (node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                {
+                    var receipt = await ResourceImportReceiptIntegrity.ReadAsync(db, new(ApplicationDeploymentId.Parse(deployment.ToString()),
+                        DeploymentGeneration.Create(generation), node.Id), token);
+                    var validator = contracts.SingleOrDefault(x => x.Producer == node.Action);
+                    if (receipt is null || validator is null || !validator.ValidateImportEvidence(
+                        new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return false;
+                    if (validateMaterial)
+                        foreach (var request in inputs.Import!.Resources.Where(x => x.Credential is not null))
+                            if (!await PostgreSqlApplicationCredentialReader.ConfirmImportedAsync(db, new(inputs.Environment,
+                                inputs.Revision.ApplicationRecordId, request.Resource), request.Credential!.Reference, token)) return false;
+                }
                 var outputs = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation && x.OperationId == node.Id.Value).ToArrayAsync(token);
                 var validators = contracts.Where(x => x.Producer == node.Action).ToArray();
                 if (validators.Length > 1 || (validators.Length == 1 && (outputs.Length != 1 || node.RequiredOutput != validators[0].Identity))) return false;

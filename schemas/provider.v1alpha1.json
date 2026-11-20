@@ -145,6 +145,11 @@
                     "minLength": 1,
                     "maxLength": 63,
                     "pattern": ".*\\S.*"
+                  },
+                  "transportMode": {
+                    "type": "string",
+                    "enum": [ "verify-full", "disable" ],
+                    "default": "verify-full"
                   }
                 }
               },

@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Durable catalog schema, independent of manifest and domain objects.</summary>
-public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbContext> options) : DbContext(options)
+public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbContext> options,
+    PostgreSqlReuseVerificationScopes? reuseVerificationScopes = null) : DbContext(options)
 {
+    internal PostgreSqlReuseVerificationScopes? ReuseVerificationScopes { get; } = reuseVerificationScopes;
     internal DbSet<ApplicationRow> Applications => Set<ApplicationRow>();
     internal DbSet<ManifestRevisionRow> Revisions => Set<ManifestRevisionRow>();
     internal DbSet<EnvironmentRow> Environments => Set<EnvironmentRow>();
@@ -43,6 +45,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         ConfigureGenerationStageCheckpoints(modelBuilder);
         ConfigureResourceNaming(modelBuilder);
         ConfigureResourceManagement(modelBuilder);
+        ConfigureApplicationCredentials(modelBuilder);
         ConfigureOperatorAccess(modelBuilder);
         ConfigureConfigurationAccess(modelBuilder);
         ConfigureConfigurationDocuments(modelBuilder);

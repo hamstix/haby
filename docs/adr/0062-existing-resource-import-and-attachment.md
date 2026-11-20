@@ -118,6 +118,32 @@ explicit capability under ADR-063, not a bypass of Import reservations.
 
 ## Accepted extension: common acquisition, rendering and status boundaries
 
+### Accepted execution clarification
+
+The first internal PostgreSQL pair implementation stages existing material through
+a trusted owner/request-bound intake, independently of serializable intent. One
+common catalog transaction confirms the complete receipt, reservations, credentials
+and ordinary outputs after read-only adapter verification. The current plaintext
+backend does not claim encryption at rest. See the [implementation boundary](../development/267-postgresql-import.md).
+
+Later consequential reuse, including zero-node generations, requires an explicit
+exact original adapter verification outside catalog transactions. Recheck captured
+catalog inputs and cancellation in the short owning transition transaction. A
+verification scope belongs only to that invocation/attempt, never a health cache.
+Historical receipts are immutable. Compare identity and required policy state;
+irrelevant ACL text differences alone do not conflict. Distinguish Conflict,
+InputUnavailable and retryable Connectivity, preserving cancellation. Ordinary
+delivery and historical success observation do not continuously probe the Provider.
+
+Fresh PostgreSQL transport is closed to verify-full (default) or explicit disable,
+frozen in saved configuration/payload version 2 and shared by administrator and
+supplied-login connections. No implicit downgrade or Binding override is accepted.
+Old payloads refuse operations needing decode without blocking metadata/history
+or unrelated Provider startup. Only incompatible earlier import intent/history
+requires an explicit fresh catalog transition; no blanket revision guard applies.
+
+### Common capability extension
+
 [ADR-063](0063-resource-capabilities-rendering-and-provider-status.md) accepts one
 shared Resource capability foundation: explicit Provision, Import and Reference
 modes with exact per-type/mode support and closed typed inputs. Reference may

@@ -84,8 +84,8 @@ public sealed class PostgreSqlPairPlanningTests
     internal static NormalizedManifestSpec Spec(JsonObject envelope) => Assert.IsType<ManifestCandidateResult.Valid>(
         ManifestCandidatePipeline.Prepare(Bytes(envelope), Catalog)).Candidate.Declaration.Spec;
     internal static PreparedProviderConfiguration Configuration() => new PostgreSqlProviderConfigurationCodec(new PostgreSqlDatabaseCheckpointCapability())
-        .Encode(new PostgreSqlProviderConfiguration(1, "localhost", 5432, "postgres", "postgres",
-            new(SecretId.New(), SecretVersionId.New()), Provider.ImplementationId));
+        .Encode(new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "localhost", 5432, "postgres", "postgres",
+            new(SecretId.New(), SecretVersionId.New()), Provider.ImplementationId, PostgreSqlTransportMode.Disable));
     internal static DurablePlanningInputs Inputs(JsonObject? envelope = null)
     {
         var manifest = ((ManifestCandidateResult.Valid)ManifestCandidatePipeline.Prepare(Bytes(envelope ?? Example()), Catalog)).Candidate.Declaration;

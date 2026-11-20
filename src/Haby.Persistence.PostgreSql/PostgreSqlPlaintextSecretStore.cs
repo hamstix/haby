@@ -21,7 +21,7 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
         ArgumentNullException.ThrowIfNull(definition);
         if (!definition.IsSupported) throw new ArgumentException("Unsupported secret owner or purpose.");
         if (definition.Owner is not SecretOwner.Environment)
-            throw new ArgumentException("Resource credentials require the atomic generated-slot service.");
+            throw new ArgumentException("Resource credentials require explicit confirmed acquisition.");
         var environment = definition.Environment;
         Validate(environment, reference, material, cancellationToken);
         var bytes = (byte[])material.Clone();
@@ -157,6 +157,9 @@ public sealed class PostgreSqlPlaintextSecretStore(IDbContextFactory<ManifestCat
         try
         {
             if (!SecretRowMapping.Matches(definition, row.Secret)) return null;
+            if (definition.Owner is SecretOwner.Resource resource &&
+                await context.ProtectedApplicationCredentials.AsNoTracking().AnyAsync(x => x.Secret == secretId, cancellationToken) &&
+                !await PostgreSqlApplicationCredentialReader.ConfirmImportedAsync(context, resource.Key, reference, cancellationToken)) return null;
             PlaintextProtectionFormat.ValidateForRead(row.ProtectionFormat, row.FormatVersion);
             return new SecretMaterial(row.Bytes);
         }
@@ -193,6 +196,8 @@ public static class PlaintextSecretStoreServiceCollectionExtensions
         services.AddSingleton<ISecretStore, PostgreSqlPlaintextSecretStore>();
         services.AddSingleton<IGeneratedCredentialSlots, PostgreSqlGeneratedCredentialSlots>();
         services.AddSingleton<IGeneratedCredentialReader, PostgreSqlGeneratedCredentialReader>();
+        services.AddSingleton<IApplicationCredentialReader, PostgreSqlApplicationCredentialReader>();
+        services.AddSingleton<IProtectedApplicationCredentialIntake, PostgreSqlProtectedApplicationCredentialIntake>();
         return services;
     }
 }

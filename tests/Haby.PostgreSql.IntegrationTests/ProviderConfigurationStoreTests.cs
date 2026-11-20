@@ -94,7 +94,7 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
             await store.AddRevisionAsync(environment, instance, Number(1), Configuration(secret, port: 5433), default));
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await store.AddRevisionAsync(environment, instance, Number(1), Configuration(secret, implementation: "unknown"), default));
-        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlProviderConfiguration(2,
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlProviderConfiguration(99,
             "localhost", 5432, "postgres", "admin", secret, Implementation));
         using (var canceled = new CancellationTokenSource())
         {
@@ -255,7 +255,7 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
     private static ProviderConfigurationRevisionNumber Number(long value) => ProviderConfigurationRevisionNumber.Create(value);
     private static PostgreSqlProviderConfiguration Configuration(SecretRef secret, string host = "localhost",
         int port = 5432, string database = "postgres", string implementation = Implementation) =>
-        new(1, host, port, database, "admin", secret, implementation);
+        new(PostgreSqlProviderConfiguration.CurrentShapeVersion, host, port, database, "admin", secret, implementation, PostgreSqlTransportMode.Disable);
     private static async Task<Exception?> Attempt(Func<ValueTask> action)
     {
         try { await action(); return null; }

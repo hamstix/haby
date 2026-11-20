@@ -102,7 +102,7 @@ public abstract partial class ApplicationLoginScenario : IDisposable
         var bytes = Encoding.UTF8.GetBytes(target.Password!);
         try { await secrets.CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), reference, bytes, default); }
         finally { Array.Clear(bytes); }
-        var config = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!, reference, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var config = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port, target.Database!, target.Username!, reference, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
         var instance = await providers.CreateInstanceAsync(environment, config, default);
         await providers.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1), config, default);

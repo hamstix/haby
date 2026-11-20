@@ -199,8 +199,8 @@ public sealed partial class PostgreSqlRestrictTests
                 finally { Array.Clear(bytes); }
             }
             await providers.AddRevisionAsync(operation.Environment, operation.ProviderInstance, next,
-                new PostgreSqlProviderConfiguration(1, pinned.Host, pinned.Port, new NpgsqlConnectionStringBuilder(scenario.Connection).Database!,
-                    pinned.AdministratorUserName, alternate, pinned.ImplementationId), default);
+                new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, pinned.Host, pinned.Port, new NpgsqlConnectionStringBuilder(scenario.Connection).Database!,
+                    pinned.AdministratorUserName, alternate, pinned.ImplementationId, PostgreSqlTransportMode.Disable), default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await arrange.GetRequiredService<IProviderAliasStore>().ChangeAsync(operation.Environment,
                 ProviderAlias.Create("postgresql.primary"), new(operation.ProviderInstance, operation.ConfigurationRevision),
                 new(operation.ProviderInstance, next), "tester", default)).Outcome);

@@ -98,8 +98,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(scenario.Plan.Inputs.Environment,
                 scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Instance, scenario.Plan.Inputs.Providers.RequireUniformResourceProvider().Configuration, default))!.Configuration;
             var next = ProviderConfigurationRevisionNumber.Create(1);
-            var different = new PostgreSqlProviderConfiguration(1, configuration.Host == "127.0.0.1" ? "localhost" : "127.0.0.1", configuration.Port, configuration.MaintenanceDatabase,
-                configuration.AdministratorUserName, configuration.AdministratorPassword, configuration.ImplementationId);
+            var different = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, configuration.Host == "127.0.0.1" ? "localhost" : "127.0.0.1", configuration.Port, configuration.MaintenanceDatabase,
+                configuration.AdministratorUserName, configuration.AdministratorPassword, configuration.ImplementationId, PostgreSqlTransportMode.Disable);
             var otherInstance = await providers.CreateInstanceAsync(scenario.Plan.Inputs.Environment, different, default);
             await providers.AddRevisionAsync(scenario.Plan.Inputs.Environment, otherInstance, next, different, default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(

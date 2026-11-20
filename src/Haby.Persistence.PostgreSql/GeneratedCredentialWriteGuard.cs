@@ -26,6 +26,25 @@ public sealed partial class ManifestCatalogDbContext
     private async Task ValidateGeneratedWritesAsync(bool asynchronous, CancellationToken cancellationToken)
     {
         ChangeTracker.DetectChanges();
+        if (ChangeTracker.Entries<ResourceImportReceiptRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Import receipts are immutable.");
+        foreach (var entry in ChangeTracker.Entries<ProtectedApplicationCredentialRow>().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
+        {
+            var query = ProtectedApplicationCredentials.AsNoTracking().Where(x => x.Id == entry.Entity.Id);
+            var saved = asynchronous ? await query.SingleOrDefaultAsync(cancellationToken) : query.SingleOrDefault();
+            try
+            {
+                if (saved is null || entry.State == EntityState.Deleted || saved.ConfirmedReceipt is not null || entry.Entity.ConfirmedReceipt is null ||
+                    entry.Properties.Any(p => p.IsModified && p.Metadata.Name != nameof(ProtectedApplicationCredentialRow.ConfirmedReceipt)))
+                    throw new InvalidOperationException("Protected credential input is immutable.");
+                var receiptQuery = ResourceImportReceipts.AsNoTracking().Where(x => x.Id == entry.Entity.ConfirmedReceipt);
+                var receipt = asynchronous ? await receiptQuery.SingleOrDefaultAsync(cancellationToken) : receiptQuery.SingleOrDefault();
+                if (receipt is null || !ResourceImportReceiptIntegrity.Decode(receipt.Document).Credentials.Any(x => x.Staged == saved.Id &&
+                    x.Resource == saved.Resource && x.Secret == saved.Secret && x.Version == saved.Version))
+                    throw new InvalidOperationException("Protected credential confirmation is unavailable.");
+            }
+            finally { if (saved is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(saved.Material); }
+        }
         if (ChangeTracker.Entries<ResourceManagementRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Resource management provenance and authority are immutable.");
         if (ChangeTracker.Entries<DurableChangeSetRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
@@ -50,13 +69,13 @@ public sealed partial class ManifestCatalogDbContext
             if (saved?.Owner != "Resource" && entry.Entity.Owner != "Resource") continue;
             if (saved is null || entry.State == EntityState.Deleted || saved.CurrentVersionId is not null ||
                 entry.Entity.CurrentVersionId is null || entry.Properties.Any(p => p.IsModified && p.Metadata.Name != nameof(SecretRow.CurrentVersionId)))
-                throw new InvalidOperationException("Generated credential metadata is immutable.");
+                throw new InvalidOperationException("Application credential metadata is immutable.");
             // Only the initial null -> first-version pin is allowed, inside the candidate creation transaction.
             var versionQuery = SecretVersions.AsNoTracking().Where(v => v.SecretId == saved.Id &&
                 v.Id == entry.Entity.CurrentVersionId && v.Number == 1 &&
                 v.ProtectionFormat == PlaintextProtectionFormat.Name && v.FormatVersion == PlaintextProtectionFormat.Version);
             var valid = asynchronous ? await versionQuery.AnyAsync(cancellationToken) : versionQuery.Any();
-            if (!valid) throw new InvalidOperationException("Invalid generated credential association.");
+            if (!valid) throw new InvalidOperationException("Invalid application credential association.");
         }
 
         var addedSlots = ChangeTracker.Entries<GeneratedCredentialSlotRow>().Where(e => e.State == EntityState.Added)

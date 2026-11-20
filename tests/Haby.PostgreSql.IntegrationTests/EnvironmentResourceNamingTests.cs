@@ -29,7 +29,7 @@ public abstract partial class ApplicationLoginScenario
         var bytes = Encoding.UTF8.GetBytes(target.Password!);
         try { await secrets.CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, bytes, default); }
         finally { Array.Clear(bytes); }
-        var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!, secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port, target.Database!, target.Username!, secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
         var provider = await providers.CreateInstanceAsync(environment, configuration, default);
         await providers.AddRevisionAsync(environment, provider, ProviderConfigurationRevisionNumber.Create(1), configuration, default);

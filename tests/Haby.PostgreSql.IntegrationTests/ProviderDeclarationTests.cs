@@ -22,7 +22,7 @@ public sealed class ProviderDeclarationTests(PostgreSqlFixture fixture) : IClass
         {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"pg-main","environment":"pilot"},
         "spec":{"revision":1,"providerKind":"postgresql/v1","configurationContract":"haby.postgresql.connection/v1",
         "implementationId":"haby.postgresql.database/v1alpha1","properties":{"host":"unreachable.invalid","port":5432,
-        "maintenanceDatabase":"postgres","administratorUserName":"admin"},
+        "maintenanceDatabase":"postgres","transportMode":"disable","administratorUserName":"admin"},
         "secretRefs":{"administrator-password":{"secretName":"admin","version":1}}}}
         """;
 

@@ -7,9 +7,10 @@ public sealed record DurableOperationKey(ApplicationDeploymentId DeploymentId,
     DeploymentGeneration Generation, OperationId OperationId);
 
 /// <summary>
-/// One durable pilot operation state. After a restart only <see cref="Pending"/> and
-/// <see cref="Preparing"/> may resume; <see cref="Dispatching"/> must move to
-/// <see cref="NeedsAttention"/> without sending SQL, as defined by ADR-025.
+/// One durable pilot operation state. Mutating handlers resume only <see cref="Pending"/> and
+/// <see cref="Preparing"/>; <see cref="Dispatching"/> moves to <see cref="NeedsAttention"/>
+/// without replay under ADR-025. Explicit observational import handlers may reverify
+/// the same open dispatched attempt without external mutation.
 /// </summary>
 public enum DurableOperationState
 {
@@ -96,8 +97,9 @@ public abstract record DurableMarkerResult
 public interface IDurableOperationJournal
 {
     /// <summary>Checks exact retained reuse evidence before new work, without creating attempts or advancing state.</summary>
-    ValueTask<bool> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
-        DurableActionAdmission admission, CancellationToken cancellationToken) => new(false);
+    ValueTask<ResourceReuseValidationResult> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+        DurableActionAdmission admission, CancellationToken cancellationToken, OperationId? operation = null) =>
+        ValueTask.FromResult(new ResourceReuseValidationResult(ResourceReuseValidationStatus.InputUnavailable));
 
     /// <summary>Completes a supported Resource-only generation through its locked, persisted evidence boundary.</summary>
     ValueTask<bool> TryCompleteGenerationAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
@@ -152,7 +154,7 @@ public enum DurableExecutionOutcome
 {
     Succeeded,
     Failed,
-    /// <summary>A pre-dispatch dependency is unavailable; the same operation can start another attempt.</summary>
+    /// <summary>A dependency is unavailable; mutating handlers retry only before dispatch. Explicit read-only import may reverify its same dispatched attempt.</summary>
     RetryableFailure,
     NeedsAttention,
     OperationNotFound,
@@ -167,6 +169,7 @@ public enum DurableExecutionOutcome
 public sealed record DurableExecutionResult(DurableExecutionOutcome Outcome,
     DurableOperation? Operation)
 {
+    public ResourceReuseValidationStatus? ReuseStatus { get; init; }
     public static DurableExecutionResult NotFound() =>
         new(DurableExecutionOutcome.OperationNotFound, null);
 }

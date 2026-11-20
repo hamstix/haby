@@ -66,6 +66,8 @@ internal static partial class DurableAggregateCompletion
                 graph.Nodes.Count + graph.ReusedResources.Count == 0 && !emptyStage) return false;
             var stored = await ReadAsync(context, source, token, internalResourceStage);
             if (stored is not null) return internalResourceStage || owner.AppliedGeneration >= generation;
+            if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(context, deployment, generation, null,
+                PostgreSqlReuseVerificationScopes.Transition.Aggregate, token)) return false;
             if (emptyStage && await context.ActionIntents.AsNoTracking().AnyAsync(x => x.DeploymentId == deployment && x.Generation == generation, token)) return false;
             // Applied is never an authority for backfilling evidence.
             if (owner.DesiredGeneration != generation || owner.AppliedGeneration >= generation ||

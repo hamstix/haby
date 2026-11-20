@@ -1903,6 +1903,72 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProtectedApplicationCredentialRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("Application")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
+
+                    b.Property<Guid?>("ConfirmedReceipt")
+                        .HasColumnType("uuid")
+                        .HasColumnName("confirmed_receipt_id");
+
+                    b.Property<Guid>("Environment")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<byte[]>("Material")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("material");
+
+                    b.Property<Guid>("Request")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("Resource")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("resource_local_id");
+
+                    b.Property<Guid>("Secret")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_id");
+
+                    b.Property<Guid>("Version")
+                        .HasColumnType("uuid")
+                        .HasColumnName("version_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Application");
+
+                    b.HasIndex("ConfirmedReceipt");
+
+                    b.HasIndex("Request")
+                        .IsUnique();
+
+                    b.HasIndex("Secret")
+                        .IsUnique();
+
+                    b.HasIndex("Version")
+                        .IsUnique();
+
+                    b.HasIndex("Environment", "Application", "Resource")
+                        .IsUnique();
+
+                    b.ToTable("protected_application_credentials", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_protected_application_credentials_material", "octet_length(material) BETWEEN 1 AND 65536");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderAliasAuditRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2159,6 +2225,40 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasIndex("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId");
 
                     b.ToTable("provider_revision_secret_refs", (string)null);
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ResourceImportReceiptRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("Deployment")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deployment_id");
+
+                    b.Property<string>("Document")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("document");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("input_fingerprint");
+
+                    b.Property<long>("Generation")
+                        .HasColumnType("bigint")
+                        .HasColumnName("generation");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Deployment", "Generation")
+                        .IsUnique();
+
+                    b.ToTable("resource_import_receipts", (string)null);
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ResourceManagementRow", b =>
@@ -3156,6 +3256,26 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ProtectedApplicationCredentialRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
+                        .WithMany()
+                        .HasForeignKey("Application")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ResourceImportReceiptRow", null)
+                        .WithMany()
+                        .HasForeignKey("ConfirmedReceipt")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("Environment")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.ProviderAliasAuditRow", b =>
                 {
                     b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
@@ -3236,6 +3356,15 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .WithMany()
                         .HasForeignKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
                         .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "EnvironmentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ResourceImportReceiptRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
+                        .WithMany()
+                        .HasForeignKey("Deployment", "Generation")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

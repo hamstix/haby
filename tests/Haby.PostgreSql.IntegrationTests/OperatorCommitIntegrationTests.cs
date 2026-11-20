@@ -38,8 +38,8 @@ public sealed partial class OperatorHostIntegrationTests
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
         await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(material), default);
-        var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", providerPort,
-            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "127.0.0.1", providerPort,
+            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = setup.GetRequiredService<IProviderConfigurationStore>();
         var instance = await providers.CreateInstanceAsync(environment, configuration, default);
         await providers.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
@@ -215,8 +215,8 @@ public sealed partial class OperatorHostIntegrationTests
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
         await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(material), default);
-        var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", providerPort,
-            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "127.0.0.1", providerPort,
+            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = setup.GetRequiredService<IProviderConfigurationStore>();
         var instance = await providers.CreateInstanceAsync(environment, configuration, default);
         await providers.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1), configuration, default);

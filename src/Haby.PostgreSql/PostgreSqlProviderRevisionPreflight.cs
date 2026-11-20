@@ -7,7 +7,8 @@ using Npgsql;
 namespace Haby.PostgreSql;
 
 /// <summary>Read-only PostgreSQL connection and CREATE DATABASE eligibility check.</summary>
-public sealed class PostgreSqlProviderRevisionPreflight(IProviderConfigurationStore revisions, ISecretStore secrets)
+public sealed class PostgreSqlProviderRevisionPreflight(IProviderConfigurationStore revisions, ISecretStore secrets,
+    PostgreSqlProviderTransport? transport = null)
     : IProviderRevisionPreflight
 {
     public async ValueTask<ProviderPreflightResult> CheckAsync(EnvironmentRecordId environment,
@@ -73,6 +74,7 @@ public sealed class PostgreSqlProviderRevisionPreflight(IProviderConfigurationSt
                 // Npgsql requires a managed string; clearing byte buffers and disabling pooling limits its lifetime.
                 Password = Encoding.UTF8.GetString(bytes)
             };
+            (transport ?? new()).Apply(builder, configuration);
             try
             {
                 await using var connection = new NpgsqlConnection(builder.ConnectionString);

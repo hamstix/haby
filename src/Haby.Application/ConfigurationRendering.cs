@@ -8,6 +8,8 @@ public abstract record ConfigurationRendererContract(ConfigurationRendererId Id,
     string OutputContract, string OutputKey, DurableActionExecutionKey ProducerAction,
     ConfigurationFormatterId Formatter)
 {
+    /// <summary>Explicit equivalent producers share the ordinary consumer shape. Default remains exact.</summary>
+    public virtual bool SupportsProducer(DurableActionExecutionKey producer) => producer == ProducerAction;
     public abstract ConfigurationObject Defaults { get; }
     public abstract bool ValidateOptions(ConfigurationObject options, bool complete);
     public abstract ConfigurationObject NormalizeOptions(ConfigurationObject options);
@@ -93,10 +95,10 @@ public sealed class ConfigurationRenderingCatalog
         foreach (var pair in request.Options.Members) { settings[pair.Key] = pair.Value; origins[pair.Key] = request.OptionOrigins[pair.Key]; }
         var complete = new ConfigurationObject(settings);
         if (!definition.ValidateOptions(complete, true)) return (null, "render.options.invalid");
-        var matches = producers.Where(n => n.ResourceId == local.ResourceRef && n.Action == definition.ProducerAction).ToArray();
+        var matches = producers.Where(n => n.ResourceId == local.ResourceRef && definition.SupportsProducer(n.Action)).ToArray();
         if (matches.Length != 1) return (null, "render.producer.unavailable");
         return (new(component, index, request.Renderer, renderer.Identity, definition.Formatter, formatter.Identity,
-            definition.Resource, local.ResourceRef, definition.OutputContract, definition.OutputKey, matches[0].Id, definition.ProducerAction,
+            definition.Resource, local.ResourceRef, definition.OutputContract, definition.OutputKey, matches[0].Id, matches[0].Action,
             definition.NormalizeOptions(definition.Defaults), definition.NormalizeOptions(complete), origins.ToImmutableDictionary(StringComparer.Ordinal)), null);
     }
 
@@ -109,7 +111,7 @@ public sealed class ConfigurationRenderingCatalog
         _renderers.TryGetValue(pin.Renderer, out var r) && r.Identity == pin.RendererImplementation &&
         _formatters.TryGetValue(pin.Formatter, out var f) && f.Identity == pin.FormatterImplementation &&
         d.Formatter == pin.Formatter && d.Resource == pin.Resource && d.OutputContract == pin.OutputContract &&
-        d.OutputKey == pin.OutputKey && d.ProducerAction == pin.ProducerAction && d.ValidateOptions(pin.Defaults, true) && d.ValidateOptions(pin.Options, true);
+        d.OutputKey == pin.OutputKey && d.SupportsProducer(pin.ProducerAction) && d.ValidateOptions(pin.Defaults, true) && d.ValidateOptions(pin.Options, true);
 
     public ConfigurationFragment? Render(ConfigurationRenderPin pin, ExternalOperationOutput confirmedOutput)
     {
@@ -133,7 +135,7 @@ public sealed class ConfigurationRenderingCatalog
     /// <summary>Delivery requires exact formatter and pure contract metadata, never a renderer instance.</summary>
     public bool SupportsDeliveryFormatter(ConfigurationRenderPin pin) => _definitions.TryGetValue(pin.Renderer, out var d) &&
         d.Formatter == pin.Formatter && d.Resource == pin.Resource && d.OutputContract == pin.OutputContract && d.OutputKey == pin.OutputKey &&
-        d.ProducerAction == pin.ProducerAction && d.ValidateOptions(pin.Options, true) &&
+        d.SupportsProducer(pin.ProducerAction) && d.ValidateOptions(pin.Options, true) &&
         _formatters.TryGetValue(pin.Formatter, out var f) && f.Identity == pin.FormatterImplementation;
 
     public ConfidentialConfigurationString? FormatDelivery(ConfigurationRenderPin pin, ConfigurationDeferredValue value, ReadOnlySpan<char> material)

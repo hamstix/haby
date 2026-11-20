@@ -39,6 +39,7 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
             .AddSingleton<IDurableActionAdmissionHandler>(p => p.GetRequiredService<ImportHandler>())
             .AddSingleton<IDurableActionHandler>(p => p.GetRequiredService<ImportHandler>())
             .AddSingleton<IExternalOperationOutputContract, ImportOutput>()
+            .AddSingleton<IDurableResourceReuseVerifier, SampleReuseVerifier>()
             .AddSingleton<IProviderRevisionPreflight, AcceptPreflight>();
         return services.BuildServiceProvider();
     }
@@ -50,7 +51,7 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
             {"worker":{"documents":{"settings":{"fileName":"resource.json","format":"json","template":{}}},
               "bindings":{"use":{"target":{"kind":"local-resource","resourceRef":"existing"},"documentProjections":[
                 {"documentRef":"settings","path":"/Resource","rendererRef":"sample.import-render/v1"}]}}}}
-            """);
+            """u8);
         return Encoding.UTF8.GetBytes(manifest.ToJsonString());
     }
     private static Task<ImportApplicationManifestResult> Import(ServiceProvider services, string version, string properties = "{}") =>
@@ -296,8 +297,17 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
             return new(DurableExecutionOutcome.Succeeded, await journal.FindAsync(operation.Key, cancellationToken));
         }
     }
+    private sealed class SampleReuseVerifier : IDurableResourceReuseVerifier
+    {
+        public DurableActionAdmissionKey Key => ImportKey.Admission;
+        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceImportReceipt receipt, CancellationToken token) =>
+            ValueTask.FromResult(original.Node.Action == ImportKey && receipt.Evidence == new DurableActionPayload("haby.import-observation/v1", "{}")
+                ? ResourceReuseValidationStatus.Confirmed : ResourceReuseValidationStatus.InputUnavailable);
+    }
     private sealed class ImportOutput : IExternalOperationOutputContract
     {
+        public bool ValidateImportEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
+            accepted.Node.Action == ImportKey && evidence == new DurableActionPayload("haby.import-observation/v1", "{}");
         public DurableActionExecutionKey Producer => ImportKey;
         public ExternalOperationOutputIdentity Identity => Receipt;
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => node.Action == ImportKey && output == new ExternalOperationOutput(Receipt.Contract, Receipt.Key, "external-42");
