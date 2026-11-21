@@ -22,6 +22,27 @@ public sealed class DurableCreateExecutorTests
         [], [], []);
 
     [Fact]
+    public async Task Imported_reuse_refusal_precedes_dependent_handler_attempt_and_external_effects()
+    {
+        foreach (var status in new[] { ResourceReuseValidationStatus.Conflict, ResourceReuseValidationStatus.InputUnavailable, ResourceReuseValidationStatus.Connectivity })
+        {
+            var (_, journal, target, _) = Harness();
+            journal.ReuseStatus = status;
+            var handler = new RoutingHandler(journal.Operation.Node.Action, new("sample.output/v1", "value"));
+            var executor = new ExactDurableOperationExecutor(journal, new DurableActionRegistry([], [handler]), new(), TimeProvider.System);
+            var result = await executor.ExecuteAsync(journal.Operation.Key, default);
+            Assert.Equal(0, handler.Calls);
+            Assert.Equal(status, result.ReuseStatus);
+            Assert.Equal(status == ResourceReuseValidationStatus.Conflict ? DurableExecutionOutcome.Failed :
+                status == ResourceReuseValidationStatus.Connectivity ? DurableExecutionOutcome.RetryableFailure : DurableExecutionOutcome.InputUnavailable, result.Outcome);
+            Assert.Empty(journal.Attempts);
+            Assert.Empty(journal.Log);
+            Assert.Empty(target.Inputs);
+            Assert.False(journal.AppliedGenerationAdvanced);
+        }
+    }
+
+    [Fact]
     public async Task Success_commits_the_marker_before_SQL_and_advances_the_applied_generation_once()
     {
         var (executor, journal, target, _) = Harness();
@@ -455,6 +476,52 @@ public sealed class DurableCreateExecutorTests
         Assert.Equal(2, target.Inputs.Count);
     }
 
+    [Fact]
+    public async Task Dispatched_reverification_requires_both_import_mode_and_explicit_read_only_handler()
+    {
+        foreach (var mode in new[] { ResourceAcquisitionMode.Provision, ResourceAcquisitionMode.ImportUseAndRetain })
+            foreach (var optedIn in new[] { false, true })
+            {
+                var (_, journal, _, _) = Harness(new Fixture
+                {
+                    State = DurableOperationState.Dispatching,
+                    AttemptId = Guid.NewGuid(),
+                    AttemptNumber = 1,
+                    OpenAttempt = true
+                });
+                var action = new DurableActionExecutionKey(journal.Operation.Node.Action.Admission with { Mode = mode },
+                    OperationContractId.Create("sample.observe-import/v1"));
+                var identity = new ExternalOperationOutputIdentity("sample.observation/v1", "receipt");
+                journal.SetNode(journal.Operation.Node with { Action = action, RequiresExternalOutput = true, RequiredOutput = identity });
+                var handler = optedIn ? new ReadOnlyRoutingHandler(action, identity) : new RoutingHandler(action, identity);
+                var executor = new ExactDurableOperationExecutor(journal, new DurableActionRegistry([], [handler],
+                    [new RoutingOutput(action, identity)]), new(), TimeProvider.System);
+                var result = await executor.ExecuteAsync(journal.Operation.Key, default);
+                var mayReverify = mode == ResourceAcquisitionMode.ImportUseAndRetain && optedIn;
+                Assert.Equal(mayReverify ? DurableExecutionOutcome.RetryableFailure : DurableExecutionOutcome.NeedsAttention, result.Outcome);
+                Assert.Equal(mayReverify ? 1 : 0, handler.Calls);
+                Assert.Equal(!mayReverify, journal.Log.Contains("recover"));
+            }
+    }
+    private class RoutingHandler(DurableActionExecutionKey key, ExternalOperationOutputIdentity identity) : IDurableActionHandler
+    {
+        public int Calls;
+        public DurableActionExecutionKey Key => key;
+        public bool RequiresExternalOutput => true;
+        public ExternalOperationOutputIdentity OutputIdentity => identity;
+        public bool Supports(DurableOperationNode node) => node.Action == key;
+        public ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation, CancellationToken cancellationToken)
+        { Calls++; return ValueTask.FromResult(new DurableExecutionResult(DurableExecutionOutcome.RetryableFailure, operation)); }
+    }
+    private sealed class ReadOnlyRoutingHandler(DurableActionExecutionKey key, ExternalOperationOutputIdentity identity)
+        : RoutingHandler(key, identity), IReadOnlyResourceImportHandler;
+    private sealed class RoutingOutput(DurableActionExecutionKey key, ExternalOperationOutputIdentity identity) : IExternalOperationOutputContract
+    {
+        public DurableActionExecutionKey Producer => key;
+        public ExternalOperationOutputIdentity Identity => identity;
+        public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => false;
+    }
+
     private const string OneResource =
         """
         "resources":{"database":{"type":"postgresql.database/v1alpha1","providerRef":"primary","properties":{"name":"appdb"}}}
@@ -553,7 +620,11 @@ public sealed class DurableCreateExecutorTests
     private sealed class FakeJournal(DurableOperation operation) : IDurableOperationJournal
     {
         public ValueTask<DurableGenerationProgress?> ProgressAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation, CancellationToken cancellationToken) =>
-            ValueTask.FromResult<DurableGenerationProgress?>(new(deployment, generation, 1, null, [new(Operation, [])]));
+            ValueTask.FromResult<DurableGenerationProgress?>(new(deployment, generation, 1, null, [new(Operation, [])]) { Reused = ReuseStatus is null ? 0 : 1 });
+        public ResourceReuseValidationStatus? ReuseStatus { get; set; }
+        public ValueTask<ResourceReuseValidationResult> ValidateReuseAsync(ApplicationDeploymentId deployment, DeploymentGeneration generation,
+            DurableActionAdmission admission, CancellationToken cancellationToken, OperationId? operation = null) =>
+            ValueTask.FromResult(new ResourceReuseValidationResult(ReuseStatus ?? ResourceReuseValidationStatus.Confirmed));
         public void SetNode(DurableOperationNode node) => Operation = Operation with { Node = node };
         public List<string> Log { get; } = [];
         public List<DurableOperationAttempt> Attempts { get; } = [];

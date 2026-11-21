@@ -283,6 +283,13 @@ internal sealed partial class InternalDurableActions
     private async Task<(bool Current, bool Expired, RolloutResult? Completed)> PublishReadAsync(ObservationCall call, SubmittedMember member, Guid reservation,
         RolloutObservation observation, Dictionary<string, Guid> samples, Dictionary<string, RolloutObservation> observations, CancellationToken token, BatchReadBudget? batch = null)
     {
+        using var lifecycle = CancellationTokenSource.CreateLinkedTokenSource(token, call.LifecycleToken);
+        // A canceled/non-ready sample only closes its existing reservation under the bounded grace.
+        // It cannot promote readiness or Applied and must not start a new Provider verification.
+        using var reuse = observation.Outcome != RolloutOutcome.Ready || lifecycle.IsCancellationRequested
+            ? new ResourceReuseValidationResult(ResourceReuseValidationStatus.InputUnavailable)
+            : await VerifyReadPromotionAsync(call, lifecycle.Token, token);
+        if (observation.Outcome == RolloutOutcome.Ready && !call.LifecycleToken.IsCancellationRequested) RequireReuse(reuse);
         var payload = RolloutJson.Encode(observation);
         if (Encoding.UTF8.GetByteCount(payload) > 16384) throw new InvalidDataException("Observation exceeds bound.");
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
@@ -297,14 +304,27 @@ internal sealed partial class InternalDurableActions
         if (latest.Id == member.Attempt.Id)
         {
             samples[member.Subject] = reservation; observations[member.Subject] = observation;
-            completed = await FinishRoundAsync(db, call, samples, observations, token);
+            if (reuse.Status == ResourceReuseValidationStatus.Confirmed && !call.LifecycleToken.IsCancellationRequested)
+                completed = await FinishRoundAsync(db, call, samples, observations, token, reuse);
         }
         await db.SaveChangesAsync(token);
         if (completed?.Applied == true) call.LifecycleToken.ThrowIfCancellationRequested();
         await CommitRolloutAsync(tx, token, batch); return (latest.Id == member.Attempt.Id, expired, completed);
     }
+    private async ValueTask<ResourceReuseValidationResult> VerifyReadPromotionAsync(ObservationCall call, CancellationToken lifecycle, CancellationToken closure)
+    {
+        try
+        {
+            return await VerifyReuseAsync(new(ApplicationDeploymentId.Parse(call.Set.Source.DeploymentId.ToString()),
+                DeploymentGeneration.Create(call.Set.Source.Generation), OperationId.Create("reuse-readiness")), lifecycle, historical: true);
+        }
+        catch (OperationCanceledException) when (call.LifecycleToken.IsCancellationRequested && !closure.IsCancellationRequested)
+        {
+            return new(ResourceReuseValidationStatus.InputUnavailable);
+        }
+    }
     private async Task<RolloutResult?> FinishRoundAsync(ManifestCatalogDbContext db, ObservationCall call, Dictionary<string, Guid> samples,
-        Dictionary<string, RolloutObservation> observations, CancellationToken token)
+        Dictionary<string, RolloutObservation> observations, CancellationToken token, ResourceReuseValidationResult verification)
     {
         if (call.Set.Checkpoint is null || samples.Count != call.Set.Targets.Length || observations.Count != call.Set.Targets.Length ||
             observations.Values.Any(x => x.Outcome != RolloutOutcome.Ready)) return null;
@@ -321,7 +341,7 @@ internal sealed partial class InternalDurableActions
         {
             var transaction = db.Database.CurrentTransaction!;
             await transaction.CreateSavepointAsync("initial_completion", token);
-            try { result = await CompleteInitialAsync(db, call, current, proof, result, token); }
+            try { result = await CompleteInitialAsync(db, call, current, proof, result, token, verification); }
             catch (InvalidDataException)
             {
                 await transaction.RollbackToSavepointAsync("initial_completion", token);

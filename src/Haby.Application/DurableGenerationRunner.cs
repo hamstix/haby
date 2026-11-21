@@ -18,7 +18,10 @@ public sealed record DurableGenerationProgress(ApplicationDeploymentId Deploymen
             DurableAttemptOutcome.FailedBeforeDispatch or DurableAttemptOutcome.CanceledBeforeDispatch);
 }
 public sealed record DurableGenerationRunResult(DurableGenerationProgress? Progress,
-    OperationId? StoppedAt = null, DurableExecutionOutcome? StopOutcome = null, bool Canceled = false);
+    OperationId? StoppedAt = null, DurableExecutionOutcome? StopOutcome = null, bool Canceled = false)
+{
+    public ResourceReuseValidationStatus? ReuseStatus { get; init; }
+}
 
 /// <summary>Explicit sequential pass; one owner of the generation gate, no recursive locking.</summary>
 public sealed class DurableGenerationRunner(ExactDurableOperationExecutor executor,
@@ -47,10 +50,14 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
             cancellationToken.ThrowIfCancellationRequested();
             var progress = await ProgressAsync(deployment, generation, cancellationToken);
             if (progress is null) return new(null);
-            if (progress.Reused > 0 && !await journal.ValidateReuseAsync(deployment, generation, admission, cancellationToken))
-                return new(progress, StopOutcome: DurableExecutionOutcome.InputUnavailable);
             if (progress.Completed == progress.Total)
             {
+                // Historical success is metadata, not a new consequential transition or a health probe.
+                if (progress.AppliedGeneration >= generation.Value && progress.ResourcesReady is not null) return new(progress);
+                using var reuse = progress.Reused > 0 ? await journal.ValidateReuseAsync(deployment, generation, admission, cancellationToken)
+                    : new ResourceReuseValidationResult(ResourceReuseValidationStatus.Confirmed);
+                if (reuse.Status != ResourceReuseValidationStatus.Confirmed)
+                    return new(progress, StopOutcome: reuse.FailureOutcome) { ReuseStatus = reuse.Status };
                 var complete = await journal.TryCompleteGenerationAsync(deployment, generation, admission, cancellationToken);
                 return new(await ProgressAsync(deployment, generation, CancellationToken.None),
                     StopOutcome: complete ? null : DurableExecutionOutcome.InputUnavailable);
@@ -63,7 +70,8 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
             if (next is null) return new(progress, StopOutcome: DurableExecutionOutcome.Blocked);
             var result = await executor.ExecuteCoreAsync(next.Operation.Key, cancellationToken);
             if (result.Outcome != DurableExecutionOutcome.Succeeded)
-                return new(await ProgressAsync(deployment, generation, CancellationToken.None), next.Operation.Key.OperationId, result.Outcome, cancellationToken.IsCancellationRequested);
+                return new(await ProgressAsync(deployment, generation, CancellationToken.None), next.Operation.Key.OperationId, result.Outcome, cancellationToken.IsCancellationRequested)
+                { ReuseStatus = result.ReuseStatus };
         }
     }
 }

@@ -32,7 +32,7 @@ public sealed class PostgreSqlApplicationConnectionContract(IProviderConfigurati
             if (value is null || string.IsNullOrWhiteSpace(value.Host) || value.Host.Length > 255 || Uri.CheckHostName(value.Host) == UriHostNameType.Unknown ||
                 value.Port is < 1 or > 65535 || value.Password is null || value.DatabaseName is null ||
                 !PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(value.DatabaseName) || !PostgreSqlApplicationLoginContract.ValidSchema(value.Schema) ||
-                value.UserName is null || !PostgreSqlResourceNaming.ValidRoleName(value.UserName)) return null;
+                !PostgreSqlResourceNaming.ValidExistingRoleName(value.UserName)) return null;
             return new(value.Host, value.Port, value.DatabaseName, value.Schema, value.UserName,
                 new(SecretId.Parse(value.Password.SecretId), SecretVersionId.Parse(value.Password.SecretVersionId)));
         }

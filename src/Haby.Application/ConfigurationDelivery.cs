@@ -12,6 +12,7 @@ public interface IConfigurationResolutionBinding
     ManifestLocalId Implementation { get; }
     SecretResolutionReference? Bind(ConfigurationRenderPin pin, ExternalOperationOutput output, ConfigurationDeferredValue value);
     bool ValidateMaterial(ReadOnlySpan<char> material);
+    bool ValidateMaterial(ConfigurationRenderPin pin, ReadOnlySpan<char> material) => ValidateMaterial(material);
 }
 
 public sealed record SecretResolutionReference(SecretRef Reference, SecretPurpose Purpose);
@@ -170,7 +171,7 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
                     foreach (var (path, binding) in group)
                     {
                         token.ThrowIfCancellationRequested();
-                        if (!binding.Adapter.ValidateMaterial(chars)) throw new InvalidDataException();
+                        if (!binding.Adapter.ValidateMaterial(binding.Pin, chars)) throw new InvalidDataException();
                         var value = rendering.FormatDelivery(binding.Pin, binding.Value, chars) ?? throw new InvalidDataException();
                         token.ThrowIfCancellationRequested();
                         expansionBudget -= ConfigurationJson.MeasureResolvedValue(new ConfigurationString(value.Reveal()), token);

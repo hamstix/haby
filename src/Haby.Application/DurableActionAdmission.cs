@@ -55,6 +55,10 @@ public interface IDurableActionHandler
     bool Supports(DurableOperationNode node);
 }
 
+/// <summary>Explicit trusted capability for observational import only. Restart may reverify
+/// the same dispatched attempt because this handler performs no external mutation.</summary>
+public interface IReadOnlyResourceImportHandler : IDurableActionHandler;
+
 /// <summary>Typed preparation stays inside the adapter, without an object target bridge.</summary>
 public abstract class DurableActionAdmissionHandler<TInput> : IDurableActionAdmissionHandler where TInput : class
 {

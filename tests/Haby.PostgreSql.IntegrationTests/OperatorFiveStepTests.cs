@@ -68,7 +68,7 @@ public sealed partial class OperatorHostIntegrationTests
                     {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"pg-main","environment":"pilot"},
                     "spec":{"revision":1,"providerKind":"postgresql/v1","configurationContract":"haby.postgresql.connection/v1",
                     "implementationId":"haby.postgresql.database/v1alpha1","properties":{"host":"{{{{{admin.Host}}}}}","port":{{{{{admin.Port}}}}},
-                    "maintenanceDatabase":"postgres","administratorUserName":"{{{{{admin.Username}}}}}"},
+                    "maintenanceDatabase":"postgres","transportMode":"disable","administratorUserName":"{{{{{admin.Username}}}}}"},
                     "secretRefs":{"administrator-password":{"secretName":"admin","version":1}}}}
                     """;
                 var providerFile = Path.Combine(folder, "provider.json");

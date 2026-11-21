@@ -114,6 +114,7 @@ $provider = @{
             port = [int](Read-Host 'Disposable PostgreSQL published port')
             maintenanceDatabase = 'postgres'
             administratorUserName = (Read-Host 'Disposable Provider SUPERUSER name')
+            transportMode = 'disable' # This owned disposable fixture uses plaintext.
         }
         secretRefs = @{ 'administrator-password' = @{ secretName = 'pg-admin'; version = 1 } }
     }

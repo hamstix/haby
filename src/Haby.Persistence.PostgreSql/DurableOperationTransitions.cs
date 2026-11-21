@@ -12,8 +12,10 @@ internal static class DurableOperationTransitions
         var deployment = Guid.Parse(key.DeploymentId.ToString());
         return db.DurableOperations.Where(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value && x.OperationId == key.OperationId.Value);
     }
-    internal static async Task<DurableOperationRow?> BeginAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token, string? actor = null)
+    internal static async Task<DurableOperationRow?> BeginAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token, string? actor = null, ResourceReuseValidationResult? verification = null)
     {
+        if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value,
+            key.OperationId, PostgreSqlReuseVerificationScopes.Transition.Begin, token, verification: verification)) return null;
         var attempt = Guid.CreateVersion7();
         var changed = await Operation(db, key).Where(x => x.State == nameof(DurableOperationState.Pending) || x.State == nameof(DurableOperationState.Preparing))
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, nameof(DurableOperationState.Preparing))
@@ -36,19 +38,23 @@ internal static class DurableOperationTransitions
             Actor = actor
         });
         await db.SaveChangesAsync(token);
+        await PostgreSqlReuseVerificationScopes.UpdatedAsync(db, key, token, begun: true, verification: verification);
         return row;
     }
-    internal static async Task<bool> MarkerAsync(ManifestCatalogDbContext db, DurableOperationKey key, Guid attempt, DateTimeOffset at, CancellationToken token)
+    internal static async Task<bool> MarkerAsync(ManifestCatalogDbContext db, DurableOperationKey key, Guid attempt, DateTimeOffset at, CancellationToken token, ResourceReuseValidationResult? verification = null)
     {
+        if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value,
+            key.OperationId, PostgreSqlReuseVerificationScopes.Transition.Marker, token, attempt, verification)) return false;
         var changed = await Operation(db, key).Where(x => x.State == nameof(DurableOperationState.Preparing) && x.CurrentAttemptId == attempt)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, nameof(DurableOperationState.Dispatching))
                 .SetProperty(x => x.DispatchedAt, at).SetProperty(x => x.UpdatedAt, at), token);
         if (changed != 1) return false;
         if (await db.DurableOperationAttempts.Where(x => x.AttemptId == attempt && x.FinishedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.DispatchedAt, at), token) != 1) throw new InvalidDataException("Dispatch attempt mismatch.");
+        await PostgreSqlReuseVerificationScopes.UpdatedAsync(db, key, token, verification: verification);
         return true;
     }
-    internal static async Task<bool> RecoverAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token)
+    internal static async Task<bool> RecoverAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token, ResourceReuseValidationResult? verification = null)
     {
         var row = await Operation(db, key).AsNoTracking().SingleOrDefaultAsync(token);
         if (row?.State != nameof(DurableOperationState.Dispatching)) return false;
@@ -59,11 +65,14 @@ internal static class DurableOperationTransitions
         if (await db.DurableOperationAttempts.Where(x => x.AttemptId == row.CurrentAttemptId && x.FinishedAt == null && x.DispatchedAt != null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.Outcome, nameof(DurableAttemptOutcome.Uncertain)).SetProperty(x => x.FinishedAt, at), token) != 1)
             throw new InvalidDataException("Uncertain attempt mismatch.");
+        await PostgreSqlReuseVerificationScopes.UpdatedAsync(db, key, token, verification: verification);
         return true;
     }
     internal static async Task<bool> ConfirmAsync(ManifestCatalogDbContext db, DurableOperationKey key, Guid attempt,
-        DateTimeOffset at, bool observation, CancellationToken token)
+        DateTimeOffset at, bool observation, CancellationToken token, ResourceReuseValidationResult? verification = null)
     {
+        if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value,
+            key.OperationId, PostgreSqlReuseVerificationScopes.Transition.Completion, token, attempt, verification)) return false;
         var expected = observation ? nameof(DurableOperationState.NeedsAttention) : nameof(DurableOperationState.Dispatching);
         var outcome = observation ? nameof(DurableAttemptOutcome.Uncertain) : null;
         var row = await Operation(db, key).AsNoTracking().SingleOrDefaultAsync(token);
@@ -77,6 +86,7 @@ internal static class DurableOperationTransitions
         if (!observation && await db.DurableOperationAttempts.Where(x => x.AttemptId == attempt && x.FinishedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.FinishedAt, at).SetProperty(x => x.Outcome, nameof(DurableAttemptOutcome.Succeeded)), token) != 1)
             throw new InvalidDataException("Response attempt mismatch.");
+        await PostgreSqlReuseVerificationScopes.UpdatedAsync(db, key, token, verification: verification);
         return true;
     }
 }

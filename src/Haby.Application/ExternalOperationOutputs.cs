@@ -13,6 +13,9 @@ public interface IExternalOperationOutputContract
     DurableActionExecutionKey Producer { get; }
     ExternalOperationOutputIdentity Identity { get; }
     bool Validate(DurableOperationNode node, ExternalOperationOutput output);
+    /// <summary>Closed adapter-owned read-only verification evidence for this import producer.
+    /// Missing explicit support refuses import acceptance; ordinary outputs alone are insufficient.</summary>
+    bool ValidateImportEvidence(AcceptedOperation accepted, DurableActionPayload evidence) => false;
     /// <summary>Catalog metadata only: no Provider I/O or secret-material resolution. Sources have confirmed original attempts.</summary>
     bool ValidateReuse(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
         IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration,

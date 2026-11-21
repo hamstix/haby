@@ -111,6 +111,7 @@ public static class ManifestCatalogServiceCollectionExtensions
 {
     public static IServiceCollection AddPostgreSqlManifestCatalog(this IServiceCollection services, string connectionString)
     {
+        services.AddSingleton<PostgreSqlReuseVerificationScopes>();
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         services.AddDbContextFactory<ManifestCatalogDbContext>(options => options.UseNpgsql(connectionString));
         services.AddSingleton<PostgreSqlManifestImportStore>();

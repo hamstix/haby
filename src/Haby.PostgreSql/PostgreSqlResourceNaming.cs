@@ -6,6 +6,12 @@ namespace Haby.PostgreSql;
 /// <summary>PostgreSQL interpretation of frozen naming policies.</summary>
 public static class PostgreSqlResourceNaming
 {
+    // Existing identities are not generated names. Admission and evidence still verify
+    // their exact owner, role attributes and acquisition mode before publication.
+    internal static bool ValidExistingRoleName(string? value) => value is not null && value != "postgres" &&
+        !value.StartsWith("pg_", StringComparison.Ordinal) &&
+        System.Text.RegularExpressions.Regex.IsMatch(value, @"\A[a-z][a-z0-9_]{0,62}\z",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
     internal static bool ValidRoleName(string? value) => value is not null && !value.StartsWith("pg_", StringComparison.Ordinal) &&
         System.Text.RegularExpressions.Regex.IsMatch(value,
             @"\A(?:haby_a_[a-f0-9]{48}|[a-z][a-z0-9_]{0,23}haby_a_[a-f0-9]{32})\z");

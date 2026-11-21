@@ -10,10 +10,11 @@ namespace Haby.PostgreSql;
 /// <summary>Closed pilot PostgreSQL configuration. It contains an exact reference, never credential bytes.</summary>
 public sealed record PostgreSqlProviderConfiguration
 {
-    public const int CurrentShapeVersion = 1;
+    public const int CurrentShapeVersion = 2;
 
     public PostgreSqlProviderConfiguration(int shapeVersion, string host, int port, string maintenanceDatabase,
-        string administratorUserName, SecretRef administratorPassword, string implementationId)
+        string administratorUserName, SecretRef administratorPassword, string implementationId,
+        PostgreSqlTransportMode transportMode = PostgreSqlTransportMode.VerifyFull)
     {
         if (shapeVersion != CurrentShapeVersion) throw new ArgumentOutOfRangeException(nameof(shapeVersion));
         if (string.IsNullOrWhiteSpace(host) || host.Length > 255 || Uri.CheckHostName(host) == UriHostNameType.Unknown)
@@ -33,6 +34,8 @@ public sealed record PostgreSqlProviderConfiguration
         AdministratorUserName = administratorUserName;
         AdministratorPassword = administratorPassword;
         ImplementationId = implementationId;
+        _ = PostgreSqlProviderTransport.Encode(transportMode);
+        TransportMode = transportMode;
     }
 
     public int ShapeVersion { get; }
@@ -42,6 +45,7 @@ public sealed record PostgreSqlProviderConfiguration
     public string AdministratorUserName { get; }
     public SecretRef AdministratorPassword { get; }
     public string ImplementationId { get; }
+    public PostgreSqlTransportMode TransportMode { get; }
     public override string ToString() => nameof(PostgreSqlProviderConfiguration);
 }
 
@@ -55,7 +59,7 @@ public sealed class PostgreSqlProviderConfigurationCodec(ICheckpointProviderCapa
 
     public override string ProviderKindId => Kind;
     public override string ShapeId => Shape;
-    public override int PayloadFormatVersion => 1;
+    public override int PayloadFormatVersion => 2;
 
     public override PreparedProviderConfiguration Encode(PostgreSqlProviderConfiguration value)
     {
@@ -71,10 +75,11 @@ public sealed class PostgreSqlProviderConfigurationCodec(ICheckpointProviderCapa
             AdministratorUserName = value.AdministratorUserName,
             AdministratorSecretId = value.AdministratorPassword.SecretId.ToString(),
             AdministratorSecretVersionId = value.AdministratorPassword.SecretVersionId.ToString(),
-            ImplementationId = value.ImplementationId
+            ImplementationId = value.ImplementationId,
+            TransportMode = PostgreSqlProviderTransport.Encode(value.TransportMode)
         };
         var json = JsonSerializer.Serialize(snapshot, PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot);
-        return new PreparedProviderConfiguration(Kind, Target(value), value.ImplementationId, Shape, 1, json,
+        return new PreparedProviderConfiguration(Kind, Target(value), value.ImplementationId, Shape, 2, json,
             [new ProviderConfigurationSecretReference(AdministratorPasswordSlot, value.AdministratorPassword)]);
     }
 
@@ -85,10 +90,11 @@ public sealed class PostgreSqlProviderConfigurationCodec(ICheckpointProviderCapa
             var snapshot = JsonSerializer.Deserialize(payloadJson,
                 PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot)
                 ?? throw new InvalidDataException("Stored Provider configuration is invalid.");
-            return new PostgreSqlProviderConfiguration(1, snapshot.Host, snapshot.Port,
+            return new PostgreSqlProviderConfiguration(2, snapshot.Host, snapshot.Port,
                 snapshot.MaintenanceDatabase, snapshot.AdministratorUserName,
                 new SecretRef(SecretId.Parse(snapshot.AdministratorSecretId),
-                    SecretVersionId.Parse(snapshot.AdministratorSecretVersionId)), snapshot.ImplementationId);
+                    SecretVersionId.Parse(snapshot.AdministratorSecretVersionId)), snapshot.ImplementationId,
+                PostgreSqlProviderTransport.Parse(snapshot.TransportMode));
         }
         catch (Exception error) when (error is JsonException or ArgumentException or FormatException)
         {
@@ -110,9 +116,10 @@ internal sealed class PostgreSqlConfigurationSnapshot
     public required string AdministratorSecretId { get; init; }
     public required string AdministratorSecretVersionId { get; init; }
     public required string ImplementationId { get; init; }
+    public required string TransportMode { get; init; }
 }
 
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata, AllowDuplicateProperties = false, RespectNullableAnnotations = true)]
 [JsonSerializable(typeof(PostgreSqlConfigurationSnapshot))]
 internal partial class PostgreSqlConfigurationJsonContext : JsonSerializerContext;
 

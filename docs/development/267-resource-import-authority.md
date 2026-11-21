@@ -2,9 +2,9 @@
 
 This is the first bounded implementation slice of [issue #267](https://github.com/hamstix/haby/issues/267)
 and [ADR-062](../adr/0062-existing-resource-import-and-attachment.md).
-It introduces the shared intent, capability and persistence boundaries. No production
-adapter currently accepts import. PostgreSQL existing-pair verification, protected
-application credentials and the operator RPC/CLI path remain subsequent slices.
+It introduces the shared intent, capability and persistence boundaries. The next
+bounded slice adds [PostgreSQL pair verification and protected credentials](267-postgresql-import.md)
+through internal services. The operator RPC/CLI path remains subsequent work.
 Reference and Provider connection status are separate work.
 
 ## Exact intent and capabilities
@@ -75,4 +75,4 @@ provenance, unchanged reuse, mutation refusal and lost-authority publication ref
 
 These catalog tests do not prove real external import verification, credential
 attachment, cross-system atomicity, PostgreSQL import, or operational readiness.
-Those require the later bounded slices and exact-revision qualification.
+Those require the PostgreSQL slice's separate evidence and exact-revision qualification.

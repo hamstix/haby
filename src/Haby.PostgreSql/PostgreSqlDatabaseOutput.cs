@@ -4,7 +4,7 @@ using Haby.Application;
 
 namespace Haby.PostgreSql;
 
-/// <summary>Consistency evidence from a confirmed CREATE, never an ownership attestation.</summary>
+/// <summary>Ordinary database identity from confirmed acquisition; lifecycle authority is separate.</summary>
 public sealed record PostgreSqlDatabaseOutput(string DatabaseName, uint DatabaseOid, uint PublicSchemaOid);
 
 public sealed class PostgreSqlDatabaseOutputContract : IExternalOperationOutputContract

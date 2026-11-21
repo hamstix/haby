@@ -23,12 +23,25 @@ public sealed class ResourceImportIntentTests
         requests[0] = requests[0] with { Input = new("sample.import/v1", "{}") };
         Assert.Equal(Intent(), intent);
         Assert.Equal(intent, ResourceImportIntentCodec.Decode(encoded));
-        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace("\"Version\":1", "\"Version\":2", StringComparison.Ordinal)));
-        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace("\"Version\":1", "\"Version\":1,\"Version\":1", StringComparison.Ordinal)));
-        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace("\"Version\":1", "\"Unknown\":true,\"Version\":1", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace("\"Version\":2", "\"Version\":99", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace("\"Version\":2", "\"Version\":2,\"Version\":2", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace("\"Version\":2", "\"Unknown\":true,\"Version\":2", StringComparison.Ordinal)));
         Assert.Throws<ArgumentException>(() => new ResourceImportIntent([requests[0], requests[0]]));
         Assert.Throws<InvalidDataException>(() => new ResourceImportIntent([
             new(ManifestLocalId.Create("other"), new("sample.import/v1", "{}"))]).Validate(Inputs.Providers.Declaration.Spec));
+    }
+
+    [Fact]
+    public void Protected_input_reference_freezes_exact_stage_and_secret_version_without_material()
+    {
+        var credential = new ProtectedCredentialReference(Guid.NewGuid(), new(SecretId.New(), SecretVersionId.New()));
+        var intent = new ResourceImportIntent([Intent().Resources.Single() with { Credential = credential }]);
+        var encoded = ResourceImportIntentCodec.Encode(intent)!;
+        Assert.Equal(intent, ResourceImportIntentCodec.Decode(encoded));
+        Assert.Equal(credential, ResourceImportIntentCodec.Decode(encoded)!.Resources.Single().Credential);
+        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace(credential.Reference.SecretVersionId.ToString(), "latest", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace("\"Secret\":", "\"material\":\"forbidden\",\"Secret\":", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => ResourceImportIntentCodec.Decode(encoded.Replace(credential.Reference.SecretVersionId.ToString(), "", StringComparison.Ordinal)));
     }
 
     [Fact]

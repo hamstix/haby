@@ -284,7 +284,7 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"pg-main","environment":"pilot"},
         "spec":{"revision":1,"providerKind":"postgresql/v1","configurationContract":"haby.postgresql.connection/v1",
         "implementationId":"{{{{{PostgreSqlDatabaseProvisioner.ImplementationId}}}}}","properties":{"host":"{{{{{admin.Host}}}}}","port":{{{{{admin.Port}}}}},
-        "maintenanceDatabase":"postgres","administratorUserName":"{{{{{admin.Username}}}}}"},"secretRefs":{"administrator-password":{"secretName":"admin","version":1}}}}
+        "maintenanceDatabase":"postgres","transportMode":"disable","administratorUserName":"{{{{{admin.Username}}}}}"},"secretRefs":{"administrator-password":{"secretName":"admin","version":1}}}}
         """;
     private static async Task ExerciseNative(string endpoint, string instance)
     {

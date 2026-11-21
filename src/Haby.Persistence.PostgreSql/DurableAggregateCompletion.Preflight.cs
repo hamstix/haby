@@ -163,6 +163,13 @@ internal static partial class DurableAggregateCompletion
                     }
                     if (operation.State == nameof(DurableOperationState.Succeeded))
                     {
+                        if (node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                        {
+                            var receipt = await ResourceImportReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(deployment.ToString()),
+                                Haby.Domain.DeploymentGeneration.Create(source.Row.Generation), node.Id), token);
+                            if (receipt is null || !contracts.Single(x => x.Producer == node.Action).ValidateImportEvidence(
+                                new(source.Inputs, source.Graph, node, source.Inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return null;
+                        }
                         var attempt = attempts.SingleOrDefault(x => x.AttemptId == operation.CurrentAttemptId && x.OperationId == node.Id.Value && x.AttemptNumber == operation.AttemptNumber);
                         if (attempt?.Outcome != nameof(DurableAttemptOutcome.Succeeded) || attempt.FinishedAt is null || operation.FinalizedAt != attempt.FinishedAt ||
                             operation.DispatchedAt != attempt.DispatchedAt || operation.ReasonCode is not null ||
@@ -233,6 +240,11 @@ internal static partial class DurableAggregateCompletion
             var slot = await PostgreSqlGeneratedCredentialSlots.ReadAsync(db, new(credential.Input.Owner, credential.Input.SlotId), credential.Input.GenerationProfile, token, validateMaterial: false);
             if (slot?.Outcome != GeneratedCredentialOutcome.Existing || slot.Reference != credential.Output.Reference) return false;
         }
+        if (metadata.Purpose != EvidencePurpose.Publication)
+            foreach (var source in metadata.Sources.Where(x => x.Inputs.Import is not null))
+                foreach (var request in source.Inputs.Import!.Resources.Where(x => x.Credential is not null))
+                    if (!await PostgreSqlApplicationCredentialReader.ConfirmImportedAsync(db, new(source.Inputs.Environment,
+                        source.Inputs.Revision.ApplicationRecordId, request.Resource), request.Credential!.Reference, token)) return false;
         return true;
     }
 

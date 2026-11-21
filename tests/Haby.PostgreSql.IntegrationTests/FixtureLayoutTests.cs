@@ -80,7 +80,10 @@ public sealed class FixtureLayoutTests
     public void Every_nonexclusive_owned_fixture_has_a_bounded_lane()
     {
         var exclusive = new[] { typeof(ApplicationLoginLoggingTests), typeof(ProviderAliasTests),
-            typeof(ProviderPreflightCompatibilityTests), typeof(OperatorProviderAccessTests) };
+            typeof(ProviderPreflightCompatibilityTests), typeof(OperatorProviderAccessTests), typeof(PostgreSqlPairImportTests) };
+        // The import fixture changes server logging and shares the existing exclusive collection.
+        Assert.Equal("Login logging isolated", typeof(PostgreSqlPairImportTests).GetCustomAttributesData()
+            .Single(a => a.AttributeType == typeof(CollectionAttribute)).ConstructorArguments[0].Value);
         foreach (var type in typeof(PostgreSqlFixture).Assembly.GetTypes()
             .Where(t => (t.GetInterfaces().Contains(typeof(IClassFixture<PostgreSqlFixture>)) ||
                 t.GetInterfaces().Contains(typeof(IClassFixture<HostPostgreSqlFixture>))) && !exclusive.Contains(t)))

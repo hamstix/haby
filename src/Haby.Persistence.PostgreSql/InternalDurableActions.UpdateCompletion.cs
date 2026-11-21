@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Haby.Application;
+using Haby.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Haby.Persistence.PostgreSql;
@@ -74,12 +75,15 @@ internal sealed partial class InternalDurableActions
             if (retainedEvidenceBytes > 2097152) return await CloseUpdateAsync(result with { CompletionReason = "recipient-evidence-incomplete" });
             observations.Add(new(member.Subject, observed));
         }
+        using var reuse = await VerifyReuseAsync(new(ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
+            DeploymentGeneration.Create(source.Generation), OperationId.Create("reuse-update")), token, historical: true);
+        RequireReuse(reuse);
         ReadyProof fresh;
         await using (var db = await contexts.CreateDbContextAsync(token))
         {
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
-            var current = await RequireUpdateClosureAsync(db, call, token);
+            var current = await RequireUpdateClosureAsync(db, call, token, reuse);
             Trace(UpdateCompletionStage.FreshSamples);
             fresh = await FreshUpdateProofAsync(db, call, current, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
@@ -108,18 +112,22 @@ internal sealed partial class InternalDurableActions
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
-            _ = await RequireUpdateClosureAsync(db, call, token);
+            _ = await RequireUpdateClosureAsync(db, call, token, reuse);
             Trace(UpdateCompletionStage.Revoke);
             await RetirePermissionAsync(db, source, obsolete, JsonSerializer.Deserialize(call.Request.InputJson, RolloutMetadata.Default.RolloutRequest)!.Actor, token);
             await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             fault?.Invoke(InternalActionFault.AfterRetirementPermission);
         }
         fault?.Invoke(InternalActionFault.BeforeUpdateApplied);
+        reuse.Dispose();
+        using var finalReuse = await VerifyReuseAsync(new(ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
+            DeploymentGeneration.Create(source.Generation), OperationId.Create("reuse-update-applied")), token, historical: true);
+        RequireReuse(finalReuse);
         await using (var db = await contexts.CreateDbContextAsync(token))
         {
             await using var tx = await db.Database.BeginTransactionAsync(token);
             await DurableAggregateCompletion.LockAsync(db, source.DeploymentId, token);
-            var current = await RequireUpdateClosureAsync(db, call, token);
+            var current = await RequireUpdateClosureAsync(db, call, token, finalReuse);
             Trace(UpdateCompletionStage.FreshSamples);
             fresh = await FreshUpdateProofAsync(db, call, current, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
@@ -192,7 +200,7 @@ internal sealed partial class InternalDurableActions
         }
     }
 
-    private async Task<SubmittedSet> RequireUpdateClosureAsync(ManifestCatalogDbContext db, ObservationCall call, CancellationToken token)
+    private async Task<SubmittedSet> RequireUpdateClosureAsync(ManifestCatalogDbContext db, ObservationCall call, CancellationToken token, ResourceReuseValidationResult verification)
     {
         Trace(UpdateCompletionStage.ClosureSource);
         var source = await InternalGenerationAuthority.RequireStageReadAsync(db, call.Set.Source, token);
@@ -200,6 +208,7 @@ internal sealed partial class InternalDurableActions
         var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
         if (owner.DesiredGeneration != source.Generation || owner.AppliedGeneration != inventory.BaselineGeneration && owner.AppliedGeneration != source.Generation)
             throw new InvalidDataException("Update generation superseded.");
+        if (owner.AppliedGeneration != source.Generation) await RequireReuseTransitionAsync(db, source.DeploymentId, source.Generation, token, verification);
         Trace(UpdateCompletionStage.CaptureSubmitted);
         var set = await CaptureSubmittedAsync(db, source, token, completedRead: true);
         if (set.Members.Length != inventory.Members.Length || set.Members.Any(x => call.Set.Members.Single(m => m.Subject == x.Subject).Attempt.Id != x.Attempt.Id))

@@ -7,7 +7,8 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Atomic external evidence, exact attempt closure and aggregate completion.</summary>
 public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec>? codecs = null) : IExternalOperationOutputs, IConfigurationOutputEvidence
+    IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec>? codecs = null,
+    IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null, Func<DurableActionAdmission>? admissionFactory = null) : IExternalOperationOutputs, IConfigurationOutputEvidence
 {
     public async ValueTask<AcceptedOperation?> FindAcceptedAsync(DurableOperationKey key, CancellationToken cancellationToken)
     {
@@ -39,11 +40,17 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             await using var context = await contexts.CreateDbContextAsync(cancellationToken);
             var accepted = await AcceptedAsync(context, producer, cancellationToken);
             if (accepted is null) return false;
+            if (accepted.Node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                return (await new PostgreSqlResourceImportAcceptance(contexts, contracts, codecs ?? []).CompleteAsync(
+                    new([new(producer, attempt, output)], [], [], new("haby.import-observation/v1", "{}")), at, cancellationToken)).IsSuccess;
             var deployment = Guid.Parse(producer.DeploymentId.ToString());
             var previous = await context.DurableOperations.AsNoTracking().SingleOrDefaultAsync(r => r.DeploymentId == deployment &&
                 r.Generation == producer.Generation.Value && r.OperationId == producer.OperationId.Value, cancellationToken);
             if (previous?.State == nameof(DurableOperationState.Succeeded))
                 return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
+            using var verification = await PostgreSqlReuseVerificationScopes.VerifyAsync(contexts, contracts, codecs ?? [], reuseVerifiers ?? [],
+                admissionFactory, producer.DeploymentId, producer.Generation, cancellationToken, producer.OperationId, attempt);
+            if (verification.Status != ResourceReuseValidationStatus.Confirmed) return false;
             var pending = new DurableAggregateCompletion.PendingResult(producer, attempt, output);
             var metadata = await DurableAggregateCompletion.InspectPublicationAsync(context, pending, contracts, codecs ?? [], cancellationToken);
             if (metadata?.Candidate is not { } candidate || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(context, metadata, cancellationToken)) return false;
@@ -70,7 +77,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             if (!await context.DurableOperations.AsNoTracking().AnyAsync(r => r.DeploymentId == deployment && r.Generation == generation &&
                 r.OperationId == id && r.State == nameof(DurableOperationState.Dispatching) && r.CurrentAttemptId == attempt &&
                 r.AttemptNumber == candidate.AttemptNumber && r.DispatchedAt == candidate.DispatchedAt, cancellationToken) ||
-                !await DurableOperationTransitions.ConfirmAsync(context, producer, attempt, at, false, cancellationToken))
+                !await DurableOperationTransitions.ConfirmAsync(context, producer, attempt, at, false, cancellationToken, verification))
                 return await ConfirmPublicationAsync(context, producer, attempt, output, cancellationToken);
             var existing = await OutputAsync(context, producer, output.Contract, output.Key, cancellationToken);
             if (existing is not null && existing.Payload != output.Payload) return false;
@@ -84,7 +91,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
                 Payload = output.Payload
             });
             await context.SaveChangesAsync(cancellationToken);
-            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs, prepared: prepared);
+            _ = await DurableAggregateCompletion.TryAdvanceConfirmedAsync(context, deployment, generation, cancellationToken, contracts, codecs: codecs, prepared: prepared, verification: verification);
             cancellationToken.ThrowIfCancellationRequested();
             await transaction.CommitAsync(CancellationToken.None);
             return true;
@@ -156,6 +163,8 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             accepted.Node.RequiredOutput != new ExternalOperationOutputIdentity(output.Contract, output.Key)) return false;
         var row = await OutputAsync(context, key, output.Contract, output.Key, token);
         if (row is null || row.Payload != output.Payload) return false;
+        if (accepted.Node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain &&
+            await ResourceImportReceiptIntegrity.ReadAsync(context, key, token) is null) return false;
         return await context.DurableOperations.AnyAsync(r => r.DeploymentId == row.DeploymentId && r.Generation == row.Generation &&
             r.OperationId == row.OperationId && r.State == nameof(DurableOperationState.Succeeded) && r.CurrentAttemptId == attempt && r.ReasonCode == null &&
             context.DurableOperationAttempts.Any(a => a.AttemptId == attempt && a.DeploymentId == r.DeploymentId && a.Generation == r.Generation &&
@@ -173,6 +182,11 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             (validateAccepted && !await contract.ValidateAcceptedAsync(key, accepted, output, token))) return false;
         var row = await OutputAsync(context, key, output.Contract, output.Key, token);
         if (row is null || row.Payload != output.Payload) return false;
+        if (accepted.Node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+        {
+            var receipt = await ResourceImportReceiptIntegrity.ReadAsync(context, key, token);
+            if (receipt is null || !contract.ValidateImportEvidence(accepted, receipt.Evidence)) return false;
+        }
         return await context.DurableOperations.AnyAsync(r => r.DeploymentId == row.DeploymentId && r.Generation == row.Generation &&
             r.OperationId == row.OperationId && r.State == nameof(DurableOperationState.Succeeded) && r.CurrentAttemptId == attempt &&
             context.DurableOperationAttempts.Any(a => a.AttemptId == attempt && a.DeploymentId == r.DeploymentId &&

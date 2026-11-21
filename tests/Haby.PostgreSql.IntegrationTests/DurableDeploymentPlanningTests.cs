@@ -387,8 +387,8 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
             await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(providerPassword), default);
             var provider = services.GetRequiredService<IProviderConfigurationStore>();
-            var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
-                target.Database!, target.Username!, secret, Implementation);
+            var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port,
+                target.Database!, target.Username!, secret, Implementation, PostgreSqlTransportMode.Disable);
             var instance = await provider.CreateInstanceAsync(environment, configuration, default);
             await provider.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1),
                 configuration, default);
@@ -407,8 +407,8 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
             var otherEnvironment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("other"), default);
             var otherSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
             await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(otherEnvironment), SecretPurpose.ProviderAdministrator), otherSecret, Encoding.UTF8.GetBytes(providerPassword), default);
-            var otherConfiguration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
-                target.Database!, target.Username!, otherSecret, Implementation);
+            var otherConfiguration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port,
+                target.Database!, target.Username!, otherSecret, Implementation, PostgreSqlTransportMode.Disable);
             var otherInstance = await provider.CreateInstanceAsync(otherEnvironment, otherConfiguration, default);
             await provider.AddRevisionAsync(otherEnvironment, otherInstance,
                 ProviderConfigurationRevisionNumber.Create(1), otherConfiguration, default);
@@ -602,8 +602,8 @@ public sealed partial class DurableDeploymentPlanningTests(PostgreSqlFixture fix
         await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(password), default);
         var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
         { Username = user, Password = password };
-        var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port,
-            target.Database!, target.Username!, secret, Implementation);
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port,
+            target.Database!, target.Username!, secret, Implementation, PostgreSqlTransportMode.Disable);
         var provider = services.GetRequiredService<IProviderConfigurationStore>();
         var instance = await provider.CreateInstanceAsync(environment, configuration, default);
         await provider.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1),

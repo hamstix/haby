@@ -379,8 +379,8 @@ public sealed partial class PostgreSqlApplicationLoginTests
                     " LOGIN SUPERUSER PASSWORD '" + PostgreSqlScramVerifier.Create(bytes) + "'");
             }
             finally { Array.Clear(bytes); }
-            var alternate = new PostgreSqlProviderConfiguration(1, saved.Host, saved.Port, saved.MaintenanceDatabase,
-                alternateName, alternateSecret, saved.ImplementationId);
+            var alternate = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, saved.Host, saved.Port, saved.MaintenanceDatabase,
+                alternateName, alternateSecret, saved.ImplementationId, PostgreSqlTransportMode.Disable);
             await providers.AddRevisionAsync(inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Instance, next, alternate, default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(
                 inputs.Environment, inputs.Providers.RequireUniformResourceProvider().Alias, new(inputs.Providers.RequireUniformResourceProvider().Instance, inputs.Providers.RequireUniformResourceProvider().Configuration),

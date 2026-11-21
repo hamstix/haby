@@ -55,8 +55,8 @@ public sealed partial class OperatorHostIntegrationTests
         var environment = await secrets.CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
         await secrets.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(material), default);
-        var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", providerPort,
-            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "127.0.0.1", providerPort,
+            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = setup.GetRequiredService<IProviderConfigurationStore>();
         var instance = await providers.CreateInstanceAsync(environment, configuration, default);
         await providers.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
@@ -64,8 +64,8 @@ public sealed partial class OperatorHostIntegrationTests
         var aliasStore = setup.GetRequiredService<IProviderAliasStore>();
         var alias = ProviderAlias.Create("postgresql.primary");
         var firstBinding = new ProviderAliasBinding(instance, ProviderConfigurationRevisionNumber.Create(1));
-        var nextConfiguration = new PostgreSqlProviderConfiguration(1, "localhost", providerPort,
-            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var nextConfiguration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "localhost", providerPort,
+            "postgres", "never-connect", secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var nextInstance = await providers.CreateInstanceAsync(environment, nextConfiguration, default);
         await providers.AddRevisionAsync(environment, nextInstance, ProviderConfigurationRevisionNumber.Create(1), nextConfiguration, default);
         await providers.AddRevisionAsync(environment, nextInstance, ProviderConfigurationRevisionNumber.Create(2), nextConfiguration, default);

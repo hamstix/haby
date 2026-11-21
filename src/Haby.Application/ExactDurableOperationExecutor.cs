@@ -42,7 +42,10 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
     {
         var operation = await journal.FindAsync(key, cancellationToken);
         if (operation is null) return DurableExecutionResult.NotFound();
-        if (operation.State == DurableOperationState.Dispatching)
+        var readOnlyImport = operation.Node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain &&
+            registry.Find(operation.Node.Action) is IReadOnlyResourceImportHandler observational &&
+            registry.MatchesEvidence(operation.Node) && observational.Supports(operation.Node);
+        if (operation.State == DurableOperationState.Dispatching && !readOnlyImport)
         {
             await journal.TryRecoverDispatchingAsync(key, clock.GetUtcNow(), cancellationToken);
             operation = await journal.FindAsync(key, cancellationToken);
@@ -53,15 +56,18 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
             DurableOperationState.Succeeded => DurableExecutionOutcome.Succeeded,
             DurableOperationState.Failed => DurableExecutionOutcome.Failed,
             DurableOperationState.NeedsAttention => DurableExecutionOutcome.NeedsAttention,
-            DurableOperationState.Dispatching => DurableExecutionOutcome.DispatchUncertain,
+            DurableOperationState.Dispatching when !readOnlyImport => DurableExecutionOutcome.DispatchUncertain,
             _ => (DurableExecutionOutcome?)null
         };
         if (terminal is { } outcome) return new(outcome, operation);
 
         var progress = await journal.ProgressAsync(key.DeploymentId, key.Generation, cancellationToken);
         if (progress is null) return DurableExecutionResult.NotFound();
-        if (progress.Reused > 0 && !await journal.ValidateReuseAsync(key.DeploymentId, key.Generation, new DurableActionAdmission(registry), cancellationToken))
-            return new(DurableExecutionOutcome.InputUnavailable, operation);
+        using var reuse = progress.Reused > 0
+            ? await journal.ValidateReuseAsync(key.DeploymentId, key.Generation, new DurableActionAdmission(registry), cancellationToken, key.OperationId)
+            : new ResourceReuseValidationResult(ResourceReuseValidationStatus.Confirmed);
+        if (reuse.Status != ResourceReuseValidationStatus.Confirmed)
+            return new(reuse.FailureOutcome, operation) { ReuseStatus = reuse.Status };
         if (operation.Node.Dependencies.Any(dependency => !progress.Nodes.Any(n =>
             n.Operation.Key.OperationId == dependency && n.Operation.State == DurableOperationState.Succeeded)))
             return new(DurableExecutionOutcome.Blocked, operation);

@@ -78,7 +78,7 @@ public sealed class PostgreSqlProviderRevisionPreflightTests
             where TConfiguration : class
         {
             if (!available) throw error ?? new OperationCanceledException("private storage diagnostic");
-            var configuration = new PostgreSqlProviderConfiguration(1, "localhost", 5432, "postgres",
+            var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "localhost", 5432, "postgres",
                 "administrator", reference, PostgreSqlDatabaseProvisioner.ImplementationId);
             return ValueTask.FromResult<ProviderConfigurationRevision<TConfiguration>?>(
                 new(instanceId, revision, environment, (TConfiguration)(object)configuration));

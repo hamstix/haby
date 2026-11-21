@@ -244,7 +244,7 @@ public sealed class GeneratedCredentialSlotTests(PostgreSqlFixture fixture) : IC
                 else act.Remove(row);
             }
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => act.SaveChangesAsync());
-            Assert.Equal("Generated credential metadata is immutable.", error.Message);
+            Assert.Equal("Application credential metadata is immutable.", error.Message);
         }
         Assert.Equal(accepted.Reference, (await Ensure(services.GetRequiredService<IGeneratedCredentialSlots>(), slot)).Reference);
         Assert.True(Enumerable.SequenceEqual(bytes, await Bytes(services, slot, accepted.Reference!)), "Exact generated material must remain unchanged.");
@@ -350,8 +350,8 @@ public sealed class GeneratedCredentialSlotTests(PostgreSqlFixture fixture) : IC
             .AddPostgreSqlProviderConfigurationCodec().BuildServiceProvider();
         var generated = await Ensure(services.GetRequiredService<IGeneratedCredentialSlots>(), slot);
         var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString);
-        var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!, generated.Reference!,
-            PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port, target.Database!, target.Username!, generated.Reference!,
+            PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
         var preflight = new PostgreSqlProviderRevisionPreflight(providers, services.GetRequiredService<ISecretStore>());
         Assert.Equal(ProviderPreflightOutcome.SecretUnavailable,

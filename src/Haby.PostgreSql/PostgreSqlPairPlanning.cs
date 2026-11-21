@@ -166,7 +166,7 @@ public sealed class PostgreSqlPairResourceAdmission(ResourceTypeId contract) : I
     {
         if (configuration.ProviderKindId != Provider.ProviderKind || configuration.ShapeId != Provider.ConfigurationContract ||
             configuration.ImplementationId != Provider.ImplementationId || inputs.Providers.RequireUniformResourceProvider().Implementation.Value != Provider.ImplementationId ||
-            configuration.PayloadFormatVersion != 1) return null;
+            configuration.PayloadFormatVersion != 2) return null;
         try
         {
             var snapshot = JsonSerializer.Deserialize(configuration.PayloadJson, PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot);

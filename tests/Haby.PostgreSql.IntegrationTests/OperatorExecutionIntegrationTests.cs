@@ -403,8 +403,8 @@ public sealed partial class OperatorHostIntegrationTests
         await ExecutionSql(fixture.ConnectionString, $"CREATE ROLE \"{user}\" LOGIN CREATEDB PASSWORD '{password}'");
         var target = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Username = user, Password = password };
         await store.CreateAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, Encoding.UTF8.GetBytes(password), default);
-        var configuration = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!,
-            secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port, target.Database!, target.Username!,
+            secret, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
         var instance = await providers.CreateInstanceAsync(environment, configuration, default);
         await providers.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
@@ -428,8 +428,8 @@ public sealed partial class OperatorHostIntegrationTests
             var alternateSecret = new SecretRef(SecretId.New(), SecretVersionId.New());
             await Setup.GetRequiredService<ISecretStore>().CreateAsync(new SecretDefinition(new SecretOwner.Environment(Environment), SecretPurpose.ProviderAdministrator), alternateSecret,
                 Encoding.UTF8.GetBytes("unusable-alternate-secret"), default);
-            var configuration = new PostgreSqlProviderConfiguration(1, "127.0.0.1", 1, "postgres", "alternate",
-                alternateSecret, PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+            var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "127.0.0.1", 1, "postgres", "alternate",
+                alternateSecret, PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
             var alternate = await providers.CreateInstanceAsync(Environment, configuration, default);
             await providers.AddRevisionAsync(Environment, alternate, ProviderConfigurationRevisionNumber.Create(1), configuration, default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await Setup.GetRequiredService<IProviderAliasStore>()

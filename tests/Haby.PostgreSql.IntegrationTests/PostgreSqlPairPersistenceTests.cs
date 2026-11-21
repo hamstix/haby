@@ -84,8 +84,8 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
         var bytes = Encoding.UTF8.GetBytes(target.Password!);
         try { await secrets.CreateAsync(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secret, bytes, default); }
         finally { Array.Clear(bytes); }
-        var config = new PostgreSqlProviderConfiguration(1, target.Host!, target.Port, target.Database!, target.Username!, secret,
-            PostgreSqlDatabaseCheckpointCapability.ImplementationId);
+        var config = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port, target.Database!, target.Username!, secret,
+            PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
         var providers = services.GetRequiredService<IProviderConfigurationStore>();
         var instance = await providers.CreateInstanceAsync(environment, config, default);
         await providers.AddRevisionAsync(environment, instance, ProviderConfigurationRevisionNumber.Create(1), config, default);
@@ -278,7 +278,7 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
         await using var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"]);
         var catalog = host.Services.GetRequiredService<ManifestContractCatalog>();
         Assert.IsType<ValidateApplicationManifestResult.Valid>(ValidateApplicationManifest.Execute(PostgreSqlPairPlanningTests.Bytes(PostgreSqlPairPlanningTests.Example()), catalog));
-        Assert.Equal(2, host.Services.GetServices<IDurableActionAdmissionHandler>().Count());
-        Assert.Equal(5, host.Services.GetServices<IDurableActionHandler>().Count());
+        Assert.Equal(4, host.Services.GetServices<IDurableActionAdmissionHandler>().Count());
+        Assert.Equal(7, host.Services.GetServices<IDurableActionHandler>().Count());
     }
 }

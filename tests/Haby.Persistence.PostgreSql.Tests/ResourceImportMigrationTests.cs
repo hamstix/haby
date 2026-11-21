@@ -14,7 +14,8 @@ public sealed class ResourceImportMigrationTests
         using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
         Assert.False(db.Database.HasPendingModelChanges());
         var migrations = db.Database.GetMigrations().ToArray();
-        var script = db.GetService<IMigrator>().GenerateScript(migrations[^2], migrations[^1]);
+        var index = Array.FindIndex(migrations, x => x.EndsWith("_PersistResourceImportAuthority", StringComparison.Ordinal));
+        var script = db.GetService<IMigrator>().GenerateScript(migrations[index - 1], migrations[index]);
         var guard = script.IndexOf("RAISE EXCEPTION", StringComparison.Ordinal);
         Assert.True(guard >= 0, "Direct migration must refuse superseded frozen history.");
         Assert.Contains("deployment_plans", script);
@@ -22,5 +23,21 @@ public sealed class ResourceImportMigrationTests
         Assert.True(guard < script.IndexOf("ALTER TABLE", StringComparison.Ordinal));
         Assert.DoesNotContain("DEFAULT", script, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("UPDATE resource_management", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Protected_import_migration_refuses_previous_imports_before_creating_receipt_or_private_input_tables()
+    {
+        using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
+        Assert.False(db.Database.HasPendingModelChanges());
+        var migrations = db.Database.GetMigrations().ToArray();
+        var index = Array.FindIndex(migrations, x => x.EndsWith("_ConfirmResourceImportCredentials", StringComparison.Ordinal));
+        var script = db.GetService<IMigrator>().GenerateScript(migrations[index - 1], migrations[index]);
+        var guard = script.IndexOf("RAISE EXCEPTION", StringComparison.Ordinal);
+        Assert.True(guard >= 0 && guard < script.IndexOf("CREATE TABLE", StringComparison.Ordinal));
+        Assert.Contains("import_intent_json IS NOT NULL", script);
+        Assert.Contains("origin = 'Imported'", script);
+        Assert.DoesNotContain("UPDATE resource_management", script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", script, StringComparison.OrdinalIgnoreCase);
     }
 }

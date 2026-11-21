@@ -21,7 +21,8 @@ An example file, after creating Environment `staging` and secret `pg-admin`, is:
       "host": "postgres.internal",
       "port": 5432,
       "maintenanceDatabase": "postgres",
-      "administratorUserName": "registry-admin"
+      "administratorUserName": "registry-admin",
+      "transportMode": "verify-full"
     },
     "secretRefs": {
       "administrator-password": { "secretName": "pg-admin", "version": 1 }
@@ -29,6 +30,14 @@ An example file, after creating Environment `staging` and secret `pg-admin`, is:
   }
 }
 ```
+
+PostgreSQL transport accepts only `verify-full` (the fresh default) and explicit
+`disable`. The saved version 2 payload freezes that policy for all Provider and
+import authentication connections. VerifyFull uses OS certificate trust and
+driver name/validity checks; Disable selects plaintext explicitly. Binding options
+cannot change Provider transport. Older PostgreSQL payloads refuse operations that
+need decoding without blocking metadata/history or Host startup. See the
+[import and transport compatibility boundary](267-postgresql-import.md#transport-and-catalog-compatibility).
 
 ## Transaction and retry design
 

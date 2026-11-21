@@ -63,6 +63,8 @@ public sealed record PostgreSqlConnectionRendererContract() : ConfigurationRende
     PostgreSqlApplicationConnectionContract.Contract, PostgreSqlApplicationConnectionContract.Key,
     PostgreSqlApplicationAccessAction.RegistrationKey, PostgreSqlConnectionRendering.Formatter)
 {
+    public override bool SupportsProducer(DurableActionExecutionKey producer) =>
+        producer == ProducerAction || producer == PostgreSqlImportContracts.Login;
     public override ConfigurationObject Defaults => PostgreSqlConsumerOptions.Defaults;
     public override bool ValidateOptions(ConfigurationObject options, bool complete) => PostgreSqlConsumerOptions.Validate(options, complete);
     public override ConfigurationObject NormalizeOptions(ConfigurationObject options) => PostgreSqlConsumerOptions.Normalize(options);
@@ -93,6 +95,10 @@ public sealed class PostgreSqlConnectionRenderer : IConfigurationRenderer
 /// <summary>Pure output-derived authority; no renderer, Provider lookup or material I/O.</summary>
 public sealed class PostgreSqlConnectionResolutionBinding : IConfigurationResolutionBinding
 {
+    public bool ValidateMaterial(ConfigurationRenderPin pin, ReadOnlySpan<char> material) =>
+        pin.ProducerAction == PostgreSqlImportContracts.Login
+            ? !material.IsEmpty && material.Length <= 65536 && !material.Contains('\0')
+            : pin.ProducerAction == PostgreSqlApplicationAccessAction.RegistrationKey && ValidateMaterial(material);
     public bool ValidateMaterial(ReadOnlySpan<char> material)
     {
         if (material.Length != 43) return false;
@@ -108,7 +114,7 @@ public sealed class PostgreSqlConnectionResolutionBinding : IConfigurationResolu
             pin.Formatter != Formatter || pin.FormatterImplementation != Implementation || value.Formatter != Formatter ||
             pin.Resource != PostgreSqlApplicationLoginContract.Id || pin.OutputContract != PostgreSqlApplicationConnectionContract.Contract ||
             pin.OutputKey != PostgreSqlApplicationConnectionContract.Key || pin.Producer != OperationId.Create(pin.ResourceLocalId.Value + "-access") ||
-            pin.ProducerAction != PostgreSqlApplicationAccessAction.RegistrationKey || !PostgreSqlConsumerOptions.Validate(pin.Options, true) ||
+            (pin.ProducerAction != PostgreSqlApplicationAccessAction.RegistrationKey && pin.ProducerAction != PostgreSqlImportContracts.Login) || !PostgreSqlConsumerOptions.Validate(pin.Options, true) ||
             !PostgreSqlConnectionFormatter.Valid(value.Arguments) || PostgreSqlApplicationConnectionContract.Decode(output) is not { } connection ||
             !value.Arguments.Equals(PostgreSqlConnectionRenderer.Arguments(connection, pin.Options))) return null;
         return new(connection.Password, SecretPurpose.ApplicationLogin);
@@ -132,7 +138,7 @@ public sealed class PostgreSqlConnectionFormatter : IConfigurationFormatter
             h.Value.Length <= 255 && Port(a.Members["port"]) is not null &&
             a.Members["database"] is ConfigurationString d && PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(d.Value) &&
             a.Members["schema"] is ConfigurationString s && PostgreSqlApplicationLoginContract.ValidSchema(s.Value) &&
-            a.Members["username"] is ConfigurationString u && PostgreSqlResourceNaming.ValidRoleName(u.Value) &&
+            a.Members["username"] is ConfigurationString u && PostgreSqlResourceNaming.ValidExistingRoleName(u.Value) &&
             a.Members["password"] is ConfigurationSecretReference && a.Members["settings"] is ConfigurationObject settings &&
             PostgreSqlConsumerOptions.Parse(settings) is not null;
     }

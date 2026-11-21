@@ -16,7 +16,8 @@ namespace Haby.PostgreSql;
 /// non-pooled connection and is cleared before returning.
 /// </summary>
 public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore revisions, ISecretStore secrets,
-    ICheckpointProviderCapability capability, IDurableCreateDispatchFaultHooks hooks) : IPostgreSqlDatabaseCreateTarget
+    ICheckpointProviderCapability capability, IDurableCreateDispatchFaultHooks hooks,
+    PostgreSqlProviderTransport? transport = null) : IPostgreSqlDatabaseCreateTarget
 {
     public async ValueTask<PostgreSqlDatabaseAbsenceOutcome> CheckDatabaseAbsentAsync(PostgreSqlDatabaseCreateInput input,
         CancellationToken cancellationToken)
@@ -147,6 +148,7 @@ public sealed class PostgreSqlDatabaseCreateTarget(IProviderConfigurationStore r
                 // Npgsql requires a managed string; clearing byte buffers and disabling pooling limits its lifetime.
                 Password = Encoding.UTF8.GetString(bytes)
             };
+            (transport ?? new()).Apply(builder, configuration);
             return new Resolved(PostgreSqlDatabaseAbsenceOutcome.Absent, builder);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)

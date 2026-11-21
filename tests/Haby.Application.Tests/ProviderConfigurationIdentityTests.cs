@@ -21,14 +21,14 @@ public sealed class ProviderConfigurationIdentityTests
     public void Configuration_shape_is_closed_versioned_and_value_free()
     {
         var secret = new SecretRef(SecretId.New(), SecretVersionId.New());
-        var configuration = new PostgreSqlProviderConfiguration(1, "localhost", 5432, "postgres", "admin", secret,
+        var configuration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion, "localhost", 5432, "postgres", "admin", secret,
             "haby.postgresql.database/v1alpha1");
         Assert.Same(secret, configuration.AdministratorPassword);
         Assert.Equal(nameof(PostgreSqlProviderConfiguration), configuration.ToString());
-        var error = Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlProviderConfiguration(2,
+        var error = Assert.Throws<ArgumentOutOfRangeException>(() => new PostgreSqlProviderConfiguration(99,
             "localhost", 5432, "postgres", "admin", secret, configuration.ImplementationId));
         Assert.DoesNotContain(secret.SecretId.ToString(), error.ToString());
-        Assert.Throws<ArgumentException>(() => new PostgreSqlProviderConfiguration(1,
+        Assert.Throws<ArgumentException>(() => new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion,
             "not a host", 5432, "postgres", "admin", secret, configuration.ImplementationId));
         var codec = new PostgreSqlProviderConfigurationCodec(new PostgreSqlDatabaseCheckpointCapability());
         var encoded = codec.Encode(configuration);

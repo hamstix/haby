@@ -126,7 +126,7 @@ public class PostgreSqlFixture : IAsyncLifetime
     {
         if (_container is not null)
         {
-            var logs = await _container.GetLogsAsync();
+            var logs = await _container.GetLogsAsync(timestampsEnabled: false);
             return logs.Stdout + logs.Stderr;
         }
         var start = new ProcessStartInfo("wslc") { RedirectStandardError = true, RedirectStandardOutput = true };

@@ -336,7 +336,7 @@ public sealed class ProviderAliasTests(PostgreSqlFixture fixture) : IClassFixtur
 
     private static ProviderConfigurationRevisionNumber Number(long value) => ProviderConfigurationRevisionNumber.Create(value);
     private static PostgreSqlProviderConfiguration Config(NpgsqlConnectionStringBuilder target, SecretRef secret) =>
-        new(1, target.Host!, target.Port, target.Database!, target.Username!, secret, Implementation);
+        new(PostgreSqlProviderConfiguration.CurrentShapeVersion, target.Host!, target.Port, target.Database!, target.Username!, secret, Implementation, PostgreSqlTransportMode.Disable);
 
     private async Task<string> NewDatabaseAsync()
     {

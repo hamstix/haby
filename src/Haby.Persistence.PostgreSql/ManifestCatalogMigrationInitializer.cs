@@ -51,6 +51,11 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
             (await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
              await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
             throw new InvalidOperationException("Superseded Resource provenance requires an explicitly initialized fresh catalog; external resources remain unchanged.");
+        var credentialBaseLength = Array.FindIndex(expected, x => x.EndsWith("_ConfirmResourceImportCredentials", StringComparison.Ordinal)) + 1;
+        if (applied.Length >= importBaseLength && applied.Length < credentialBaseLength &&
+            (await context.DurableChangeSets.AsNoTracking().AnyAsync(x => x.ImportIntentJson != null, cancellationToken) ||
+             await context.ResourceManagement.AsNoTracking().AnyAsync(x => x.Origin == Haby.Application.ResourceOrigin.Imported, cancellationToken)))
+            throw new InvalidOperationException("Superseded import inputs require an explicitly initialized fresh catalog; external resources remain unchanged.");
         await context.Database.MigrateAsync(cancellationToken);
         if (await context.DurablePlans.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken) ||
             await context.DeploymentGenerations.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken))

@@ -215,13 +215,13 @@ public static class OperatorHostApplication
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
             p.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(), p.GetRequiredService<PostgreSqlConfigurationDocumentStore>(),
             [p.GetRequiredService<InternalDeploymentAction>()], p.GetServices<IExternalOperationOutputContract>(),
-            p.GetServices<IProviderConfigurationCodec>(), p.GetRequiredService<DurableActionAdmission>()));
+            p.GetServices<IProviderConfigurationCodec>(), p.GetRequiredService<DurableActionAdmission>(), p.GetServices<IDurableResourceReuseVerifier>()));
         builder.Services.AddSingleton<InternalDurableActions>(p => new(
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
             [p.GetRequiredService<InternalDeploymentAction>(), p.GetRequiredService<InternalRuntimeIdentityAction>()],
             p.GetServices<IProviderConfigurationCodec>(), p.GetServices<IExternalOperationOutputContract>(), p.GetRequiredService<DurableActionAdmission>(),
             p.GetRequiredService<DurableOperationSerialization>(), p.GetRequiredService<TimeProvider>(),
-            configurationPreparation: p.GetRequiredService<InternalWorkloadConfiguration>()));
+            configurationPreparation: p.GetRequiredService<InternalWorkloadConfiguration>(), reuseVerifiers: p.GetServices<IDurableResourceReuseVerifier>()));
         builder.Services.AddSingleton<InternalRuntimeIdentityPreparation>(p => new(
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
             p.GetRequiredService<InternalWorkloadConfiguration>(), p.GetRequiredService<InternalDurableActions>(), InternalRuntimeIdentityAction.Create));
@@ -279,6 +279,8 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlProviderResourceReservations();
         builder.Services.AddPostgreSqlApplicationLogin();
         builder.Services.AddPostgreSqlApplicationAccess();
+        builder.Services.AddPostgreSqlResourceImportAcceptance();
+        builder.Services.AddPostgreSqlExistingPairImport();
         builder.Services.AddPostgreSqlDatabaseRecoveryJournal();
         builder.Services.AddPostgreSqlDatabaseRecovery();
         builder.Services.AddSingleton<PostgreSqlOperationRecoveryAdapter>();

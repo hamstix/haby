@@ -19,9 +19,33 @@ public sealed class ProviderDeclarationTests
     private static readonly PostgreSqlProviderDeclarationAdapter Adapter = new(new(new PostgreSqlDatabaseCheckpointCapability()));
 
     [Fact]
+    public void Fresh_transport_default_and_explicit_disable_agree_with_schema_without_accepting_null_or_passthrough()
+    {
+        var secret = new Haby.Domain.SecretRef(Haby.Domain.SecretId.New(), Haby.Domain.SecretVersionId.New());
+        PostgreSqlProviderConfiguration Bind(string json)
+        {
+            var declaration = ProviderDeclarationInput.Parse(Encoding.UTF8.GetBytes(json))!;
+            return (PostgreSqlProviderConfiguration)Adapter.Bind(Adapter.ParseProperties(declaration.Spec.Properties),
+                new Dictionary<string, Haby.Domain.SecretRef> { [PostgreSqlProviderConfigurationCodec.AdministratorPasswordSlot] = secret });
+        }
+        Assert.Equal(PostgreSqlTransportMode.VerifyFull, Bind(Valid).TransportMode);
+        var explicitDisable = Valid.Replace("\"maintenanceDatabase\":", "\"transportMode\":\"disable\",\"maintenanceDatabase\":", StringComparison.Ordinal);
+        Assert.True(Schema().Validate(Encoding.UTF8.GetBytes(explicitDisable)));
+        Assert.Equal(PostgreSqlTransportMode.Disable, Bind(explicitDisable).TransportMode);
+        foreach (var value in new[] { "null", "\"prefer\"", "\"require\"", "\"DISABLE\"", "{\"mode\":\"disable\"}" })
+        {
+            var json = Valid.Replace("\"maintenanceDatabase\":", "\"transportMode\":" + value + ",\"maintenanceDatabase\":", StringComparison.Ordinal);
+            Assert.False(Schema().Validate(Encoding.UTF8.GetBytes(json)));
+            Assert.False(Accepted(json));
+        }
+    }
+
+    [Fact]
     public void Required_members_and_nulls_agree_with_checked_in_schema_and_typed_input()
     {
         var schema = Schema();
+        var declaration = Assert.IsType<ProviderDeclaration>(ProviderDeclarationInput.Parse(Encoding.UTF8.GetBytes(Valid)));
+        _ = Adapter.ParseProperties(declaration.Spec.Properties);
         Assert.True(Accepted(Valid));
         Assert.True(schema.Validate(Encoding.UTF8.GetBytes(Valid)));
         foreach (var path in new[] { "", "metadata", "spec", "spec.properties", "spec.secretRefs.administrator-password" })
