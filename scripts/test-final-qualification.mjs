@@ -543,22 +543,26 @@ async function publisherFixture(scope) {
   const results = Object.fromEntries(['build', 'api', 'workloads'].map(key => [key, scope === 'full' ? 'success' : 'skipped']));
   const reduction = await reduce(adapter.github, identity, results, directory, 123, 1, summary);
   assert.equal(reduction.outcome, 'verified');
-  let calls = 0; let freshness = 0;
+  let calls = 0; let freshness = 0; let elapsed = 0; const delays = []; let timer; let read;
+  const timing = { now: () => elapsed, wait: async ms => { delays.push(ms); elapsed += ms; },
+    setTimer: (callback, ms) => { timer = { callback, ms }; return timer; }, clearTimer: () => { timer = null; } };
   const getBranch = adapter.github.rest.repos.getBranch;
   adapter.github.rest.repos.getBranch = async args => { freshness++; return getBranch(args); };
   const artifact = { id: 900, name: 'qualification-control-123-1', workflow_run: { id: 123 }, expired: false, size_in_bytes: 1 };
   let response = { data: artifact }; let thrown; let shouldThrow = false;
   adapter.github.rest.actions.getArtifact = async args => {
-    calls++; assert.deepEqual(args, { owner: 'example', repo: 'project', artifact_id: 900 });
+    calls++; assert.equal(args.owner, 'example'); assert.equal(args.repo, 'project'); assert.equal(args.artifact_id, 900);
+    if (read) return read(args, calls, timer, ms => { elapsed += ms; });
     if (shouldThrow) throw thrown;
     return response;
   };
-  return { ...adapter, artifact, directory, summary,
+  return { ...adapter, artifact, directory, summary, timing, delays,
+    setRead: value => { read = value; },
     setError: error => { thrown = error; shouldThrow = true; },
     setResponse: value => { response = value; shouldThrow = false; },
     counts: () => ({ calls, freshness }),
     publish: (publication = { reduction: 'success', upload: 'success', artifact: '900' }) =>
-      publish(adapter.github, identity, 123, 1, '9', summary, publication),
+      publish(adapter.github, identity, 123, 1, '9', summary, publication, timing),
     cleanup: () => rmSync(directory, { recursive: true }),
   };
 }
@@ -583,9 +587,9 @@ test('publisher request diagnostics retain only safe structured facts and fail c
       assert.equal(failure.primary.code, 'api-or-data-unavailable'); assert.equal(failure.primary.stage, 'control-artifact');
       assert.equal(failure.primary.gate, 'control'); assert.equal(failure.primary.member, 'qualification-control-123-1');
       assert.equal(failure.primary.deadline, null);
-      assert.deepEqual(failure.primary.api, { operation: 'actions.getArtifact', httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null, category });
+      assert.deepEqual(failure.primary.api, { operation: 'actions.getArtifact', httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null, category, attempts: status === 404 ? 4 : 1, elapsedMs: status === 404 ? 7000 : 0 });
       assert.equal(failure.cleanup, scope === 'full' ? 'confirmed-by-required-gates' : 'not-applicable');
-      assert.deepEqual(f.counts(), { calls: 1, freshness: 0 });
+      assert.deepEqual(f.counts(), { calls: status === 404 ? 4 : 1, freshness: 0 });
       assert.doesNotMatch(JSON.stringify(f.updates) + readFileSync(f.summary, 'utf8'), /PROTECTED/);
     } finally { f.cleanup(); }
   });
@@ -595,7 +599,7 @@ test('publisher request diagnostics retain only safe structured facts and fail c
       f.setError(error); await assert.rejects(f.publish());
       const output = f.updates.at(-1).output.summary;
       const failure = JSON.parse(output.slice('Qualification did not pass: '.length));
-      assert.deepEqual(failure.primary.api, { operation: 'actions.getArtifact', httpStatus: null, category: 'unknown' });
+      assert.deepEqual(failure.primary.api, { operation: 'actions.getArtifact', httpStatus: null, category: 'unknown', attempts: 1, elapsedMs: 0 });
       assert.equal(f.updates.at(-1).conclusion, 'failure'); assert.deepEqual(f.counts(), { calls: 1, freshness: 0 });
       assert.doesNotMatch(output, /PROTECTED/);
     } finally { f.cleanup(); }
@@ -624,7 +628,8 @@ test('publisher diagnostics preserve upload gate and final freshness in both sco
   for (const scope of ['docs-only', 'full']) {
     const f = await publisherFixture(scope);
     try {
-      for (const publication of [{ reduction: 'failure', upload: 'success', artifact: '900' }, { reduction: 'success', upload: 'failure', artifact: '900' }]) {
+      for (const publication of [{ reduction: 'failure', upload: 'success', artifact: '900' }, { reduction: 'success', upload: 'failure', artifact: '900' },
+        ...['', '0', '9007199254740993', '900.0', 'PROTECTED', 900].map(artifact => ({ reduction: 'success', upload: 'success', artifact }))]) {
         await assert.rejects(f.publish(publication)); assert.equal(f.updates.at(-1).conclusion, 'failure');
       }
       assert.deepEqual(f.counts(), { calls: 0, freshness: 0 });
@@ -635,4 +640,80 @@ test('publisher diagnostics preserve upload gate and final freshness in both sco
       assert.deepEqual(f.counts(), { calls: 2, freshness: 2 });
     } finally { f.cleanup(); }
   }
+});
+
+test('publisher waits only for structured 404 on the exact uploaded artifact', async t => {
+  for (const scope of ['docs-only', 'full']) for (const missing of [1, 3, 4]) await t.test(`${scope} ${missing} missing reads`, async () => {
+    const f = await publisherFixture(scope);
+    try {
+      f.setRead(async (_args, calls) => { if (calls <= missing) throw { status: 404, message: 'PROTECTED' }; return { data: f.artifact }; });
+      if (missing === 4) await assert.rejects(f.publish()); else await f.publish();
+      assert.deepEqual(f.counts(), { calls: Math.min(missing + 1, 4), freshness: missing === 4 ? 0 : 1 });
+      assert.deepEqual(f.delays, [1000, 2000, 4000].slice(0, Math.min(missing, 3)));
+      assert.equal(f.updates.at(-1).conclusion, missing === 4 ? 'failure' : 'success');
+      const diagnostic = missing === 4 ? JSON.parse(f.updates.at(-1).output.summary.slice('Qualification did not pass: '.length)).primary.api :
+        JSON.parse(f.updates.at(-1).output.summary.split('Control artifact read: ')[1]);
+      assert.equal(diagnostic.attempts, Math.min(missing + 1, 4));
+      assert.equal(diagnostic.httpStatus, missing === 4 ? 404 : 200);
+      assert.equal(diagnostic.elapsedMs, f.delays.reduce((sum, ms) => sum + ms, 0));
+      assert.doesNotMatch(JSON.stringify(f.updates), /PROTECTED/);
+    } finally { f.cleanup(); }
+  });
+});
+
+test('publisher bounds stalled reads, cancels the request and never retries cancellation', async t => {
+  for (const mode of ['timeout', 'cancel', 'late-response', 'deadline-between-reads']) await t.test(mode, async () => {
+    const f = await publisherFixture('docs-only');
+    try {
+      f.setRead(async (args, calls, timer, advance) => {
+        assert.ok(args.request.signal instanceof AbortSignal);
+        assert.ok(args.request.timeout > 0 && args.request.timeout <= 15000);
+        if (mode === 'timeout') {
+          advance(timer.ms); timer.callback();
+          assert.equal(args.request.signal.aborted, true);
+          return new Promise(() => {});
+        }
+        if (mode === 'cancel') throw Object.assign(new Error('PROTECTED'), { name: 'AbortError' });
+        advance(15000);
+        if (mode === 'deadline-between-reads') throw { status: 404 };
+        return { data: f.artifact };
+      });
+      await assert.rejects(f.publish());
+      assert.deepEqual(f.counts(), { calls: 1, freshness: 0 }); assert.deepEqual(f.delays, []);
+      assert.equal(f.updates.at(-1).conclusion, 'failure');
+      assert.doesNotMatch(JSON.stringify(f.updates), /PROTECTED/);
+    } finally { f.cleanup(); }
+  });
+});
+
+test('eventual metadata still requires exact identity and final current candidate', async t => {
+  for (const mode of ['id', 'run', 'stale']) await t.test(mode, async () => {
+    const f = await publisherFixture('docs-only');
+    try {
+      f.setRead(async (_args, calls) => {
+        if (calls === 1) throw { status: 404 };
+        if (mode === 'stale') f.state.main = sha('e');
+        return { data: { ...f.artifact, ...(mode === 'id' ? { id: 901 } : mode === 'run' ? { workflow_run: { id: 124 } } : {}) } };
+      });
+      await assert.rejects(f.publish()); assert.equal(f.updates.at(-1).conclusion, 'failure');
+      assert.deepEqual(f.counts(), { calls: 2, freshness: mode === 'stale' ? 1 : 0 });
+      assert.match(f.updates.at(-1).output.summary, mode === 'stale' ? /stale-main/ : /control-artifact-incomplete/);
+    } finally { f.cleanup(); }
+  });
+});
+
+
+test('publisher request budgets shrink across delays and slow reads', async () => {
+  const f = await publisherFixture('docs-only'); const budgets = [];
+  try {
+    f.setRead(async (args, calls, timer, advance) => {
+      budgets.push(args.request.timeout); assert.equal(timer.ms, args.request.timeout);
+      advance(2000);
+      if (calls < 3) throw { status: 404 };
+      return { data: f.artifact };
+    });
+    await f.publish();
+    assert.deepEqual(budgets, [15000, 12000, 8000]); assert.deepEqual(f.delays, [1000, 2000]);
+    assert.equal(f.updates.at(-1).conclusion, 'success');
+  } finally { f.cleanup(); }
 });

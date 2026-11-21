@@ -110,6 +110,18 @@ be exactly `[base, head]`; main must still equal control/base. The actor needs
 write/maintain/admin permission. The installed control owns privilege separation,
 full-gate reduction, required control publication and final freshness checks.
 Selected or renamed jobs/artifacts cannot enter its full evidence contract.
+
+After verified reduction and successful upload with an exact valid artifact ID,
+the publisher immediately reads that artifact's metadata. Only a structured HTTP
+404 permits another GET of the same ID: at most four reads, separated by 1, 2
+and 4 seconds, within one 15-second visibility deadline including request time.
+Each request has the remaining timeout and is aborted at that deadline. Other
+HTTP errors, transport errors, cancellation and malformed or mismatched metadata
+fail immediately. The publisher never repeats upload or check creation. Exact
+artifact ID/name/run, nonexpired/nonempty metadata and a fresh HEAD/base/merge/tree
+check remain mandatory before success. Exhaustion fails closed; diagnostics keep
+only bounded attempts, HTTP status/category and elapsed time, never API payloads.
+
 Schedule deliberately around already-running automatic expensive jobs; do not
 repeat full dispatches for diagnostics. A new required hosted failure stops new
 cycles until bounded disposition; source/base movement invalidates evidence.
