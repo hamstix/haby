@@ -663,14 +663,18 @@ test('publisher waits only for structured 404 on the exact uploaded artifact', a
 
 test('publisher bounds stalled reads, cancels the request and never retries cancellation', async t => {
   for (const mode of ['timeout', 'cancel', 'late-response', 'deadline-between-reads']) await t.test(mode, async () => {
-    const f = await publisherFixture('docs-only');
+    const f = await publisherFixture('docs-only'); const observed = {};
     try {
       f.setRead(async (args, calls, timer, advance) => {
-        assert.ok(args.request.signal instanceof AbortSignal);
-        assert.ok(args.request.timeout > 0 && args.request.timeout <= 15000);
+        observed.signal = args.request?.signal; observed.timeout = args.request?.timeout;
+        observed.timerMs = timer?.ms;
         if (mode === 'timeout') {
+          // Without the deadline mechanism, return valid metadata so the public
+          // success/failure assertion also detects the original unbounded read.
+          if (!timer) return { data: f.artifact };
+          observed.abortedBefore = observed.signal?.aborted;
           advance(timer.ms); timer.callback();
-          assert.equal(args.request.signal.aborted, true);
+          observed.abortedAfter = observed.signal?.aborted;
           return new Promise(() => {});
         }
         if (mode === 'cancel') throw Object.assign(new Error('PROTECTED'), { name: 'AbortError' });
@@ -679,6 +683,18 @@ test('publisher bounds stalled reads, cancels the request and never retries canc
         return { data: f.artifact };
       });
       await assert.rejects(f.publish());
+      // Assert outside the publisher's catch boundary: assertion failures must
+      // never be mistaken for an expected API/publication rejection.
+      assert.ok(observed.signal instanceof AbortSignal); assert.equal(observed.timeout, 15000);
+      assert.equal(observed.timerMs, 15000);
+      if (mode === 'timeout') {
+        assert.equal(observed.abortedBefore, false); assert.equal(observed.abortedAfter, true);
+      }
+      const failure = JSON.parse(f.updates.at(-1).output.summary.slice('Qualification did not pass: '.length));
+      assert.equal(failure.primary.code, mode === 'cancel' ? 'api-or-data-unavailable' : 'control-artifact-deadline');
+      assert.equal(failure.primary.stage, 'control-artifact');
+      assert.equal(failure.primary.api.attempts, 1);
+      assert.equal(failure.primary.api.elapsedMs, mode === 'cancel' ? 0 : 15000);
       assert.deepEqual(f.counts(), { calls: 1, freshness: 0 }); assert.deepEqual(f.delays, []);
       assert.equal(f.updates.at(-1).conclusion, 'failure');
       assert.doesNotMatch(JSON.stringify(f.updates), /PROTECTED/);
@@ -704,16 +720,16 @@ test('eventual metadata still requires exact identity and final current candidat
 
 
 test('publisher request budgets shrink across delays and slow reads', async () => {
-  const f = await publisherFixture('docs-only'); const budgets = [];
+  const f = await publisherFixture('docs-only'); const budgets = []; const timerBudgets = [];
   try {
     f.setRead(async (args, calls, timer, advance) => {
-      budgets.push(args.request.timeout); assert.equal(timer.ms, args.request.timeout);
+      budgets.push(args.request?.timeout); timerBudgets.push(timer?.ms);
       advance(2000);
       if (calls < 3) throw { status: 404 };
       return { data: f.artifact };
     });
     await f.publish();
-    assert.deepEqual(budgets, [15000, 12000, 8000]); assert.deepEqual(f.delays, [1000, 2000]);
+    assert.deepEqual(budgets, [15000, 12000, 8000]); assert.deepEqual(timerBudgets, budgets); assert.deepEqual(f.delays, [1000, 2000]);
     assert.equal(f.updates.at(-1).conclusion, 'success');
   } finally { f.cleanup(); }
 });
