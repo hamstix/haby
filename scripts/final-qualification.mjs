@@ -25,6 +25,50 @@ function artifactRequestDiagnostic(error) {
         transportCodes.includes(error?.code) ? 'transport' : 'unknown';
   return { operation: 'actions.getArtifact', httpStatus, category };
 }
+// Internal timing seam keeps the fixed visibility policy deterministic in tests.
+const artifactTiming = {
+  now: () => performance.now(),
+  wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  setTimer: (callback, ms) => setTimeout(callback, ms),
+  clearTimer: timer => clearTimeout(timer),
+};
+async function readControlArtifact(github, owner, repo, artifactId, member, timing) {
+  const started = timing.now(); const deadline = started + 15000;
+  const elapsed = () => Math.max(0, Math.floor(timing.now() - started));
+  let attempts = 0;
+  const unavailable = (error, code = 'api-or-data-unavailable') => new QualificationFailure('Control artifact request failed.', {
+    code, gate: 'control', member,
+    api: { ...artifactRequestDiagnostic(error), attempts, elapsedMs: elapsed() },
+  });
+  for (const delay of [0, 1000, 2000, 4000]) {
+    if (timing.now() + delay >= deadline) throw unavailable(null, 'control-artifact-deadline');
+    if (delay) await timing.wait(delay);
+    const remaining = deadline - timing.now();
+    if (remaining <= 0) throw unavailable(null, 'control-artifact-deadline');
+    const controller = new AbortController(); let timer;
+    attempts++;
+    try {
+      // Race as well as abort: an unresponsive transport must not hold publication open.
+      const timeout = new Promise((_, reject) => {
+        timer = timing.setTimer(() => {
+          controller.abort(); reject(unavailable(null, 'control-artifact-deadline'));
+        }, remaining);
+      });
+      const response = await Promise.race([
+        timeout,
+        github.rest.actions.getArtifact({ owner, repo, artifact_id: artifactId,
+          request: { timeout: remaining, signal: controller.signal } }),
+      ]);
+      if (timing.now() >= deadline) throw unavailable(null, 'control-artifact-deadline');
+      return { response, diagnostic: { attempts, httpStatus: 200, elapsedMs: elapsed() } };
+    } catch (error) {
+      if (error instanceof QualificationFailure) throw error;
+      // Only the structured HTTP status is retryable, never a message or transport code.
+      if (error?.status !== 404 || attempts === 4) throw unavailable(error);
+      if (timing.now() >= deadline) throw unavailable(error, 'control-artifact-deadline');
+    } finally { timing.clearTimer(timer); }
+  }
+}
 const outcome = value => ['failure', 'cancelled', 'skipped', 'timed_out', 'action_required', 'neutral'].includes(value) ? value : 'missing-or-incomplete';
 
 export function validateRequest(environment, input) {
@@ -344,7 +388,7 @@ export async function reduce(github, identity, results, directory, runId, attemp
   return reduction;
 }
 
-export async function publish(github, identity, runId, attempt, checkId, summaryPath, publication) {
+export async function publish(github, identity, runId, attempt, checkId, summaryPath, publication, timing = artifactTiming) {
   const [owner, repo] = identity.repository.split('/');
   let conclusion = 'failure'; let summary = 'Qualification failed, is stale or has incomplete publication.'; let failure = null; let stage = 'control-summary'; let cleanupState = 'not-established';
   try {
@@ -369,17 +413,11 @@ export async function publish(github, identity, runId, attempt, checkId, summary
       JSON.stringify(reduction.gates[0].checks) === JSON.stringify(docsChecks) && !('cases' in reduction.gates[0]),
     'Docs attestation incomplete.', { code: 'scope-mismatch', gate: 'control', member: 'documentation-checks' });
     stage = 'publication';
-    requireThat(publication?.reduction === 'success' && publication?.upload === 'success' && /^[1-9][0-9]*$/.test(publication?.artifact ?? ''), 'Required control artifact publication failed or was canceled.',
+    requireThat(publication?.reduction === 'success' && publication?.upload === 'success' && typeof publication?.artifact === 'string' && /^[1-9][0-9]*$/.test(publication.artifact) && Number.isSafeInteger(Number(publication.artifact)), 'Required control artifact publication failed or was canceled.',
       { code: 'control-upload-incomplete', gate: 'control', member: 'qualification-summary.json', outcome: outcome(publication?.reduction !== 'success' ? publication?.reduction : publication?.upload) });
     stage = 'control-artifact';
-    let response;
-    try {
-      response = await github.rest.actions.getArtifact({ owner, repo, artifact_id: Number(publication.artifact) });
-    } catch (error) {
-      // Keep only closed structured facts; API messages, bodies and headers may contain secrets.
-      throw new QualificationFailure('Control artifact request failed.', { code: 'api-or-data-unavailable',
-        gate: 'control', member: `qualification-control-${runId}-${attempt}`, api: artifactRequestDiagnostic(error) });
-    }
+    const { response, diagnostic } = await readControlArtifact(github, owner, repo, Number(publication.artifact),
+      `qualification-control-${runId}-${attempt}`, timing);
     const artifact = response?.data;
     requireThat(artifact && typeof artifact === 'object' && !Array.isArray(artifact) && artifact.id === Number(publication.artifact) && artifact.name === `qualification-control-${runId}-${attempt}` &&
       artifact.workflow_run?.id === runId && artifact.expired === false && artifact.size_in_bytes > 0, 'Required control artifact is missing or belongs to another invocation.',
@@ -389,6 +427,7 @@ export async function publish(github, identity, runId, attempt, checkId, summary
     conclusion = 'success'; summary = identity.scope === 'docs-only'
       ? 'Documentation-only qualification and required control publication passed on the current exact HEAD/base/tested merge tree. runtimeExecuted=false; cleanup=not-applicable; no runtime coverage credit. Pilot maintainer trust applies; this is not architect merge approval.'
       : 'Complete existing qualification and required control publication passed on the current exact HEAD/base/tested merge tree. Pilot maintainer trust applies; this is not architect merge approval.';
+    summary += ' Control artifact read: ' + JSON.stringify(diagnostic);
   } catch (error) {
     // Completion never grants green credit for reduction/upload/freshness failure.
     failure ??= boundedFailure(error, stage);
