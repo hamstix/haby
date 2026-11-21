@@ -16,7 +16,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
     IProviderAliasResolver aliases, IEnumerable<IProviderConfigurationCodec> codecs,
     DurableActionAdmission admission, TimeProvider clock, ConfigurationRenderingCatalog? rendering = null,
     IEnumerable<IExternalOperationOutputContract>? outputContracts = null)
-    : IDurableDeploymentPlanner
+    : IDurableDeploymentPlanner, IOperatorImportRequestStore
 {
     private readonly ConfigurationRenderingCatalog _rendering = rendering ?? ConfigurationRenderingCatalog.Empty;
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
@@ -48,40 +48,60 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (precondition is not (DeploymentPrecondition.ExpectedAbsence or DeploymentPrecondition.ExpectedGeneration))
             throw new ArgumentException("Unsupported precondition.", nameof(precondition));
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        var validation = await ValidateChangeSetInputAsync(context, environment, application, revision, intent, false, cancellationToken);
+        if (validation is { } refused) return new(refused);
+        var change = AddChangeSet(context, environment, application, revision, precondition, intent, actorId);
+        await context.SaveChangesAsync(cancellationToken);
+        return new(DurableChangeSetCreateStatus.Created, change);
+    }
+
+    private async Task<DurableChangeSetCreateStatus?> ValidateChangeSetInputAsync(ManifestCatalogDbContext context,
+        EnvironmentRecordId environment, ApplicationRecordId application, ManifestRevisionRef revision,
+        ResourceImportIntent? intent, bool localRevision, CancellationToken token)
+    {
         var environmentId = Guid.Parse(environment.ToString());
         var applicationId = Guid.Parse(application.ToString());
-        if (!await context.Environments.AsNoTracking().AnyAsync(row => row.Id == environmentId, cancellationToken))
-            return new(DurableChangeSetCreateStatus.EnvironmentNotFound);
+        if (!await context.Environments.AsNoTracking().AnyAsync(row => row.Id == environmentId, token))
+            return DurableChangeSetCreateStatus.EnvironmentNotFound;
         if (revision.ApplicationRecordId != application)
-            return new(DurableChangeSetCreateStatus.RevisionNotOwnedByApplication);
+            return DurableChangeSetCreateStatus.RevisionNotOwnedByApplication;
         if (!await context.Revisions.AsNoTracking().AnyAsync(row => row.ApplicationRecordId == applicationId &&
-            row.LocalRevisionNumber == revision.RevisionNumber.Value, cancellationToken))
-            return new(DurableChangeSetCreateStatus.RevisionNotFound);
+            row.LocalRevisionNumber == revision.RevisionNumber.Value, token)) return DurableChangeSetCreateStatus.RevisionNotFound;
         if (intent is not null)
         {
-            var accepted = await revisions.FindAsync(revision, cancellationToken);
-            if (accepted is null) return new(DurableChangeSetCreateStatus.RevisionNotFound);
+            // A request-owned transaction uses its own connection, including a single-connection catalog pool.
+            var accepted = localRevision
+                ? PostgreSqlManifestImportStore.Rehydrate(await context.Revisions.AsNoTracking().SingleAsync(row =>
+                    row.ApplicationRecordId == applicationId && row.LocalRevisionNumber == revision.RevisionNumber.Value, token))
+                : await revisions.FindAsync(revision, token);
+            if (accepted is null) return DurableChangeSetCreateStatus.RevisionNotFound;
             try { intent.Validate(accepted.Declaration.Spec); }
-            catch (InvalidDataException) { return new(DurableChangeSetCreateStatus.ImportNotSupported); }
+            catch (InvalidDataException) { return DurableChangeSetCreateStatus.ImportNotSupported; }
         }
+        return null;
+    }
+
+    private DeploymentChangeSet AddChangeSet(ManifestCatalogDbContext context, EnvironmentRecordId environment,
+        ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
+        ResourceImportIntent? intent, string actorId)
+    {
         var id = DeploymentChangeSetId.New();
         var createdAt = clock.GetUtcNow();
         context.DurableChangeSets.Add(new DurableChangeSetRow
         {
             Id = Guid.Parse(id.ToString()),
             ImportIntentJson = ResourceImportIntentCodec.Encode(intent),
-            EnvironmentRecordId = environmentId,
-            ApplicationRecordId = applicationId,
+            EnvironmentRecordId = Guid.Parse(environment.ToString()),
+            ApplicationRecordId = Guid.Parse(application.ToString()),
             RevisionNumber = revision.RevisionNumber.Value,
             ExpectedAbsence = precondition is DeploymentPrecondition.ExpectedAbsence,
             ExpectedGeneration = (precondition as DeploymentPrecondition.ExpectedGeneration)?.Generation.Value,
             CreatedAt = createdAt,
             ActorId = actorId
         });
-        await context.SaveChangesAsync(cancellationToken);
-        return new(DurableChangeSetCreateStatus.Created, new DeploymentChangeSet(id, environment,
+        return new DeploymentChangeSet(id, environment,
             new DeploymentChangeSetMember(application, revision, precondition), createdAt, actorId)
-        { Import = intent });
+        { Import = intent };
     }
 
     public ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId,

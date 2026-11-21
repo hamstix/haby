@@ -1509,6 +1509,87 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.OperatorImportRequestRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<Guid>("Application")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
+
+                    b.Property<Guid?>("ChangeSet")
+                        .HasColumnType("uuid")
+                        .HasColumnName("change_set_id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<string>("CompletedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("completed_by");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("CredentialResource")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("credential_resource_local_id");
+
+                    b.Property<Guid>("Environment")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("Input")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("input");
+
+                    b.Property<Guid>("ManifestRevision")
+                        .HasColumnType("uuid")
+                        .HasColumnName("manifest_revision_id");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.Property<Guid?>("StagedCredential")
+                        .HasColumnType("uuid")
+                        .HasColumnName("staged_credential_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Application");
+
+                    b.HasIndex("ChangeSet")
+                        .IsUnique();
+
+                    b.HasIndex("Environment");
+
+                    b.HasIndex("ManifestRevision");
+
+                    b.HasIndex("StagedCredential")
+                        .IsUnique();
+
+                    b.ToTable("operator_resource_import_requests", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_operator_import_request_completion", "(change_set_id IS NULL AND staged_credential_id IS NULL AND completed_at IS NULL AND completed_by IS NULL) OR (change_set_id IS NOT NULL AND staged_credential_id IS NOT NULL AND completed_at IS NOT NULL AND completed_by IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.OwnedObjectRow", b =>
                 {
                     b.Property<Guid>("ManagedWorkloadId")
@@ -3193,6 +3274,37 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasForeignKey("DeploymentId", "Generation", "OperationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.OperatorImportRequestRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ApplicationRow", null)
+                        .WithMany()
+                        .HasForeignKey("Application")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableChangeSetRow", null)
+                        .WithMany()
+                        .HasForeignKey("ChangeSet")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Haby.Persistence.PostgreSql.EnvironmentRow", null)
+                        .WithMany()
+                        .HasForeignKey("Environment")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ManifestRevisionRow", null)
+                        .WithMany()
+                        .HasForeignKey("ManifestRevision")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ProtectedApplicationCredentialRow", null)
+                        .WithMany()
+                        .HasForeignKey("StagedCredential")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Haby.Persistence.PostgreSql.OwnedObjectRow", b =>

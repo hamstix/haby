@@ -26,6 +26,7 @@ public sealed partial class ManifestCatalogDbContext
     private async Task ValidateGeneratedWritesAsync(bool asynchronous, CancellationToken cancellationToken)
     {
         ChangeTracker.DetectChanges();
+        await ValidateOperatorImportRequestWritesAsync(asynchronous, cancellationToken);
         if (ChangeTracker.Entries<ResourceImportReceiptRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Import receipts are immutable.");
         foreach (var entry in ChangeTracker.Entries<ProtectedApplicationCredentialRow>().Where(e => e.State is EntityState.Modified or EntityState.Deleted))

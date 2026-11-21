@@ -9,6 +9,35 @@ Reference, Provider status and stronger lifecycle authority remain separate issu
 
 ## Protected intake and planning
 
+Trusted compositions can opt into `AddPostgreSqlOperatorImportRequests` for the
+generic request foundation. `OperatorImportRequests.CreateAsync` accepts an
+adapter-validated nonsecret binding and separate password material. It commits
+an immutable Pending binding before private staging, then creates a new ChangeSet
+and its request link in one catalog transaction. This foundation exposes no public
+RPC or CLI command and performs no external preparation or verification.
+
+The binding fixes the request UUID, Environment, accepted Application revision,
+designated credential Resource and complete import intent. Conflicting bindings
+are refused before staging. Every Create replay, including an already linked
+request, verifies the same exact password bytes through private intake. An outage
+during that comparison cannot acknowledge a verified replay. Concurrent creation
+and recovery after a lost commit response return the original linked ChangeSet.
+
+`GetAsync` reads only safe request metadata: binding identities, original actor
+and time, and optional ChangeSet/completing actor/time. It accepts no password and
+returns no material, digest or private stage reference. Pending means no linked
+ChangeSet; it does not assert staging succeeded. Before the initial binding is
+durable, NotFound remains possible. The original actor is immutable; successful
+linkage records the completing actor once. Later reads/replays change neither.
+Trusted callers remain responsible for authentication, authorization, deriving
+actors from authenticated identity and validating the adapter's closed input.
+
+The existing unique credential-owner guard remains in effect from successful
+staging, even before Commit. Closing a Plan does not free that owner. A new UUID
+for the same owner conflicts, and changed bytes under the old UUID conflict.
+This slice provides no replacement, deletion or supersession policy. Its additive
+catalog migration retains existing stages, import intents and receipt history.
+
 The trusted internal caller stages the password with
 `IProtectedApplicationCredentialIntake.StageAsync`, an immutable request ID and
 the exact Environment/Application/Resource owner. The returned opaque stage and
