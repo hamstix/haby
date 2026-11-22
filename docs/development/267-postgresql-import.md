@@ -4,8 +4,10 @@ This bounded implementation of [#267](https://github.com/hamstix/haby/issues/267
 implements [ADR-062](../adr/0062-existing-resource-import-and-attachment.md)
 through internal services and the authenticated API-only operator surface. It
 accepts one existing database/application login pair and supplies the ordinary
-database and connection outputs. Qualification remains bound to the exact source
-and published artifacts; this runbook does not declare issue #267 or P3 complete.
+database and connection outputs. Issue #267 was accepted on 2026-11-23 at main
+`1f87cdfd877f3834321a33a2fed0569322ee735f`. Qualification remains bound to the
+reviewed source and published artifacts; no new post-merge runtime is claimed.
+This bounded completion does not declare P3 complete.
 Reference, Provider status and stronger lifecycle authority remain separate issues.
 
 ## Protected intake and planning
@@ -17,8 +19,8 @@ administrator sessions and returns nonsecret intent pinned to the selected exact
 Provider revision. Pure admission and Execute check that pin; Execute still
 authenticates the supplied application password and rechecks external identities.
 Preparation neither stages a password nor confirms an association. The trusted
-internal payload is not proof of server origin for a future public create API;
-that API must prepare names server-side or consume server-bound preparation.
+internal payload is not proof of server origin for the public create API;
+the public wrapper below prepares names server-side and freezes the binding.
 
 Trusted compositions can opt into `AddPostgreSqlOperatorImportRequests` for the
 generic request foundation. `OperatorImportRequests.CreateAsync` accepts an
@@ -62,7 +64,8 @@ conflicts without exporting a password digest or comparison API. Material is
 strict UTF-8, NUL-free, bounded to 65,536 bytes and never normalized. Pending
 material persists privately for restart; it cannot resolve as an application
 Secret or publish usable outputs. Lost responses never cause stage deletion.
-This implementation exposes no public intake endpoint or automatic cleanup.
+There is no standalone public credential-intake endpoint or automatic cleanup;
+the authenticated import-create wrapper below composes this private intake.
 
 The current storage backend is PostgreSQL plaintext under ADR-006, including the
 private stage. Protected intake describes the trusted access boundary; it does
