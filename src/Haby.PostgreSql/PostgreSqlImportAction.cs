@@ -116,6 +116,8 @@ public static class PostgreSqlImportServices
     public static IServiceCollection AddPostgreSqlExistingPairImport(this IServiceCollection services)
     {
         services.TryAddSingleton<PostgreSqlImportVerifier>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IResourceImportPreparer, PostgreSqlImportPreparer>());
+        services.TryAddSingleton<PrepareResourceImport>();
         services.TryAddSingleton<IPostgreSqlImportFaultHooks, NullPostgreSqlImportFaultHooks>();
         foreach (var type in new[] { PostgreSqlDatabaseContract.Id, PostgreSqlApplicationLoginContract.Id })
         {

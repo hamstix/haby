@@ -9,6 +9,16 @@ Reference, Provider status and stronger lifecycle authority remain separate issu
 
 ## Protected intake and planning
 
+Trusted compositions registering `AddPostgreSqlExistingPairImport` can use
+`PrepareResourceImport` with the closed `haby.postgresql.import-names/v1` input.
+The adapter observes exact database/login/schema OIDs through bounded read-only
+administrator sessions and returns nonsecret intent pinned to the selected exact
+Provider revision. Pure admission and Execute check that pin; Execute still
+authenticates the supplied application password and rechecks external identities.
+Preparation neither stages a password nor confirms an association. The trusted
+internal payload is not proof of server origin for a future public create API;
+that API must prepare names server-side or consume server-bound preparation.
+
 Trusted compositions can opt into `AddPostgreSqlOperatorImportRequests` for the
 generic request foundation. `OperatorImportRequests.CreateAsync` accepts an
 adapter-validated nonsecret binding and separate password material. It commits

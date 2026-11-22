@@ -11,6 +11,23 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class PostgreSqlPairPlanningTests
 {
     [Fact]
+    public void Prepared_import_with_unknown_resource_is_refused_without_provider_lookup_exception()
+    {
+        var inputs = Inputs();
+        var spec = Spec(Example());
+        var provider = inputs.Providers.Resource(ManifestLocalId.Create("db"));
+        var schema = PostgreSqlApplicationLoginContract.Parse(spec.Resources[ManifestLocalId.Create("app-login")].Properties)!.Schema;
+        var pair = new PostgreSqlExistingPairInput("db", "app-login", "existing_database", 123, "existing_login", 124, schema, 125, 126);
+        var prepared = new PostgreSqlPreparedImportInput(pair, inputs.Environment.ToString(), provider.Instance.ToString(),
+            provider.Configuration.Value, provider.Implementation.Value);
+        var payload = new DurableActionPayload(PostgreSqlImportPreparer.PreparedFormat, System.Text.Json.JsonSerializer.Serialize(prepared,
+            PostgreSqlImportPreparationJsonContext.Default.PostgreSqlPreparedImportInput));
+        var intent = new ResourceImportIntent([new(ManifestLocalId.Create("db"), payload),
+            new(ManifestLocalId.Create("missing"), payload, new(Guid.NewGuid(), new(SecretId.New(), SecretVersionId.New())))]);
+        Assert.Null(PostgreSqlImportAdmission.Prepare(spec, inputs with { Import = intent }));
+    }
+
+    [Fact]
     public void Initial_pair_plus_independent_database_is_refused_before_acceptance()
     {
         var envelope = Example();

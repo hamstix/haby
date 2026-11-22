@@ -13,7 +13,7 @@ public sealed record PostgreSqlImportVerificationResult(PostgreSqlImportVerifica
 
 /// <summary>Observes an existing pair and authenticates its supplied credential. Executes SELECT
 /// only in read-only sessions; never invokes provisioning, DDL probes, permission repair or rotation.</summary>
-public sealed class PostgreSqlImportVerifier(IProviderConfigurationStore providers, ISecretStore secrets,
+public sealed partial class PostgreSqlImportVerifier(IProviderConfigurationStore providers, ISecretStore secrets,
     IProtectedApplicationCredentialIntake protectedInputs, PostgreSqlProviderTransport? transport = null)
 {
     internal const string ApplicationName = "haby-resource-import-verification";
