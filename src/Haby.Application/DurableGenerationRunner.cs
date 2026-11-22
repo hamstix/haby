@@ -10,6 +10,7 @@ public sealed record DurableGenerationProgress(ApplicationDeploymentId Deploymen
     public int Retained { get; init; }
     public int Reintroduced { get; init; }
     public ResourcesReadyCheckpoint? ResourcesReady { get; init; }
+    public long? SupersededByGeneration { get; init; }
     public int Completed => Nodes.Count(n => n.Operation.State == DurableOperationState.Succeeded);
     public int Total => Nodes.Count;
     public DurableNodeProgress? StoppedAt => Nodes.FirstOrDefault(n => n.Operation.State is
@@ -50,6 +51,7 @@ public sealed class DurableGenerationRunner(ExactDurableOperationExecutor execut
             cancellationToken.ThrowIfCancellationRequested();
             var progress = await ProgressAsync(deployment, generation, cancellationToken);
             if (progress is null) return new(null);
+            if (progress.SupersededByGeneration is not null) return new(progress, StopOutcome: DurableExecutionOutcome.InputUnavailable);
             if (progress.Completed == progress.Total)
             {
                 // Historical success is metadata, not a new consequential transition or a health probe.

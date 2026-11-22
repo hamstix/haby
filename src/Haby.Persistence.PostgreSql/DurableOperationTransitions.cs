@@ -14,6 +14,7 @@ internal static class DurableOperationTransitions
     }
     internal static async Task<DurableOperationRow?> BeginAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token, string? actor = null, ResourceReuseValidationResult? verification = null)
     {
+        if (!await ImportAdmissionAuthority.BeforeExecutionAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value, token)) return null;
         if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value,
             key.OperationId, PostgreSqlReuseVerificationScopes.Transition.Begin, token, verification: verification)) return null;
         var attempt = Guid.CreateVersion7();
@@ -43,6 +44,7 @@ internal static class DurableOperationTransitions
     }
     internal static async Task<bool> MarkerAsync(ManifestCatalogDbContext db, DurableOperationKey key, Guid attempt, DateTimeOffset at, CancellationToken token, ResourceReuseValidationResult? verification = null)
     {
+        if (!await ImportAdmissionAuthority.BeforeExecutionAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value, token)) return false;
         if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value,
             key.OperationId, PostgreSqlReuseVerificationScopes.Transition.Marker, token, attempt, verification)) return false;
         var changed = await Operation(db, key).Where(x => x.State == nameof(DurableOperationState.Preparing) && x.CurrentAttemptId == attempt)
@@ -56,6 +58,7 @@ internal static class DurableOperationTransitions
     }
     internal static async Task<bool> RecoverAsync(ManifestCatalogDbContext db, DurableOperationKey key, DateTimeOffset at, CancellationToken token, ResourceReuseValidationResult? verification = null)
     {
+        if (!await ImportAdmissionAuthority.BeforeExecutionAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value, token)) return false;
         var row = await Operation(db, key).AsNoTracking().SingleOrDefaultAsync(token);
         if (row?.State != nameof(DurableOperationState.Dispatching)) return false;
         if (await Operation(db, key).Where(x => x.State == nameof(DurableOperationState.Dispatching) && x.CurrentAttemptId == row.CurrentAttemptId)

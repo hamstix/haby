@@ -747,6 +747,7 @@ message GenerationProgress {
   int32 retained_resources = 10;
   int32 reintroduced_resources = 11;
   ResourceStageCheckpointSummary resources_ready = 12;
+  optional int64 superseded_by_generation = 13;
 }
 // Actual saved Resource stage only; no Workload readiness or later-stage assertion.
 message ResourceStageCheckpointSummary {

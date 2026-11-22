@@ -65,7 +65,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         if (!spec.Components.Values.Any(x => x.Workloads.Count > 0) || graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0) return false;
         if (owner is null)
             return change.ExpectedAbsence && change.ExpectedGeneration is null && InternalResourceStage.IsEmpty(inputs, graph) &&
-                !await db.ResourceManagement.AnyAsync(x => x.Environment == change.EnvironmentRecordId && x.Application == change.ApplicationRecordId, token);
+                !await db.CurrentResourceManagement.AnyAsync(x => x.Environment == change.EnvironmentRecordId && x.Application == change.ApplicationRecordId, token);
         if (change.ExpectedAbsence || change.ExpectedGeneration != owner.DesiredGeneration || owner.AppliedGeneration != owner.DesiredGeneration ||
             graph.Baseline is not { } baseline || baseline.Deployment.ToString() != owner.Id.ToString() || baseline.Generation != owner.DesiredGeneration ||
             spec.Resources.Count == 0 || graph.ReusedResources.Count != spec.Resources.Count || graph.ReusedResources.Any(x => x.Reintroduced)) return false;

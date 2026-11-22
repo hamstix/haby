@@ -71,7 +71,7 @@ internal static class ResourceContinuity
             if (!admission.Supports(graph) || !admission.ValidateCreationGraph(inputs.Configuration!.Manifest.Spec, adapter, inputs, configuration, graph)) return false;
             foreach (var requirement in reuse.ReusedResources.Where(x => x.SourceGeneration == generation))
             {
-                var management = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == requirement.ManagementId, token);
+                var management = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == requirement.ManagementId, token);
                 if (management is null) return false;
                 if (management.Authority == ResourceLifecycleAuthority.UseAndRetain)
                 {
@@ -189,7 +189,7 @@ internal static class ResourceContinuity
         if (!inventory.SetEquals(requirements.Select(x => x.Resource))) return false;
         foreach (var reuse in requirements)
         {
-            var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token);
+            var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token);
             if (managed is null || managed.Deployment != deployment || managed.Environment != owner.EnvironmentRecordId ||
                 managed.Application != owner.ApplicationRecordId || managed.Resource != reuse.Resource.Value || managed.SourceGeneration != reuse.SourceGeneration ||
                 await EvidenceAsync(db, managed, token) != reuse.EvidenceFingerprint) return false;

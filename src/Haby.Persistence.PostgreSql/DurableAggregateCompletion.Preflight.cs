@@ -62,7 +62,7 @@ internal static partial class DurableAggregateCompletion
             var resourceIds = (closure is null
                 ? target.Nodes.Select(x => x.ResourceId.Value).Concat(target.ReusedResources.Select(x => x.Resource.Value)).Concat(target.RetainedResources.Select(x => x.Resource.Value))
                 : target.Nodes.Where(x => closure.Contains(x.Id)).Select(x => x.ResourceId.Value)).Distinct(StringComparer.Ordinal).ToArray();
-            var managed = await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && resourceIds.Contains(x.Resource)).ToArrayAsync(token);
+            var managed = await db.CurrentResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && resourceIds.Contains(x.Resource)).ToArrayAsync(token);
             var identities = new Dictionary<string, Guid>(StringComparer.Ordinal);
             foreach (var resource in resourceIds)
             {

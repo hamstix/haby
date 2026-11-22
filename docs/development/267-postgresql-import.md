@@ -42,11 +42,11 @@ linkage records the completing actor once. Later reads/replays change neither.
 Trusted callers remain responsible for authentication, authorization, deriving
 actors from authenticated identity and validating the adapter's closed input.
 
-The existing unique credential-owner guard remains in effect from successful
-staging, even before Commit. Closing a Plan does not free that owner. A new UUID
-for the same owner conflicts, and changed bytes under the old UUID conflict.
-This slice provides no replacement, deletion or supersession policy. Its additive
-catalog migration retains existing stages, import intents and receipt history.
+The credential-owner reservation remains in effect from successful ordinary
+staging, even before Commit. Closing a Plan does not free that owner. An ordinary
+new UUID for the same owner conflicts, and changed bytes under the old UUID conflict.
+Explicit correction uses the separate candidate path described below. The additive
+catalog migrations retain existing stages, import intents and receipt history.
 
 The trusted internal caller stages the password with
 `IProtectedApplicationCredentialIntake.StageAsync`, an immutable request ID and
@@ -68,6 +68,39 @@ private stage. Protected intake describes the trusted access boundary; it does
 not claim encryption at rest. Deployment protection and a future encrypted backend
 remain independent requirements. Do not put passwords in manifests, typed import
 payloads, Plans, logs, receipts or diagnostics.
+
+## Explicit unconfirmed correction
+
+A new request may name `OperatorImportCorrectionTarget`: the previous request,
+an explicit expected absence of Commit or exact Deployment/generation, and a
+closed reason (`CredentialRejected`, `InputCorrection` or `ExplicitRetry`). The
+Environment, Application revision and designated credential Resource remain the
+same. It stages a new immutable private credential candidate with a new SecretVersion;
+staging and planning transfer no ownership and expose no usable application Secret.
+Retries must retain the same request, binding and exact credential bytes.
+
+Commit serializes admission, execution markers and confirmation through the same
+Environment/Application import gate. It refuses confirmed receipts, usable outputs,
+Applied association, active or uncertain attempts across either coupled Resource,
+and stale ownership or desired state. An expected absence never silently becomes a
+post-Commit correction. Before Commit it accepts one initial generation; after a
+failed unconfirmed generation it appends the next generation. Ownership and current
+Resource-management heads move by compare-and-swap in the same transaction as the
+new Commit and immutable actor/time/reason supersession audit. A fault rolls back
+the entire change; a lost response is recovered through the original ChangeSet ID.
+
+Previous request, stage, ChangeSet, generation and management history remain intact.
+Safe request metadata reports `Superseded` and the successor request. Historical
+generation progress reports its successor generation and cannot claim that the
+selected superseded generation became Applied. Old Commit replay remains truthful;
+old execution, late verifier publication and old credential resolution are fenced.
+No external password, ownership, grant or data mutation is authorized. Confirmed
+imports cannot be corrected through this path.
+
+The migration seeds current owner/head pointers from existing immutable rows and
+does not rewrite history. Downgrade refuses any correction request or supersession
+before changing the schema. This internal foundation still exposes no public
+import RPC/CLI; authenticated operator composition and rehearsal remain required.
 
 ## Read-only verification and acceptance
 

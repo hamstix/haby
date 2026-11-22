@@ -47,7 +47,7 @@ internal static class ResourceImportReceiptIntegrity
             document.Operations.All(x => x.Operation != key.OperationId.Value)) return null;
         foreach (var resource in inputs.Import.Resources)
         {
-            var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Resource == resource.Resource.Value, token);
+            var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Resource == resource.Resource.Value, token);
             if (managed is null || managed.Environment != source.EnvironmentRecordId || managed.Application != source.ApplicationRecordId ||
                 managed.SourceGeneration != source.Generation || !ResourceContinuity.HasAcquisitionAuthority(managed, inputs)) return null;
         }

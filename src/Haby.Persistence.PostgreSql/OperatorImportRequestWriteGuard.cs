@@ -37,7 +37,8 @@ public sealed partial class ManifestCatalogDbContext
             var staged = asynchronous ? await stageQuery.SingleOrDefaultAsync(token) : stageQuery.SingleOrDefault();
             if (change is null || !PostgreSqlDurableDeploymentPlanner.MatchesRequestCredential(staged, row) || staged!.ConfirmedReceipt is not null ||
                 change.EnvironmentRecordId != row.Environment || change.ApplicationRecordId != row.Application || change.RevisionNumber != row.Revision ||
-                !change.ExpectedAbsence || change.ExpectedGeneration is not null || change.CreatedAt != row.CompletedAt || change.ActorId != row.CompletedBy ||
+                change.ExpectedAbsence != (binding.Correction?.Generation is null) || change.ExpectedGeneration != binding.Correction?.Generation?.Value ||
+                change.CreatedAt != row.CompletedAt || change.ActorId != row.CompletedBy ||
                 change.ImportIntentJson != ResourceImportIntentCodec.Encode(binding.Attach(new(staged.Id,
                     new(Haby.Domain.SecretId.Parse(staged.Secret.ToString()), Haby.Domain.SecretVersionId.Parse(staged.Version.ToString()))))))
                 throw new InvalidOperationException("Import request linkage requires its exact new ChangeSet and private credential.");

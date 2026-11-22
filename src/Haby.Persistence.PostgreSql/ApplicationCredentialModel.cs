@@ -37,7 +37,6 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.Material).HasColumnName("material");
             e.Property(x => x.ConfirmedReceipt).HasColumnName("confirmed_receipt_id");
             e.HasIndex(x => x.Request).IsUnique();
-            e.HasIndex(x => new { x.Environment, x.Application, x.Resource }).IsUnique();
             e.HasIndex(x => x.Secret).IsUnique();
             e.HasIndex(x => x.Version).IsUnique();
             e.HasOne<EnvironmentRow>().WithMany().HasForeignKey(x => x.Environment).OnDelete(DeleteBehavior.Restrict);

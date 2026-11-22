@@ -118,6 +118,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
         var changeId = Guid.Parse(changeSetId.ToString());
+        var identity = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == changeId, cancellationToken);
+        if (identity is null) return new(DurablePlanStatus.ChangeSetNotFound);
+        if (identity.ImportIntentJson is not null)
+            await ImportMutationGate.LockAsync(context, identity.EnvironmentRecordId, identity.ApplicationRecordId, cancellationToken);
         // Commit takes FOR UPDATE on this row. Planning holds FOR SHARE through
         // insertion so a Plan cannot be created after this ChangeSet commits.
         await context.Database.ExecuteSqlInterpolatedAsync(
@@ -134,6 +138,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken);
         if (!Matches(row, baseline))
             return new(DurablePlanStatus.ChangeSetStale);
+        var correction = row.ImportIntentJson is null ? null : await ImportAdmissionAuthority.CorrectionAsync(context, row.Id, cancellationToken);
+        if (row.ImportIntentJson is not null && !await ImportAdmissionAuthority.CanPlanAsync(context, row, correction, cancellationToken))
+            return new(DurablePlanStatus.ChangeSetStale);
+        if (correction is not null) baseline = null;
         if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
             return new(DurablePlanStatus.PlanInputUnavailable);
         if (baseline is not null && !await HasAppliedBaselineProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
@@ -375,11 +383,20 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var row = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == Guid.Parse(id.ToString()), cancellationToken);
         if (row is null) return (DurablePlanStatus.ChangeSetStale, null);
+        if (row.ImportIntentJson is not null)
+        {
+            await ImportMutationGate.LockAsync(context, row.EnvironmentRecordId, row.ApplicationRecordId, cancellationToken);
+            row = await context.DurableChangeSets.AsNoTracking().SingleAsync(x => x.Id == row.Id, cancellationToken);
+        }
         var baseline = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(item =>
             item.EnvironmentRecordId == row.EnvironmentRecordId &&
             item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken);
         if (!Matches(row, baseline))
             return (DurablePlanStatus.ChangeSetStale, null);
+        var correction = row.ImportIntentJson is null ? null : await ImportAdmissionAuthority.CorrectionAsync(context, row.Id, cancellationToken);
+        if (row.ImportIntentJson is not null && !await ImportAdmissionAuthority.CanPlanAsync(context, row, correction, cancellationToken))
+            return (DurablePlanStatus.ChangeSetStale, null);
+        if (correction is not null) baseline = null;
         if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
             return (DurablePlanStatus.PlanInputUnavailable, null);
         if (baseline is not null && !await HasAppliedBaselineProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
@@ -573,7 +590,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);
         var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
         var configuration = PreparedConfiguration(instance.ProviderKindId, provider);
-        var managedResources = await db.ResourceManagement.AsNoTracking().Where(x => x.Environment == owner.EnvironmentRecordId &&
+        var managedResources = await db.CurrentResourceManagement.AsNoTracking().Where(x => x.Environment == owner.EnvironmentRecordId &&
             x.Application == owner.ApplicationRecordId).ToArrayAsync(token);
         var expected = accepted.Manifest.Spec.Resources.Keys.Select(x => x.Value)
             .Concat(baselineGraph.RetainedResources.Select(x => x.Resource.Value)).ToHashSet(StringComparer.Ordinal);
@@ -636,7 +653,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var environment = Guid.Parse(inputs.Environment.ToString());
         var application = Guid.Parse(inputs.Revision.ApplicationRecordId.ToString());
         var resources = inputs.Providers.Declaration.Spec.Resources.Keys.Select(x => x.Value).ToArray();
-        var managed = await db.ResourceManagement.AsNoTracking().Where(x => x.Environment == environment &&
+        var managed = await db.CurrentResourceManagement.AsNoTracking().Where(x => x.Environment == environment &&
             x.Application == application && x.Origin == ResourceOrigin.Imported && resources.Contains(x.Resource)).ToArrayAsync(token);
         var producers = new List<DurableOperationNode>();
         foreach (var group in managed.GroupBy(x => new { x.Deployment, x.SourceGeneration }))
