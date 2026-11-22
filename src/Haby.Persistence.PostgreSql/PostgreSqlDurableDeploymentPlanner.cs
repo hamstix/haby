@@ -155,7 +155,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (environment is null) return new(DurablePlanStatus.ChangeSetStale);
         var spec = revision.Declaration.Spec;
         var import = ResourceImportIntentCodec.Decode(row.ImportIntentJson);
-        if (import is not null && (baseline is not null || mode != DeploymentAdmissionMode.ResourceOnly)) return new(DurablePlanStatus.ImportNotSupported);
+        if (import is not null && (baseline is not null || mode == DeploymentAdmissionMode.Internal ||
+            spec.Components.Values.Any(x => x.Workloads.Count > 0))) return new(DurablePlanStatus.ImportNotSupported);
         var internalEffects = mode == DeploymentAdmissionMode.Internal || mode == DeploymentAdmissionMode.Operator && spec.Components.Values.Any(x => x.Workloads.Count > 0);
         var workloadUpdate = await HasWorkloadBaselineAsync(context, baseline, cancellationToken);
         if (workloadUpdate && mode != DeploymentAdmissionMode.Internal) return new(DurablePlanStatus.UnsupportedShape);

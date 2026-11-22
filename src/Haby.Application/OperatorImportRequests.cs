@@ -5,7 +5,16 @@ namespace Haby.Application;
 public enum OperatorImportCorrectionReason { CredentialRejected, InputCorrection, ExplicitRetry }
 
 public sealed record OperatorImportCorrectionTarget(Guid PreviousRequestId, ApplicationDeploymentId? Deployment,
-    DeploymentGeneration? Generation, OperatorImportCorrectionReason Reason);
+    DeploymentGeneration? Generation, OperatorImportCorrectionReason Reason)
+{
+    public void Validate(Guid requestId)
+    {
+        if (PreviousRequestId == Guid.Empty || PreviousRequestId == requestId ||
+            (Deployment is null) != (Generation is null) || Reason is not
+                (OperatorImportCorrectionReason.CredentialRejected or OperatorImportCorrectionReason.InputCorrection or OperatorImportCorrectionReason.ExplicitRetry))
+            throw new ArgumentException("Invalid operator import correction target.");
+    }
+}
 
 /// <summary>Trusted, adapter-validated nonsecret intent. Public preparation is a separate boundary.</summary>
 public sealed record OperatorImportRequestBinding(Guid RequestId, EnvironmentRecordId Environment,
@@ -24,10 +33,7 @@ public sealed record OperatorImportRequestBinding(Guid RequestId, EnvironmentRec
             !Input.Resources.Any(x => x.Resource == CredentialResource))
             throw new ArgumentException("Invalid operator import request binding.");
         _ = ResourceImportIntentCodec.Encode(Input);
-        if (Correction is { } target && (target.PreviousRequestId == Guid.Empty || target.PreviousRequestId == RequestId ||
-            (target.Deployment is null) != (target.Generation is null) || target.Reason is not
-                (OperatorImportCorrectionReason.CredentialRejected or OperatorImportCorrectionReason.InputCorrection or OperatorImportCorrectionReason.ExplicitRetry)))
-            throw new ArgumentException("Invalid operator import correction target.");
+        Correction?.Validate(RequestId);
     }
 
     public ResourceImportIntent Attach(ProtectedCredentialReference reference) => new(Input.Resources.Select(x =>
@@ -43,7 +49,7 @@ public sealed record OperatorImportRequestView(Guid RequestId, EnvironmentRecord
 public enum OperatorImportRequestStatus
 {
     Pending, Created, Existing, NotFound, InvalidInput, EnvironmentNotFound, RevisionNotFound,
-    ImportNotSupported, Conflict, StorageUnavailable, Superseded
+    ImportNotSupported, Conflict, StorageUnavailable, Superseded, ProviderUnavailable, SecretUnavailable, Connectivity
 }
 
 public sealed record OperatorImportRequestResult(OperatorImportRequestStatus Status, OperatorImportRequestView? Request = null);

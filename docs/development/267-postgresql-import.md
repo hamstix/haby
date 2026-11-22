@@ -2,9 +2,10 @@
 
 This bounded implementation of [#267](https://github.com/hamstix/haby/issues/267)
 implements [ADR-062](../adr/0062-existing-resource-import-and-attachment.md)
-through internal application services. It accepts one existing database/application
-login pair and supplies the ordinary database and connection outputs. Public
-operator RPC/CLI composition and operational rehearsal remain subsequent work.
+through internal services and the authenticated API-only operator surface. It
+accepts one existing database/application login pair and supplies the ordinary
+database and connection outputs. Qualification remains bound to the exact source
+and published artifacts; this runbook does not declare issue #267 or P3 complete.
 Reference, Provider status and stronger lifecycle authority remain separate issues.
 
 ## Protected intake and planning
@@ -23,8 +24,8 @@ Trusted compositions can opt into `AddPostgreSqlOperatorImportRequests` for the
 generic request foundation. `OperatorImportRequests.CreateAsync` accepts an
 adapter-validated nonsecret binding and separate password material. It commits
 an immutable Pending binding before private staging, then creates a new ChangeSet
-and its request link in one catalog transaction. This foundation exposes no public
-RPC or CLI command and performs no external preparation or verification.
+and its request link in one catalog transaction. This trusted foundation performs
+no external preparation itself; the public wrapper below supplies server preparation.
 
 The binding fixes the request UUID, Environment, accepted Application revision,
 designated credential Resource and complete import intent. Conflicting bindings
@@ -99,8 +100,69 @@ imports cannot be corrected through this path.
 
 The migration seeds current owner/head pointers from existing immutable rows and
 does not rewrite history. Downgrade refuses any correction request or supersession
-before changing the schema. This internal foundation still exposes no public
-import RPC/CLI; authenticated operator composition and rehearsal remain required.
+before changing the schema. The authenticated public surface composes these guards;
+it cannot accept a caller-supplied trusted binding or override them.
+
+## Operator create and recovery
+
+Use the existing [operator-admin credential](150-operator-access-tokens.md) and
+selected CLI context. `CreateResourceImportChangeSet` accepts a nonempty request
+UUID, exact Environment record/revision, closed names input and separate credential
+bytes. `GetResourceImportRequest` returns safe request metadata only. Neither accepts
+an actor or grants authority from UUID knowledge. Ordinary `CreateSecret` purposes
+are unchanged; this path does not create an administrative application-password API.
+The initial import revision has the complete pair and no declared Workloads;
+preparation refuses an unsupported mixed shape before Provider access or staging.
+
+The CLI names document contains no password, OIDs or Provider endpoint:
+
+```json
+{
+  "format": "haby.postgresql.import-names/v1",
+  "input": {
+    "databaseName": "existing_database",
+    "loginName": "existing_login",
+    "schema": "public"
+  }
+}
+```
+
+```text
+habyctl changeset import create <application-record-id> <revision> --environment <name> --input names.json
+habyctl changeset import get <request-id>
+habyctl plan create <change-set-id>
+habyctl plan check <plan-id>
+habyctl changeset commit <change-set-id> --plan <plan-id>
+habyctl deployment generation execute <deployment-id> <generation>
+```
+
+Create prompts for a hidden password. `--password-stdin` instead reads exact bytes
+to EOF: 1..65,536 bytes, strict UTF-8 and no NUL. No trimming, BOM or newline removal
+occurs. Redirected input requires that explicit flag. Password arguments, password
+fields in the names document and password files are not supported. Choose an
+Environment through the selected context or `--environment`; the mutually exclusive
+`--environment-record-id` uses an exact record without a name lookup.
+
+The optional `--request-id` generates one UUID per invocation when absent. JSON
+results contain `data.requestId`. Keep that exact ID and original input/password
+for replay after an uncertain result; the returned safe ticket gives the exact
+lookup command and replay identity. A NotFound read does not prove an in-flight
+Create rolled back. A new invocation with no supplied ID is a new request.
+
+New requests prepare names on the server before freezing the immutable binding.
+Bound retries compare the original names and correction target against that stored
+binding without contacting or retargeting the Provider. Changed names, revision,
+Environment, correction target or password cannot silently acknowledge a replay.
+Client-prepared OID/pin payloads are unsupported. Safe get exports no input payload,
+password hash, private stage or SecretVersion reference.
+
+Explicit correction adds `--corrects-request <old-request-id>` and
+`--correction-reason credential-rejected|input-correction|explicit-retry`, plus
+exactly one target: `--expected-uncommitted`, or
+`--expected-deployment <deployment-id> --expected-generation <generation>`.
+Use a new request ID and the corrected password. Plan/Check/Commit/Execute remain
+separate commands. No target is silently replaced with current state, and closing
+a Plan alone does not release ownership. Confirmed imports refuse correction.
 
 ## Read-only verification and acceptance
 
@@ -213,3 +275,22 @@ preparation/receipt/readiness fixtures; no live Kubernetes qualification is clai
 They separately test drift before dispatch, before initial Applied with saved
 ResourcesReady, at update Applied, cancellation, and restart without duplicate
 external writes.
+
+The public operator rehearsal covers pre-Commit and failed-execution correction,
+production Host authentication, a lost response after durable Create, restart and
+same-request replay, explicit Plan/Check/Commit/Execute, rejected confirmed correction,
+authorized runtime delivery and a real query using the delivered connection. It
+asserts unchanged external identities, owners, ACLs, data and password, and absence
+of mutation statements or credential leakage from verification.
+
+Hosted Linux PostgreSQL gates require the published Native AOT CLI and explicitly
+set `HABY_IMPORT_REHEARSAL_ISOLATED_PROFILE=1`. Only that disposable qualification
+profile temporarily trusts fresh public test CAs; both Host and PostgreSQL clients
+retain stock chain/name verification, and cleanup removes only those test roots.
+The Native AOT requirement fails closed without the isolated profile. Development
+runs use explicit test CA chain/name validation and the existing adapter test trust
+seam, without editing the user's trust store; they provide generated-client API
+evidence and no published CLI credit. An isolated Linux probe can instead supply
+`HABY_IMPORT_REHEARSAL_CLI_PATH` for an explicitly managed published CLI; that does
+not qualify Native AOT. Focused local and managed evidence never replaces required
+hosted gates or installed-final qualification.

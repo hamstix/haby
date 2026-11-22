@@ -22,17 +22,38 @@ public sealed class PostgreSqlImportPreparer(IProviderAliasResolver aliases, Pos
     public static DurableActionPayload Encode(PostgreSqlImportNames names) => new(NamesFormat,
         JsonSerializer.Serialize(names, PostgreSqlImportPreparationJsonContext.Default.PostgreSqlImportNames));
 
+    public bool MatchesPreparedRequest(ResourceImportPreparationRequest request, OperatorImportRequestBinding binding)
+    {
+        var names = DecodeNames(request.Input);
+        if (names is null || binding.Input.Resources.Count != 2) return false;
+        var frozen = Decode(binding.Input.Resources[0].Input);
+        if (frozen is null || frozen.Environment != binding.Environment.ToString() ||
+            binding.Input.Resources.Any(x => x.Credential is not null || Decode(x.Input) != frozen)) return false;
+        var pair = frozen.Pair;
+        return pair.DatabaseName == names.DatabaseName && pair.LoginName == names.LoginName && pair.Schema == names.Schema &&
+            binding.CredentialResource.Value == pair.LoginResource &&
+            binding.Input.Resources.Select(x => x.Resource.Value).ToHashSet(StringComparer.Ordinal)
+                .SetEquals([pair.DatabaseResource, pair.LoginResource]);
+    }
+
+    private static PostgreSqlImportNames? DecodeNames(DurableActionPayload input)
+    {
+        if (input.Format != NamesFormat || input.Json.Length > 4096) return null;
+        try
+        {
+            var names = JsonSerializer.Deserialize(input.Json, PostgreSqlImportPreparationJsonContext.Default.PostgreSqlImportNames);
+            return names is not null && PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(names.DatabaseName) &&
+                PostgreSqlResourceNaming.ValidExistingRoleName(names.LoginName) && PostgreSqlApplicationLoginContract.ValidSchema(names.Schema) ? names : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
     public async ValueTask<ResourceImportPreparationResult> PrepareAsync(ResourceImportPreparationRequest request,
         NormalizedManifestSpec spec, CancellationToken token)
     {
-        if (request.Input.Format != NamesFormat || request.Input.Json.Length > 4096) return new(ResourceImportPreparationStatus.InvalidInput);
-        PostgreSqlImportNames? names;
-        try { names = JsonSerializer.Deserialize(request.Input.Json, PostgreSqlImportPreparationJsonContext.Default.PostgreSqlImportNames); }
-        catch (JsonException) { return new(ResourceImportPreparationStatus.InvalidInput); }
-        if (names is null || !PostgreSqlDatabaseGateway.SafeDatabase.IsMatch(names.DatabaseName) ||
-            !PostgreSqlResourceNaming.ValidExistingRoleName(names.LoginName) || !PostgreSqlApplicationLoginContract.ValidSchema(names.Schema))
-            return new(ResourceImportPreparationStatus.InvalidInput);
-        if (spec.Resources.Count != 2) return new(ResourceImportPreparationStatus.ImportNotSupported);
+        if (DecodeNames(request.Input) is not { } names) return new(ResourceImportPreparationStatus.InvalidInput);
+        if (spec.Resources.Count != 2 || spec.Components.Values.Any(x => x.Workloads.Count > 0))
+            return new(ResourceImportPreparationStatus.ImportNotSupported);
         var databases = spec.Resources.Where(x => x.Value.Type == PostgreSqlDatabaseContract.Id).ToArray();
         var logins = spec.Resources.Where(x => x.Value.Type == PostgreSqlApplicationLoginContract.Id).ToArray();
         if (databases.Length != 1 || logins.Length != 1) return new(ResourceImportPreparationStatus.ImportNotSupported);

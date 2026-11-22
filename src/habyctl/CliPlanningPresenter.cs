@@ -51,6 +51,7 @@ internal static partial class PlanningPresentation
         PlanningStatus.Expired => "expired",
         PlanningStatus.PlanStale => "planStale",
         PlanningStatus.PlanInputUnavailable => "planInputUnavailable",
+        PlanningStatus.ImportNotSupported => "importNotSupported",
         _ => throw new InvalidDataException("Unknown server outcome.")
     };
 

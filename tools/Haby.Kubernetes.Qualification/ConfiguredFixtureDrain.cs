@@ -1,4 +1,7 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json.Nodes;
+using k8s.Autorest;
 using Haby.Kubernetes;
 using k8s;
 using k8s.Models;
@@ -9,8 +12,9 @@ internal static class ConfiguredFixtureDrain
     internal sealed class OwnershipRefused() : InvalidOperationException("Fixture drain ownership refused.");
     internal sealed class Failure(Exception error) : Exception("Fixture drain failed.", error);
     private const int Bound = 64;
+    internal enum Operation { NamespaceRead, DeploymentsList, ReplicaSetsList, PodsList, DeploymentRead, DeploymentScale }
     internal static async Task RunAsync(Kubernetes admin, V1Namespace owned, DeploymentReceipt[] expected,
-        CancellationToken token, Func<TimeSpan, CancellationToken, Task>? pause = null)
+        CancellationToken token, Func<TimeSpan, CancellationToken, Task>? pause = null, Action<string>? report = null)
     {
         Console.WriteLine("Q243 configured retirement DrainStart");
         var remaining = -1;
@@ -22,22 +26,22 @@ internal static class ConfiguredFixtureDrain
             // Recheck the complete namespace inventory and exact object immediately before EACH mutation.
             foreach (var receipt in expected)
             {
-                _ = await VerifyOwnedAsync(admin, owned, expected, token);
-                var current = await admin.AppsV1.ReadNamespacedDeploymentAsync(receipt.Name, receipt.Namespace, cancellationToken: token);
+                _ = await VerifyOwnedAsync(admin, owned, expected, token, report: report);
+                var current = await CallAsync(Operation.DeploymentRead, () => admin.AppsV1.ReadNamespacedDeploymentAsync(receipt.Name, receipt.Namespace, cancellationToken: token), token, report: report);
                 Verify(current, receipt);
                 token.ThrowIfCancellationRequested();
                 var patch = new JsonArray(
                     new JsonObject { ["op"] = "test", ["path"] = "/metadata/uid", ["value"] = receipt.Uid },
                     new JsonObject { ["op"] = "test", ["path"] = "/metadata/resourceVersion", ["value"] = current.Metadata.ResourceVersion },
                     new JsonObject { ["op"] = "add", ["path"] = "/spec/replicas", ["value"] = 0 });
-                await admin.AppsV1.PatchNamespacedDeploymentAsync(new(patch.ToJsonString(), V1Patch.PatchType.JsonPatch),
-                    receipt.Name, receipt.Namespace, cancellationToken: token);
+                _ = await CallAsync(Operation.DeploymentScale, () => admin.AppsV1.PatchNamespacedDeploymentAsync(new(patch.ToJsonString(), V1Patch.PatchType.JsonPatch),
+                    receipt.Name, receipt.Namespace, cancellationToken: token), token, report: report);
             }
             // Consume the caller's one bounded drain allocation; never renew it.
             for (var round = 0; round < 181; round++)
             {
                 token.ThrowIfCancellationRequested();
-                remaining = await VerifyOwnedAsync(admin, owned, expected, token, requireQuiesced: true);
+                remaining = await VerifyOwnedAsync(admin, owned, expected, token, requireQuiesced: true, round: round, report: report);
                 token.ThrowIfCancellationRequested();
                 if (remaining == 0) { Console.WriteLine("Q243 configured retirement DrainComplete"); return; }
                 if (round < 180) await (pause?.Invoke(TimeSpan.FromMilliseconds(250), token) ?? Task.Delay(250, token));
@@ -53,13 +57,13 @@ internal static class ConfiguredFixtureDrain
         }
     }
     internal static async Task<int> VerifyOwnedAsync(Kubernetes admin, V1Namespace owned, DeploymentReceipt[] expected,
-        CancellationToken token, bool requireQuiesced = false)
+        CancellationToken token, bool requireQuiesced = false, int round = -1, Action<string>? report = null)
     {
         token.ThrowIfCancellationRequested();
-        var ns = await admin.CoreV1.ReadNamespaceAsync(owned.Metadata.Name, cancellationToken: token);
+        var ns = await CallAsync(Operation.NamespaceRead, () => admin.CoreV1.ReadNamespaceAsync(owned.Metadata.Name, cancellationToken: token), token, round, report);
         Need(ns.Metadata.Uid == owned.Metadata.Uid && ns.Metadata.DeletionTimestamp is null &&
             Label(ns.Metadata.Labels, "haby.dev/qualification") == owned.Metadata.Name);
-        var deployments = await admin.AppsV1.ListNamespacedDeploymentAsync(owned.Metadata.Name, limit: Bound, cancellationToken: token);
+        var deployments = await CallAsync(Operation.DeploymentsList, () => admin.AppsV1.ListNamespacedDeploymentAsync(owned.Metadata.Name, limit: Bound, cancellationToken: token), token, round, report);
         Complete(deployments.Metadata, deployments.Items.Count);
         Need(deployments.Items.Count == expected.Length);
         foreach (var current in deployments.Items)
@@ -69,9 +73,42 @@ internal static class ConfiguredFixtureDrain
             if (requireQuiesced) Need(current.Spec.Replicas == 0);
         }
         Need(deployments.Items.Select(x => x.Metadata.Uid).Distinct(StringComparer.Ordinal).Count() == expected.Length);
-        var sets = await admin.AppsV1.ListNamespacedReplicaSetAsync(owned.Metadata.Name, limit: Bound, cancellationToken: token);
-        var pods = await admin.CoreV1.ListNamespacedPodAsync(owned.Metadata.Name, limit: Bound, cancellationToken: token);
+        var sets = await CallAsync(Operation.ReplicaSetsList, () => admin.AppsV1.ListNamespacedReplicaSetAsync(owned.Metadata.Name, limit: Bound, cancellationToken: token), token, round, report);
+        var pods = await CallAsync(Operation.PodsList, () => admin.CoreV1.ListNamespacedPodAsync(owned.Metadata.Name, limit: Bound, cancellationToken: token), token, round, report);
         return Remaining(owned.Metadata.Name, expected, sets, pods);
+    }
+    internal static async Task<T> CallAsync<T>(Operation operation, Func<Task<T>> call, CancellationToken token,
+        int round = -1, Action<string>? report = null)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try { return await call(); }
+        catch (Exception error)
+        {
+            var record = CallFailure(operation, error, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, round, token.IsCancellationRequested);
+            // Diagnostic output must not replace the original API/cancellation failure.
+            try { if (report is null) Console.WriteLine(record); else report(record); }
+            catch { }
+            throw;
+        }
+    }
+    internal static string CallFailure(Operation operation, Exception error, long elapsed, int round, bool canceled)
+    {
+        var name = operation switch
+        {
+            Operation.NamespaceRead => nameof(Operation.NamespaceRead),
+            Operation.DeploymentsList => nameof(Operation.DeploymentsList),
+            Operation.ReplicaSetsList => nameof(Operation.ReplicaSetsList),
+            Operation.PodsList => nameof(Operation.PodsList),
+            Operation.DeploymentRead => nameof(Operation.DeploymentRead),
+            Operation.DeploymentScale => nameof(Operation.DeploymentScale),
+            _ => "Unknown"
+        };
+        var status = error is HttpOperationException { Response: { } response } && (int)response.StatusCode is >= 100 and <= 599
+            ? ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) : "unavailable";
+        return "Q243 configured retirement DrainCall " + name + " " + status + " " +
+            (elapsed is >= 0 and <= 240000 ? elapsed.ToString(CultureInfo.InvariantCulture) : "unknown") + " " +
+            (round is >= 0 and <= 180 ? round.ToString(CultureInfo.InvariantCulture) : "unknown") + " " +
+            (canceled ? "true" : "false") + " " + ConfiguredRetirementDiagnostics.Category(error);
     }
     private static void Verify(V1Deployment value, DeploymentReceipt receipt)
     {

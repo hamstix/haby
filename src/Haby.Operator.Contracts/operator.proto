@@ -50,6 +50,9 @@ service ManifestOperator {
   rpc GetRevision(GetRevisionRequest) returns (GetRevisionReply);
   rpc PreviewDatabase(PreviewDatabaseRequest) returns (PreviewDatabaseReply);
   rpc CreateChangeSet(CreateChangeSetRequest) returns (PlanningReply);
+  // Names are prepared on the server. This never accepts client-supplied OID attestations.
+  rpc CreateResourceImportChangeSet(CreateResourceImportChangeSetRequest) returns (ResourceImportRequestReply);
+  rpc GetResourceImportRequest(ResourceImportRequestKey) returns (ResourceImportRequestReply);
   rpc GetChangeSet(ChangeSetRequest) returns (PlanningReply);
   rpc CreatePlan(ChangeSetRequest) returns (PlanningReply);
   rpc GetPlan(PlanRequest) returns (PlanningReply);
@@ -295,6 +298,7 @@ enum PlanningStatus {
   PLANNING_STATUS_PLAN_STALE = 20;
   PLANNING_STATUS_PLAN_INPUT_UNAVAILABLE = 21;
   PLANNING_STATUS_CONFIGURATION_REFUSED = 22;
+  PLANNING_STATUS_IMPORT_NOT_SUPPORTED = 23;
 }
 enum PlanningPrecondition {
   PLANNING_PRECONDITION_UNSPECIFIED = 0;
@@ -398,6 +402,69 @@ message PlanningReply {
 
 // No caller-supplied actor or implicit Plan selection.
 message CommitDesiredStateRequest { string change_set_id = 1; string plan_id = 2; }
+
+enum ResourceImportCorrectionReason {
+  RESOURCE_IMPORT_CORRECTION_REASON_UNSPECIFIED = 0;
+  RESOURCE_IMPORT_CORRECTION_REASON_CREDENTIAL_REJECTED = 1;
+  RESOURCE_IMPORT_CORRECTION_REASON_INPUT_CORRECTION = 2;
+  RESOURCE_IMPORT_CORRECTION_REASON_EXPLICIT_RETRY = 3;
+}
+message ResourceImportCommittedTarget { string deployment_id = 1; int64 generation = 2; }
+message ResourceImportCorrection {
+  string previous_request_id = 1;
+  ResourceImportCorrectionReason reason = 2;
+  oneof precondition {
+    bool expected_absence = 3;
+    ResourceImportCommittedTarget committed = 4;
+  }
+}
+// Password material is separate from the closed nonsecret names input. No actor is accepted.
+message CreateResourceImportChangeSetRequest {
+  string request_id = 1;
+  string environment_record_id = 2;
+  RevisionReference reference = 3;
+  string input_format = 4;
+  bytes input_json = 5;
+  bytes credential_material = 6;
+  ResourceImportCorrection correction = 7;
+}
+message ResourceImportRequestKey { string request_id = 1; }
+enum ResourceImportRequestStatus {
+  RESOURCE_IMPORT_REQUEST_STATUS_UNSPECIFIED = 0;
+  RESOURCE_IMPORT_REQUEST_STATUS_PENDING = 1;
+  RESOURCE_IMPORT_REQUEST_STATUS_CREATED = 2;
+  RESOURCE_IMPORT_REQUEST_STATUS_EXISTING = 3;
+  RESOURCE_IMPORT_REQUEST_STATUS_NOT_FOUND = 4;
+  RESOURCE_IMPORT_REQUEST_STATUS_INVALID_INPUT = 5;
+  RESOURCE_IMPORT_REQUEST_STATUS_ENVIRONMENT_NOT_FOUND = 6;
+  RESOURCE_IMPORT_REQUEST_STATUS_REVISION_NOT_FOUND = 7;
+  RESOURCE_IMPORT_REQUEST_STATUS_IMPORT_NOT_SUPPORTED = 8;
+  RESOURCE_IMPORT_REQUEST_STATUS_CONFLICT = 9;
+  RESOURCE_IMPORT_REQUEST_STATUS_STORAGE_UNAVAILABLE = 10;
+  RESOURCE_IMPORT_REQUEST_STATUS_SUPERSEDED = 11;
+  RESOURCE_IMPORT_REQUEST_STATUS_PROVIDER_UNAVAILABLE = 12;
+  RESOURCE_IMPORT_REQUEST_STATUS_SECRET_UNAVAILABLE = 13;
+  RESOURCE_IMPORT_REQUEST_STATUS_CONNECTIVITY = 14;
+}
+message ResourceImportRequestSummary {
+  string request_id = 1;
+  string environment_record_id = 2;
+  RevisionReference reference = 3;
+  string credential_resource_id = 4;
+  string created_at_utc = 5;
+  string created_by = 6;
+  optional string change_set_id = 7;
+  optional string completed_at_utc = 8;
+  optional string completed_by = 9;
+  ResourceImportCorrection correction = 10;
+  optional string superseded_by_request_id = 11;
+}
+// Metadata only: no password, hash, private stage or SecretVersion reference.
+message ResourceImportRequestReply {
+  string request_id = 1;
+  ResourceImportRequestStatus status = 2;
+  ResourceImportRequestSummary request = 3;
+}
 message GenerationRequest { string deployment_id = 1; int64 generation = 2; }
 enum CommitStatus {
   COMMIT_STATUS_UNSPECIFIED = 0;

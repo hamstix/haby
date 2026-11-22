@@ -7,8 +7,24 @@ using Npgsql;
 
 namespace Haby.Persistence.PostgreSql;
 
-public sealed partial class PostgreSqlDurableDeploymentPlanner
+public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImportRequestBindings
 {
+    public async ValueTask<OperatorImportBindingResult> FindBindingAsync(Guid requestId, CancellationToken token)
+    {
+        if (requestId == Guid.Empty) return new(OperatorImportRequestStatus.InvalidInput);
+        try
+        {
+            await using var db = await contexts.CreateDbContextAsync(token);
+            var row = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == requestId, token);
+            if (row is null) return new(OperatorImportRequestStatus.NotFound);
+            var binding = StoredImportBinding(row);
+            var result = await ReadBoundRequestAsync(db, row, binding, token);
+            return new(result.Status, binding);
+        }
+        catch (Exception error) when (ImportRequestStorageFailure(error))
+        { return new(OperatorImportRequestStatus.StorageUnavailable); }
+    }
+
     async ValueTask<OperatorImportRequestResult> IOperatorImportRequestStore.BindAsync(OperatorImportRequestBinding binding,
         string actor, CancellationToken token)
     {
@@ -267,11 +283,13 @@ public static class OperatorImportRequestServiceCollectionExtensions
     {
         services.AddPostgreSqlDurableDeploymentPlanner();
         services.TryAddSingleton<IOperatorImportRequestStore>(provider => provider.GetRequiredService<PostgreSqlDurableDeploymentPlanner>());
+        services.TryAddSingleton<IOperatorImportRequestBindings>(provider => provider.GetRequiredService<PostgreSqlDurableDeploymentPlanner>());
         services.TryAddSingleton<IProtectedApplicationCredentialIntake, PostgreSqlProtectedApplicationCredentialIntake>();
         services.TryAddSingleton<IProtectedApplicationCredentialCandidateIntake>(provider =>
             provider.GetRequiredService<IProtectedApplicationCredentialIntake>() as IProtectedApplicationCredentialCandidateIntake
                 ?? throw new InvalidOperationException("The selected private intake does not support correction candidates."));
         services.TryAddSingleton<OperatorImportRequests>();
+        services.TryAddSingleton<CreatePreparedOperatorImport>();
         return services;
     }
 }

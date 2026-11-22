@@ -8,6 +8,18 @@ namespace Haby.Cli.Tests;
 
 public sealed class CliCommandTests
 {
+    [Fact]
+    public async Task Import_correction_cannot_ignore_committed_flags_when_expected_uncommitted_is_selected()
+    {
+        var factory = new FakeFactory(); using var output = new StringWriter(); using var error = new StringWriter();
+        var cli = new CliApplication(new Endpoint("http://localhost"), factory, output, error, configEnvironment: new MissingConfig());
+        Assert.Equal(CliApplication.UsageError, await cli.RunAsync(["changeset", "import", "create", "019a2b70-1234-7123-8123-123456789abc", "1",
+            "--input", "unused.json", "--environment-record-id", "019a2b70-1234-7123-8123-123456789abc",
+            "--corrects-request", Guid.NewGuid().ToString(), "--correction-reason", "explicit-retry", "--expected-uncommitted",
+            "--expected-deployment", "019a2b70-1234-7123-8123-123456789abc", "--expected-generation", "0"]));
+        Assert.Equal(0, factory.Created);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("--expected-generation 0")]
@@ -51,6 +63,8 @@ public sealed class CliCommandTests
 
     private sealed class FakeClient : IRegistryClient
     {
+        public Task<ResourceImportRequestReply> CreateResourceImportChangeSetAsync(CreateResourceImportChangeSetRequest request, CancellationToken token) => throw new NotSupportedException();
+        public Task<ResourceImportRequestReply> GetResourceImportRequestAsync(ResourceImportRequestKey request, CancellationToken token) => throw new NotSupportedException();
         public Task<GenerationReadinessReply> WaitGenerationAsync(GenerationWaitRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<GenerationBatchReadinessReply> WaitGenerationBatchAsync(GenerationBatchWaitRequest request, CancellationToken token) => throw new NotSupportedException();
         public Task<GenerationReadinessReply> ResumeGenerationAsync(GenerationResumeRequest request, CancellationToken token) => throw new NotSupportedException();

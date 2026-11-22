@@ -78,6 +78,7 @@ public sealed partial class ManifestOperatorService
                 DurablePlanStatus.UnsupportedShape => PlanningStatus.UnsupportedShape,
                 DurablePlanStatus.ConfigurationRefused => PlanningStatus.ConfigurationRefused,
                 DurablePlanStatus.PlanInputUnavailable => PlanningStatus.PlanInputUnavailable,
+                DurablePlanStatus.ImportNotSupported => PlanningStatus.ImportNotSupported,
                 _ => throw new InvalidOperationException("Unknown Plan outcome.")
             },
             Plan = result.Plan is null ? null : await PlanSummaryAsync(

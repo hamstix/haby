@@ -73,6 +73,8 @@ internal interface IRegistryClient : IDisposable
     Task<GenerationExecutionReply> ExecuteGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
     Task<CommitReply> GetGenerationAsync(GenerationRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> CreateChangeSetAsync(CreateChangeSetRequest request, CancellationToken cancellationToken);
+    Task<ResourceImportRequestReply> CreateResourceImportChangeSetAsync(CreateResourceImportChangeSetRequest request, CancellationToken token);
+    Task<ResourceImportRequestReply> GetResourceImportRequestAsync(ResourceImportRequestKey request, CancellationToken token);
     Task<PlanningReply> GetChangeSetAsync(ChangeSetRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> CreatePlanAsync(ChangeSetRequest request, CancellationToken cancellationToken);
     Task<PlanningReply> GetPlanAsync(PlanRequest request, CancellationToken cancellationToken);
@@ -107,6 +109,10 @@ internal sealed class GrpcRegistryClientFactory : IRegistryClientFactory
 
 internal sealed class GrpcRegistryClient(GrpcChannel channel, GrpcChannel? configurationChannel = null, string? credential = null) : IRegistryClient
 {
+    public async Task<ResourceImportRequestReply> CreateResourceImportChangeSetAsync(CreateResourceImportChangeSetRequest request, CancellationToken token) =>
+        await _client.CreateResourceImportChangeSetAsync(request, headers, cancellationToken: token);
+    public async Task<ResourceImportRequestReply> GetResourceImportRequestAsync(ResourceImportRequestKey request, CancellationToken token) =>
+        await _client.GetResourceImportRequestAsync(request, headers, cancellationToken: token);
     public async Task<ListProfilesReply> ListProfilesAsync(ListProfilesRequest request, CancellationToken token) => await _client.ListProfilesAsync(request, headers, cancellationToken: token);
     public async Task<ListProfileRevisionsReply> ListProfileRevisionsAsync(ListProfileRevisionsRequest request, CancellationToken token) => await _client.ListProfileRevisionsAsync(request, headers, cancellationToken: token);
     private readonly Grpc.Core.Metadata? headers = credential is null ? null : new() { { "authorization", "Bearer " + credential } };

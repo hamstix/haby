@@ -1503,3 +1503,28 @@ Write-Output 'PASS executable resolution selects one application path'
 & "$PSScriptRoot/test-configured-lifecycle-diagnostics.ps1"
 
 & "$PSScriptRoot/test-configured-reporting-budget.ps1"
+
+# Configured drain diagnostics: finite call/status evidence, never raw API data or success credit.
+foreach($operation in @('NamespaceRead','DeploymentsList','ReplicaSetsList','PodsList','DeploymentRead','DeploymentScale','Unknown')){
+    foreach($status in @('100','200','409','422','599','unavailable')){
+        $line="Q243 configured retirement DrainCall $operation $status 240000 180 false Api"
+        $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$line) 'protected-token-uri-body'
+        if($parsed.Status -cne 'valid' -or !$parsed.HasFailure -or ('Diagnostic workload: '+$line.Substring(5)) -cnotin $parsed.Records -or ($parsed.Records -match 'protected')){throw 'Closed drain call lost, leaked or incorrectly credited as success'}
+        $wrong=Read-QualificationWorkloadEvidence kernel ("Q243 kernel entry start`n"+$line) ''
+        if($wrong.Status -cne 'invalid' -or @($wrong.Records).Count){throw 'Drain evidence admitted outside configured mode'}
+    }
+}
+$valid='Q243 configured retirement DrainCall NamespaceRead unavailable unknown unknown true Canceled'
+$parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$valid) ''
+if($parsed.Status -cne 'valid' -or !$parsed.HasFailure){throw 'Missing HTTP status or cancellation became success'}
+foreach($bad in @(
+    $valid.Replace('NamespaceRead','protected-operation'),
+    $valid.Replace('unavailable','099'),$valid.Replace('unavailable','600'),$valid.Replace('unavailable','900'),$valid.Replace('unavailable','0200'),
+    $valid.Replace('unknown unknown','-1 unknown'),$valid.Replace('unknown unknown','00 unknown'),$valid.Replace('unknown unknown','240001 unknown'),
+    $valid.Replace('unknown unknown','0 181'),$valid.Replace('unknown unknown','0 -1'),$valid.Replace('unknown unknown','0 00'),
+    $valid.Replace('true','True'),$valid.Replace('Canceled','protected-status-reason'),($valid+' protected-uri-body')
+)){
+    $parsed=Read-QualificationWorkloadEvidence configured ("Q243 configured entry start`n"+$bad) ''
+    if($parsed.Status -cne 'invalid' -or @($parsed.Records).Count){throw 'Invalid or private drain diagnostic escaped fail-closed validation'}
+}
+Write-Output 'PASS configured drain call/status/cancellation bounds and hostile redaction controls'
