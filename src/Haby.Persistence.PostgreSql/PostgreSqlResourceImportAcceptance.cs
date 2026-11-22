@@ -39,6 +39,10 @@ public sealed class PostgreSqlResourceImportAcceptance(IDbContextFactory<Manifes
             await using var db = await contexts.CreateDbContextAsync(cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var deployment = Guid.Parse(first.DeploymentId.ToString());
+            var identity = await db.DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == first.Generation.Value)
+                .Select(x => new { x.EnvironmentRecordId, x.ApplicationRecordId }).SingleOrDefaultAsync(cancellationToken);
+            if (identity is null) return new(ResourceImportAcceptanceStatus.InputUnavailable);
+            await ImportMutationGate.LockAsync(db, identity.EnvironmentRecordId, identity.ApplicationRecordId, cancellationToken);
             await DurableAggregateCompletion.LockAsync(db, deployment, cancellationToken);
             var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == first.Generation.Value, cancellationToken);
             if (source is null) return new(ResourceImportAcceptanceStatus.InputUnavailable);
@@ -60,6 +64,8 @@ public sealed class PostgreSqlResourceImportAcceptance(IDbContextFactory<Manifes
             if (prior is not null) return new(prior.Document == json && await ResourceImportReceiptIntegrity.ReadAsync(db, first, cancellationToken) is not null
                 ? ResourceImportAcceptanceStatus.Existing : ResourceImportAcceptanceStatus.Conflict);
             if (!await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == deployment && x.DesiredGeneration == source.Generation, cancellationToken))
+                return new(ResourceImportAcceptanceStatus.Conflict);
+            if (!await ImportAdmissionAuthority.OwnsInputsAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId, inputs.Import, cancellationToken))
                 return new(ResourceImportAcceptanceStatus.Conflict);
             var expectedCredentials = inputs.Import.Resources.Where(x => x.Credential is not null).ToArray();
             if (acceptance.Credentials.Count != expectedCredentials.Length || acceptance.Credentials.Any(x =>
@@ -160,6 +166,7 @@ public sealed class PostgreSqlResourceImportAcceptance(IDbContextFactory<Manifes
         {
             if (row.Environment != Guid.Parse(credential.Owner.EnvironmentRecordId.ToString()) || row.Application != Guid.Parse(credential.Owner.ApplicationRecordId.ToString()) ||
                 row.Resource != credential.Owner.ResourceLocalId.Value || PostgreSqlProtectedApplicationCredentialIntake.Reference(row) != credential.Staged ||
+                !await db.ProtectedCredentialOwners.AsNoTracking().AnyAsync(x => x.Stage == row.Id && x.Request == row.Request, token) ||
                 row.ConfirmedReceipt is not null || await db.Secrets.AnyAsync(x => x.EnvironmentRecordId == row.Environment && x.ApplicationRecordId == row.Application && x.ResourceLocalId == row.Resource, token)) return false;
             var secret = SecretRowMapping.Create(new(new SecretOwner.Resource(credential.Owner), SecretPurpose.ApplicationLogin), row.Secret);
             secret.CreatedAt = at;

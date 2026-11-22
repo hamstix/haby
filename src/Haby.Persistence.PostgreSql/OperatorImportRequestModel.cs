@@ -27,6 +27,16 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.StagedCredential).HasColumnName("staged_credential_id");
             e.Property(x => x.CompletedAt).HasColumnName("completed_at");
             e.Property(x => x.CompletedBy).HasColumnName("completed_by").HasMaxLength(256);
+            e.Property(x => x.PreviousRequest).HasColumnName("previous_request_id");
+            e.Property(x => x.ExpectedDeployment).HasColumnName("expected_deployment_id");
+            e.Property(x => x.ExpectedGeneration).HasColumnName("expected_generation");
+            e.Property(x => x.CorrectionReason).HasColumnName("correction_reason").HasMaxLength(32);
+            e.ToTable(t => t.HasCheckConstraint("CK_operator_import_request_correction",
+                "(previous_request_id IS NULL AND expected_deployment_id IS NULL AND expected_generation IS NULL AND correction_reason IS NULL) OR " +
+                "(previous_request_id IS NOT NULL AND previous_request_id <> request_id AND correction_reason IS NOT NULL AND correction_reason IN ('CredentialRejected','InputCorrection','ExplicitRetry') AND " +
+                "((expected_deployment_id IS NULL AND expected_generation IS NULL) OR (expected_deployment_id IS NOT NULL AND expected_generation IS NOT NULL AND expected_generation > 0)))"));
+            e.HasOne<OperatorImportRequestRow>().WithMany().HasForeignKey(x => x.PreviousRequest).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<DeploymentGenerationRow>().WithMany().HasForeignKey(x => new { x.ExpectedDeployment, x.ExpectedGeneration }).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<EnvironmentRow>().WithMany().HasForeignKey(x => x.Environment).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<ApplicationRow>().WithMany().HasForeignKey(x => x.Application).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<ManifestRevisionRow>().WithMany().HasForeignKey(x => x.ManifestRevision).OnDelete(DeleteBehavior.Restrict);
@@ -53,4 +63,8 @@ internal sealed class OperatorImportRequestRow
     public Guid? StagedCredential { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string? CompletedBy { get; set; }
+    public Guid? PreviousRequest { get; set; }
+    public Guid? ExpectedDeployment { get; set; }
+    public long? ExpectedGeneration { get; set; }
+    public string? CorrectionReason { get; set; }
 }

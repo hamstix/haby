@@ -12,6 +12,7 @@ internal sealed record CliGenerationProgress(string DeploymentId, long Generatio
     public int RetainedResources { get; init; }
     public int ReintroducedResources { get; init; }
     public CliResourceCheckpoint? ResourcesReady { get; init; }
+    public long? SupersededByGeneration { get; init; }
 }
 internal sealed record CliGenerationExecutionData(CliGenerationProgress? Progress, string? StoppedOperationId, string? StopOutcome);
 
@@ -37,10 +38,11 @@ internal static class GenerationPresentation
     internal static int Exit(GenerationExecutionReply reply)
     {
         _ = Outcome(reply.Status);
+        if (reply.Progress is { } snapshot) ValidateSupersession(snapshot);
         if (reply.Status == GenerationExecutionStatus.Succeeded)
         {
             if (reply.Progress is not { } p || (p.Total <= 0 && p.ReusedResources <= 0) || p.Completed != p.Total ||
-                !p.HasAppliedGeneration || p.AppliedGeneration < p.Generation ||
+                !p.HasAppliedGeneration || p.AppliedGeneration < p.Generation || p.HasSupersededByGeneration ||
                 p.ResourcesReady is not { FormatVersion: 1, ActiveResources: > 0, OriginalResults: > 0 } ||
                 !Guid.TryParse(p.ResourcesReady.CheckpointId, out var checkpointId) || checkpointId == Guid.Empty ||
                 p.Nodes.Count != p.Total || p.Nodes.Any(n => n.Operation?.State != OperationState.Succeeded) ||
@@ -56,20 +58,32 @@ internal static class GenerationPresentation
         };
     }
 
-    internal static CliGenerationProgress? Progress(GenerationProgress? p) => p is null ? null : new(
+    private static void ValidateSupersession(GenerationProgress p)
+    {
+        if (p.HasSupersededByGeneration && (p.SupersededByGeneration <= p.Generation || p.SupersededByGeneration > p.DesiredGeneration || p.ResourcesReady is not null))
+            throw new InvalidDataException("Invalid superseded generation snapshot.");
+    }
+
+    internal static CliGenerationProgress? Progress(GenerationProgress? p)
+    {
+        if (p is null) return null;
+        ValidateSupersession(p);
+        return new(
         p.DeploymentId, p.Generation, p.DesiredGeneration, p.HasAppliedGeneration ? p.AppliedGeneration : null,
         p.Completed, p.Total, [.. p.Nodes.Select(n => new CliGenerationNode(
             OperationPresentation.Data(new OperationReply { Operation = n.Operation }).Operation
                 ?? throw new InvalidDataException("Missing operation snapshot."),
             [.. n.BlockingDependencies], n.HasLastAttemptOutcome ? OperationPresentation.AttemptOutcome(n.LastAttemptOutcome) : null))],
         p.HasStoppedOperationId ? p.StoppedOperationId : null)
-    {
-        ReusedResources = p.ReusedResources,
-        RetainedResources = p.RetainedResources,
-        ReintroducedResources = p.ReintroducedResources,
-        ResourcesReady = p.ResourcesReady is { } ready ? new(ready.CheckpointId, ready.FormatVersion, ready.InputFingerprint,
+        {
+            ReusedResources = p.ReusedResources,
+            RetainedResources = p.RetainedResources,
+            ReintroducedResources = p.ReintroducedResources,
+            SupersededByGeneration = p.HasSupersededByGeneration ? p.SupersededByGeneration : null,
+            ResourcesReady = p.ResourcesReady is { } ready ? new(ready.CheckpointId, ready.FormatVersion, ready.InputFingerprint,
             ready.ConfirmedAtUtc, ready.ActiveResources, ready.RetainedResources, ready.OriginalResults) : null
-    };
+        };
+    }
 }
 
 internal sealed partial class CliJsonPresenter
@@ -92,6 +106,8 @@ internal sealed partial class CliTextPresenter
     {
         if (p is null) return;
         _output.WriteLine($"Deployment: {p.DeploymentId}; generation: {p.Generation}; desired: {p.DesiredGeneration}; applied: {p.AppliedGeneration?.ToString() ?? "(none)"}; completed: {p.Completed}/{p.Total}");
+        if (p.SupersededByGeneration is { } superseded)
+            _output.WriteLine($"Superseded by generation: {superseded}; the selected generation was not Applied.");
         if (p.ReusedResources > 0) _output.WriteLine($"Reused Resources: {p.ReusedResources}; external operations: {p.Total}");
         if (p.RetainedResources > 0) _output.WriteLine($"Retained Resources: {p.RetainedResources}; no external deletion or drift check");
         if (p.ReintroducedResources > 0) _output.WriteLine($"Reintroduced Resources: {p.ReintroducedResources}; original evidence reused");

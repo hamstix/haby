@@ -22,7 +22,7 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.SourceGeneration).HasColumnName("source_generation");
             e.Property(x => x.Origin).HasColumnName("origin").HasConversion<string>().HasMaxLength(32).IsRequired();
             e.Property(x => x.Authority).HasColumnName("authority").HasConversion<string>().HasMaxLength(32).IsRequired();
-            e.HasIndex(x => new { x.Environment, x.Application, x.Resource }).IsUnique();
+            e.HasIndex(x => new { x.Environment, x.Application, x.Resource, x.SourceGeneration }).IsUnique();
             e.HasOne<DeploymentGenerationRow>().WithMany().HasForeignKey(x => new { DeploymentId = x.Deployment, Generation = x.SourceGeneration })
                 .OnDelete(DeleteBehavior.Restrict);
             e.HasOne<EnvironmentRow>().WithMany().HasForeignKey(x => x.Environment).OnDelete(DeleteBehavior.Restrict);

@@ -211,6 +211,7 @@ public sealed partial class ApplicationConfigurationTests
             await arrange.Database.ExecuteSqlRawAsync("""
                 DROP TABLE operator_access_grants;
                 DROP TABLE configuration_access_grants;
+                DROP TABLE resource_management_heads;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
@@ -226,7 +227,7 @@ public sealed partial class ApplicationConfigurationTests
         var after = await verify.ConfigurationDocuments.AsNoTracking().SingleAsync(); Assert.Equal(saved.Payload, after.Payload); Assert.Equal(saved.Fingerprint, after.Fingerprint);
         Assert.DoesNotContain(await verify.Database.GetAppliedMigrationsAsync(), m => m.EndsWith("AddResourceNaming", StringComparison.Ordinal));
         await using var connection = new Npgsql.NpgsqlConnection(scenario.Connection); await connection.OpenAsync();
-        Assert.Equal(true, await new Npgsql.NpgsqlCommand("SELECT to_regclass('public.configuration_access_grants') IS NULL AND to_regclass('public.resource_management') IS NULL", connection).ExecuteScalarAsync());
+        Assert.Equal(true, await new Npgsql.NpgsqlCommand("SELECT to_regclass('public.configuration_access_grants') IS NULL AND to_regclass('public.resource_management') IS NULL AND to_regclass('public.resource_management_heads') IS NULL", connection).ExecuteScalarAsync());
         // Refusal never recreates authority tables, backfills ownership or rewrites the old artifact.
     }
 

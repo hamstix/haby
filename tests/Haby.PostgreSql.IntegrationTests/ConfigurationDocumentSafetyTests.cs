@@ -101,6 +101,7 @@ public sealed partial class ApplicationConfigurationTests
                 DROP TABLE runtime_publication_receipts;
                 DROP TABLE workload_configuration_recipients;
                 DROP TABLE configuration_document_revisions;
+                DROP TABLE resource_management_heads;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
@@ -118,7 +119,7 @@ public sealed partial class ApplicationConfigurationTests
         Assert.DoesNotContain(await verify.Database.GetAppliedMigrationsAsync(), m => m.EndsWith("AddResourceNaming", StringComparison.Ordinal));
         Assert.Equal(1, await verify.DurablePlans.AsNoTracking().CountAsync());
         await using var connection = new Npgsql.NpgsqlConnection(scenario.Connection); await connection.OpenAsync();
-        Assert.Equal(true, await new Npgsql.NpgsqlCommand("SELECT to_regclass('public.configuration_document_revisions') IS NULL", connection).ExecuteScalarAsync());
+        Assert.Equal(true, await new Npgsql.NpgsqlCommand("SELECT to_regclass('public.configuration_document_revisions') IS NULL AND to_regclass('public.resource_management') IS NULL AND to_regclass('public.resource_management_heads') IS NULL", connection).ExecuteScalarAsync());
     }
 
     [Theory]

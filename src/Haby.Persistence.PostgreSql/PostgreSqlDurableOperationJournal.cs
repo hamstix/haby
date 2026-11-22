@@ -110,8 +110,12 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         _ = gen.Inputs();
         var graph = DurableOperationGraphCodec.Decode(gen.GraphJson);
         var owner = await context.ApplicationDeployments.AsNoTracking().SingleAsync(r => r.Id == id, cancellationToken);
+        var supersededBy = await (from audit in context.ImportSupersessions.AsNoTracking()
+                                  join successor in context.OperatorImportRequestRecords.AsNoTracking() on audit.SuccessorRequest equals successor.Id
+                                  where successor.ExpectedDeployment == id && successor.ExpectedGeneration == generation.Value && audit.Deployment == id
+                                  select (long?)audit.Generation).SingleOrDefaultAsync(cancellationToken);
         var checkpoint = await DurableAggregateCompletion.ReadAsync(context, gen, cancellationToken);
-        if (owner.AppliedGeneration >= generation.Value && checkpoint is null)
+        if (owner.AppliedGeneration >= generation.Value && checkpoint is null && supersededBy is null)
             throw new InvalidDataException("Applied generation has no Resource checkpoint.");
         var operations = new List<DurableOperation>();
         foreach (var node in graph.Nodes)
@@ -127,7 +131,8 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             Reused = graph.ReusedResources.Count,
             Retained = graph.RetainedResources.Count,
             Reintroduced = graph.ReusedResources.Count(x => x.Reintroduced),
-            ResourcesReady = checkpoint
+            ResourcesReady = checkpoint,
+            SupersededByGeneration = supersededBy
         };
     }
 
@@ -335,8 +340,9 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
             throw new InvalidDataException("Stored create operation is inconsistent.");
         var inputs = joined.gen.Inputs();
         var node = DurableOperationGraphCodec.Decode(joined.gen.GraphJson).Nodes.Single(n => n.Id == key.OperationId);
+        // Historical metadata retains its original provenance; active execution is fenced separately.
         var management = await context.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment &&
-            x.Resource == node.ResourceId.Value, cancellationToken);
+            x.Resource == node.ResourceId.Value && x.SourceGeneration == generation, cancellationToken);
         if (management is null || management.SourceGeneration != generation ||
             !ResourceContinuity.HasAcquisitionAuthority(management, inputs))
             throw new InvalidDataException("Operation has no persisted Resource authority.");

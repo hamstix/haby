@@ -47,6 +47,9 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         ConfigureResourceManagement(modelBuilder);
         ConfigureApplicationCredentials(modelBuilder);
         ConfigureOperatorImportRequests(modelBuilder);
+        ConfigureProtectedCredentialOwners(modelBuilder);
+        ConfigureImportSupersessions(modelBuilder);
+        ConfigureResourceManagementHeads(modelBuilder);
         ConfigureOperatorAccess(modelBuilder);
         ConfigureConfigurationAccess(modelBuilder);
         ConfigureConfigurationDocuments(modelBuilder);

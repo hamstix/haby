@@ -175,6 +175,37 @@ public sealed partial class CliLoopbackTests
     }
 
     [Fact]
+    public void Superseded_generation_preserves_metadata_without_claiming_selected_applied_success()
+    {
+        var reply = new GenerationExecutionReply
+        {
+            Status = GenerationExecutionStatus.InputUnavailable,
+            Progress = new() { Generation = 1, DesiredGeneration = 2, AppliedGeneration = 2, SupersededByGeneration = 2, Total = 1 }
+        };
+        reply.Progress.Nodes.Add(new GenerationNodeProgress { Operation = CliOperationTests.Snapshot(OperationStatus.Found, OperationState.Failed).Operation });
+        Assert.Equal(2, GenerationPresentation.Progress(reply.Progress)!.SupersededByGeneration);
+        Assert.Null(GenerationPresentation.Progress(reply.Progress)!.ResourcesReady);
+        Assert.Equal(1, GenerationPresentation.Exit(reply));
+        reply.Status = GenerationExecutionStatus.Succeeded;
+        reply.Progress.Completed = 1;
+        reply.Progress.Nodes[0].Operation.State = OperationState.Succeeded;
+        reply.Progress.ResourcesReady = ResourceCheckpoint();
+        Assert.Throws<InvalidDataException>(() => GenerationPresentation.Exit(reply));
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(3, false)]
+    [InlineData(2, true)]
+    public void Supersession_metadata_rejects_invalid_lineage_or_a_fabricated_completion_checkpoint(long successor, bool checkpoint)
+    {
+        var progress = new GenerationProgress { Generation = 1, DesiredGeneration = 2, AppliedGeneration = 2, SupersededByGeneration = successor };
+        if (checkpoint) progress.ResourcesReady = ResourceCheckpoint();
+        Assert.Throws<InvalidDataException>(() => GenerationPresentation.Progress(progress));
+    }
+
+    [Fact]
     public void Mixed_completed_nodes_cannot_hide_missing_aggregate_reuse_completion()
     {
         var reply = new GenerationExecutionReply

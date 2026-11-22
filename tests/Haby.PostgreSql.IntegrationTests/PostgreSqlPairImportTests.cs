@@ -128,7 +128,7 @@ public sealed partial class PostgreSqlPairImportTests(PostgreSqlFixture fixture)
     }
 
     private async Task<Setup> Prepare(Pair pair, PostgreSqlTransportMode mode, PostgreSqlProviderTransport? transport = null,
-        string? password = null, string? existingCatalog = null)
+        string? password = null, string? existingCatalog = null, bool operatorRequest = false)
     {
         var catalog = existingCatalog;
         if (catalog is null)
@@ -165,11 +165,26 @@ public sealed partial class PostgreSqlPairImportTests(PostgreSqlFixture fixture)
         var owner = new ManagedResourceKey(environment, revision.ApplicationRecordId, ManifestLocalId.Create("app-login"));
         var request = Guid.NewGuid();
         using var material = Material(password ?? pair.Password);
-        var staged = (await services.GetRequiredService<IProtectedApplicationCredentialIntake>().StageAsync(request, owner, material, default)).Reference!;
-        var intent = new ResourceImportIntent([new(ManifestLocalId.Create("db"), PostgreSqlImportContracts.Encode(pair.Input)),
-            new(owner.ResourceLocalId, PostgreSqlImportContracts.Encode(pair.Input), staged)]);
         var planner = services.GetRequiredService<IDurableDeploymentPlanner>();
-        var change = (await planner.CreateImportChangeSetAsync(environment, revision.ApplicationRecordId, revision, intent, "tester", default)).ChangeSet!;
+        ProtectedCredentialReference staged;
+        DeploymentChangeSet change;
+        if (operatorRequest)
+        {
+            var prepared = await services.GetRequiredService<PrepareResourceImport>().ExecuteAsync(new(request, environment, revision,
+                PostgreSqlImportPreparer.Encode(new(pair.Database, pair.Login, pair.Input.Schema))), default);
+            Assert.Equal(ResourceImportPreparationStatus.Prepared, prepared.Status);
+            var created = await services.GetRequiredService<OperatorImportRequests>().CreateAsync(prepared.Binding!, material, "original-operator", default);
+            Assert.Equal(OperatorImportRequestStatus.Created, created.Status);
+            change = (await planner.FindChangeSetAsync(created.Request!.ChangeSetId!, default))!;
+            staged = change.Import!.Resources.Single(x => x.Resource == owner.ResourceLocalId).Credential!;
+        }
+        else
+        {
+            staged = (await services.GetRequiredService<IProtectedApplicationCredentialIntake>().StageAsync(request, owner, material, default)).Reference!;
+            var intent = new ResourceImportIntent([new(ManifestLocalId.Create("db"), PostgreSqlImportContracts.Encode(pair.Input)),
+                new(owner.ResourceLocalId, PostgreSqlImportContracts.Encode(pair.Input), staged)]);
+            change = (await planner.CreateImportChangeSetAsync(environment, revision.ApplicationRecordId, revision, intent, "tester", default)).ChangeSet!;
+        }
         var planned = await planner.CreatePlanAsync(change.Id, "tester", default);
         Assert.Equal(DurablePlanStatus.Planned, planned.Status);
         Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckPlanAsync(planned.Plan!.Id, default));
@@ -294,6 +309,7 @@ public sealed partial class PostgreSqlPairImportTests(PostgreSqlFixture fixture)
             .AddPostgreSqlProviderConfigurationCodec().AddPostgreSqlProviderRevisionPreflight().AddPostgreSqlDurableDesiredStateCommitter()
             .AddPostgreSqlDurableOperationJournal().AddPostgreSqlDurableOperationExecution().AddPostgreSqlResourceImportAcceptance()
             .AddPostgreSqlExistingPairImport();
+        services.AddPostgreSqlOperatorImportRequests();
         if (hooks is not null) services.AddSingleton(hooks);
         if (transport is not null) services.AddSingleton(transport);
         configure?.Invoke(services);

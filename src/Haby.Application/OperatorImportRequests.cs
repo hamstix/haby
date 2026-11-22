@@ -2,9 +2,15 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
+public enum OperatorImportCorrectionReason { CredentialRejected, InputCorrection, ExplicitRetry }
+
+public sealed record OperatorImportCorrectionTarget(Guid PreviousRequestId, ApplicationDeploymentId? Deployment,
+    DeploymentGeneration? Generation, OperatorImportCorrectionReason Reason);
+
 /// <summary>Trusted, adapter-validated nonsecret intent. Public preparation is a separate boundary.</summary>
 public sealed record OperatorImportRequestBinding(Guid RequestId, EnvironmentRecordId Environment,
-    ManifestRevisionRef Revision, ManifestLocalId CredentialResource, ResourceImportIntent Input)
+    ManifestRevisionRef Revision, ManifestLocalId CredentialResource, ResourceImportIntent Input,
+    OperatorImportCorrectionTarget? Correction = null)
 {
     public ManagedResourceKey CredentialOwner => new(Environment, Revision.ApplicationRecordId, CredentialResource);
 
@@ -18,6 +24,10 @@ public sealed record OperatorImportRequestBinding(Guid RequestId, EnvironmentRec
             !Input.Resources.Any(x => x.Resource == CredentialResource))
             throw new ArgumentException("Invalid operator import request binding.");
         _ = ResourceImportIntentCodec.Encode(Input);
+        if (Correction is { } target && (target.PreviousRequestId == Guid.Empty || target.PreviousRequestId == RequestId ||
+            (target.Deployment is null) != (target.Generation is null) || target.Reason is not
+                (OperatorImportCorrectionReason.CredentialRejected or OperatorImportCorrectionReason.InputCorrection or OperatorImportCorrectionReason.ExplicitRetry)))
+            throw new ArgumentException("Invalid operator import correction target.");
     }
 
     public ResourceImportIntent Attach(ProtectedCredentialReference reference) => new(Input.Resources.Select(x =>
@@ -27,12 +37,13 @@ public sealed record OperatorImportRequestBinding(Guid RequestId, EnvironmentRec
 /// <summary>Safe request metadata. Pending means no linked ChangeSet, not successful credential staging.</summary>
 public sealed record OperatorImportRequestView(Guid RequestId, EnvironmentRecordId Environment,
     ManifestRevisionRef Revision, ManifestLocalId CredentialResource, DateTimeOffset CreatedAt, string CreatedBy,
-    DeploymentChangeSetId? ChangeSetId, DateTimeOffset? CompletedAt, string? CompletedBy);
+    DeploymentChangeSetId? ChangeSetId, DateTimeOffset? CompletedAt, string? CompletedBy,
+    OperatorImportCorrectionTarget? Correction = null, Guid? SupersededByRequestId = null);
 
 public enum OperatorImportRequestStatus
 {
     Pending, Created, Existing, NotFound, InvalidInput, EnvironmentNotFound, RevisionNotFound,
-    ImportNotSupported, Conflict, StorageUnavailable
+    ImportNotSupported, Conflict, StorageUnavailable, Superseded
 }
 
 public sealed record OperatorImportRequestResult(OperatorImportRequestStatus Status, OperatorImportRequestView? Request = null);
@@ -47,7 +58,14 @@ public interface IOperatorImportRequestStore
 }
 
 /// <summary>No public transport or adapter preparation policy. Callers authenticate and validate adapter support.</summary>
-public sealed class OperatorImportRequests(IOperatorImportRequestStore requests, IProtectedApplicationCredentialIntake credentials)
+public interface IProtectedApplicationCredentialCandidateIntake
+{
+    ValueTask<ProtectedCredentialStageResult> StageCandidateAsync(OperatorImportRequestBinding binding,
+        SecretMaterial material, CancellationToken token);
+}
+
+public sealed class OperatorImportRequests(IOperatorImportRequestStore requests, IProtectedApplicationCredentialIntake credentials,
+    IProtectedApplicationCredentialCandidateIntake? candidates = null)
 {
     public async ValueTask<OperatorImportRequestResult> CreateAsync(OperatorImportRequestBinding binding,
         SecretMaterial material, string actor, CancellationToken token)
@@ -56,11 +74,14 @@ public sealed class OperatorImportRequests(IOperatorImportRequestStore requests,
         try { ArgumentNullException.ThrowIfNull(binding); binding.Validate(); }
         catch (Exception error) when (error is ArgumentException or InvalidDataException)
         { return new(OperatorImportRequestStatus.InvalidInput); }
+        if (binding.Correction is not null && candidates is null) return new(OperatorImportRequestStatus.ImportNotSupported);
         var bound = await requests.BindAsync(binding, actor, token);
         if (bound.Status is not (OperatorImportRequestStatus.Pending or OperatorImportRequestStatus.Created or OperatorImportRequestStatus.Existing))
             return bound;
         // Even a linked request must verify the exact-byte replay before acknowledging Create again.
-        var staged = await credentials.StageAsync(binding.RequestId, binding.CredentialOwner, material, token);
+        var staged = binding.Correction is null
+            ? await credentials.StageAsync(binding.RequestId, binding.CredentialOwner, material, token)
+            : await candidates!.StageCandidateAsync(binding, material, token);
         if (staged.Status is not (ProtectedCredentialStageStatus.Staged or ProtectedCredentialStageStatus.Existing))
             return new(staged.Status switch
             {

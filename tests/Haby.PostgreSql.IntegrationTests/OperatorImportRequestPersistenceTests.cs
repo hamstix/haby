@@ -271,8 +271,23 @@ public sealed class OperatorImportRequestPersistenceTests(CatalogServerFixture f
         DeploymentChangeSetId change;
         await using (var previous = Services(connection))
         {
-            staged = (await previous.GetRequiredService<IProtectedApplicationCredentialIntake>()
-                .StageAsync(binding.RequestId, binding.CredentialOwner, password, default)).Reference!;
+            // Arrange the historical schema directly: current intake requires the new owner-reservation table.
+            await using (var db = await previous.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            {
+                var row = new ProtectedApplicationCredentialRow
+                {
+                    Id = Guid.CreateVersion7(), Request = binding.RequestId, Environment = Guid.Parse(binding.Environment.ToString()),
+                    Application = Guid.Parse(binding.Revision.ApplicationRecordId.ToString()), Resource = binding.CredentialResource.Value,
+                    Secret = Guid.CreateVersion7(), Version = Guid.CreateVersion7(), Material = password.CopyBytes()
+                };
+                try
+                {
+                    db.ProtectedApplicationCredentials.Add(row);
+                    await db.SaveChangesAsync();
+                    staged = new(row.Id, new(SecretId.Parse(row.Secret.ToString()), SecretVersionId.Parse(row.Version.ToString())));
+                }
+                finally { Array.Clear(row.Material); }
+            }
             change = (await previous.GetRequiredService<IDurableDeploymentPlanner>().CreateImportChangeSetAsync(binding.Environment,
                 binding.Revision.ApplicationRecordId, binding.Revision, binding.Attach(staged), "previous-operator", default)).ChangeSet!.Id;
         }

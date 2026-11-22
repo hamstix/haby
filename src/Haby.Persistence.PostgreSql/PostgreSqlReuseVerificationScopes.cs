@@ -127,7 +127,7 @@ public sealed class PostgreSqlReuseVerificationScopes
             var originals = new List<Original>();
             foreach (var reuse in graph.ReusedResources.OrderBy(x => x.Resource.Value, StringComparer.Ordinal))
             {
-                var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token);
+                var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token);
                 if (managed is null) return null;
                 fields.AddRange([managed.Id.ToString(), managed.Environment.ToString(), managed.Application.ToString(), managed.Resource,
                     managed.Deployment.ToString(), managed.SourceGeneration.ToString(CultureInfo.InvariantCulture), managed.Origin.ToString(), managed.Authority.ToString(), reuse.EvidenceFingerprint]);

@@ -17,7 +17,7 @@ internal static partial class DurableAggregateCompletion
         foreach (var resource in resources)
         {
             var reuse = graph.ReusedResources.Concat(graph.RetainedResources).SingleOrDefault(x => x.Resource.Value == resource);
-            var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == target.DeploymentId && x.Resource == resource, token);
+            var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == target.DeploymentId && x.Resource == resource, token);
             var generation = reuse?.SourceGeneration ?? target.Generation;
             if (managed is null || managed.Environment != target.EnvironmentRecordId || managed.Application != target.ApplicationRecordId ||
                 managed.SourceGeneration != generation || reuse is not null && managed.Id != reuse.ManagementId) return null;

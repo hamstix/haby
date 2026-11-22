@@ -34,6 +34,11 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
+        var identity = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == changeId, cancellationToken);
+        if (identity is null) return new DurableCommitResult.ChangeSetNotFound();
+        if (identity.ImportIntentJson is not null)
+            await ImportMutationGate.LockAsync(context, identity.EnvironmentRecordId, identity.ApplicationRecordId, cancellationToken);
+
         // A row lock serializes retries of one ChangeSet. The advisory transaction lock
         // serializes different ExpectedAbsence ChangeSets for the same deployment key,
         // including the interval before the deployment row exists. The unique index is
@@ -82,13 +87,16 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             row.ApplicationRecordId == change.ApplicationRecordId, cancellationToken);
         if (!PostgreSqlDurableDeploymentPlanner.Matches(change, actual))
             return new DurableCommitResult.ChangeSetStale(actual is null ? null : DeploymentGeneration.Create(actual.DesiredGeneration));
+        var correction = change.ImportIntentJson is null ? null : await ImportAdmissionAuthority.CorrectionAsync(context, change.Id, cancellationToken);
+        if (change.ImportIntentJson is not null && !await ImportAdmissionAuthority.CanPlanAsync(context, change, correction, cancellationToken))
+            return new DurableCommitResult.PlanInputUnavailable();
         if (actual is not null)
         {
             if (mode != DeploymentAdmissionMode.Internal && await PostgreSqlDurableDeploymentPlanner.HasWorkloadBaselineAsync(context, actual, cancellationToken)) return new DurableCommitResult.UnsupportedShape();
             await context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {actual.Id} FOR UPDATE", cancellationToken);
             actual = await context.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == actual.Id, cancellationToken);
-            if (actual.AppliedGeneration != actual.DesiredGeneration) return new DurableCommitResult.PlanInputUnavailable();
-            if (!await PostgreSqlDurableDeploymentPlanner.HasAppliedBaselineProofAsync(context, actual.Id, actual.DesiredGeneration, cancellationToken))
+            if (correction is null && actual.AppliedGeneration != actual.DesiredGeneration) return new DurableCommitResult.PlanInputUnavailable();
+            if (correction is null && !await PostgreSqlDurableDeploymentPlanner.HasAppliedBaselineProofAsync(context, actual.Id, actual.DesiredGeneration, cancellationToken))
                 return new DurableCommitResult.PlanInputUnavailable();
             await ResourceContinuity.LockAsync(context, actual.Id, cancellationToken);
         }
@@ -144,7 +152,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         var emptyStage = internalEffects && (actual is null && change.ExpectedAbsence && change.ExpectedGeneration is null && InternalResourceStage.IsEmpty(inputs, graph) ||
             graph.WorkloadUpdate is not null && inputs.Providers.Declaration.Spec.Resources.Count == 0);
         if (revision is null && !emptyStage) return new DurableCommitResult.UnsupportedShape();
-        if (actual is null ? graph.Baseline is not null : graph.Baseline is not { } baseline ||
+        if (correction is not null ? graph.Baseline is not null : actual is null ? graph.Baseline is not null : graph.Baseline is not { } baseline ||
             baseline.Deployment.ToString() != actual.Id.ToString() || baseline.Generation != actual.DesiredGeneration)
             return new DurableCommitResult.PlanInputUnavailable();
         if (plan.EnvironmentRecordId != change.EnvironmentRecordId ||
@@ -238,12 +246,13 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         if (actual is not null)
         {
             var previous = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == actual.Id && x.Generation == actual.DesiredGeneration, cancellationToken);
-            unchanged = previous.RevisionNumber == plan.RevisionNumber && previous.ConfigurationJson == plan.ConfigurationJson &&
+            unchanged = correction is null && previous.RevisionNumber == plan.RevisionNumber && previous.ConfigurationJson == plan.ConfigurationJson &&
                 previous.Inputs().Providers.Equals(inputs.Providers);
             if (unchanged) generation = actual.DesiredGeneration;
             else
             {
-                var changed = await context.ApplicationDeployments.Where(x => x.Id == actual.Id && x.DesiredGeneration == actual.DesiredGeneration && x.AppliedGeneration == actual.DesiredGeneration)
+                var changed = await context.ApplicationDeployments.Where(x => x.Id == actual.Id && x.DesiredGeneration == actual.DesiredGeneration &&
+                    (correction != null ? x.AppliedGeneration == null : x.AppliedGeneration == actual.DesiredGeneration))
                     .ExecuteUpdateAsync(s => s.SetProperty(x => x.DesiredGeneration, generation).SetProperty(x => x.ConcurrencyToken, x => x.ConcurrencyToken + 1), cancellationToken);
                 if (changed != 1) return new DurableCommitResult.ChangeSetStale(DeploymentGeneration.Create(actual.DesiredGeneration));
             }
@@ -297,8 +306,10 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 State = nameof(DurableOperationState.Pending),
                 CreatedAt = committedAt
             });
+        var managementRows = new List<ResourceManagementRow>();
         if (!unchanged) foreach (var resource in spec.Resources.Keys.Where(r => !graph.ReusedResources.Any(x => x.Resource == r)))
-            context.ResourceManagement.Add(new()
+        {
+            var management = new ResourceManagementRow
             {
                 Id = Guid.CreateVersion7(),
                 Environment = change.EnvironmentRecordId,
@@ -308,8 +319,15 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 SourceGeneration = generation,
                 Origin = inputs.Import is null ? ResourceOrigin.Provisioned : ResourceOrigin.Imported,
                 Authority = inputs.Import is null ? ResourceLifecycleAuthority.Provisioned : ResourceLifecycleAuthority.UseAndRetain
-            });
+            };
+            context.ResourceManagement.Add(management);
+            managementRows.Add(management);
+            if (correction is null) context.ResourceManagementHeads.Add(new()
+            { Environment = management.Environment, Application = management.Application, Resource = management.Resource, Management = management.Id });
+        }
         await context.SaveChangesAsync(cancellationToken);
+        if (correction is not null && !await ImportCorrectionCommit.ApplyAsync(context, correction, commit, managementRows, cancellationToken))
+            return new DurableCommitResult.PlanInputUnavailable();
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
         return new DurableCommitResult.Committed(ToCommit(commit));

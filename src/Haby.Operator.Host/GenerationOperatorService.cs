@@ -59,6 +59,7 @@ public sealed partial class ManifestOperatorService
             ReintroducedResources = value.Reintroduced
         };
         if (value.AppliedGeneration is { } applied) progress.AppliedGeneration = applied;
+        if (value.SupersededByGeneration is { } superseded) progress.SupersededByGeneration = superseded;
         if (value.ResourcesReady is { } ready) progress.ResourcesReady = new()
         {
             CheckpointId = ready.Id.ToString(),

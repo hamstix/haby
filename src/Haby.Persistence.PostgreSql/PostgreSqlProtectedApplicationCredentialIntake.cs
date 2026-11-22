@@ -10,23 +10,50 @@ namespace Haby.Persistence.PostgreSql;
 /// <summary>Private durable input in the explicitly selected plaintext catalog backend.
 /// No public endpoint, password digest, normalization, implicit replacement or lost-response cleanup.</summary>
 public sealed class PostgreSqlProtectedApplicationCredentialIntake(IDbContextFactory<ManifestCatalogDbContext> contexts)
-    : IProtectedApplicationCredentialIntake
+    : IProtectedApplicationCredentialIntake, IProtectedApplicationCredentialCandidateIntake
 {
-    public async ValueTask<ProtectedCredentialStageResult> StageAsync(Guid requestId, ManagedResourceKey owner,
-        SecretMaterial material, CancellationToken cancellationToken)
+    public ValueTask<ProtectedCredentialStageResult> StageAsync(Guid requestId, ManagedResourceKey owner,
+        SecretMaterial material, CancellationToken cancellationToken) => StageCoreAsync(requestId, owner, material, null, cancellationToken);
+
+    public ValueTask<ProtectedCredentialStageResult> StageCandidateAsync(OperatorImportRequestBinding binding,
+        SecretMaterial material, CancellationToken token)
+    {
+        try { binding.Validate(); }
+        catch (Exception error) when (error is ArgumentException or InvalidDataException)
+        { return ValueTask.FromResult(new ProtectedCredentialStageResult(ProtectedCredentialStageStatus.InvalidInput)); }
+        return binding.Correction is null ? ValueTask.FromResult(new ProtectedCredentialStageResult(ProtectedCredentialStageStatus.InvalidInput))
+            : StageCoreAsync(binding.RequestId, binding.CredentialOwner, material, binding, token);
+    }
+
+    private async ValueTask<ProtectedCredentialStageResult> StageCoreAsync(Guid requestId, ManagedResourceKey owner,
+        SecretMaterial material, OperatorImportRequestBinding? candidate, CancellationToken cancellationToken)
     {
         var bytes = material.CopyBytes();
+        var environment = Guid.Parse(owner.EnvironmentRecordId.ToString());
+        var application = Guid.Parse(owner.ApplicationRecordId.ToString());
+        var committing = false;
         try
         {
             if (requestId == Guid.Empty || !Valid(bytes)) return new(ProtectedCredentialStageStatus.InvalidInput);
-            var environment = Guid.Parse(owner.EnvironmentRecordId.ToString());
-            var application = Guid.Parse(owner.ApplicationRecordId.ToString());
             await using var db = await contexts.CreateDbContextAsync(cancellationToken);
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await ImportMutationGate.LockAsync(db, environment, application, cancellationToken);
             if (!await db.Environments.AnyAsync(x => x.Id == environment, cancellationToken) ||
                 !await db.Applications.AnyAsync(x => x.Id == application, cancellationToken))
                 return new(ProtectedCredentialStageStatus.InvalidInput);
-            var previous = await ReadAsync(db, environment, requestId, owner, bytes, cancellationToken);
+            var binding = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == requestId, cancellationToken);
+            if (await db.ImportSupersessions.AsNoTracking().AnyAsync(x => x.PreviousRequest == requestId, cancellationToken) ||
+                candidate is not null && (binding is null || !PostgreSqlDurableDeploymentPlanner.SameImportRequest(binding, candidate)))
+                return new(ProtectedCredentialStageStatus.Conflict);
+            var previous = await ReadAsync(db, environment, requestId, owner, bytes, candidate, cancellationToken);
             if (previous is not null) return previous;
+            if (candidate is not null)
+            {
+                if (!await ImportCorrectionRules.EligibleAsync(db, candidate, cancellationToken)) return new(ProtectedCredentialStageStatus.Conflict);
+            }
+            else if (binding?.PreviousRequest is not null || await db.ProtectedCredentialOwners.AsNoTracking().AnyAsync(x =>
+                x.Environment == environment && x.Application == application && x.Resource == owner.ResourceLocalId.Value, cancellationToken))
+                return new(ProtectedCredentialStageStatus.Conflict);
             var row = new ProtectedApplicationCredentialRow
             {
                 Id = Guid.CreateVersion7(),
@@ -39,17 +66,24 @@ public sealed class PostgreSqlProtectedApplicationCredentialIntake(IDbContextFac
                 Material = bytes
             };
             db.ProtectedApplicationCredentials.Add(row);
+            if (candidate is null) db.ProtectedCredentialOwners.Add(new()
+            { Environment = environment, Application = application, Resource = owner.ResourceLocalId.Value, Stage = row.Id, Request = requestId });
+            await db.SaveChangesAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            committing = true;
+            await transaction.CommitAsync(CancellationToken.None);
+            return new(ProtectedCredentialStageStatus.Staged, Reference(row));
+        }
+        catch (Exception error) when (error is DbUpdateException or NpgsqlException or IOException || committing && error is OperationCanceledException)
+        {
             try
             {
-                await db.SaveChangesAsync(cancellationToken);
-                return new(ProtectedCredentialStageStatus.Staged, Reference(row));
-            }
-            catch (Exception e) when (e is DbUpdateException or NpgsqlException or IOException)
-            {
                 await using var reread = await contexts.CreateDbContextAsync(CancellationToken.None);
-                return await ReadAsync(reread, environment, requestId, owner, bytes, CancellationToken.None) ??
+                return await ReadAsync(reread, environment, requestId, owner, bytes, candidate, CancellationToken.None) ??
                     new(ProtectedCredentialStageStatus.StorageUnavailable);
             }
+            catch (Exception unavailable) when (unavailable is DbUpdateException or NpgsqlException or IOException or TimeoutException)
+            { return new(ProtectedCredentialStageStatus.StorageUnavailable); }
         }
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }
@@ -67,16 +101,24 @@ public sealed class PostgreSqlProtectedApplicationCredentialIntake(IDbContextFac
     }
 
     private static async Task<ProtectedCredentialStageResult?> ReadAsync(ManifestCatalogDbContext db, Guid environment,
-        Guid request, ManagedResourceKey owner, byte[] bytes, CancellationToken token)
+        Guid request, ManagedResourceKey owner, byte[] bytes, OperatorImportRequestBinding? candidate, CancellationToken token)
     {
         var application = Guid.Parse(owner.ApplicationRecordId.ToString());
-        var rows = await db.ProtectedApplicationCredentials.AsNoTracking().Where(x => x.Request == request ||
-            x.Environment == environment && x.Application == application && x.Resource == owner.ResourceLocalId.Value).Take(2).ToArrayAsync(token);
-        if (rows.Length > 1) { foreach (var item in rows) CryptographicOperations.ZeroMemory(item.Material); return new(ProtectedCredentialStageStatus.Conflict); }
-        var row = rows.SingleOrDefault();
+        var row = await db.ProtectedApplicationCredentials.AsNoTracking().SingleOrDefaultAsync(x => x.Request == request, token);
         if (row is null) return null;
         try
         {
+            if (await db.ImportSupersessions.AsNoTracking().AnyAsync(x => x.PreviousRequest == request, token)) return new(ProtectedCredentialStageStatus.Conflict);
+            if (candidate is null)
+            {
+                if (!await db.ProtectedCredentialOwners.AsNoTracking().AnyAsync(x => x.Stage == row.Id && x.Request == request, token))
+                    return new(ProtectedCredentialStageStatus.Conflict);
+            }
+            else
+            {
+                var binding = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request, token);
+                if (binding is null || !PostgreSqlDurableDeploymentPlanner.SameImportRequest(binding, candidate)) return new(ProtectedCredentialStageStatus.Conflict);
+            }
             return row.Request == request && row.Environment == environment && row.Application == application && row.Resource == owner.ResourceLocalId.Value &&
                 CryptographicOperations.FixedTimeEquals(row.Material, bytes)
                 ? new(ProtectedCredentialStageStatus.Existing, Reference(row)) : new(ProtectedCredentialStageStatus.Conflict);
@@ -90,6 +132,10 @@ public sealed class PostgreSqlProtectedApplicationCredentialIntake(IDbContextFac
         await using var db = await contexts.CreateDbContextAsync(cancellationToken);
         var environment = Guid.Parse(owner.EnvironmentRecordId.ToString());
         var application = Guid.Parse(owner.ApplicationRecordId.ToString());
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await ImportMutationGate.LockAsync(db, environment, application, cancellationToken);
+        if (!await db.ProtectedCredentialOwners.AsNoTracking().AnyAsync(x => x.Stage == reference.Id &&
+            x.Environment == environment && x.Application == application && x.Resource == owner.ResourceLocalId.Value, cancellationToken)) return null;
         var row = await db.ProtectedApplicationCredentials.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reference.Id &&
             x.Environment == environment && x.Application == application && x.Resource == owner.ResourceLocalId.Value, cancellationToken);
         if (row is null) return null;

@@ -110,7 +110,7 @@ internal static partial class InternalGenerationAuthority
             ?? throw new InvalidDataException("Accepted declaration unavailable.");
         var manifest = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);
         if (!manifest.Equals(inputs.Configuration!.Manifest) || mixed && !await ResourceContinuity.ValidateAsync(db, deployment, graph, token) ||
-            initial && await db.ResourceManagement.AsNoTracking().AnyAsync(x => x.Environment == row.EnvironmentRecordId && x.Application == row.ApplicationRecordId, token))
+            initial && await db.CurrentResourceManagement.AsNoTracking().AnyAsync(x => x.Environment == row.EnvironmentRecordId && x.Application == row.ApplicationRecordId, token))
             throw new InvalidDataException("Accepted declaration or original Resource provenance mismatch.");
         var pins = await db.InternalPlanInputs.AsNoTracking().Where(x => x.PlanId == row.PlanId).ToArrayAsync(token);
         if (pins.Length != inputs.Providers.Entries.Count || inputs.Providers.Entries.Values.Any(exact =>
