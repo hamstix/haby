@@ -19,6 +19,8 @@ public sealed record ResourceImportPreparationResult(ResourceImportPreparationSt
 public interface IResourceImportPreparer
 {
     string InputFormat { get; }
+    // Pure replay comparison against a trusted durable binding, never a client attestation.
+    bool MatchesPreparedRequest(ResourceImportPreparationRequest request, OperatorImportRequestBinding binding) => false;
     ValueTask<ResourceImportPreparationResult> PrepareAsync(ResourceImportPreparationRequest request,
         NormalizedManifestSpec spec, CancellationToken token);
 }
@@ -29,12 +31,20 @@ public sealed class PrepareResourceImport(IManifestRevisionQuery revisions, IEnu
     private readonly IReadOnlyDictionary<string, IResourceImportPreparer> _preparers =
         preparers.ToDictionary(x => x.InputFormat, StringComparer.Ordinal);
 
+    internal static bool Valid(ResourceImportPreparationRequest? request) => request is not null && request.RequestId != Guid.Empty &&
+        request.Environment is not null && request.Revision is not null && request.Input is not null &&
+        !string.IsNullOrWhiteSpace(request.Input.Format) && request.Input.Format.Length <= 128 && request.Input.Json is not null &&
+        Encoding.UTF8.GetByteCount(request.Input.Json) <= 65536;
+
+    internal bool Supports(string format) => _preparers.ContainsKey(format);
+    internal bool Matches(ResourceImportPreparationRequest request, OperatorImportRequestBinding binding) =>
+        binding.RequestId == request.RequestId && binding.Environment == request.Environment && binding.Revision == request.Revision &&
+        _preparers.TryGetValue(request.Input.Format, out var preparer) && preparer.MatchesPreparedRequest(request, binding);
+
     public async ValueTask<ResourceImportPreparationResult> ExecuteAsync(ResourceImportPreparationRequest request, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (request is null || request.RequestId == Guid.Empty || request.Environment is null || request.Revision is null ||
-            request.Input is null || string.IsNullOrWhiteSpace(request.Input.Format) || request.Input.Format.Length > 128 ||
-            request.Input.Json is null || Encoding.UTF8.GetByteCount(request.Input.Json) > 65536)
+        if (!Valid(request))
             return new(ResourceImportPreparationStatus.InvalidInput);
         if (!_preparers.TryGetValue(request.Input.Format, out var preparer)) return new(ResourceImportPreparationStatus.ImportNotSupported);
         var revision = await revisions.FindAsync(request.Revision, token);
