@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text.Json.Nodes;
+using k8s.Autorest;
 using Haby.Kubernetes;
 using k8s;
 using k8s.Models;
@@ -120,5 +122,76 @@ public sealed class ConfiguredFixtureDrainTests
         Assert.Equal(0, patch[2]!["value"]!.GetValue<int>());
         Assert.DoesNotContain("gracePeriodSeconds", api.Bodies[0]);
         Assert.Equal(cancel ? 1 : 0, f.Pods.Items.Count);
+    }
+
+    [Theory]
+    [InlineData("NamespaceRead", 401)]
+    [InlineData("DeploymentsList", 403)]
+    [InlineData("ReplicaSetsList", 404)]
+    [InlineData("PodsList", 409)]
+    [InlineData("DeploymentRead", 422)]
+    [InlineData("DeploymentScale", 503)]
+    [InlineData("DeploymentScale", 900)]
+    public async Task Drain_failure_reports_the_actual_closed_call_and_status_without_private_api_values(string operation, int status)
+    {
+        var f = Fixture(); var rejected = 0;
+        using var api = new KernelTests.FakeApi((request, _) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            var current = request.Method == HttpMethod.Patch ? "DeploymentScale" :
+                path.EndsWith("/namespaces/" + f.Receipt.Namespace, StringComparison.Ordinal) ? "NamespaceRead" :
+                path.EndsWith("/deployments", StringComparison.Ordinal) ? "DeploymentsList" :
+                path.EndsWith("/replicasets", StringComparison.Ordinal) ? "ReplicaSetsList" :
+                path.EndsWith("/pods", StringComparison.Ordinal) ? "PodsList" : "DeploymentRead";
+            if (current == operation)
+            {
+                rejected++;
+                return KernelTests.Reply(status, new JsonObject { ["message"] = "protected-token-body-uri-uid", ["reason"] = "protected-server-reason" });
+            }
+            return current switch
+            {
+                "NamespaceRead" => Reply(f.Namespace),
+                "DeploymentsList" => Reply(new V1DeploymentList { Metadata = new() { ResourceVersion = "10" }, Items = [f.Deployment] }),
+                "ReplicaSetsList" => Reply(f.Sets),
+                "PodsList" => Reply(f.Pods),
+                _ => Reply(f.Deployment)
+            };
+        });
+        using var admin = new k8s.Kubernetes(new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, api);
+        var output = new List<string>();
+        var failure = await Record.ExceptionAsync(() => ConfiguredFixtureDrain.RunAsync(admin, f.Namespace, [f.Receipt], default, report: output.Add));
+        Assert.IsType<HttpOperationException>(failure);
+        Assert.Equal(1, rejected);
+        Assert.Equal(operation == "DeploymentScale" ? 1 : 0, api.Methods.Count(x => x == "PATCH"));
+        Assert.DoesNotContain("DELETE", api.Methods);
+        var record = Assert.Single(output, x => x.StartsWith("Q243 configured retirement DrainCall ", StringComparison.Ordinal));
+        var parts = record.Split(' ');
+        Assert.Equal(10, parts.Length); Assert.Equal(operation, parts[4]);
+        Assert.Equal(status <= 599 ? status.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unavailable", parts[5]);
+        Assert.InRange(long.Parse(parts[6], System.Globalization.CultureInfo.InvariantCulture), 0, 240000);
+        Assert.Equal("unknown", parts[7]); Assert.Equal("false", parts[8]); Assert.Equal("Api", parts[9]);
+        Assert.DoesNotContain("protected", record); Assert.DoesNotContain("fixture.invalid", record);
+        Assert.DoesNotContain(f.Receipt.Uid, record); Assert.True(record.Length <= 160);
+    }
+
+    [Fact]
+    public async Task Drain_call_diagnostics_preserve_cancellation_transport_identity_and_closed_bounds_even_when_output_fails()
+    {
+        using var canceled = new CancellationTokenSource(); canceled.Cancel();
+        foreach (var error in new Exception[] { new OperationCanceledException("protected", canceled.Token), new HttpRequestException("protected-uri-token") })
+        {
+            var calls = 0; var records = new List<string>();
+            var token = error is OperationCanceledException ? canceled.Token : default;
+            var actual = await Record.ExceptionAsync(() => ConfiguredFixtureDrain.CallAsync(ConfiguredFixtureDrain.Operation.PodsList,
+                () => { calls++; return Task.FromException<int>(error); }, token, 180, record => { records.Add(record); throw new IOException("protected-writer"); }));
+            Assert.Same(error, actual); Assert.Equal(1, calls);
+            var record = Assert.Single(records); var parts = record.Split(' ');
+            Assert.Equal("unavailable", parts[5]); Assert.Equal("180", parts[7]);
+            Assert.Equal(error is OperationCanceledException ? "true" : "false", parts[8]);
+            Assert.Equal(error is OperationCanceledException ? "Canceled" : "Unknown", parts[9]);
+            Assert.DoesNotContain("protected", record);
+        }
+        Assert.Equal("Q243 configured retirement DrainCall Unknown unavailable unknown unknown false Unknown",
+            ConfiguredFixtureDrain.CallFailure((ConfiguredFixtureDrain.Operation)999, new IOException("protected"), -1, 181, false));
     }
 }
