@@ -53,8 +53,11 @@ internal sealed partial class CliCommandContext
                 var found = await client.GetEnvironmentAsync(new() { Name = name }, ct);
                 if (found.Status is EnvironmentStatus.NotFound or EnvironmentStatus.InvalidName)
                 {
-                    var result = PrintResourceImport("changeset import create", new() { RequestId = id.ToString(),
-                        Status = found.Status == EnvironmentStatus.NotFound ? ResourceImportRequestStatus.EnvironmentNotFound : ResourceImportRequestStatus.InvalidInput });
+                    var result = PrintResourceImport("changeset import create", new()
+                    {
+                        RequestId = id.ToString(),
+                        Status = found.Status == EnvironmentStatus.NotFound ? ResourceImportRequestStatus.EnvironmentNotFound : ResourceImportRequestStatus.InvalidInput
+                    });
                     received = true; return result;
                 }
                 if (found.Status != EnvironmentStatus.Found || found.Environment is null || found.Environment.Name != name ||

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Haby.Domain;
+using Haby.Manifest;
 using Haby.PostgreSql;
 using Xunit;
 
@@ -7,6 +8,32 @@ namespace Haby.Application.Tests;
 
 public sealed class PostgreSqlImportReplayTests
 {
+    [Fact]
+    public async Task Unsupported_workloads_refuse_preparation_before_provider_access_or_private_ownership()
+    {
+        var candidate = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare("""
+            {"applicationVersion":"1","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},
+              "spec":{"resources":{"db":{"type":"postgresql.database/v1alpha1","providerRef":"main","properties":{"name":"derived_db"}},
+              "login":{"type":"postgresql.application-login/v1alpha1","providerRef":"main","properties":{"databaseRef":"db","schema":"public","privilegePolicy":"database-owner/v1"}}},
+              "components":{"worker":{"workloads":{"run":{"type":"sample.workload/v1","providerRef":"main","properties":{}}}}}}}}
+            """u8.ToArray(), new([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition],
+                [new(WorkloadTypeId.Create("sample.workload/v1"), "{}")], [], [])));
+        var provider = new NoProvider();
+        var result = await new PostgreSqlImportPreparer(provider, null!).PrepareAsync(new(Guid.NewGuid(), EnvironmentRecordId.New(),
+            ManifestRevisionRef.Create(ApplicationRecordId.New(), ManifestRevisionNumber.Create(1)),
+            PostgreSqlImportPreparer.Encode(new("legacy_db", "legacy_login", "public"))), candidate.Candidate.Declaration.Spec, default);
+        Assert.Equal(ResourceImportPreparationStatus.ImportNotSupported, result.Status);
+        Assert.Equal(0, provider.Reads);
+        Assert.Null(result.Binding);
+    }
+
+    private sealed class NoProvider : IProviderAliasResolver
+    {
+        internal int Reads;
+        public ValueTask<PersistedProviderAliasResolution?> ResolveAsync(EnvironmentRecordId environment, ProviderAlias alias, CancellationToken cancellationToken)
+        { Reads++; return ValueTask.FromResult<PersistedProviderAliasResolution?>(null); }
+    }
+
     [Theory]
     [InlineData("same", true)]
     [InlineData("changed-name", false)]

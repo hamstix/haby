@@ -111,6 +111,8 @@ UUID, exact Environment record/revision, closed names input and separate credent
 bytes. `GetResourceImportRequest` returns safe request metadata only. Neither accepts
 an actor or grants authority from UUID knowledge. Ordinary `CreateSecret` purposes
 are unchanged; this path does not create an administrative application-password API.
+The initial import revision has the complete pair and no declared Workloads;
+preparation refuses an unsupported mixed shape before Provider access or staging.
 
 The CLI names document contains no password, OIDs or Provider endpoint:
 
