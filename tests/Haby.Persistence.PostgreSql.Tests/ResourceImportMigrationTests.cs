@@ -9,6 +9,23 @@ namespace Haby.Persistence.PostgreSql.Tests;
 public sealed class ResourceImportMigrationTests
 {
     [Fact]
+    public void Operator_request_migration_is_additive_and_preserves_existing_import_history()
+    {
+        using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
+        Assert.False(db.Database.HasPendingModelChanges());
+        var migrations = db.Database.GetMigrations().ToArray();
+        var index = Array.FindIndex(migrations, x => x.EndsWith("_PersistOperatorImportRequests", StringComparison.Ordinal));
+        Assert.True(index > 0);
+        var script = db.GetService<IMigrator>().GenerateScript(migrations[index - 1], migrations[index]);
+        Assert.Contains("CREATE TABLE operator_resource_import_requests", script);
+        Assert.Contains("CK_operator_import_request_completion", script);
+        Assert.DoesNotContain("RAISE EXCEPTION", script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DROP TABLE", script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Current_model_matches_snapshot_and_migration_refuses_frozen_history_before_schema_changes()
     {
         using var db = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql().Options);
