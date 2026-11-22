@@ -51,11 +51,14 @@ internal sealed partial class CliCommandContext
                 var name = environment ?? selected;
                 if (string.IsNullOrEmpty(name)) throw new InvalidDataException("Select an Environment using --environment, --environment-record-id or a context.");
                 var found = await client.GetEnvironmentAsync(new() { Name = name }, ct);
-                if (found.Status != EnvironmentStatus.Found || found.Environment is null)
+                if (found.Status is EnvironmentStatus.NotFound or EnvironmentStatus.InvalidName)
                 {
-                    var result = PrintResourceImport("changeset import create", new() { RequestId = id.ToString(), Status = ResourceImportRequestStatus.EnvironmentNotFound });
+                    var result = PrintResourceImport("changeset import create", new() { RequestId = id.ToString(),
+                        Status = found.Status == EnvironmentStatus.NotFound ? ResourceImportRequestStatus.EnvironmentNotFound : ResourceImportRequestStatus.InvalidInput });
                     received = true; return result;
                 }
+                if (found.Status != EnvironmentStatus.Found || found.Environment is null || found.Environment.Name != name ||
+                    !ResourceImportPresentation.RecordId(found.Environment.RecordId)) throw new InvalidDataException("Invalid Environment lookup result.");
                 record = found.Environment.RecordId;
             }
             var input = await ReadImportInput(inputPath, ct);

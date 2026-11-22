@@ -89,7 +89,7 @@ internal static class ResourceImportPresentation
     internal static int Exit(string command, ResourceImportRequestStatus status) => status is ResourceImportRequestStatus.Created or ResourceImportRequestStatus.Existing ||
         command == "changeset import get" && status is ResourceImportRequestStatus.Pending or ResourceImportRequestStatus.Superseded ? CliApplication.Success : CliApplication.Rejected;
     private static bool Uuid(string value) => Guid.TryParseExact(value, "D", out var id) && id != Guid.Empty && value == id.ToString();
-    private static bool RecordId(string value) => Uuid(value) && value[14] == '7' && value[19] is ('8' or '9' or 'a' or 'b');
+    internal static bool RecordId(string value) => Uuid(value) && value[14] == '7' && value[19] is ('8' or '9' or 'a' or 'b');
     private static bool Timestamp(string value) => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _);
 }
 

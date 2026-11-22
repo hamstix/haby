@@ -23,11 +23,13 @@ public sealed partial class CliLoopbackTests
     {
         internal int Creates;
         internal int Environments;
+        internal EnvironmentStatus LookupStatus = EnvironmentStatus.Found;
         internal string? LastRequest;
         internal ResourceImportRequestReply? LastReply;
         public override Task<EnvironmentReply> GetEnvironment(EnvironmentNameRequest request, ServerCallContext context)
         {
             Assert.Equal("pilot", request.Name); Environments++;
+            if (LookupStatus != EnvironmentStatus.Found) return Task.FromResult(new EnvironmentReply { Status = LookupStatus });
             return Task.FromResult(new EnvironmentReply { Status = EnvironmentStatus.Found, Environment = new() { RecordId = ImportEnvironment, Name = "pilot" } });
         }
         public override Task<ResourceImportRequestReply> CreateResourceImportChangeSet(CreateResourceImportChangeSetRequest request, ServerCallContext context)
@@ -62,6 +64,28 @@ public sealed partial class CliLoopbackTests
         }
         public override Task<ResourceImportRequestReply> GetResourceImportRequest(ResourceImportRequestKey request, ServerCallContext context)
         { Assert.Equal(LastRequest, request.RequestId); return Task.FromResult(LastReply!.Clone()); }
+    }
+
+    [Fact]
+    public async Task Resource_import_environment_resolution_refuses_unknown_status_before_password_or_create()
+    {
+        var registry = new ImportRegistry { LookupStatus = EnvironmentStatus.Unspecified };
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listen => listen.Protocols = HttpProtocols.Http2));
+        builder.Services.AddGrpc(); builder.Services.AddSingleton(registry);
+        await using var host = builder.Build(); host.MapGrpcService<ImportRegistry>(); await host.StartAsync();
+        using var output = new StringWriter(); using var error = new StringWriter();
+        var cli = new CliApplication(new FixedEndpoint(host.Urls.Single()), new GrpcRegistryClientFactory(), output, error,
+            secretTerminal: new SecretInputTests.Terminal([]));
+        try
+        {
+            Assert.Equal(CliApplication.UsageError, await cli.RunAsync(["changeset", "import", "create", ImportApplication, "1", "--input", "unused.json",
+                "--environment", "pilot", "--password-stdin", "-o", "json"]));
+            Assert.Equal(0, registry.Creates); Assert.Equal(1, registry.Environments);
+            using var json = JsonDocument.Parse(output.ToString());
+            Assert.Equal("notSubmitted", json.RootElement.GetProperty("outcome").GetString());
+        }
+        finally { await host.StopAsync(); }
     }
 
     [Fact]
