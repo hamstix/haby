@@ -289,6 +289,7 @@ jobs:
         shell: pwsh
         env:
           HABY_AOT_CLI_REQUIRED: '1'
+          HABY_IMPORT_REHEARSAL_ISOLATED_PROFILE: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
         run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite full -AnonymousReflectionPrecheck -ResultsDirectory ./.artifacts/postgresql-measurement
       - name: Publish external composition executable bytes
