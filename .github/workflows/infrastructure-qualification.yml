@@ -61,6 +61,7 @@ jobs:
           TEST_CASE: ${{ inputs.testcase }}
           TEST_GROUP: ${{ inputs.testgroup }}
           HABY_AOT_CLI_REQUIRED: '1'
+          HABY_IMPORT_REHEARSAL_ISOLATED_PROFILE: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
         run: |
           if ($env:TEST_CASE -or $env:TEST_GROUP) {
