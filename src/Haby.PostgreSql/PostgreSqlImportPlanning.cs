@@ -25,6 +25,7 @@ public static class PostgreSqlImportContracts
 
     internal static PostgreSqlExistingPairInput? Decode(DurableActionPayload payload)
     {
+        if (payload.Format == PostgreSqlImportPreparer.PreparedFormat) return PostgreSqlImportPreparer.Decode(payload)?.Pair;
         if (payload.Format != InputFormat) return null;
         try
         {
@@ -74,6 +75,7 @@ public sealed class PostgreSqlImportAdmission(ResourceTypeId type) : IDurableAct
         if (pair is null || requests.Any(x => PostgreSqlImportContracts.Decode(x.Input) != pair)) return null;
         var database = ManifestLocalId.Create(pair.DatabaseResource); var login = ManifestLocalId.Create(pair.LoginResource);
         if (!Shape(spec, database, login) || !spec.Resources.Keys.ToHashSet().SetEquals(requests.Select(x => x.Resource)) ||
+            requests.Any(x => !PostgreSqlImportPreparer.Matches(x.Input, inputs, x.Resource)) ||
             PostgreSqlApplicationLoginContract.Parse(spec.Resources[login].Properties)?.Schema != pair.Schema ||
             requests.Single(x => x.Resource == database).Credential is not null || requests.Single(x => x.Resource == login).Credential is not { } credential) return null;
         return new(pair, credential.Id, credential.Reference.SecretId.ToString(), credential.Reference.SecretVersionId.ToString());

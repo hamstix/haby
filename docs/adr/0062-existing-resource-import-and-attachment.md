@@ -93,6 +93,51 @@ or erase existing external ownership.
 
 ### Acceptance, retry and external identity
 
+#### Accepted operator preparation and unconfirmed correction (2026-11-22)
+
+The authenticated operator-admin path may prepare an import by resolving names
+on the server through bounded read-only adapter observations. Capture exact
+database/login/schema identities and OIDs in closed typed input, together with
+the exact selected Provider revision. Plan and Check remain pure; Execute
+rechecks the frozen identities and required state. Preparation is not acceptance
+or authority to change external state.
+
+The server requires a request UUID. The CLI's `--request-id` is optional: generate
+one UUID per invocation and retain it for any retries in that invocation. Always
+include requestId in JSON results. An uncertain result must include a safe exact-ID
+lookup/replay ticket; never write password material to disk. A new invocation is
+not an implicit retry of an earlier one. Existing operator-admin authorization
+governs preparation, creation, lookup and explicit correction; UUID knowledge
+is not authority. Derive actors from authenticated identity.
+
+An operator may explicitly correct an unconfirmed import before Commit and after
+a failed Commit or execution. Use a new request and protected SecretVersion;
+retain the old binding, intent, attempts, referenced inputs and immutable
+actor/time/reason audit. Do not overwrite staged material or delete history.
+Closing a Plan or choosing a new UUID alone does not free a credential owner.
+
+Transfer the pending credential-owner reservation atomically using compare-and-swap
+and reference-integrity guards. Refuse transfer if a confirmed receipt, usable
+output, Applied association, active execution or live consumer reference makes
+it unsafe. Confirmation and executor admission must participate in the same
+serialization boundary; a check followed by an unguarded transfer is insufficient.
+For an already committed failed import, a narrow desired-generation supersession
+compare-and-swap fences old execution while retaining old generations and history.
+Never reset desired state or the catalog to simulate a fresh initial import.
+
+Concurrent retry, restart and lost responses must converge on one durable outcome.
+Old failed or superseded credentials must never become consumer-usable. This
+authority is limited to preparation and explicit unconfirmed correction; it grants
+no change to a confirmed import, external password rotation, CREATE/ALTER/GRANT,
+ownership/ACL repair, deletion or identity bypass. Current-build runtime safety
+and fresh provisioning invariants remain mandatory.
+
+These are accepted requirements, not implemented merely by this amendment.
+Deliver the operator path in bounded reviewed slices, preserving the frozen
+request-foundation qualification separately. Cover pre/post-Commit correction,
+confirmation/execution races, retry/restart/lost responses, reference integrity,
+secret safety and real external no-mutation assertions.
+
 Verify the coupled database/login/credential and required state before atomically
 accepting the catalog association and confirmed outputs. Internally staged
 credential records are allowed; failure cleanup affects only owned staged
