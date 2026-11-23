@@ -58,7 +58,7 @@ internal static class SecretPresentation
     internal static CliSecretMetadataData Metadata(SecretMetadata value)
     {
         if (!Identity(value.EnvironmentRecordId) || !Identity(value.SecretId) ||
-            value.Purpose is not ("ProviderAdministrator" or "Configuration") ||
+            value.Purpose is not ("ProviderAdministrator" or "Configuration" or "SharedApplicationCredential") ||
             value.Versions.Count > 1 || value.Versions.Any(v => !Identity(v.VersionId) || (v.HasNumber && v.Number < 1)))
             throw new InvalidDataException("Incomplete secret metadata.");
         return new(value.EnvironmentRecordId, value.SecretId,

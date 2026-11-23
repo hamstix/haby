@@ -32,9 +32,10 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
             var references = new Dictionary<string, SecretRef>(StringComparer.Ordinal);
             foreach (var entry in spec.SecretRefs)
             {
+                var purpose = adapter.SharedCredentialSlots.ContainsKey(entry.Key) ? "SharedApplicationCredential" : "ProviderAdministrator";
                 var selected = await (from secret in context.Secrets.AsNoTracking()
                                       join version in context.SecretVersions.AsNoTracking() on secret.Id equals version.SecretId
-                                      where secret.Owner == "Environment" && secret.Purpose == "ProviderAdministrator" &&
+                                      where secret.Owner == "Environment" && secret.Purpose == purpose &&
                                       secret.ApplicationRecordId == null && secret.ResourceLocalId == null &&
                                       secret.EnvironmentRecordId == env && secret.Name == entry.Value.SecretName &&
                                             version.Number == entry.Value.Version
@@ -46,7 +47,8 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
             var prepared = adapter.Codec.Encode(candidate);
             PostgreSqlProviderConfigurationStore.ValidatePrepared(adapter.Codec, prepared);
             if (prepared.ImplementationId != adapter.Key.ImplementationId || prepared.SecretReferences.Count != references.Count ||
-                prepared.SecretReferences.Any(r => !references.TryGetValue(r.Slot, out var exact) || exact != r.Reference))
+                prepared.SecretReferences.Any(r => !references.TryGetValue(r.Slot, out var exact) || exact != r.Reference ||
+                    r.SharedUse != (adapter.SharedCredentialSlots.TryGetValue(r.Slot, out var use) ? use : (SharedCredentialUse?)null)))
                 return new(ProviderOutcome.ConfigurationUnavailable);
             ProviderConfigurationRevisionRow? previous = null;
             if (instance is not null)
@@ -126,7 +128,12 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
                     SecretId = Guid.Parse(reference.Reference.SecretId.ToString()),
                     SecretVersionId = Guid.Parse(reference.Reference.SecretVersionId.ToString())
                 });
+            if (prepared.SecretReferences.Any(x => x.SharedUse is not null) &&
+                !await context.AcquireSharedCredentialGateAsync(env, instance.Id, cancellationToken)) return new(ProviderOutcome.StorageUnavailable);
+            SharedCredentialPersistence.Issue(context, env, instance.Id, spec.Revision, prepared, actor);
             await context.SaveChangesAsync(cancellationToken);
+            if (!await SharedCredentialPersistence.MatchesAsync(context, env, instance.Id, spec.Revision, prepared, cancellationToken))
+                return new(ProviderOutcome.StorageUnavailable);
             var sealedRows = await context.ProviderConfigurationRevisions.Where(x => x.ProviderInstanceId == instance.Id &&
                 x.RevisionNumber == spec.Revision && !x.IsSealed).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsSealed, true), cancellationToken);
             if (sealedRows != 1) return new(ProviderOutcome.StorageUnavailable);
@@ -155,6 +162,7 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
         var decoded = reader.Decode(row.PayloadJson);
         var prepared = reader.Encode(decoded);
         PostgreSqlProviderConfigurationStore.ValidatePrepared(reader, prepared);
+        if (!await SharedCredentialPersistence.MatchesAsync(context, row.EnvironmentRecordId, instance.Id, row.RevisionNumber, prepared, cancellationToken)) return null;
         var refs = await context.ProviderRevisionSecretRefs.AsNoTracking().Where(x => x.ProviderInstanceId == instance.Id &&
             x.RevisionNumber == row.RevisionNumber).ToArrayAsync(cancellationToken);
         return prepared.PayloadJson == row.PayloadJson && prepared.ImplementationId == row.ImplementationId &&

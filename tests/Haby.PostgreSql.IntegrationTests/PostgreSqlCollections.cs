@@ -25,7 +25,8 @@ public sealed class PostgreSqlCollections(ITestAssembly assembly, IMessageSink s
         "PostgreSqlApplicationLoginTests", "ApplicationConfigurationTests", "ApplicationGenerationTests",
         "OperatorHostIntegrationTests", "DurableDeploymentPlanningTests", "ExactActionAdmissionTests",
         "PostgreSqlPairPersistenceTests", "GeneratedCredentialSlotTests", "ProviderConfigurationStoreTests",
-        "PostgreSqlIntegrationTests", "DurableExecutionTests", "PostgreSqlRestrictTests", "TestCatalogPoolTests", "ProviderDeclarationTests"
+        "PostgreSqlIntegrationTests", "DurableExecutionTests", "PostgreSqlRestrictTests", "TestCatalogPoolTests", "ProviderDeclarationTests",
+        "SharedCredentialAuthorityTests"
     ];
     internal static readonly string[] HeavyHostClasses =
         ["ApplicationConfigurationTests", "ApplicationGenerationTests", "OperatorHostIntegrationTests", "PostgreSqlIntegrationTests"];

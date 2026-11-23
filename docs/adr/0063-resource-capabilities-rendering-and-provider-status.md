@@ -325,8 +325,9 @@ authorized implementation qualification, not this documentation change.
 
 The maintainer accepted all decisions below. They amend ADR-029 administrative
 intake and ADR-042/050 delivery authorization, and apply ADR-051 retirement to
-Reference associations. Acceptance is not implementation: #275-A is merged;
-#275-B sharing is in progress; #275-C and #275-D remain planned. Existing
+Reference associations. Acceptance is not implementation: #275-A and #275-B are merged (PRs #290/#291);
+#275-C authority implementation/qualification is in progress; #275-D delivery and
+Reference retirement remain pending. See [275-C scope](../development/275-shared-credential-authority.md). Existing
 Provision/Import and static Profile secret-projection semantics remain unchanged.
 
 ### 19. Environment-owned shared credentials

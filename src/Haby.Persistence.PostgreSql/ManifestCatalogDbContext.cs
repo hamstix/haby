@@ -21,6 +21,8 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
     internal DbSet<GeneratedCredentialCreationAuditRow> GeneratedCredentialCreationAudits => Set<GeneratedCredentialCreationAuditRow>();
     internal DbSet<ProviderInstanceRow> ProviderInstances => Set<ProviderInstanceRow>();
     internal DbSet<ProviderConfigurationRevisionRow> ProviderConfigurationRevisions => Set<ProviderConfigurationRevisionRow>();
+    internal DbSet<SharedCredentialBindingRow> SharedCredentialBindings => Set<SharedCredentialBindingRow>();
+    internal DbSet<SharedCredentialRevocationRow> SharedCredentialRevocations => Set<SharedCredentialRevocationRow>();
     internal DbSet<ProviderRevisionSecretRefRow> ProviderRevisionSecretRefs => Set<ProviderRevisionSecretRefRow>();
     internal DbSet<ProviderAliasRow> ProviderAliases => Set<ProviderAliasRow>();
     internal DbSet<ProviderAliasAuditRow> ProviderAliasAudits => Set<ProviderAliasAuditRow>();
@@ -251,6 +253,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
                 .HasPrincipalKey(row => new { row.SecretId, row.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
+        SharedCredentialPersistence.Configure(modelBuilder);
         modelBuilder.Entity<ProviderAliasRow>(entity =>
         {
             entity.ToTable("provider_aliases");

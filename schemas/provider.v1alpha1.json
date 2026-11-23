@@ -148,7 +148,10 @@
                   },
                   "transportMode": {
                     "type": "string",
-                    "enum": [ "verify-full", "disable" ],
+                    "enum": [
+                      "verify-full",
+                      "disable"
+                    ],
                     "default": "verify-full"
                   }
                 }
@@ -161,6 +164,46 @@
                 ],
                 "properties": {
                   "administrator-password": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "secretName",
+                      "version"
+                    ],
+                    "properties": {
+                      "secretName": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      }
+                    }
+                  },
+                  "system-access-credential": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "secretName",
+                      "version"
+                    ],
+                    "properties": {
+                      "secretName": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647
+                      }
+                    }
+                  },
+                  "application-credential": {
                     "type": "object",
                     "additionalProperties": false,
                     "required": [

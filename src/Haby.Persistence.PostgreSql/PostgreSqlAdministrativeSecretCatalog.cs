@@ -14,7 +14,7 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
     public async ValueTask<SecretResult> CreateAsync(EnvironmentRecordId environment, string name, Guid requestId,
         SecretMaterial material, string actor, CancellationToken cancellationToken, SecretPurpose purpose = SecretPurpose.ProviderAdministrator)
     {
-        if (purpose is not (SecretPurpose.ProviderAdministrator or SecretPurpose.Configuration))
+        if (purpose is not (SecretPurpose.ProviderAdministrator or SecretPurpose.Configuration or SecretPurpose.SharedApplicationCredential))
             return new(SecretOutcome.InvalidRequest, RequestId: requestId);
         var bytes = material.CopyBytes();
         try
@@ -115,7 +115,7 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var env = Guid.Parse(environment.ToString());
         var identity = id is null ? (Guid?)null : Guid.Parse(id.ToString());
-        var row = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env && x.Owner == "Environment" && (x.Purpose == "ProviderAdministrator" || x.Purpose == "Configuration") &&
+        var row = await context.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == env && x.Owner == "Environment" && (x.Purpose == "ProviderAdministrator" || x.Purpose == "Configuration" || x.Purpose == "SharedApplicationCredential") &&
             x.ApplicationRecordId == null && x.ResourceLocalId == null && (identity == null ? x.Name == name : x.Id == identity), cancellationToken);
         if (row is null) return null;
         // Discovery reports the initial numbered version only. Legacy versions remain explicitly unnumbered.
@@ -130,7 +130,7 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var env = Guid.Parse(environment.ToString());
         var query = context.Secrets.AsNoTracking().Where(x => x.EnvironmentRecordId == env &&
-            x.Owner == "Environment" && (x.Purpose == "ProviderAdministrator" || x.Purpose == "Configuration") && x.ApplicationRecordId == null && x.ResourceLocalId == null);
+            x.Owner == "Environment" && (x.Purpose == "ProviderAdministrator" || x.Purpose == "Configuration" || x.Purpose == "SharedApplicationCredential") && x.ApplicationRecordId == null && x.ResourceLocalId == null);
         if (after is not null) query = query.Where(x => string.Compare(EF.Functions.Collate(x.Name ?? "~" + x.Id.ToString(), "C"), after) > 0);
         var rows = await query.OrderBy(x => EF.Functions.Collate(x.Name ?? "~" + x.Id.ToString(), "C")).Take(limit).ToArrayAsync(cancellationToken);
         var ids = rows.Select(x => x.Id).ToArray();
@@ -143,6 +143,6 @@ public sealed class PostgreSqlAdministrativeSecretCatalog(
     private static SecretMetadata Metadata(SecretRow row, IReadOnlyList<SecretVersionRow> versions) => new(
         EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString()),
         new SecretOwner.Environment(EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString())), SecretId.Parse(row.Id.ToString()), row.Name,
-        row.Purpose == "Configuration" ? SecretPurpose.Configuration : SecretPurpose.ProviderAdministrator, row.CreatedAt,
+        row.Purpose switch { "Configuration" => SecretPurpose.Configuration, "SharedApplicationCredential" => SecretPurpose.SharedApplicationCredential, _ => SecretPurpose.ProviderAdministrator }, row.CreatedAt,
         versions.Select(v => new SecretVersionMetadata(SecretVersionId.Parse(v.Id.ToString()), v.Number, v.CreatedAt)).ToArray());
 }

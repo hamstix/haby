@@ -10,15 +10,19 @@ public sealed partial class ManifestOperatorService
     {
         if (!Guid.TryParse(request.RequestId, out var requestId) || requestId == Guid.Empty ||
             request.Material.Length is < 1 or > SecretAdministration.MaxBytes ||
-            request.Purpose is not ("" or "ProviderAdministrator" or "Configuration"))
+            request.Purpose is not ("" or "ProviderAdministrator" or "Configuration" or "SharedApplicationCredential"))
             return new SecretReply { Status = SecretStatus.InvalidRequest };
         var bytes = request.Material.ToByteArray();
         try
         {
             using var material = new SecretMaterial(bytes);
             return SecretReplyOf(await secretAdministration.CreateAsync(request.Environment, request.Name, requestId,
-                material, Actor, context.CancellationToken, request.Purpose == "Configuration"
-                    ? Haby.Domain.SecretPurpose.Configuration : Haby.Domain.SecretPurpose.ProviderAdministrator));
+                material, Actor, context.CancellationToken, request.Purpose switch
+                {
+                    "Configuration" => Haby.Domain.SecretPurpose.Configuration,
+                    "SharedApplicationCredential" => Haby.Domain.SecretPurpose.SharedApplicationCredential,
+                    _ => Haby.Domain.SecretPurpose.ProviderAdministrator
+                }));
         }
         finally { Array.Clear(bytes); }
     }
@@ -51,6 +55,7 @@ public sealed partial class ManifestOperatorService
             {
                 Haby.Domain.SecretPurpose.ProviderAdministrator => "ProviderAdministrator",
                 Haby.Domain.SecretPurpose.Configuration => "Configuration",
+                Haby.Domain.SecretPurpose.SharedApplicationCredential => "SharedApplicationCredential",
                 _ => throw new InvalidOperationException("Unsupported administrative secret purpose.")
             }
         };

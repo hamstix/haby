@@ -19,7 +19,8 @@ public sealed record ProviderTargetIdentity
 }
 
 /// <summary>One exact SecretRef extracted from a typed Provider configuration.</summary>
-public sealed record ProviderConfigurationSecretReference(string Slot, SecretRef Reference);
+public sealed record ProviderConfigurationSecretReference(string Slot, SecretRef Reference,
+    SharedCredentialUse? SharedUse = null);
 
 /// <summary>Validated, non-secret snapshot prepared by a registered Provider codec.</summary>
 public sealed record PreparedProviderConfiguration(string ProviderKindId, ProviderTargetIdentity TargetIdentity,
