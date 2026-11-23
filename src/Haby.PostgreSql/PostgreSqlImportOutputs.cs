@@ -7,7 +7,7 @@ namespace Haby.PostgreSql;
 
 /// <summary>Equivalent ordinary output contracts for exact import producers. No CREATE evidence.</summary>
 public sealed class PostgreSqlImportOutputContract(ResourceTypeId type, PostgreSqlProviderConfigurationCodec codec,
-    IApplicationCredentialReader credentials) : IExternalOperationOutputContract
+    IApplicationCredentialReader credentials) : IResourceObservationOutputContract
 {
     public DurableActionExecutionKey Producer => type == PostgreSqlDatabaseContract.Id ? PostgreSqlImportContracts.Database : PostgreSqlImportContracts.Login;
     public ExternalOperationOutputIdentity Identity => type == PostgreSqlDatabaseContract.Id

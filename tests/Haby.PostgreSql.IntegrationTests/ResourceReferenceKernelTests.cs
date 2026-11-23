@@ -29,6 +29,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
     private sealed class Boundary
     {
         public int Observations;
+        public int HandlerCalls;
         public bool SecondMemberDependsOnImport;
         public CancellationTokenSource? CancelBeforeAcceptance;
     }
@@ -44,7 +45,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         }
         catch (JsonException) { return null; }
     }
-    private static ServiceProvider Services(string connection, Boundary boundary, bool referenceExecutor = true, bool referenceEvidence = true, IInterceptor? interceptor = null)
+    private static ServiceProvider Services(string connection, Boundary boundary, bool referenceExecutor = true, bool referenceEvidence = true, IInterceptor? interceptor = null, bool observationCapability = true, bool referenceIdentityCapability = true)
     {
         var services = new ServiceCollection().AddSingleton<TimeProvider>(new Clock()).AddSingleton(ConfigurationRenderingCatalog.Empty)
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
@@ -61,7 +62,10 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
             if (mode != ResourceAcquisitionMode.Reference || referenceExecutor)
                 services.AddSingleton<IDurableActionHandler>(p => new Handler(mode, p.GetRequiredService<IDurableOperationJournal>(),
                     p.GetRequiredService<IExternalOperationOutputs>(), p.GetRequiredService<IResourceObservationAcceptance>(), p.GetRequiredService<IProviderConfigurationStore>(), boundary));
-            if (mode != ResourceAcquisitionMode.Reference || referenceEvidence) services.AddSingleton<IExternalOperationOutputContract>(new Evidence(mode));
+            if (mode != ResourceAcquisitionMode.Reference || referenceEvidence)
+                services.AddSingleton<IExternalOperationOutputContract>(mode == ResourceAcquisitionMode.Reference && !observationCapability
+                    ? new OutputOnlyEvidence(mode) : mode == ResourceAcquisitionMode.Reference && !referenceIdentityCapability
+                        ? new ObservationOnlyEvidence(mode) : new Evidence(mode));
         }
         return services.BuildServiceProvider();
     }
@@ -179,6 +183,41 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         }
         Assert.Equal(2, boundary.Observations);
     }
+    [Fact]
+    public Task Missing_observation_capability_refuses_before_any_sibling_handler_or_publication() => MissingCapabilityAsync(true);
+
+    [Fact]
+    public Task Missing_reference_identity_capability_refuses_before_any_sibling_handler_or_publication() => MissingCapabilityAsync(false);
+
+    private async Task MissingCapabilityAsync(bool missingObservation)
+    {
+        var connection = await CreateDatabaseAsync("reference_capability_");
+        var boundary = new Boundary();
+        var item = await PrepareAsync(connection, boundary);
+        await using var services = Services(connection, boundary, observationCapability: !missingObservation,
+            referenceIdentityCapability: missingObservation);
+        // Retain the exact handler, ordinary output registration and matching output identity.
+        var output = Assert.Single(services.GetServices<IExternalOperationOutputContract>(), x => x.Producer == Key(ResourceAcquisitionMode.Reference));
+        Assert.Equal(Output, output.Identity);
+        var handler = Assert.Single(services.GetServices<IDurableActionHandler>(), x => x.Key == Key(ResourceAcquisitionMode.Reference));
+        Assert.All(item.Plan.Graph.Nodes.Where(x => x.ResourceId == Referenced), node => Assert.True(handler.Supports(node)));
+        var result = await services.GetRequiredService<IDurableOperationExecutor>().ExecuteAsync(Operation(item, "imported-verify"), default);
+        await using (var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            Assert.Equal((DurableExecutionOutcome.HandlerUnavailable, 0, 0, 0, 0, 0),
+                (result.Outcome, boundary.HandlerCalls, boundary.Observations, await verify.DurableOperationAttempts.CountAsync(),
+                    await verify.ResourceObservationReceipts.CountAsync(), await verify.OperationOutputs.CountAsync()));
+        ResourceObservationAcceptance request;
+        await using (var healthy = Services(connection, boundary)) request = await StageAsync(healthy, item, Imported);
+        Assert.Equal(ResourceObservationAcceptanceStatus.InputUnavailable, (await services.GetRequiredService<IResourceObservationAcceptance>()
+            .CompleteAsync(request, DateTimeOffset.UtcNow, default)).Status);
+        await using var afterDirect = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+        Assert.Equal(0, boundary.HandlerCalls);
+        Assert.Equal(0, boundary.Observations);
+        Assert.Empty(await afterDirect.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await afterDirect.OperationOutputs.AsNoTracking().ToArrayAsync());
+        Assert.All(await afterDirect.DurableOperations.AsNoTracking().ToArrayAsync(), x => Assert.NotEqual(nameof(DurableOperationState.Succeeded), x.State));
+    }
+
     [Fact]
     public async Task Direct_acceptance_validates_every_member_prerequisite_and_cannot_publish_partial_group()
     {
@@ -452,6 +491,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         public bool Supports(DurableOperationNode node) => node.Action == Key && Decode(node.Input) is not null;
         public async ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation, CancellationToken token)
         {
+            Interlocked.Increment(ref boundary.HandlerCalls);
             var accepted = (await outputs.FindAcceptedAsync(operation.Key, token))!;
             var members = accepted.Graph.ObservationGroups.Single(x => x.Operations.Contains(operation.Node.Id));
             var confirmations = new List<ObservationOperationConfirmation>();
@@ -482,7 +522,20 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
             return new(result.IsSuccess ? DurableExecutionOutcome.Succeeded : DurableExecutionOutcome.InputUnavailable, await journal.FindAsync(operation.Key, token));
         }
     }
-    private sealed class Evidence(ResourceAcquisitionMode mode) : IExternalOperationOutputContract
+    private sealed class OutputOnlyEvidence(ResourceAcquisitionMode mode) : IExternalOperationOutputContract
+    {
+        public DurableActionExecutionKey Producer => Key(mode);
+        public ExternalOperationOutputIdentity Identity => Output;
+        public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => new Evidence(mode).Validate(node, output);
+    }
+    private sealed class ObservationOnlyEvidence(ResourceAcquisitionMode mode) : IResourceObservationOutputContract
+    {
+        public DurableActionExecutionKey Producer => Key(mode);
+        public ExternalOperationOutputIdentity Identity => Output;
+        public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => new Evidence(mode).Validate(node, output);
+        public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) => new Evidence(mode).ValidateObservationEvidence(accepted, evidence);
+    }
+    private sealed class Evidence(ResourceAcquisitionMode mode) : IResourceReferenceOutputContract
     {
         public DurableActionExecutionKey Producer => Key(mode);
         public ExternalOperationOutputIdentity Identity => Output;

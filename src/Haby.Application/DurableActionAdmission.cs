@@ -111,7 +111,7 @@ public sealed class DurableActionRegistry
 {
     private readonly Dictionary<DurableActionAdmissionKey, IDurableActionAdmissionHandler> admissions = [];
     private readonly Dictionary<DurableActionExecutionKey, IDurableActionHandler> handlers = [];
-    private readonly HashSet<DurableActionExecutionKey> outputProducers;
+    private readonly Dictionary<DurableActionExecutionKey, IExternalOperationOutputContract> outputContracts;
     private readonly Dictionary<DurableActionExecutionKey, ExternalOperationOutputIdentity> outputIdentities;
 
     public DurableActionRegistry(IEnumerable<IDurableActionAdmissionHandler> registrations,
@@ -120,7 +120,7 @@ public sealed class DurableActionRegistry
         var contracts = (outputs ?? []).ToArray();
         if (contracts.GroupBy(c => c.Producer).Any(g => g.Count() != 1))
             throw new InvalidOperationException("External output registration is ambiguous.");
-        outputProducers = contracts.Select(c => c.Producer).ToHashSet();
+        outputContracts = contracts.ToDictionary(c => c.Producer);
         outputIdentities = contracts.ToDictionary(c => c.Producer, c => c.Identity);
         foreach (var handler in registrations)
         {
@@ -154,8 +154,16 @@ public sealed class DurableActionRegistry
             throw new InvalidDataException("Planned evidence obligation disagrees with the exact output registration.");
         return node;
     }
+    private bool SupportsRequiredEvidence(DurableActionExecutionKey key) => key.Admission.Mode switch
+    {
+        ResourceAcquisitionMode.Provision => true,
+        ResourceAcquisitionMode.ImportUseAndRetain => outputContracts.GetValueOrDefault(key) is IResourceObservationOutputContract,
+        ResourceAcquisitionMode.Reference => outputContracts.GetValueOrDefault(key) is IResourceReferenceOutputContract,
+        _ => false
+    };
     public IDurableActionHandler? Find(DurableActionExecutionKey key) =>
-        handlers.TryGetValue(key, out var handler) && (!handler.RequiresExternalOutput || outputProducers.Contains(key)) ? handler : null;
+        handlers.TryGetValue(key, out var handler) && SupportsRequiredEvidence(key) &&
+        (!handler.RequiresExternalOutput || outputContracts.ContainsKey(key)) ? handler : null;
     internal bool MatchesEvidence(DurableOperationNode node) => Find(node.Action) is { } handler &&
         node.RequiresExternalOutput == handler.RequiresExternalOutput && node.RequiredOutput == handler.OutputIdentity &&
         (node.RequiredOutput is null || outputIdentities.TryGetValue(node.Action, out var identity) && identity == node.RequiredOutput);

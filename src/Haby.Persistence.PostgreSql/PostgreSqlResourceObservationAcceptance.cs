@@ -71,8 +71,9 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
             {
                 var accepted = await PostgreSqlExternalOperationOutputs.AcceptedAsync(db, result.Key, cancellationToken);
                 var validator = accepted is null ? null : contracts.SingleOrDefault(x => x.Producer == accepted.Node.Action);
-                if (accepted is null || validator is null || !validator.ValidateObservationEvidence(accepted, acceptance.Evidence) ||
-                    group.Mode == ResourceAcquisitionMode.Reference && !validator.ValidateReferenceIdentities(accepted, acceptance.Reservations)) return new(ResourceObservationAcceptanceStatus.InputUnavailable);
+                if (accepted is null || validator is not IResourceObservationOutputContract observation || !observation.ValidateObservationEvidence(accepted, acceptance.Evidence) ||
+                    group.Mode == ResourceAcquisitionMode.Reference &&
+                    (validator is not IResourceReferenceOutputContract reference || !reference.ValidateReferenceIdentities(accepted, acceptance.Reservations))) return new(ResourceObservationAcceptanceStatus.InputUnavailable);
             }
             var prior = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == source.Generation && x.Group == group.Id, cancellationToken);
             if (prior is not null) return new(prior.Document == json && await ResourceObservationReceiptIntegrity.ReadAsync(db, first, cancellationToken) is not null

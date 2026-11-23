@@ -92,7 +92,7 @@ internal static class ResourceContinuity
                     var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, new(ApplicationDeploymentId.Parse(deployment.ToString()),
                         DeploymentGeneration.Create(generation), node.Id), token);
                     var validator = contracts.SingleOrDefault(x => x.Producer == node.Action);
-                    if (receipt is null || validator is null || !validator.ValidateObservationEvidence(
+                    if (receipt is null || validator is not IResourceObservationOutputContract observation || !observation.ValidateObservationEvidence(
                         new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return false;
                     if (validateMaterial)
                         foreach (var request in inputs.Import!.Resources.Where(x => x.Credential is not null))

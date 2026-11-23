@@ -304,7 +304,7 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
             ValueTask.FromResult(original.Node.Action == ImportKey && receipt.Evidence == new DurableActionPayload("haby.import-observation/v1", "{}")
                 ? ResourceReuseValidationStatus.Confirmed : ResourceReuseValidationStatus.InputUnavailable);
     }
-    private sealed class ImportOutput : IExternalOperationOutputContract
+    private sealed class ImportOutput : IResourceObservationOutputContract
     {
         public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
             accepted.Node.Action == ImportKey && evidence == new DurableActionPayload("haby.import-observation/v1", "{}");

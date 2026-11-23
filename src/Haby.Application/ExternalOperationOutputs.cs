@@ -13,11 +13,6 @@ public interface IExternalOperationOutputContract
     DurableActionExecutionKey Producer { get; }
     ExternalOperationOutputIdentity Identity { get; }
     bool Validate(DurableOperationNode node, ExternalOperationOutput output);
-    /// <summary>Closed adapter-owned read-only verification evidence for this import producer.
-    /// Missing explicit support refuses import acceptance; ordinary outputs alone are insufficient.</summary>
-    bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) => false;
-    /// <summary>Exact adapter identity claims for Reference; absence of explicit support refuses confirmation.</summary>
-    bool ValidateReferenceIdentities(AcceptedOperation accepted, IReadOnlyList<ProviderResourceReservation> identities) => false;
     /// <summary>Catalog metadata only: no Provider I/O or secret-material resolution. Sources have confirmed original attempts.</summary>
     bool ValidateReuse(DurableOperationKey key, AcceptedOperation accepted, ExternalOperationOutput output,
         IReadOnlyList<ConfirmedOperationOutput> sources, PreparedProviderConfiguration configuration,
@@ -29,6 +24,18 @@ public interface IExternalOperationOutputContract
     /// <summary>Optional adapter-owned validation against the exact accepted context and pinned inputs.</summary>
     ValueTask<bool> ValidateAcceptedAsync(DurableOperationKey key, AcceptedOperation accepted,
         ExternalOperationOutput output, CancellationToken cancellationToken) => new(Validate(accepted.Node, output));
+}
+
+/// <summary>Explicit exact producer capability for closed observational evidence validation.</summary>
+public interface IResourceObservationOutputContract : IExternalOperationOutputContract
+{
+    bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence);
+}
+
+/// <summary>Reference additionally validates its exact nonexclusive association identities.</summary>
+public interface IResourceReferenceOutputContract : IResourceObservationOutputContract
+{
+    bool ValidateReferenceIdentities(AcceptedOperation accepted, IReadOnlyList<ProviderResourceReservation> identities);
 }
 
 public sealed record AcceptedOperation(DurablePlanningInputs Inputs, DurableOperationGraph Graph,

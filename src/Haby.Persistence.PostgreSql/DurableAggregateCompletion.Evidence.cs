@@ -68,7 +68,7 @@ internal static partial class DurableAggregateCompletion
                     {
                         var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
                             Haby.Domain.DeploymentGeneration.Create(generation), node.Id), token);
-                        if (receipt is null || validators.Length != 1 || !validators[0].ValidateObservationEvidence(
+                        if (receipt is null || validators is not [IResourceObservationOutputContract observation] || !observation.ValidateObservationEvidence(
                             new(inputs, original, node, inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return null;
                     }
                 }

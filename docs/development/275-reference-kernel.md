@@ -14,6 +14,11 @@ the PostgreSQL operator import intake still requires its complete all-Import pai
 The internal acquisition intake is not added to the operator/CLI public surface.
 Exact type/mode/configuration/implementation/action registrations govern admission
 and dispatch. Missing handlers, evidence contracts or schemas never fall back to CREATE.
+Observational output registrations explicitly implement `IResourceObservationOutputContract`;
+Reference requires `IResourceReferenceOutputContract`, which also requires observation
+evidence validation. These are compile-time contracts, checked for every node before
+any graph handler runs and by the same shared direct-acceptance gate. Actual evidence
+and identity validation still happens at acceptance; no dummy payload probes are used.
 
 Frozen observation groups form a complete, disjoint partition of observational
 nodes, each with one mode and no Provision member. The Import pair remains one
