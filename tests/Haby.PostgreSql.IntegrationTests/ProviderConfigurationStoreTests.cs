@@ -47,7 +47,7 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
                 CREATE ROLE "{readerName}" LOGIN PASSWORD '{readerPassword}';
                 GRANT USAGE ON SCHEMA public TO "{readerName}";
                 GRANT SELECT ON provider_instances, provider_configuration_revisions,
-                    provider_revision_secret_refs TO "{readerName}";
+                    provider_revision_secret_refs, shared_credential_bindings TO "{readerName}";
                 """, check).ExecuteNonQueryAsync();
         }
         var readerConnection = new NpgsqlConnectionStringBuilder(connection)
@@ -61,6 +61,18 @@ public sealed class ProviderConfigurationStoreTests(PostgreSqlFixture fixture) :
             Assert.Equal("maintenance", second!.Configuration.MaintenanceDatabase);
             Assert.Equal(secret, first.Configuration.AdministratorPassword);
             Assert.Equal(secret, second.Configuration.AdministratorPassword);
+        }
+        // Exact Provider reads need only safe metadata. Prove the same restricted
+        // connection still cannot inspect secret storage or retrieve material.
+        await using (var restricted = new NpgsqlConnection(readerConnection))
+        {
+            await restricted.OpenAsync();
+            foreach (var sql in new[] { "SELECT id FROM secrets LIMIT 1", "SELECT id FROM secret_versions LIMIT 1", "SELECT bytes FROM secret_payloads LIMIT 1" })
+            {
+                await using var command = new NpgsqlCommand(sql, restricted);
+                var denied = await Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteScalarAsync());
+                Assert.Equal("42501", denied.SqlState);
+            }
         }
         await using var database = new NpgsqlConnection(connection);
         await database.OpenAsync();
