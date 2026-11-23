@@ -188,7 +188,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
         if (accepted.Node.Action.Admission.Mode != ResourceAcquisitionMode.Provision)
         {
             var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(context, key, token);
-            if (receipt is null || contract is not IResourceObservationOutputContract observation || !observation.ValidateObservationEvidence(accepted, receipt.Evidence)) return false;
+            if (receipt is null || !ReferenceSharingAuthorizationCodec.Supports(accepted.Node, contract) || contract is not IResourceObservationOutputContract observation || !observation.ValidateObservationEvidence(accepted, receipt.Evidence)) return false;
         }
         return await context.DurableOperations.AnyAsync(r => r.DeploymentId == row.DeploymentId && r.Generation == row.Generation &&
             r.OperationId == row.OperationId && r.State == nameof(DurableOperationState.Succeeded) && r.CurrentAttemptId == attempt &&

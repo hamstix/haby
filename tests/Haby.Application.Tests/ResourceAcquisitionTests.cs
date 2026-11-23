@@ -37,7 +37,12 @@ public sealed class ResourceAcquisitionTests
         var intent = Intent();
         var json = ResourceAcquisitionIntentCodec.Encode(intent);
         Assert.Equal(intent, ResourceAcquisitionIntentCodec.Decode(json));
-        foreach (var malformed in new[] { json.Replace("\"Mode\":2", "\"Mode\":99", StringComparison.Ordinal), json.Replace("\"Version\":1", "\"Version\":1,\"Version\":1", StringComparison.Ordinal), json.Replace("\"Version\":1", "\"Unknown\":true,\"Version\":1", StringComparison.Ordinal) })
+        var shared = new ResourceAcquisitionIntent(intent.Resources.Select(x => x.Mode == ResourceAcquisitionMode.Reference
+            ? x with { SharingRequest = new("test.sharing/v1", "{\"Group\":\"readers\"}") } : x));
+        Assert.Equal(shared, ResourceAcquisitionIntentCodec.Decode(ResourceAcquisitionIntentCodec.Encode(shared)));
+        Assert.Throws<ArgumentException>(() => new ResourceAcquisitionIntent([new(First, ResourceAcquisitionMode.Provision) { SharingRequest = Input }]));
+        Assert.Throws<ArgumentException>(() => new ResourceAcquisitionIntent([new(First, ResourceAcquisitionMode.ImportUseAndRetain, Input) { SharingRequest = Input }]));
+        foreach (var malformed in new[] { json.Replace("\"Mode\":2", "\"Mode\":99", StringComparison.Ordinal), json.Replace("\"Version\":2", "\"Version\":2,\"Version\":2", StringComparison.Ordinal), json.Replace("\"Version\":2", "\"Unknown\":true,\"Version\":2", StringComparison.Ordinal) })
             Assert.Throws<InvalidDataException>(() => ResourceAcquisitionIntentCodec.Decode(malformed));
     }
     [Fact]

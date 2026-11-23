@@ -2446,13 +2446,13 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(512)")
                         .HasColumnName("value");
 
-                    b.Property<Guid>("Application")
-                        .HasColumnType("uuid")
-                        .HasColumnName("application_record_id");
-
                     b.Property<Guid>("Association")
                         .HasColumnType("uuid")
                         .HasColumnName("association_id");
+
+                    b.Property<Guid>("Application")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
 
                     b.Property<Guid>("Environment")
                         .HasColumnType("uuid")
@@ -2464,7 +2464,11 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("character varying(63)")
                         .HasColumnName("resource_local_id");
 
-                    b.HasKey("Provider", "Namespace", "Value");
+                    b.Property<string>("SharingJson")
+                        .HasColumnType("text")
+                        .HasColumnName("sharing_json");
+
+                    b.HasKey("Provider", "Namespace", "Value", "Association");
 
                     b.HasIndex("Association");
 

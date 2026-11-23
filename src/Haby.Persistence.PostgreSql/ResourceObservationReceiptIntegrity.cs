@@ -50,16 +50,16 @@ internal static class ResourceObservationReceiptIntegrity
     }
 
     internal static async Task<ResourceObservationReceipt?> ReadAsync(ManifestCatalogDbContext db,
-        DurableOperationKey key, CancellationToken token)
+        DurableOperationKey key, CancellationToken token, bool asynchronous = true)
     {
         var deployment = Guid.Parse(key.DeploymentId.ToString());
-        var sourceGraph = await db.DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value).Select(x => x.GraphJson).SingleOrDefaultAsync(token);
+        var sourceGraph = await db.DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value).Select(x => x.GraphJson).ReceiptSingleAsync(asynchronous, token);
         if (sourceGraph is null) return null;
         var frozenGroup = DurableOperationGraphCodec.Decode(sourceGraph).ObservationGroups.SingleOrDefault(x => x.Operations.Contains(key.OperationId));
         if (frozenGroup is null) return null;
-        var row = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == key.Generation.Value && x.Group == frozenGroup.Id, token);
+        var row = await db.ResourceObservationReceipts.AsNoTracking().ReceiptSingleAsync(x => x.Deployment == deployment && x.Generation == key.Generation.Value && x.Group == frozenGroup.Id, asynchronous, token);
         if (row is null) return null;
-        var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value, token);
+        var source = await db.DeploymentGenerations.AsNoTracking().ReceiptSingleAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value, asynchronous, token);
         if (source is null || row.Fingerprint != Fingerprint(source.Fingerprint, row.Document)) return null;
         var inputs = source.Inputs();
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
@@ -75,7 +75,7 @@ internal static class ResourceObservationReceiptIntegrity
             var association = document.Associations.SingleOrDefault(x => x.Resource == resource.Value);
             if (association is null) return null;
             // Historical proof uses immutable source identity, never the current head.
-            var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == association.Management, token);
+            var managed = await db.ResourceManagement.AsNoTracking().ReceiptSingleAsync(x => x.Id == association.Management, asynchronous, token);
             if (managed is null || managed.Deployment != deployment || managed.Resource != resource.Value ||
                 managed.SourceGeneration != source.Generation || !ResourceContinuity.HasAcquisitionAuthority(managed, inputs)) return null;
         }
@@ -84,15 +84,15 @@ internal static class ResourceObservationReceiptIntegrity
         {
             var node = graph.Nodes.Single(x => x.Id.Value == member.Operation);
             if (node.RequiredOutput != new ExternalOperationOutputIdentity(member.Contract, member.Key)) return null;
-            var operation = await db.DurableOperations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment &&
-                x.Generation == row.Generation && x.OperationId == member.Operation, token);
+            var operation = await db.DurableOperations.AsNoTracking().ReceiptSingleAsync(x => x.DeploymentId == deployment &&
+                x.Generation == row.Generation && x.OperationId == member.Operation, asynchronous, token);
             if (operation is null || operation.State != nameof(DurableOperationState.Succeeded) || operation.CurrentAttemptId != member.Attempt ||
                 operation.ReasonCode is not null || operation.DispatchedAt is null || operation.FinalizedAt is null ||
-                !await db.DurableOperationAttempts.AsNoTracking().AnyAsync(x => x.AttemptId == member.Attempt && x.DeploymentId == deployment &&
+                !await db.DurableOperationAttempts.AsNoTracking().ReceiptAnyAsync(x => x.AttemptId == member.Attempt && x.DeploymentId == deployment &&
                     x.Generation == row.Generation && x.OperationId == member.Operation && x.AttemptNumber == operation.AttemptNumber &&
-                    x.Outcome == nameof(DurableAttemptOutcome.Succeeded) && x.DispatchedAt == operation.DispatchedAt && x.FinishedAt == operation.FinalizedAt, token)) return null;
-            var output = await db.OperationOutputs.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == row.Generation &&
-                x.OperationId == member.Operation && x.Contract == member.Contract && x.Key == member.Key, token);
+                    x.Outcome == nameof(DurableAttemptOutcome.Succeeded) && x.DispatchedAt == operation.DispatchedAt && x.FinishedAt == operation.FinalizedAt, asynchronous, token)) return null;
+            var output = await db.OperationOutputs.AsNoTracking().ReceiptSingleAsync(x => x.DeploymentId == deployment && x.Generation == row.Generation &&
+                x.OperationId == member.Operation && x.Contract == member.Contract && x.Key == member.Key, asynchronous, token);
             if (output is null || ResourcesReadyCheckpointCodec.Hash(output.Payload) != member.Fingerprint) return null;
             operations.Add(new(key with { OperationId = node.Id }, member.Attempt, new(output.Contract, output.Key, output.Payload)));
         }
@@ -103,27 +103,42 @@ internal static class ResourceObservationReceiptIntegrity
             var expected = expectedCredentials.SingleOrDefault(x => x.Resource.Value == member.Resource)?.Credential;
             if (expected is null || expected.Id != member.Staged || expected.Reference.SecretId.ToString() != member.Secret.ToString() ||
                 expected.Reference.SecretVersionId.ToString() != member.Version.ToString() ||
-                !await db.ProtectedApplicationCredentials.AsNoTracking().AnyAsync(x => x.Id == member.Staged && x.Environment == source.EnvironmentRecordId &&
-                    x.Application == source.ApplicationRecordId && x.Resource == member.Resource && x.Secret == member.Secret && x.Version == member.Version && x.ConfirmedReceipt == row.Id, token)) return null;
+                !await db.ProtectedApplicationCredentials.AsNoTracking().ReceiptAnyAsync(x => x.Id == member.Staged && x.Environment == source.EnvironmentRecordId &&
+                    x.Application == source.ApplicationRecordId && x.Resource == member.Resource && x.Secret == member.Secret && x.Version == member.Version && x.ConfirmedReceipt == row.Id, asynchronous, token)) return null;
             var definition = new SecretDefinition(new SecretOwner.Resource(new(inputs.Environment, inputs.Revision.ApplicationRecordId,
                 ManifestLocalId.Create(member.Resource))), SecretPurpose.ApplicationLogin);
-            var secret = await db.Secrets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == member.Secret, token);
+            var secret = await db.Secrets.AsNoTracking().ReceiptSingleAsync(x => x.Id == member.Secret, asynchronous, token);
             if (secret is null || !SecretRowMapping.Matches(definition, secret) || secret.CurrentVersionId != member.Version ||
-                !await db.SecretVersions.AnyAsync(x => x.Id == member.Version && x.SecretId == member.Secret &&
-                    x.ProtectionFormat == PlaintextProtectionFormat.Name && x.FormatVersion == PlaintextProtectionFormat.Version, token)) return null;
+                !await db.SecretVersions.ReceiptAnyAsync(x => x.Id == member.Version && x.SecretId == member.Secret &&
+                    x.ProtectionFormat == PlaintextProtectionFormat.Name && x.FormatVersion == PlaintextProtectionFormat.Version, asynchronous, token)) return null;
         }
         foreach (var reservation in document.Reservations)
         {
             if (group.Mode == ResourceAcquisitionMode.Reference)
             {
                 var association = document.Associations.Single(a => a.Resource == reservation.Resource).Management;
-                if (!await db.ResourceIdentityClaims.AsNoTracking().AnyAsync(x => x.Provider == reservation.Provider && x.Namespace == reservation.Namespace &&
-                    x.Value == reservation.Value && x.Association == association, token)) return null;
+                var sharing = graph.Nodes.First(x => x.ResourceId.Value == reservation.Resource).Sharing;
+                var sharingJson = sharing is null ? null : ReferenceSharingAuthorizationCodec.Encode(sharing);
+                if (!await db.ResourceIdentityClaims.AsNoTracking().ReceiptAnyAsync(x => x.Provider == reservation.Provider && x.Namespace == reservation.Namespace &&
+                    x.Value == reservation.Value && x.Association == association && x.SharingJson == sharingJson, asynchronous, token)) return null;
             }
-            else if (!await db.ProviderResourceReservations.AsNoTracking().AnyAsync(x => x.ProviderInstanceId == reservation.Provider &&
+            else if (!await db.ProviderResourceReservations.AsNoTracking().ReceiptAnyAsync(x => x.ProviderInstanceId == reservation.Provider &&
                 x.EnvironmentRecordId == source.EnvironmentRecordId && x.ApplicationRecordId == source.ApplicationRecordId && x.ResourceLocalId == reservation.Resource &&
-                x.Namespace == reservation.Namespace && x.Value == reservation.Value, token)) return null;
+                x.Namespace == reservation.Namespace && x.Value == reservation.Value, asynchronous, token)) return null;
         }
         return new(row.Id, new(document.EvidenceFormat, document.EvidenceJson), operations);
     }
+}
+
+// The synchronous identity writer uses the identical historical proof without asynchronous I/O.
+internal static class ReceiptProofQueries
+{
+    internal static Task<T?> ReceiptSingleAsync<T>(this IQueryable<T> query, bool asynchronous, CancellationToken token) where T : class =>
+        asynchronous ? query.SingleOrDefaultAsync(token) : Task.FromResult(query.SingleOrDefault());
+    internal static Task<T?> ReceiptSingleAsync<T>(this IQueryable<T> query, System.Linq.Expressions.Expression<Func<T, bool>> predicate,
+        bool asynchronous, CancellationToken token) where T : class =>
+        asynchronous ? query.SingleOrDefaultAsync(predicate, token) : Task.FromResult(query.SingleOrDefault(predicate));
+    internal static Task<bool> ReceiptAnyAsync<T>(this IQueryable<T> query, System.Linq.Expressions.Expression<Func<T, bool>> predicate,
+        bool asynchronous, CancellationToken token) =>
+        asynchronous ? query.AnyAsync(predicate, token) : Task.FromResult(query.Any(predicate));
 }
