@@ -23,12 +23,16 @@ ADR defines required extensions; it does not claim upstream Reference or Provide
 status support already exists. Existing `provider check` and alias-switch
 preflight must not be relabeled as the new status operation.
 
-The bounded [#275-A kernel](../development/275-reference-kernel.md) implements
+The bounded [#275-A/B kernel](../development/275-reference-kernel.md) implements
 per-Resource acquisition, frozen homogeneous observation groups, common Import/Reference
-acceptance, conflict-safe catalog claims and separate historical/active association
-proof. Its Reference adapter is test-only. No production Reference intake, secret
-delivery, sharing or removal capability is registered by that kernel; their accepted
-requirements and outstanding decisions below are not claimed implemented.
+acceptance and separate historical/active association proof. Explicit non-secret
+sharing uses the same generic claim relation and Provider-row locks: each peer
+has its own frozen adapter-authorized decision, identity and verification evidence,
+and both exact registered contracts must accept compatibility. Default and
+exclusive conflicts remain. Its Reference adapter and sharing registration are
+test-only. Production Reference intake, shared-secret purpose/delivery authority,
+renderer delivery, removal/reintroduction and Provider status remain outside this
+implementation. This boundary does not claim umbrella #275 complete.
 
 ## Decisions
 

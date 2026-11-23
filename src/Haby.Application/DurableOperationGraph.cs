@@ -29,6 +29,7 @@ public sealed record DurableOperationNode(OperationId Id, ManifestLocalId Resour
     public IReadOnlyList<OperationOutputRef> OutputReferences { get; init; } = [];
     public bool RequiresExternalOutput { get; init; }
     public ExternalOperationOutputIdentity? RequiredOutput { get; init; }
+    public ReferenceSharingAuthorization? Sharing { get; init; }
 }
 
 /// <summary>Validated, defensively copied and canonically ordered immutable graph.</summary>
@@ -154,6 +155,8 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
     {
         inputs.Validate();
         ValidateObservationGroups();
+        if (Nodes.GroupBy(x => x.ResourceId).Any(g => g.Select(x => x.Sharing).Distinct().Count() != 1))
+            throw new InvalidDataException("A Resource requires one exact sharing authorization.");
         if (!Acquisitions.Equals(inputs.Acquisitions)) throw new InvalidDataException("Acquisition set differs from accepted graph.");
         if (!Equals(Import, inputs.Import) || Import is not null && (Baseline is not null || ReusedResources.Count != 0 || RetainedResources.Count != 0))
             throw new InvalidDataException("Import intent does not match the accepted graph.");
@@ -162,6 +165,10 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
             throw new InvalidDataException("Graph Resource coverage does not match the exact input set.");
         foreach (var node in Nodes)
         {
+            if (node.Sharing?.Request != inputs.Acquisitions.Resource(node.ResourceId).SharingRequest ||
+                node.Sharing is not null && node.Action.Admission.Mode != ResourceAcquisitionMode.Reference)
+                throw new InvalidDataException("Sharing authorization differs from accepted acquisition.");
+            if (node.Sharing is not null) _ = ReferenceSharingAuthorizationCodec.Encode(node.Sharing);
             var provider = inputs.Providers.Resource(node.ResourceId);
             if (node.Action.Admission.Mode != Acquisitions.Resource(node.ResourceId).Mode ||
                 node.Action.Admission.Mode != ResourceAcquisitionMode.Provision && (!node.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(node)))
@@ -185,7 +192,7 @@ public static class DurableOperationGraphCodec
     public static string Encode(DurableOperationGraph graph)
     {
         graph.ValidateObservationGroups();
-        return JsonSerializer.Serialize(new GraphDocument(7,
+        return JsonSerializer.Serialize(new GraphDocument(8,
         graph.Nodes.Select(n => new NodeDocument(n.Id.Value, n.ResourceId.Value,
             n.Action.Admission.ResourceContract.Value, n.Action.Admission.ProviderKind.Value,
             n.Action.Admission.ConfigurationContract.Value, n.Action.Admission.ImplementationId.Value,
@@ -193,7 +200,7 @@ public static class DurableOperationGraphCodec
             n.References.ConfigurationRevision.Value, n.Input.Format, n.Input.Json,
             n.Dependencies.Select(d => d.Value).ToArray(), n.OutputReferences.Select(r =>
                 new OutputRefDocument(r.ProducerOperationId.Value, r.OutputContract, r.OutputKey)).ToArray(), n.RequiresExternalOutput,
-            n.RequiredOutput is { } required ? new(n.Id.Value, required.Contract, required.Key) : null, (int)n.Action.Admission.Mode)).ToArray(),
+            n.RequiredOutput is { } required ? new(n.Id.Value, required.Contract, required.Key) : null, (int)n.Action.Admission.Mode, n.Sharing)).ToArray(),
         graph.ReusedResources.Count == 0 ? null : graph.ReusedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, r.Reintroduced)).ToArray(),
         graph.Baseline is { } b ? new BaselineDocument(b.Deployment.ToString(), b.Generation, b.Fingerprint) : null,
         graph.RetainedResources.Count == 0 ? null : graph.RetainedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, false)).ToArray(), graph.Retirement?.Document, graph.WorkloadUpdate?.Document, ResourceImportIntentCodec.Encode(graph.Import), ResourceAcquisitionIntentCodec.Encode(graph.Acquisitions),
@@ -206,7 +213,7 @@ public static class DurableOperationGraphCodec
         {
             if (Encoding.UTF8.GetByteCount(json) > 2097152) throw new InvalidDataException("Operation graph exceeds bound.");
             var document = JsonSerializer.Deserialize(json, GraphJsonContext.Default.GraphDocument);
-            if (document is null || document.Version != 7 || document.Nodes is null || document.Retirement is not null && document.WorkloadUpdate is not null)
+            if (document is null || document.Version != 8 || document.Nodes is null || document.Retirement is not null && document.WorkloadUpdate is not null)
                 throw new InvalidDataException("Unsupported operation graph format.");
             var graph = new DurableOperationGraph(document.Nodes.Select(n => new DurableOperationNode(OperationId.Create(n.Id),
                 ManifestLocalId.Create(n.Resource), new(new(ResourceTypeId.Create(n.ResourceContract),
@@ -219,6 +226,7 @@ public static class DurableOperationGraphCodec
             {
                 OutputReferences = n.Outputs.Select(r => new OperationOutputRef(OperationId.Create(r.Producer), r.Contract, r.Key)).ToArray(),
                 RequiresExternalOutput = n.RequiresExternalOutput,
+                Sharing = n.Sharing,
                 RequiredOutput = n.RequiredOutput is { } required && required.Producer == n.Id ? new(required.Contract, required.Key) :
                     n.RequiredOutput is null ? null : throw new InvalidDataException("Wrong accepted output producer.")
             }),
@@ -265,7 +273,7 @@ internal sealed record ReuseDocument(string Resource, Guid Management, long Gene
 internal sealed record BaselineDocument(string Deployment, long Generation, string Fingerprint);
 internal sealed record NodeDocument(string Id, string Resource, string ResourceContract, string Kind,
     string Configuration, string Implementation, string Action, string Environment, string Provider,
-    long Revision, string Format, string Input, string[] Dependencies, OutputRefDocument[] Outputs, bool RequiresExternalOutput, OutputRefDocument? RequiredOutput, int Mode);
+    long Revision, string Format, string Input, string[] Dependencies, OutputRefDocument[] Outputs, bool RequiresExternalOutput, OutputRefDocument? RequiredOutput, int Mode, ReferenceSharingAuthorization? Sharing);
 internal sealed record OutputRefDocument(string Producer, string Contract, string Key);
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false, RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true)]
 [JsonSerializable(typeof(GraphDocument))]

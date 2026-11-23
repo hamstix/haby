@@ -25,7 +25,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
     private static readonly ManifestLocalId Imported = ManifestLocalId.Create("imported");
     private static readonly ManifestLocalId Referenced = ManifestLocalId.Create("referenced");
     private static DurableActionExecutionKey Key(ResourceAcquisitionMode mode) => new(new(Type, Provider) { Mode = mode }, OperationContractId.Create("test.verify/v1"));
-    public sealed record CapabilityInput(string Identity);
+    public sealed record CapabilityInput(string Identity, string? SharingClass = null);
     private sealed class Boundary
     {
         public int Observations;
@@ -34,7 +34,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         public CancellationTokenSource? CancelBeforeAcceptance;
     }
     private sealed record Prepared(DurablePlan Plan, DurableChangeSetCommit Commit, EnvironmentRecordId Environment, ProviderInstanceId Provider);
-    private static DurableActionPayload Payload(string identity) => new("test.capability-input/v1", JsonSerializer.Serialize(new CapabilityInput(identity), CapabilityJsonContext.Default.CapabilityInput));
+    private static DurableActionPayload Payload(string identity, string? sharingClass = null) => new("test.capability-input/v1", JsonSerializer.Serialize(new CapabilityInput(identity, sharingClass), CapabilityJsonContext.Default.CapabilityInput));
     private static CapabilityInput? Decode(DurableActionPayload input)
     {
         if (input.Format != "test.capability-input/v1") return null;
@@ -45,7 +45,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         }
         catch (JsonException) { return null; }
     }
-    private static ServiceProvider Services(string connection, Boundary boundary, bool referenceExecutor = true, bool referenceEvidence = true, IInterceptor? interceptor = null, bool observationCapability = true, bool referenceIdentityCapability = true)
+    private static ServiceProvider Services(string connection, Boundary boundary, bool referenceExecutor = true, bool referenceEvidence = true, IInterceptor? interceptor = null, bool observationCapability = true, bool referenceIdentityCapability = true, bool sharingCapability = true, string sharingContract = "test.reference-sharing/v1", bool sharingAvailable = true)
     {
         var services = new ServiceCollection().AddSingleton<TimeProvider>(new Clock()).AddSingleton(ConfigurationRenderingCatalog.Empty)
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
@@ -65,17 +65,18 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
             if (mode != ResourceAcquisitionMode.Reference || referenceEvidence)
                 services.AddSingleton<IExternalOperationOutputContract>(mode == ResourceAcquisitionMode.Reference && !observationCapability
                     ? new OutputOnlyEvidence(mode) : mode == ResourceAcquisitionMode.Reference && !referenceIdentityCapability
-                        ? new ObservationOnlyEvidence(mode) : new Evidence(mode));
+                        ? new ObservationOnlyEvidence(mode) : mode == ResourceAcquisitionMode.Reference && !sharingCapability
+                            ? new ReferenceOnlyEvidence(mode) : new Evidence(mode, sharingContract, sharingAvailable));
         }
         return services.BuildServiceProvider();
     }
     private static async Task<Prepared> PrepareAsync(string connection, Boundary boundary, string application = "reference-app",
-        Prepared? scope = null, bool mixed = true, string identity = "shared-service", ResourceAcquisitionMode singleMode = ResourceAcquisitionMode.Reference)
+        Prepared? scope = null, bool mixed = true, string identity = "shared-service", ResourceAcquisitionMode singleMode = ResourceAcquisitionMode.Reference, string? sharingClass = null, bool secondReference = false, bool newProvider = false)
     {
         await using var services = Services(connection, boundary);
         if (scope is null) await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         var environment = scope?.Environment ?? await services.GetRequiredService<ISecretStore>().CreateEnvironmentAsync(EnvironmentId.Create("pilot"), default);
-        var provider = scope?.Provider;
+        var provider = newProvider ? null : scope?.Provider;
         if (provider is null)
         {
             var configurations = services.GetRequiredService<IProviderConfigurationStore>();
@@ -83,13 +84,16 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
             provider = await configurations.CreateInstanceAsync(environment, config, default);
             await configurations.AddRevisionAsync(environment, provider, ProviderConfigurationRevisionNumber.Create(1), config, default);
             Assert.Equal(ProviderAliasChangeOutcome.Changed, (await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environment,
-                ProviderAlias.Create("sample.primary"), null, new(provider, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
+                ProviderAlias.Create("sample.primary"), newProvider && scope is not null ? new(scope.Provider, scope.Plan.Inputs.Providers.Resource(Referenced).Configuration) : null,
+                new(provider, ProviderConfigurationRevisionNumber.Create(1)), "tester", default)).Outcome);
         }
         var resources = mixed ? "\"imported\":{\"type\":\"test.capability/v1\",\"providerRef\":\"sample.primary\",\"properties\":{}}," : "";
+        if (secondReference) resources += "\"shared-peer\":{\"type\":\"test.capability/v1\",\"providerRef\":\"sample.primary\",\"properties\":{}},";
         var bytes = Encoding.UTF8.GetBytes("{\"applicationVersion\":\"v1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"" + application + "\"},\"spec\":{\"resources\":{" + resources + "\"referenced\":{\"type\":\"test.capability/v1\",\"providerRef\":\"sample.primary\",\"properties\":{}}}}}}");
         var revision = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(services.GetRequiredService<IManifestImportStore>(),
             new([new(Type, "{\"type\":\"object\",\"additionalProperties\":false}")], [], [], []), TimeProvider.System).ExecuteAsync(bytes, "tester")).ManifestRevisionRef;
-        var requests = new List<ResourceAcquisitionRequest> { new(Referenced, singleMode, Payload(identity)) };
+        var requests = new List<ResourceAcquisitionRequest> { new(Referenced, singleMode, Payload(identity, sharingClass)) { SharingRequest = sharingClass is null ? null : SharingRequest(sharingClass) } };
+        if (secondReference) requests.Add(new(ManifestLocalId.Create("shared-peer"), ResourceAcquisitionMode.Reference, Payload(identity, sharingClass)) { SharingRequest = sharingClass is null ? null : SharingRequest(sharingClass) });
         if (mixed) requests.Add(new(Imported, ResourceAcquisitionMode.ImportUseAndRetain, Payload("imported-service")));
         var planner = Assert.IsType<PostgreSqlDurableDeploymentPlanner>(services.GetRequiredService<IDurableDeploymentPlanner>());
         var ordinary = (await planner.CreateChangeSetAsync(environment, revision.ApplicationRecordId, revision, new DeploymentPrecondition.ExpectedAbsence(), "tester", default)).ChangeSet!;
@@ -121,7 +125,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
             members.Add(new(key, attempt!.Value, new(Output.Contract, Output.Key, node.Input.Json)));
         }
         var payload = item.Plan.Inputs.Acquisitions.Resource(resource).Input!;
-        return new(members, [], [Identity(item, resource, Decode(payload)!.Identity)], new("test.observed/v1", payload.Json));
+        return new(members, [], [Identity(item, resource, Decode(payload)!.Identity)], Observation(new(item.Plan.Inputs, item.Plan.Graph, item.Plan.Graph.Nodes.First(x => x.ResourceId == resource), item.Plan.Inputs.Configuration!.Manifest.Spec)));
     }
     private static async Task<ExternalOperationOutput?> ReadAsync(ServiceProvider services, Prepared item, string operation = "referenced-first", ManagedResourceKey? owner = null) =>
         await services.GetRequiredService<IConfigurationOutputEvidence>().ReadAsync(Operation(item, operation), owner ?? new(item.Environment,
@@ -516,7 +520,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
             token.ThrowIfCancellationRequested();
             var identity = Decode(operation.Node.Input)!.Identity;
             var request = new ResourceObservationAcceptance(confirmations, [], [new(accepted.Provider.Instance, accepted.Inputs.Environment,
-                accepted.Inputs.Revision.ApplicationRecordId, operation.Node.ResourceId, "test.service", identity)], new("test.observed/v1", operation.Node.Input.Json));
+                accepted.Inputs.Revision.ApplicationRecordId, operation.Node.ResourceId, "test.service", identity)], Observation(accepted));
             var result = await acceptance.CompleteAsync(request, DateTimeOffset.UtcNow, token);
             Assert.True(result.IsSuccess, result.Status.ToString());
             return new(result.IsSuccess ? DurableExecutionOutcome.Succeeded : DurableExecutionOutcome.InputUnavailable, await journal.FindAsync(operation.Key, token));
@@ -535,16 +539,57 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => new Evidence(mode).Validate(node, output);
         public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) => new Evidence(mode).ValidateObservationEvidence(accepted, evidence);
     }
-    private sealed class Evidence(ResourceAcquisitionMode mode) : IResourceReferenceOutputContract
+    private sealed class ReferenceOnlyEvidence(ResourceAcquisitionMode mode) : IResourceReferenceOutputContract
     {
+        private readonly Evidence evidence = new(mode);
+        public DurableActionExecutionKey Producer => evidence.Producer;
+        public ExternalOperationOutputIdentity Identity => evidence.Identity;
+        public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => evidence.Validate(node, output);
+        public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload payload) => evidence.ValidateObservationEvidence(accepted, payload);
+        public bool ValidateReferenceIdentities(AcceptedOperation accepted, IReadOnlyList<ProviderResourceReservation> identities) => evidence.ValidateReferenceIdentities(accepted, identities);
+    }
+    private sealed class Evidence(ResourceAcquisitionMode mode, string sharingContract = "test.reference-sharing/v1", bool sharingAvailable = true) : IResourceReferenceSharingContract
+    {
+        public string SharingContract => sharingContract;
+        public DurableActionPayload? AuthorizeSharing(DurableOperationNode operation, DurableActionPayload request)
+        {
+            if (!sharingAvailable || request.Format != "test.sharing-request/v1" || mode != ResourceAcquisitionMode.Reference) return null;
+            try
+            {
+                var value = JsonSerializer.Deserialize(request.Json, CapabilityJsonContext.Default.SharingRequestDocument);
+                var input = Decode(operation.Input);
+                return value?.Group is { Length: > 0 and <= 64 } && value.Group == input?.SharingClass
+                    ? new("test.sharing-decision/v1", JsonSerializer.Serialize(new SharingDecisionDocument(value.Group, input.Identity,
+                        operation.References.ConfigurationRevision.Value), CapabilityJsonContext.Default.SharingDecisionDocument)) : null;
+            }
+            catch (JsonException) { return null; }
+        }
+        public bool AreCompatible(ReferenceSharingParticipant own, ReferenceSharingParticipant peer)
+        {
+            var left = JsonSerializer.Deserialize(own.Authorization.Decision.Json, CapabilityJsonContext.Default.SharingDecisionDocument);
+            var right = JsonSerializer.Deserialize(peer.Authorization.Decision.Json, CapabilityJsonContext.Default.SharingDecisionDocument);
+            return left is not null && right is not null && (left.Group == "open" || left.Group == right.Group) && left.Identity == right.Identity &&
+                own.Identity.Namespace == "test.service" && peer.Identity.Namespace == "test.service" &&
+                own.Identity.Value == left.Identity && peer.Identity.Value == right.Identity;
+        }
         public DurableActionExecutionKey Producer => Key(mode);
         public ExternalOperationOutputIdentity Identity => Output;
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => node.Action == Producer && output.Contract == Output.Contract && output.Key == Output.Key && output.Payload == node.Input.Json && Decode(node.Input) is not null;
-        public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) => accepted.Node.Action == Producer && evidence.Format == "test.observed/v1" && evidence.Json == accepted.Node.Input.Json;
+        public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) => accepted.Node.Action == Producer && evidence == Observation(accepted);
         public bool ValidateReferenceIdentities(AcceptedOperation accepted, IReadOnlyList<ProviderResourceReservation> identities) => identities.Count == 1 &&
             identities[0] == new ProviderResourceReservation(accepted.Provider.Instance, accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId,
                 accepted.Node.ResourceId, "test.service", Decode(accepted.Node.Input)!.Identity);
     }
+    internal sealed record SharingObservationDocument(string Environment, string Application, string Resource, string Provider, long Revision, string Identity);
+    private static DurableActionPayload Observation(AcceptedOperation accepted) => accepted.Node.Sharing is null
+        ? new("test.observed/v1", accepted.Node.Input.Json)
+        : new("test.shared-observed/v1", JsonSerializer.Serialize(new SharingObservationDocument(accepted.Inputs.Environment.ToString(),
+            accepted.Inputs.Revision.ApplicationRecordId.ToString(), accepted.Node.ResourceId.Value, accepted.Provider.Instance.ToString(),
+            accepted.Provider.Configuration.Value, Decode(accepted.Node.Input)!.Identity), CapabilityJsonContext.Default.SharingObservationDocument));
+    internal sealed record SharingRequestDocument(string Group);
+    internal sealed record SharingDecisionDocument(string Group, string Identity, long Revision);
+    private static DurableActionPayload SharingRequest(string group) => new("test.sharing-request/v1",
+        JsonSerializer.Serialize(new SharingRequestDocument(group), CapabilityJsonContext.Default.SharingRequestDocument));
     private sealed class Clock : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(2026, 11, 23, 0, 0, 0, TimeSpan.Zero);
@@ -555,5 +600,8 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
     }
     [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false, RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true)]
     [JsonSerializable(typeof(CapabilityInput))]
+    [JsonSerializable(typeof(SharingRequestDocument))]
+    [JsonSerializable(typeof(SharingObservationDocument))]
+    [JsonSerializable(typeof(SharingDecisionDocument))]
     internal partial class CapabilityJsonContext : JsonSerializerContext;
 }

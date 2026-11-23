@@ -6,7 +6,10 @@ namespace Haby.Application;
 
 /// <summary>One exact Resource's acquisition. Payloads are closed adapter contracts, never material.</summary>
 public sealed record ResourceAcquisitionRequest(ManifestLocalId Resource, ResourceAcquisitionMode Mode,
-    DurableActionPayload? Input = null, ProtectedCredentialReference? Credential = null);
+    DurableActionPayload? Input = null, ProtectedCredentialReference? Credential = null)
+{
+    public DurableActionPayload? SharingRequest { get; init; }
+}
 
 public sealed class ResourceAcquisitionIntent : IEquatable<ResourceAcquisitionIntent>
 {
@@ -18,6 +21,7 @@ public sealed class ResourceAcquisitionIntent : IEquatable<ResourceAcquisitionIn
                 x.Mode == ResourceAcquisitionMode.Provision && (x.Input is not null || x.Credential is not null) ||
                 x.Mode != ResourceAcquisitionMode.Provision && (x.Input is null || x.Input.Format is not { Length: > 0 and <= 128 } || x.Input.Json is not { Length: > 0 and <= 65536 }) ||
                 x.Mode != ResourceAcquisitionMode.ImportUseAndRetain && x.Credential is not null ||
+                x.SharingRequest is not null && (x.Mode != ResourceAcquisitionMode.Reference || !ReferenceSharingAuthorizationCodec.IsBounded(x.SharingRequest)) ||
                 x.Credential is { } credential && (credential.Id == Guid.Empty || credential.Reference is null)) ||
             values.Select(x => x.Resource).Distinct().Count() != values.Length)
             throw new ArgumentException("Invalid Resource acquisition set.");
@@ -44,8 +48,8 @@ public static class ResourceAcquisitionIntentCodec
 {
     public static string Encode(ResourceAcquisitionIntent intent)
     {
-        var json = JsonSerializer.Serialize(new AcquisitionDocument(1, intent.Resources.Select(x => new AcquisitionMember(x.Resource.Value, (int)x.Mode,
-            x.Input?.Format, x.Input?.Json, x.Credential?.Id, x.Credential?.Reference.SecretId.ToString(), x.Credential?.Reference.SecretVersionId.ToString())).ToArray()), AcquisitionJsonContext.Default.AcquisitionDocument);
+        var json = JsonSerializer.Serialize(new AcquisitionDocument(2, intent.Resources.Select(x => new AcquisitionMember(x.Resource.Value, (int)x.Mode,
+            x.Input?.Format, x.Input?.Json, x.Credential?.Id, x.Credential?.Reference.SecretId.ToString(), x.Credential?.Reference.SecretVersionId.ToString(), x.SharingRequest)).ToArray()), AcquisitionJsonContext.Default.AcquisitionDocument);
         if (System.Text.Encoding.UTF8.GetByteCount(json) > 1048576) throw new InvalidDataException("Acquisition set exceeds bound.");
         return json;
     }
@@ -55,18 +59,19 @@ public static class ResourceAcquisitionIntentCodec
         {
             if (System.Text.Encoding.UTF8.GetByteCount(json) > 1048576) throw new InvalidDataException("Acquisition set exceeds bound.");
             var document = JsonSerializer.Deserialize(json, AcquisitionJsonContext.Default.AcquisitionDocument);
-            if (document?.Version != 1) throw new InvalidDataException("Unsupported acquisition format.");
+            if (document?.Version != 2) throw new InvalidDataException("Unsupported acquisition format.");
             return new(document.Resources.Select(x => new ResourceAcquisitionRequest(ManifestLocalId.Create(x.Resource), (ResourceAcquisitionMode)x.Mode,
                 x.Format is null && x.Input is null ? null : new(x.Format!, x.Input!),
                 x.Credential is null && x.Secret is null && x.Version is null ? null :
-                new(x.Credential ?? throw new InvalidDataException(), new(SecretId.Parse(x.Secret!), SecretVersionId.Parse(x.Version!))))));
+                new(x.Credential ?? throw new InvalidDataException(), new(SecretId.Parse(x.Secret!), SecretVersionId.Parse(x.Version!))))
+            { SharingRequest = x.SharingRequest }));
         }
         catch (Exception e) when (e is JsonException or ArgumentException or NullReferenceException or InvalidOperationException)
         { throw new InvalidDataException("Invalid acquisition set.", e); }
     }
 }
 internal sealed record AcquisitionDocument(int Version, AcquisitionMember[] Resources);
-internal sealed record AcquisitionMember(string Resource, int Mode, string? Format, string? Input, Guid? Credential, string? Secret, string? Version);
+internal sealed record AcquisitionMember(string Resource, int Mode, string? Format, string? Input, Guid? Credential, string? Secret, string? Version, DurableActionPayload? SharingRequest);
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false, RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true)]
 [JsonSerializable(typeof(AcquisitionDocument))]
 internal partial class AcquisitionJsonContext : JsonSerializerContext;

@@ -12,6 +12,7 @@ internal sealed class ResourceIdentityClaimRow
     public Guid Application { get; set; }
     public string Resource { get; set; } = "";
     public Guid Association { get; set; }
+    public string? SharingJson { get; set; }
 }
 
 public sealed partial class ManifestCatalogDbContext
@@ -22,7 +23,7 @@ public sealed partial class ManifestCatalogDbContext
         model.Entity<ResourceIdentityClaimRow>(e =>
         {
             e.ToTable("resource_identity_claims");
-            e.HasKey(x => new { x.Provider, x.Namespace, x.Value });
+            e.HasKey(x => new { x.Provider, x.Namespace, x.Value, x.Association });
             e.Property(x => x.Provider).HasColumnName("provider_instance_id");
             e.Property(x => x.Namespace).HasColumnName("namespace").HasMaxLength(128);
             e.Property(x => x.Value).HasColumnName("value").HasMaxLength(512);
@@ -30,6 +31,7 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.Application).HasColumnName("application_record_id");
             e.Property(x => x.Resource).HasColumnName("resource_local_id").HasMaxLength(63);
             e.Property(x => x.Association).HasColumnName("association_id");
+            e.Property(x => x.SharingJson).HasColumnName("sharing_json");
             e.HasIndex(x => new { x.Provider, x.Environment, x.Application, x.Resource, x.Namespace }).IsUnique();
             e.HasOne<ProviderInstanceRow>().WithMany().HasForeignKey(x => x.Provider).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<ResourceManagementRow>().WithMany().HasForeignKey(x => x.Association).OnDelete(DeleteBehavior.Restrict);
@@ -59,21 +61,43 @@ public sealed partial class ManifestCatalogDbContext
             var associationQuery = ResourceManagement.AsNoTracking().Where(x => x.Id == claim.Association && x.Environment == claim.Environment &&
                 x.Application == claim.Application && x.Resource == claim.Resource && x.Origin == ResourceOrigin.Referenced && x.Authority == ResourceLifecycleAuthority.ConsumptionOnly);
             var providerQuery = ProviderInstances.AsNoTracking().Where(x => x.Id == claim.Provider && x.EnvironmentRecordId == claim.Environment);
-            if (!(asynchronous ? await associationQuery.AnyAsync(token) && await providerQuery.AnyAsync(token) : associationQuery.Any() && providerQuery.Any()))
+            var association = await SharingSingleAsync(associationQuery, asynchronous, token);
+            if (association is null || !(asynchronous ? await providerQuery.AnyAsync(token) : providerQuery.Any()))
                 throw new InvalidOperationException("Identity has no exact Reference authority.");
+            var source = await SharingSingleAsync(DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == association.Deployment &&
+                x.Generation == association.SourceGeneration && x.EnvironmentRecordId == claim.Environment && x.ApplicationRecordId == claim.Application), asynchronous, token);
+            var original = source?.Inputs();
+            var resource = Haby.Domain.ManifestLocalId.Create(claim.Resource);
+            if (original is null || original.Acquisitions.Resource(resource).Mode != ResourceAcquisitionMode.Reference ||
+                original.Providers.Resource(resource).Instance.ToString() != claim.Provider.ToString())
+                throw new InvalidOperationException("Identity differs from its own pinned Provider association.");
             var conflicts = ProviderResourceReservations.AsNoTracking().Where(x => x.ProviderInstanceId == claim.Provider && x.Namespace == claim.Namespace &&
                 (x.Value == claim.Value || x.EnvironmentRecordId == claim.Environment && x.ApplicationRecordId == claim.Application && x.ResourceLocalId == claim.Resource));
             var duplicates = ResourceIdentityClaims.AsNoTracking().Where(x => x.Provider == claim.Provider && x.Namespace == claim.Namespace &&
                 (x.Value == claim.Value || x.Environment == claim.Environment && x.Application == claim.Application && x.Resource == claim.Resource));
-            if ((asynchronous ? await conflicts.AnyAsync(token) || await duplicates.AnyAsync(token) : conflicts.Any() || duplicates.Any()) ||
+            if ((asynchronous ? await conflicts.AnyAsync(token) : conflicts.Any()) ||
                 reservations.Any(x => x.ProviderInstanceId == claim.Provider && x.Namespace == claim.Namespace && (x.Value == claim.Value || x.EnvironmentRecordId == claim.Environment && x.ApplicationRecordId == claim.Application && x.ResourceLocalId == claim.Resource)))
-                throw new InvalidOperationException("Identity association conflicts.");
+                throw new ResourceIdentityConflictException();
+            var own = claim.SharingJson is null ? null : await ReadSharingParticipantAsync(claim, true, asynchronous, token);
+            if (claim.SharingJson is not null && own is null) throw new ResourceIdentityConflictException();
+            var stored = asynchronous ? await duplicates.ToArrayAsync(token) : duplicates.ToArray();
+            foreach (var peer in stored.Concat(claims.Where(x => !ReferenceEquals(x, claim) && x.Provider == claim.Provider && x.Namespace == claim.Namespace &&
+                (x.Value == claim.Value || x.Environment == claim.Environment && x.Application == claim.Application && x.Resource == claim.Resource))))
+            {
+                if (peer.Environment == claim.Environment && peer.Application == claim.Application && peer.Resource == claim.Resource ||
+                    own is null || peer.SharingJson is null || peer.Environment != claim.Environment)
+                    throw new ResourceIdentityConflictException();
+                var other = await ReadSharingParticipantAsync(peer, claims.Contains(peer), asynchronous, token);
+                if (other is null || !CompatibleSharing(own, other)) throw new ResourceIdentityConflictException();
+            }
         }
         foreach (var reservation in reservations)
         {
             var conflicts = ResourceIdentityClaims.AsNoTracking().Where(x => x.Provider == reservation.ProviderInstanceId && x.Namespace == reservation.Namespace &&
                 (x.Value == reservation.Value || x.Environment == reservation.EnvironmentRecordId && x.Application == reservation.ApplicationRecordId && x.Resource == reservation.ResourceLocalId));
-            if (asynchronous ? await conflicts.AnyAsync(token) : conflicts.Any()) throw new InvalidOperationException("Identity association conflicts.");
+            if (asynchronous ? await conflicts.AnyAsync(token) : conflicts.Any()) throw new ResourceIdentityConflictException();
         }
     }
 }
+
+internal sealed class ResourceIdentityConflictException() : InvalidOperationException("Identity association conflicts.");

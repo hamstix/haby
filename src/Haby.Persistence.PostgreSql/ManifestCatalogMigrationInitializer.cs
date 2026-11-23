@@ -62,6 +62,12 @@ public sealed class ManifestCatalogMigrationInitializer(IDbContextFactory<Manife
              await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
              await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
             throw new InvalidOperationException("Superseded acquisition history requires an explicitly initialized fresh catalog; external resources remain unchanged.");
+        var sharingBaseLength = Array.FindIndex(expected, x => x.EndsWith("_ReferenceSharingAssociations", StringComparison.Ordinal)) + 1;
+        if (applied.Length > 0 && applied.Length < sharingBaseLength &&
+            (await context.DurableChangeSets.AsNoTracking().AnyAsync(cancellationToken) ||
+             await context.DurablePlans.AsNoTracking().AnyAsync(cancellationToken) ||
+             await context.DeploymentGenerations.AsNoTracking().AnyAsync(cancellationToken)))
+            throw new InvalidOperationException("Superseded Reference authorization requires an explicitly initialized fresh catalog; external resources remain unchanged.");
         await context.Database.MigrateAsync(cancellationToken);
         if (await context.DurablePlans.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken) ||
             await context.DeploymentGenerations.AsNoTracking().AnyAsync(x => x.SnapshotFormatVersion != DurableInputStorage.Version, cancellationToken))

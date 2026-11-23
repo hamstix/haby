@@ -138,7 +138,9 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
                         Environment = source.EnvironmentRecordId,
                         Application = source.ApplicationRecordId,
                         Resource = reservation.ResourceLocalId.Value,
-                        Association = associations.Single(x => x.Resource == reservation.ResourceLocalId.Value).Id
+                        Association = associations.Single(x => x.Resource == reservation.ResourceLocalId.Value).Id,
+                        SharingJson = members.First(x => x.ResourceId == reservation.ResourceLocalId).Sharing is { } sharing
+                            ? ReferenceSharingAuthorizationCodec.Encode(sharing) : null
                     });
                     continue;
                 }
@@ -191,6 +193,7 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
                 var receipt = await confirm.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == Guid.Parse(first.DeploymentId.ToString()) && x.Generation == first.Generation.Value && x.Group == groupId, CancellationToken.None);
                 if (json is not null && receipt?.Document == json && await ResourceObservationReceiptIntegrity.ReadAsync(confirm, first, CancellationToken.None) is not null)
                     return new(ResourceObservationAcceptanceStatus.Existing);
+                if (e is ResourceIdentityConflictException) return new(ResourceObservationAcceptanceStatus.Conflict);
                 foreach (var reservation in acceptance.Reservations)
                 {
                     var provider = Guid.Parse(reservation.ProviderInstanceId.ToString());

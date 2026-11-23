@@ -139,7 +139,7 @@ public sealed class DurableActionRegistry
     }
 
     public IDurableActionAdmissionHandler? Find(DurableActionAdmissionKey key) => admissions.GetValueOrDefault(key);
-    internal DurableOperationNode FreezeEvidence(DurableOperationNode node)
+    internal DurableOperationNode FreezeEvidence(DurableOperationNode node, DurablePlanningInputs inputs)
     {
         // Exact registered metadata wins while planning. Absence never writes a false
         // obligation over the typed planner's explicit declaration.
@@ -152,6 +152,14 @@ public sealed class DurableActionRegistry
         }
         if (outputIdentities.TryGetValue(node.Action, out var identity) && node.RequiredOutput != identity)
             throw new InvalidDataException("Planned evidence obligation disagrees with the exact output registration.");
+        var request = inputs.Acquisitions.Resource(node.ResourceId).SharingRequest;
+        if (request is null) return node with { Sharing = null };
+        if (node.Action.Admission.Mode != ResourceAcquisitionMode.Reference ||
+            outputContracts.GetValueOrDefault(node.Action) is not IResourceReferenceSharingContract sharing ||
+            sharing.AuthorizeSharing(node with { Sharing = null }, request) is not { } decision)
+            throw new InvalidDataException("Explicit Reference sharing capability is unavailable.");
+        node = node with { Sharing = new(sharing.SharingContract, request, decision) };
+        if (!ReferenceSharingAuthorizationCodec.Supports(node, sharing)) throw new InvalidDataException("Reference sharing authorization is invalid.");
         return node;
     }
     private bool SupportsRequiredEvidence(DurableActionExecutionKey key) => key.Admission.Mode switch
@@ -166,6 +174,7 @@ public sealed class DurableActionRegistry
         (!handler.RequiresExternalOutput || outputContracts.ContainsKey(key)) ? handler : null;
     internal bool MatchesEvidence(DurableOperationNode node) => Find(node.Action) is { } handler &&
         node.RequiresExternalOutput == handler.RequiresExternalOutput && node.RequiredOutput == handler.OutputIdentity &&
+        (node.Sharing is null || outputContracts.TryGetValue(node.Action, out var contract) && ReferenceSharingAuthorizationCodec.Supports(node, contract)) &&
         (node.RequiredOutput is null || outputIdentities.TryGetValue(node.Action, out var identity) && identity == node.RequiredOutput);
 
 }
@@ -268,7 +277,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
                 ? composer.Plan(spec, resource.Key, inputs, configuration)
                 : handler.Plan(resource.Key, resource.Value, inputs));
         }
-        var graph = new DurableOperationGraph(nodes.Select(registry.FreezeEvidence)) { Import = inputs.Import, Acquisitions = inputs.Acquisitions };
+        var graph = new DurableOperationGraph(nodes.Select(n => registry.FreezeEvidence(n, inputs))) { Import = inputs.Import, Acquisitions = inputs.Acquisitions };
         graph.ValidateReferences(inputs);
         if (!ValidateGraph(spec, provider, inputs, configuration, graph))
             throw new InvalidDataException("Graph ownership or contracts are inconsistent.");
@@ -305,7 +314,7 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
             return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
                 : handler.Plan(r.Key, r.Value, inputs);
         });
-        var graph = new DurableOperationGraph(nodes.Select(registry.FreezeEvidence), reused, baseline, retained) { Acquisitions = inputs.Acquisitions };
+        var graph = new DurableOperationGraph(nodes.Select(n => registry.FreezeEvidence(n, inputs)), reused, baseline, retained) { Acquisitions = inputs.Acquisitions };
         graph.ValidateReferences(inputs);
         if (!spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(reused.Select(r => r.Resource))) ||
             graph.Nodes.Any(n => !spec.Resources.TryGetValue(n.ResourceId, out var declared) ||

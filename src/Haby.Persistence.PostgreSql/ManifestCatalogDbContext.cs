@@ -4,8 +4,10 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Durable catalog schema, independent of manifest and domain objects.</summary>
 public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCatalogDbContext> options,
-    PostgreSqlReuseVerificationScopes? reuseVerificationScopes = null) : DbContext(options)
+    PostgreSqlReuseVerificationScopes? reuseVerificationScopes = null,
+    IEnumerable<Haby.Application.IExternalOperationOutputContract>? identityOutputContracts = null) : DbContext(options)
 {
+    private readonly Haby.Application.IExternalOperationOutputContract[] identityContracts = (identityOutputContracts ?? []).ToArray();
     internal PostgreSqlReuseVerificationScopes? ReuseVerificationScopes { get; } = reuseVerificationScopes;
     internal DbSet<ApplicationRow> Applications => Set<ApplicationRow>();
     internal DbSet<ManifestRevisionRow> Revisions => Set<ManifestRevisionRow>();
