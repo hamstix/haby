@@ -268,7 +268,9 @@ public sealed class OperatorImportRequestPersistenceTests(CatalogServerFixture f
         var binding = await Arrange(connection, false);
         using var password = Password();
         ProtectedCredentialReference staged;
-        DeploymentChangeSetId change;
+        var change = DeploymentChangeSetId.New();
+        string[] previousMigrations;
+        var created = DateTimeOffset.UtcNow;
         await using (var previous = Services(connection))
         {
             // Arrange the historical schema directly: current intake requires the new owner-reservation table.
@@ -288,22 +290,56 @@ public sealed class OperatorImportRequestPersistenceTests(CatalogServerFixture f
                 }
                 finally { Array.Clear(row.Material); }
             }
-            change = (await previous.GetRequiredService<IDurableDeploymentPlanner>().CreateImportChangeSetAsync(binding.Environment,
-                binding.Revision.ApplicationRecordId, binding.Revision, binding.Attach(staged), "previous-operator", default)).ChangeSet!.Id;
+            // Historical schema has no acquisition_intent_json; do not invoke the current planner.
+            await using var historical = await previous.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+            previousMigrations = (await historical.Database.GetAppliedMigrationsAsync()).ToArray();
+            var intent = ResourceImportIntentCodec.Encode(binding.Attach(staged));
+            await historical.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO deployment_change_sets
+                    (id, environment_record_id, application_record_id, revision_number, expected_absence, created_at, actor_id, import_intent_json)
+                VALUES ({Guid.Parse(change.ToString())}, {Guid.Parse(binding.Environment.ToString())},
+                    {Guid.Parse(binding.Revision.ApplicationRecordId.ToString())}, {binding.Revision.RevisionNumber.Value},
+                    {true}, {created}, {"previous-operator"}, {intent})
+                """);
         }
         await using (var migrate = Services(connection))
-            await migrate.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => migrate.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync());
+            Assert.Contains("fresh catalog", error.Message);
+        }
         await using (var verify = Services(connection))
         {
-            Assert.Equal(new(ProtectedCredentialStageStatus.Existing, staged), await verify.GetRequiredService<IProtectedApplicationCredentialIntake>()
-                .StageAsync(binding.RequestId, binding.CredentialOwner, password, default));
             await using var db = await verify.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-            var saved = await db.DurableChangeSets.AsNoTracking().SingleAsync();
-            Assert.Equal(Guid.Parse(change.ToString()), saved.Id);
-            Assert.Equal("previous-operator", saved.ActorId);
-            Assert.Equal(ResourceImportIntentCodec.Encode(binding.Attach(staged)), saved.ImportIntentJson);
+            Assert.Equal(previousMigrations, (await db.Database.GetAppliedMigrationsAsync()).ToArray());
+            var savedStage = await db.ProtectedApplicationCredentials.AsNoTracking().SingleAsync();
+            var material = password.CopyBytes();
+            try
+            {
+                Assert.True(material.AsSpan().SequenceEqual(savedStage.Material), "Staged material changed.");
+                Assert.Equal(binding.RequestId, savedStage.Request);
+                Assert.Equal(Guid.Parse(binding.Environment.ToString()), savedStage.Environment);
+                Assert.Equal(Guid.Parse(binding.Revision.ApplicationRecordId.ToString()), savedStage.Application);
+                Assert.Equal(binding.CredentialResource.Value, savedStage.Resource);
+                Assert.Equal(staged.Id, savedStage.Id);
+                Assert.Equal(staged.Reference.SecretId.ToString(), savedStage.Secret.ToString());
+                Assert.Equal(staged.Reference.SecretVersionId.ToString(), savedStage.Version.ToString());
+            }
+            finally { Array.Clear(material); Array.Clear(savedStage.Material); }
+            await using var sql = new NpgsqlConnection(connection); await sql.OpenAsync();
+            await using var command = new NpgsqlCommand("SELECT id, actor_id, import_intent_json, created_at FROM deployment_change_sets", sql);
+            await using var reader = await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(Guid.Parse(change.ToString()), reader.GetGuid(0));
+            Assert.Equal("previous-operator", reader.GetString(1));
+            Assert.Equal(ResourceImportIntentCodec.Encode(binding.Attach(staged)), reader.GetString(2));
+            Assert.Equal(created.ToUnixTimeMilliseconds(), reader.GetFieldValue<DateTimeOffset>(3).ToUnixTimeMilliseconds());
+            Assert.False(await reader.ReadAsync());
+            Assert.Empty(await db.Secrets.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await db.OperationOutputs.AsNoTracking().ToArrayAsync());
+            await reader.DisposeAsync();
+            Assert.Equal(true, await new NpgsqlCommand("SELECT to_regclass('public.operator_resource_import_requests') IS NULL AND to_regclass('public.resource_identity_claims') IS NULL", sql).ExecuteScalarAsync());
+            Assert.Equal(0L, await new NpgsqlCommand("SELECT count(*) FROM resource_import_receipts", sql).ExecuteScalarAsync());
         }
-        await AssertCounts(connection, 0, 1, 1);
     }
 
     private static ServiceProvider Services(string connection, params IInterceptor[] interceptors)

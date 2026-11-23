@@ -101,6 +101,7 @@ public sealed partial class ApplicationConfigurationTests
                 DROP TABLE runtime_publication_receipts;
                 DROP TABLE workload_configuration_recipients;
                 DROP TABLE configuration_document_revisions;
+                DROP TABLE resource_identity_claims;
                 DROP TABLE resource_management_heads;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;

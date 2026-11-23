@@ -211,6 +211,7 @@ public sealed partial class ApplicationConfigurationTests
             await arrange.Database.ExecuteSqlRawAsync("""
                 DROP TABLE operator_access_grants;
                 DROP TABLE configuration_access_grants;
+                DROP TABLE resource_identity_claims;
                 DROP TABLE resource_management_heads;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;

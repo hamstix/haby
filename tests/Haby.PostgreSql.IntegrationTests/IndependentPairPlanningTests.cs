@@ -40,7 +40,7 @@ public sealed class IndependentPairPlanningTests
         }
         var admission = new DurableActionAdmission(new(new IDurableActionAdmissionHandler[]
             { new PostgreSqlDatabaseCreateAdmission(), new PostgreSqlPairResourceAdmission(PostgreSqlApplicationLoginContract.Id) }, []));
-        Assert.False(admission.CanReuse(accepted, Spec(envelope), Provider, Inputs(), PostgreSqlPairPlanningTests.Configuration()));
+        Assert.False(admission.CanReuse(accepted, Spec(envelope), Provider, Inputs(envelope), PostgreSqlPairPlanningTests.Configuration()));
     }
 
     [Theory]
