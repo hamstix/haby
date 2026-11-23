@@ -43,19 +43,20 @@ public sealed class PostgreSqlSharedCredentialAuthority(IDbContextFactory<Manife
         var env = Guid.Parse(scope.Environment.ToString());
         var provider = Guid.Parse(scope.Provider.ToString());
         // The same provider lock serializes issuance and every per-use revocation.
-        if (await db.ProviderInstances.FromSqlInterpolated($"SELECT * FROM provider_instances WHERE id = {provider} AND environment_record_id = {env} FOR UPDATE")
-                .SingleOrDefaultAsync(token) is null) return SharedCredentialRevocationOutcome.NotFound;
+        if (!await db.AcquireSharedCredentialGateAsync(env, provider, token)) return SharedCredentialRevocationOutcome.NotFound;
         var row = await ExactAsync(db, scope, token);
         if (row is null) return SharedCredentialRevocationOutcome.NotFound;
         if (await RevokedAsync(db, row, token)) return SharedCredentialRevocationOutcome.AlreadyRevoked;
-        db.SharedCredentialRevocations.Add(new()
+        var revocation = new SharedCredentialRevocationRow
         {
             ProviderInstanceId = provider,
             RevisionNumber = scope.Revision.Value,
             Slot = scope.Slot,
             Actor = actor,
             CreatedAt = DateTimeOffset.UtcNow
-        });
+        };
+        db.AuthorizeSharedCredentialRevocation(revocation, scope);
+        db.SharedCredentialRevocations.Add(revocation);
         await db.SaveChangesAsync(token);
         token.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);

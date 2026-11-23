@@ -6,23 +6,28 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Haby.Persistence.PostgreSql.Migrations
 {
     /// <inheritdoc />
-    public partial class SharedCredentialUseAuthority : Migration
+    public partial class SharedCredentialAuthorityTransactions : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql("""
-            ALTER TABLE secrets DROP CONSTRAINT ck_secrets_typed_shape;
-            ALTER TABLE secrets ADD CONSTRAINT ck_secrets_typed_shape CHECK (
-              sensitivity = 'Credential' AND content_type = 'application/octet-stream'
-              AND storage_backend = 'PostgreSqlPlaintext' AND ownership_policy = 'Managed'
-              AND ((owner = 'Environment' AND purpose IN ('ProviderAdministrator', 'Configuration', 'SharedApplicationCredential')
-                    AND (purpose <> 'SharedApplicationCredential' OR name IS NOT NULL)
-                    AND application_record_id IS NULL AND resource_local_id IS NULL)
-                OR (owner = 'Resource' AND purpose = 'ApplicationLogin' AND name IS NULL
-                    AND application_record_id IS NOT NULL AND resource_local_id IS NOT NULL
-                    AND resource_local_id ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$')));
-            """);
+                ALTER TABLE secrets DROP CONSTRAINT ck_secrets_typed_shape;
+                ALTER TABLE secrets ADD CONSTRAINT ck_secrets_typed_shape CHECK (
+                  sensitivity = 'Credential' AND content_type = 'application/octet-stream'
+                  AND storage_backend = 'PostgreSqlPlaintext' AND ownership_policy = 'Managed'
+                  AND ((owner = 'Environment' AND purpose IN ('ProviderAdministrator', 'Configuration', 'SharedApplicationCredential')
+                        AND (purpose <> 'SharedApplicationCredential' OR name IS NOT NULL)
+                        AND application_record_id IS NULL AND resource_local_id IS NULL)
+                    OR (owner = 'Resource' AND purpose = 'ApplicationLogin' AND name IS NULL
+                        AND application_record_id IS NOT NULL AND resource_local_id IS NOT NULL
+                        AND resource_local_id ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$')));
+                """);
+            migrationBuilder.AddUniqueConstraint(
+                name: "AK_provider_revision_secret_refs_provider_instance_id_revision~",
+                table: "provider_revision_secret_refs",
+                columns: new[] { "provider_instance_id", "revision_number", "slot", "environment_record_id", "secret_id", "secret_version_id" });
+
             migrationBuilder.CreateTable(
                 name: "shared_credential_bindings",
                 columns: table => new
@@ -44,9 +49,9 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     table.CheckConstraint("ck_shared_credential_use", "use IN ('SystemAccess', 'ApplicationDelivery')");
                     table.ForeignKey(
                         name: "FK_shared_credential_bindings_provider_revision_secret_refs_pr~",
-                        columns: x => new { x.provider_instance_id, x.revision_number, x.slot },
+                        columns: x => new { x.provider_instance_id, x.revision_number, x.slot, x.environment_record_id, x.secret_id, x.secret_version_id },
                         principalTable: "provider_revision_secret_refs",
-                        principalColumns: new[] { "provider_instance_id", "revision_number", "slot" },
+                        principalColumns: new[] { "provider_instance_id", "revision_number", "slot", "environment_record_id", "secret_id", "secret_version_id" },
                         onDelete: ReferentialAction.Restrict);
                 });
 
@@ -71,56 +76,37 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         principalColumns: new[] { "provider_instance_id", "revision_number", "slot" },
                         onDelete: ReferentialAction.Restrict);
                 });
-            migrationBuilder.Sql("""
-                CREATE FUNCTION check_shared_credential_insert() RETURNS trigger LANGUAGE plpgsql AS $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM provider_revision_secret_refs r
-                        JOIN provider_configuration_revisions p ON p.provider_instance_id = r.provider_instance_id
-                            AND p.revision_number = r.revision_number AND p.environment_record_id = r.environment_record_id
-                        JOIN secrets s ON s.id = r.secret_id AND s.environment_record_id = r.environment_record_id
-                        WHERE r.provider_instance_id = NEW.provider_instance_id AND r.revision_number = NEW.revision_number
-                            AND r.slot = NEW.slot AND r.environment_record_id = NEW.environment_record_id
-                            AND r.secret_id = NEW.secret_id AND r.secret_version_id = NEW.secret_version_id
-                            AND NOT p.is_sealed AND s.owner = 'Environment' AND s.purpose = 'SharedApplicationCredential'
-                            AND s.application_record_id IS NULL AND s.resource_local_id IS NULL AND s.name IS NOT NULL
-                    ) THEN RAISE EXCEPTION 'Shared credential issuance requires an exact unsealed revision reference'; END IF;
-                    RETURN NEW;
-                END $$;
-                CREATE TRIGGER shared_credential_bindings_before_seal BEFORE INSERT ON shared_credential_bindings
-                    FOR EACH ROW EXECUTE FUNCTION check_shared_credential_insert();
-                CREATE TRIGGER shared_credential_bindings_immutable BEFORE UPDATE OR DELETE ON shared_credential_bindings
-                    FOR EACH ROW EXECUTE FUNCTION reject_provider_mutation();
-                CREATE TRIGGER shared_credential_revocations_immutable BEFORE UPDATE OR DELETE ON shared_credential_revocations
-                    FOR EACH ROW EXECUTE FUNCTION reject_provider_mutation();
-                """);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_shared_credential_bindings_provider_instance_id_revision_nu~",
+                table: "shared_credential_bindings",
+                columns: new[] { "provider_instance_id", "revision_number", "slot", "environment_record_id", "secret_id", "secret_version_id" });
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // CHECK validation refuses downgrade while shared-purpose data remains; no stored workflow.
             migrationBuilder.Sql("""
-                DO $$ BEGIN
-                    IF EXISTS (SELECT 1 FROM secrets WHERE purpose = 'SharedApplicationCredential') THEN
-                        RAISE EXCEPTION 'Shared credentials prevent downgrade.';
-                    END IF;
-                END $$;
                 ALTER TABLE secrets DROP CONSTRAINT ck_secrets_typed_shape;
                 ALTER TABLE secrets ADD CONSTRAINT ck_secrets_typed_shape CHECK (
                   sensitivity = 'Credential' AND content_type = 'application/octet-stream'
                   AND storage_backend = 'PostgreSqlPlaintext' AND ownership_policy = 'Managed'
                   AND ((owner = 'Environment' AND purpose IN ('ProviderAdministrator', 'Configuration')
-                    AND application_record_id IS NULL AND resource_local_id IS NULL)
-                OR (owner = 'Resource' AND purpose = 'ApplicationLogin' AND name IS NULL
-                    AND application_record_id IS NOT NULL AND resource_local_id IS NOT NULL
-                    AND resource_local_id ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$')));
-                DROP FUNCTION check_shared_credential_insert() CASCADE;
+                        AND application_record_id IS NULL AND resource_local_id IS NULL)
+                    OR (owner = 'Resource' AND purpose = 'ApplicationLogin' AND name IS NULL
+                        AND application_record_id IS NOT NULL AND resource_local_id IS NOT NULL
+                        AND resource_local_id ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$')));
                 """);
             migrationBuilder.DropTable(
                 name: "shared_credential_revocations");
 
             migrationBuilder.DropTable(
                 name: "shared_credential_bindings");
+
+            migrationBuilder.DropUniqueConstraint(
+                name: "AK_provider_revision_secret_refs_provider_instance_id_revision~",
+                table: "provider_revision_secret_refs");
         }
     }
 }

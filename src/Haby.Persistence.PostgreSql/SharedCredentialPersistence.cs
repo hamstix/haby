@@ -44,7 +44,9 @@ internal static class SharedCredentialPersistence
             e.Property(x => x.Use).HasColumnName("use").HasMaxLength(64);
             e.Property(x => x.Actor).HasColumnName("actor").HasMaxLength(256);
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
-            e.HasOne<ProviderRevisionSecretRefRow>().WithMany().HasForeignKey(x => new { x.ProviderInstanceId, x.RevisionNumber, x.Slot })
+            e.HasOne<ProviderRevisionSecretRefRow>().WithMany()
+                .HasForeignKey(x => new { x.ProviderInstanceId, x.RevisionNumber, x.Slot, x.EnvironmentRecordId, x.SecretId, x.SecretVersionId })
+                .HasPrincipalKey(x => new { x.ProviderInstanceId, x.RevisionNumber, x.Slot, x.EnvironmentRecordId, x.SecretId, x.SecretVersionId })
                 .OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<SharedCredentialRevocationRow>(e =>
@@ -66,7 +68,8 @@ internal static class SharedCredentialPersistence
         if (string.IsNullOrWhiteSpace(actor) || actor.Length > 256)
             throw new ArgumentException("Shared credential issuance requires a trusted actor.");
         foreach (var reference in prepared.SecretReferences.Where(x => x.SharedUse is not null))
-            db.SharedCredentialBindings.Add(new()
+        {
+            var row = new SharedCredentialBindingRow
             {
                 EnvironmentRecordId = environment,
                 ProviderInstanceId = provider,
@@ -77,7 +80,10 @@ internal static class SharedCredentialPersistence
                 Use = reference.SharedUse!.Value.ToString(),
                 Actor = actor,
                 CreatedAt = DateTimeOffset.UtcNow
-            });
+            };
+            db.AuthorizeSharedCredentialBinding(row);
+            db.SharedCredentialBindings.Add(row);
+        }
     }
     internal static async Task<bool> MatchesAsync(ManifestCatalogDbContext db, Guid environment, Guid provider, long revision,
         PreparedProviderConfiguration prepared, CancellationToken token)

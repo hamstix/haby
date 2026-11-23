@@ -81,7 +81,7 @@ uses by explicitly revoking each scope. The other use and other Provider revisio
 remain independent, even when they refer to the same physical version. Revocation
 changes no external password, privilege, ownership or stored material.
 
-Bindings and revocations cannot be updated or deleted. A new Provider revision
+Supported Haby writes cannot update or delete bindings or revocations. A new Provider revision
 may issue new explicit grants, but retrying it or the old revision cannot clear an
 old revocation. There is no un-revoke operation or positive authorization cache.
 
@@ -93,9 +93,41 @@ raw password endpoint or production Reference delivery path is opened for it.
 this exact unrevoked use binding on every static-token/runtime request, preserving
 whole-response failure. This slice does not implement retirement or rotation.
 
-The additive migration adds generic binding/revocation tables and extends the
-existing typed secret constraint. It performs no grant backfill and rewrites no
+The replacement unmerged C migration adds generic binding/revocation tables, an
+exact composite reference FK, and the typed secret constraint. It performs no grant backfill and rewrites no
 existing revision, document or material. Existing snapshots without shared slots
 retain their current representation. Downgrade refuses while shared secrets
 exist. Existing ADR-033 catalog-reset guards continue to apply to superseded
 planning histories; this migration never resets persistent data.
+
+
+## ADR-026 writer and catalog boundary
+
+This C slice installs no new stored function, procedure or trigger. The earlier
+unmerged SharedCredentialUseAuthority prototype is superseded by
+SharedCredentialAuthorityTransactions. The existing migration-prefix check refuses
+that prototype catalog before mutation and requires explicit fresh initialization;
+it never silently resets or backfills it. Valid pre-C catalogs retain the
+additive path. All merged migration files and their existing guards stay intact.
+
+C#/EF SaveChanges enforces tracked append-only history in both sync and async
+paths. New bindings and revocations require exact permits tied to the current
+transaction and the acquired Provider lock; absent Provider names use the owning
+Environment lock. Issuance verifies the newly added unsealed revision, exact
+accepted reference and named shared-purpose metadata without reading material.
+Before sealing, the transaction rechecks the complete persisted binding set.
+Revocation requires the exact sealed binding and cannot replace the first audit.
+Uniqueness/composite FKs/use checks remain declarative database guarantees.
+
+ExecuteUpdate/Delete bypass SaveChanges. A stateless singleton EF query-expression
+interceptor rejects sync/async bulk writes involving either new history entity,
+including projected updates, before SQL execution. It uses EF entity-root metadata
+and compile-time entity types, not SQL parsing or reflection-based discovery.
+The unrelated existing Provider seal update remains supported and tested.
+
+As with generated credential slots, supported Haby writers own these invariants.
+Privileged/direct SQL maintenance and external writers bypassing that boundary
+are trusted and are not claimed to be prevented by C# guards. No new runtime-role
+split is required. Optional SELECT/INSERT-only history-table permissions are
+defense in depth, not a substitute for the guarded transaction path or a new
+server-side exception. Existing direct-write SQL guards on older tables remain.

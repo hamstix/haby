@@ -3126,6 +3126,8 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasKey("ProviderInstanceId", "RevisionNumber", "Slot");
 
+                    b.HasIndex("ProviderInstanceId", "RevisionNumber", "Slot", "EnvironmentRecordId", "SecretId", "SecretVersionId");
+
                     b.ToTable("shared_credential_bindings", null, t =>
                         {
                             t.HasCheckConstraint("ck_shared_credential_actor", "length(actor) BETWEEN 1 AND 256");
@@ -4024,7 +4026,8 @@ namespace Haby.Persistence.PostgreSql.Migrations
                 {
                     b.HasOne("Haby.Persistence.PostgreSql.ProviderRevisionSecretRefRow", null)
                         .WithMany()
-                        .HasForeignKey("ProviderInstanceId", "RevisionNumber", "Slot")
+                        .HasForeignKey("ProviderInstanceId", "RevisionNumber", "Slot", "EnvironmentRecordId", "SecretId", "SecretVersionId")
+                        .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "Slot", "EnvironmentRecordId", "SecretId", "SecretVersionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

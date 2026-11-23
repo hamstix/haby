@@ -128,8 +128,12 @@ public sealed class PostgreSqlProviderDeclarationCatalog(IDbContextFactory<Manif
                     SecretId = Guid.Parse(reference.Reference.SecretId.ToString()),
                     SecretVersionId = Guid.Parse(reference.Reference.SecretVersionId.ToString())
                 });
+            if (prepared.SecretReferences.Any(x => x.SharedUse is not null) &&
+                !await context.AcquireSharedCredentialGateAsync(env, instance.Id, cancellationToken)) return new(ProviderOutcome.StorageUnavailable);
             SharedCredentialPersistence.Issue(context, env, instance.Id, spec.Revision, prepared, actor);
             await context.SaveChangesAsync(cancellationToken);
+            if (!await SharedCredentialPersistence.MatchesAsync(context, env, instance.Id, spec.Revision, prepared, cancellationToken))
+                return new(ProviderOutcome.StorageUnavailable);
             var sealedRows = await context.ProviderConfigurationRevisions.Where(x => x.ProviderInstanceId == instance.Id &&
                 x.RevisionNumber == spec.Revision && !x.IsSealed).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsSealed, true), cancellationToken);
             if (sealedRows != 1) return new(ProviderOutcome.StorageUnavailable);
