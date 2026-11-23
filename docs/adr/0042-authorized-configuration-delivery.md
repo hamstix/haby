@@ -1,5 +1,7 @@
 # ADR-042: Authorized configuration delivery with scoped static tokens
 
+> Accepted extension: [ADR-063 shared credentials](0063-resource-capabilities-rendering-and-provider-status.md#accepted-shared-credential-and-delivery-package-2026-11-23) adds exact shared-secret use-binding and association checks to both static and runtime delivery. Existing in-flight authorization semantics remain; acceptance does not claim implementation.
+
 - Status: Accepted
 - Date: 2026-11-07
 - Scope: P2 exact-document delivery, transient secret resolution and access administration
