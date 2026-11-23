@@ -15,6 +15,9 @@ public interface IProviderDeclarationAdapter
     IProviderConfigurationCodec Codec { get; }
     IReadOnlyList<string> RequiredSecretSlots { get; }
     IReadOnlyList<string> AllowedSecretSlots => RequiredSecretSlots;
+    /// <summary>Closed adapter-owned slot purposes; other slots remain ProviderAdministrator.</summary>
+    IReadOnlyDictionary<string, SharedCredentialUse> SharedCredentialSlots =>
+        new Dictionary<string, SharedCredentialUse>();
     object ParseProperties(JsonElement properties);
     object Bind(object properties, IReadOnlyDictionary<string, SecretRef> secrets);
     bool CanReplace(ProviderAdapterKey previous);
@@ -36,7 +39,9 @@ public sealed class ProviderDeclarationRegistry
                 x.AllowedSecretSlots.Count > 64 || x.AllowedSecretSlots.Any(s => !ValidId(s)) ||
                 x.AllowedSecretSlots.Distinct(StringComparer.Ordinal).Count() != x.AllowedSecretSlots.Count ||
                 x.RequiredSecretSlots.Distinct(StringComparer.Ordinal).Count() != x.RequiredSecretSlots.Count ||
-                x.RequiredSecretSlots.Any(s => !x.AllowedSecretSlots.Contains(s, StringComparer.Ordinal))))
+                x.RequiredSecretSlots.Any(s => !x.AllowedSecretSlots.Contains(s, StringComparer.Ordinal)) ||
+                x.SharedCredentialSlots.Any(s => !x.AllowedSecretSlots.Contains(s.Key, StringComparer.Ordinal) ||
+                    s.Value is not (SharedCredentialUse.SystemAccess or SharedCredentialUse.ApplicationDelivery))))
             throw new InvalidOperationException("Provider declaration registration is invalid or ambiguous.");
         // Intake and reload must use the same registered codec instance, not independently
         // configured codecs that merely advertise matching envelope identifiers.

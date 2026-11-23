@@ -14,7 +14,8 @@ public sealed record PostgreSqlProviderConfiguration
 
     public PostgreSqlProviderConfiguration(int shapeVersion, string host, int port, string maintenanceDatabase,
         string administratorUserName, SecretRef administratorPassword, string implementationId,
-        PostgreSqlTransportMode transportMode = PostgreSqlTransportMode.VerifyFull)
+        PostgreSqlTransportMode transportMode = PostgreSqlTransportMode.VerifyFull,
+        SecretRef? systemAccessCredential = null, SecretRef? applicationCredential = null)
     {
         if (shapeVersion != CurrentShapeVersion) throw new ArgumentOutOfRangeException(nameof(shapeVersion));
         if (string.IsNullOrWhiteSpace(host) || host.Length > 255 || Uri.CheckHostName(host) == UriHostNameType.Unknown)
@@ -36,6 +37,8 @@ public sealed record PostgreSqlProviderConfiguration
         ImplementationId = implementationId;
         _ = PostgreSqlProviderTransport.Encode(transportMode);
         TransportMode = transportMode;
+        SystemAccessCredential = systemAccessCredential;
+        ApplicationCredential = applicationCredential;
     }
 
     public int ShapeVersion { get; }
@@ -46,6 +49,8 @@ public sealed record PostgreSqlProviderConfiguration
     public SecretRef AdministratorPassword { get; }
     public string ImplementationId { get; }
     public PostgreSqlTransportMode TransportMode { get; }
+    public SecretRef? SystemAccessCredential { get; init; }
+    public SecretRef? ApplicationCredential { get; init; }
     public override string ToString() => nameof(PostgreSqlProviderConfiguration);
 }
 
@@ -56,6 +61,8 @@ public sealed class PostgreSqlProviderConfigurationCodec(ICheckpointProviderCapa
     public const string Kind = "postgresql/v1";
     public const string Shape = "haby.postgresql.connection/v1";
     public const string AdministratorPasswordSlot = "administrator-password";
+    public const string SystemAccessCredentialSlot = "system-access-credential";
+    public const string ApplicationCredentialSlot = "application-credential";
 
     public override string ProviderKindId => Kind;
     public override string ShapeId => Shape;
@@ -76,11 +83,18 @@ public sealed class PostgreSqlProviderConfigurationCodec(ICheckpointProviderCapa
             AdministratorSecretId = value.AdministratorPassword.SecretId.ToString(),
             AdministratorSecretVersionId = value.AdministratorPassword.SecretVersionId.ToString(),
             ImplementationId = value.ImplementationId,
-            TransportMode = PostgreSqlProviderTransport.Encode(value.TransportMode)
+            TransportMode = PostgreSqlProviderTransport.Encode(value.TransportMode),
+            SystemAccessSecretId = value.SystemAccessCredential?.SecretId.ToString(),
+            SystemAccessSecretVersionId = value.SystemAccessCredential?.SecretVersionId.ToString(),
+            ApplicationSecretId = value.ApplicationCredential?.SecretId.ToString(),
+            ApplicationSecretVersionId = value.ApplicationCredential?.SecretVersionId.ToString()
         };
         var json = JsonSerializer.Serialize(snapshot, PostgreSqlConfigurationJsonContext.Default.PostgreSqlConfigurationSnapshot);
+        var references = new List<ProviderConfigurationSecretReference> { new(AdministratorPasswordSlot, value.AdministratorPassword) };
+        if (value.SystemAccessCredential is { } system) references.Add(new(SystemAccessCredentialSlot, system, SharedCredentialUse.SystemAccess));
+        if (value.ApplicationCredential is { } application) references.Add(new(ApplicationCredentialSlot, application, SharedCredentialUse.ApplicationDelivery));
         return new PreparedProviderConfiguration(Kind, Target(value), value.ImplementationId, Shape, 2, json,
-            [new ProviderConfigurationSecretReference(AdministratorPasswordSlot, value.AdministratorPassword)]);
+            references);
     }
 
     public override PostgreSqlProviderConfiguration DecodeTyped(string payloadJson)
@@ -94,13 +108,18 @@ public sealed class PostgreSqlProviderConfigurationCodec(ICheckpointProviderCapa
                 snapshot.MaintenanceDatabase, snapshot.AdministratorUserName,
                 new SecretRef(SecretId.Parse(snapshot.AdministratorSecretId),
                     SecretVersionId.Parse(snapshot.AdministratorSecretVersionId)), snapshot.ImplementationId,
-                PostgreSqlProviderTransport.Parse(snapshot.TransportMode));
+                PostgreSqlProviderTransport.Parse(snapshot.TransportMode),
+                Reference(snapshot.SystemAccessSecretId, snapshot.SystemAccessSecretVersionId),
+                Reference(snapshot.ApplicationSecretId, snapshot.ApplicationSecretVersionId));
         }
         catch (Exception error) when (error is JsonException or ArgumentException or FormatException)
         {
             throw new InvalidDataException("Stored Provider configuration is invalid.");
         }
     }
+
+    private static SecretRef? Reference(string? id, string? version) => id is null && version is null ? null :
+        new(SecretId.Parse(id!), SecretVersionId.Parse(version!));
 
     private static ProviderTargetIdentity Target(PostgreSqlProviderConfiguration value) =>
         new(1, $"{value.Host.Length}:{value.Host}:{value.Port}");
@@ -117,6 +136,14 @@ internal sealed class PostgreSqlConfigurationSnapshot
     public required string AdministratorSecretVersionId { get; init; }
     public required string ImplementationId { get; init; }
     public required string TransportMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SystemAccessSecretId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SystemAccessSecretVersionId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApplicationSecretId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApplicationSecretVersionId { get; init; }
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata, AllowDuplicateProperties = false, RespectNullableAnnotations = true)]

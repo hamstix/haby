@@ -21,6 +21,7 @@ internal static class SecretRowMapping
                 SecretPurpose.ProviderAdministrator => "ProviderAdministrator",
                 SecretPurpose.ApplicationLogin => "ApplicationLogin",
                 SecretPurpose.Configuration => "Configuration",
+                SecretPurpose.SharedApplicationCredential => "SharedApplicationCredential",
                 _ => throw new ArgumentException("Unsupported secret purpose.")
             },
             Sensitivity = "Credential",
@@ -36,7 +37,7 @@ internal static class SecretRowMapping
         row.OwnershipPolicy == "Managed" && row.StorageBackend == "PostgreSqlPlaintext";
 
     internal static bool IsNamedEnvironment(SecretRow row, SecretPurpose purpose) => row.Owner == "Environment" &&
-        row.Purpose == (purpose == SecretPurpose.Configuration ? "Configuration" : "ProviderAdministrator") &&
+        row.Purpose == purpose.ToString() &&
         row.ApplicationRecordId is null && row.ResourceLocalId is null && row.Name is not null &&
         row.Sensitivity == "Credential" && row.ContentType == "application/octet-stream" &&
         row.OwnershipPolicy == "Managed" && row.StorageBackend == "PostgreSqlPlaintext";

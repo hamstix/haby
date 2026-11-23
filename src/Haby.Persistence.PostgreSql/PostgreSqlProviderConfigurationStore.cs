@@ -58,6 +58,8 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
         ArgumentNullException.ThrowIfNull(configuration);
         cancellationToken.ThrowIfCancellationRequested();
         var prepared = Prepare(configuration);
+        if (prepared.SecretReferences.Any(x => x.SharedUse is not null))
+            throw new InvalidOperationException("Shared credential issuance requires trusted Provider declaration intake.");
         var environmentId = Guid.Parse(environment.ToString());
         var id = Guid.Parse(instanceId.ToString());
         await using var context = await _contexts.CreateDbContextAsync(cancellationToken);
@@ -197,6 +199,8 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
                     item.Slot == reference.Slot && item.SecretId == Guid.Parse(reference.Reference.SecretId.ToString()) &&
                     item.SecretVersionId == Guid.Parse(reference.Reference.SecretVersionId.ToString()))))
                 throw new InvalidDataException("Stored Provider configuration is inconsistent.");
+            if (!await SharedCredentialPersistence.MatchesAsync(context, environmentId, id, revision.Value, prepared, cancellationToken))
+                throw new InvalidDataException("Stored Provider credential bindings are inconsistent.");
             return new LoadedProviderRevision(new(row.Instance.ProviderKindId, row.Revision.ConfigurationShapeId,
                 row.Revision.ImplementationId), codec, decoded);
         }
@@ -223,7 +227,8 @@ public sealed class PostgreSqlProviderConfigurationStore : IProviderConfiguratio
             prepared.ImplementationId.Length > 128 || string.IsNullOrWhiteSpace(prepared.PayloadJson) ||
             prepared.TargetIdentity is null || prepared.SecretReferences is null ||
             prepared.SecretReferences.Any(item => item is null || string.IsNullOrWhiteSpace(item.Slot) ||
-                item.Slot.Length > 128 || item.Reference is null) ||
+                item.Slot.Length > 128 || item.Reference is null ||
+                item.SharedUse is not (null or SharedCredentialUse.SystemAccess or SharedCredentialUse.ApplicationDelivery)) ||
             prepared.SecretReferences.Select(item => item.Slot).Distinct(StringComparer.Ordinal).Count() !=
                 prepared.SecretReferences.Count)
             throw new InvalidOperationException("Provider configuration codec returned an invalid snapshot.");

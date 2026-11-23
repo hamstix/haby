@@ -26,9 +26,9 @@ internal sealed partial class CliCommandContext
 
     internal Task<int> CreateSecretAsync(string name, string? environment, bool stdin, string? suppliedRequestId, CancellationToken token, string? purpose = null)
     {
-        if (purpose is not (null or "administrator" or "configuration"))
+        if (purpose is not (null or "administrator" or "configuration" or "shared-application-credential"))
         {
-            error.WriteLine("Purpose must be administrator or configuration.");
+            error.WriteLine("Purpose must be administrator, configuration or shared-application-credential.");
             return Task.FromResult(CliApplication.UsageError);
         }
         var requestId = Guid.NewGuid();
@@ -54,7 +54,12 @@ internal sealed partial class CliCommandContext
                     Name = name,
                     RequestId = requestId.ToString(),
                     Material = ByteString.CopyFrom(bytes),
-                    Purpose = purpose == "configuration" ? "Configuration" : "ProviderAdministrator"
+                    Purpose = purpose switch
+                    {
+                        "configuration" => "Configuration",
+                        "shared-application-credential" => "SharedApplicationCredential",
+                        _ => "ProviderAdministrator"
+                    }
                 };
                 try
                 {

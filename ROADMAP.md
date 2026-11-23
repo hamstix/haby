@@ -369,8 +369,8 @@ authorization rules. Contract acceptance never enables an incomplete executor.
 
 - [x] Accept [ADR-063](docs/adr/0063-resource-capabilities-rendering-and-provider-status.md): explicit Provision/Import/Reference capabilities; verified Resource use without provisioning; provenance and lifecycle authority separate from reusable typed outputs/rendering; explicit application-secret delivery authority.
 - [x] Deliver #275-A shared Reference kernel ([PR #290](https://github.com/hamstix/haby/pull/290)): canonical per-Resource acquisition, atomic observation groups and safe outputs, conflict-safe claims, historical proof separate from active authority. Test-only adapter; no production Reference registration.
-- [ ] Complete #275-B explicitly compatible shared associations across Resources/Applications, preserving Import/reservation exclusion and independent authority.
-- [ ] Implement #275-C accepted shared-secret authority: Environment-owned SharedApplicationCredential, protected named intake, exact SystemAccess/ApplicationDelivery bindings atomically issued with Provider revision, irreversible per-use revocation and durable safe audit.
+- [x] Complete #275-B explicitly compatible shared associations across Resources/Applications, preserving Import/reservation exclusion and independent authority ([PR #291](https://github.com/hamstix/haby/pull/291)).
+- [ ] Implement #275-C accepted shared-secret authority (implementation and qualification in progress): Environment-owned SharedApplicationCredential, protected named intake, exact SystemAccess/ApplicationDelivery bindings atomically issued with Provider revision, irreversible per-use revocation and durable safe audit.
 - [ ] Implement #275-D exact Reference configuration delivery through existing materialization and static/runtime authorization: frozen typed options, no duplicate secret material, whole-response failure and no old-grant revival. See the [accepted credential package](docs/adr/0063-resource-capabilities-rendering-and-provider-status.md#accepted-shared-credential-and-delivery-package-2026-11-23).
 - [ ] Complete Reference retirement authority at safe recipient transition, with explicit operator confirmation for unmanaged consumers; until supported, refuse removal. Production Reference readiness remains separate from test-adapter delivery evidence.
 - [ ] Deliver [shared Reference #275](https://github.com/hamstix/haby/issues/275) through #267's common foundation, not a second import framework: exact per-type/mode schema, durable verification/receipt/confirmed outputs/retry/restart, no CREATE fallback and no external lifecycle authority. Sharing across Resources/Applications requires explicit adapter semantics and does not bypass ADR-062 Import conflicts. Removal affects internal association/delivery authorization only.
@@ -378,8 +378,8 @@ authorization rules. Contract acceptance never enables an incomplete executor.
 - [ ] Deliver [Provider status #274](https://github.com/hamstix/haby/issues/274) as a separate operator-admin, API-only endpoint/TLS/SYSTEM-credential login observation. Resolve current alias-bound revision once; unbound Providers report not-configured/not-selected rather than implicit latest. Return bounded safe per-Provider outcomes without management privilege, Resource/dbNum/workload or preflight-receipt claims. Resource/consumer checks may separately verify effective options.
 
 The shared Reference kernel is delivered; the remaining accepted Reference
-contracts are not yet production capabilities. Continue #275-B, then #275-C and
-#275-D. Provider status #274 follows the separately scheduled CLI root grouping
+contracts are not yet production capabilities. 275-B is merged. Continue #275-C qualification and then
+#275-D; Reference retirement remains pending. Provider status #274 follows the separately scheduled CLI root grouping
 and public composition/extensions. A private adapter may prepare typed codecs,
 consumer options, renderer and probe, but cannot fabricate durable CREATE or
 bypass shared Reference/application delivery authority. No additional generic SDK,

@@ -78,7 +78,7 @@ public sealed class RuntimePublicationTests
         Assert.True(entity.FindProperty("ConcurrencyToken")!.IsConcurrencyToken);
         Assert.All(entity.GetForeignKeys(), x => Assert.Equal(DeleteBehavior.Restrict, x.DeleteBehavior));
         Assert.DoesNotContain(entity.GetProperties(), x => new[] { "Namespace", "Uid", "TokenHash", "Password", "Endpoint" }.Contains(x.Name));
-        var sql = db.GetService<IMigrator>().GenerateScript("20261114033757_StableWorkloadRuntimeIdentity");
+        var sql = db.GetService<IMigrator>().GenerateScript("20261114033757_StableWorkloadRuntimeIdentity", "20261114051041_RuntimeConfigurationPublication");
         Assert.DoesNotContain("CREATE FUNCTION", sql, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("CREATE TRIGGER", sql, StringComparison.OrdinalIgnoreCase);
     }

@@ -46,8 +46,9 @@ absent-name races, then the existing Provider row to serialize all revision
 writers. Named Secret/version metadata is resolved within that transaction;
 material and secret payload tables are never read. Instance, immutable snapshot,
 exact associations and any identity confirmation audit are committed together.
-The existing unsealed/association/seal guards remain in force. No workflow SQL,
-new trigger, receipt or external effect is introduced.
+The existing unsealed/association/seal guards remain in force. Shared-credential bindings, when explicitly selected, are issued in the same
+transaction. Their insert and immutability guards enforce the revision seal; no
+external effect is introduced. See [shared credential authority](275-shared-credential-authority.md).
 
 Existing-number equivalence precedes monotonicity and confirmation checks.
 Adapters compare typed settings, exact SecretRefs and ImplementationId. New

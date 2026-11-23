@@ -12,6 +12,14 @@ public sealed class PostgreSqlProviderDeclarationAdapter(PostgreSqlProviderConfi
     public IProviderConfigurationCodec Codec => codec;
     public IReadOnlyList<string> RequiredSecretSlots => [PostgreSqlProviderConfigurationCodec.AdministratorPasswordSlot];
 
+    public IReadOnlyList<string> AllowedSecretSlots => [PostgreSqlProviderConfigurationCodec.AdministratorPasswordSlot,
+        PostgreSqlProviderConfigurationCodec.SystemAccessCredentialSlot, PostgreSqlProviderConfigurationCodec.ApplicationCredentialSlot];
+    public IReadOnlyDictionary<string, SharedCredentialUse> SharedCredentialSlots { get; } = new Dictionary<string, SharedCredentialUse>
+    {
+        [PostgreSqlProviderConfigurationCodec.SystemAccessCredentialSlot] = SharedCredentialUse.SystemAccess,
+        [PostgreSqlProviderConfigurationCodec.ApplicationCredentialSlot] = SharedCredentialUse.ApplicationDelivery
+    };
+
     public object ParseProperties(JsonElement properties)
     {
         var value = properties.Deserialize(PostgreSqlDeclarationJsonContext.Default.PostgreSqlDeclarationProperties)
@@ -26,8 +34,13 @@ public sealed class PostgreSqlProviderDeclarationAdapter(PostgreSqlProviderConfi
         return value;
     }
 
-    public object Bind(object properties, IReadOnlyDictionary<string, SecretRef> secrets) =>
-        Configuration((PostgreSqlDeclarationProperties)properties, secrets[PostgreSqlProviderConfigurationCodec.AdministratorPasswordSlot]);
+    public object Bind(object properties, IReadOnlyDictionary<string, SecretRef> secrets)
+    {
+        var configuration = Configuration((PostgreSqlDeclarationProperties)properties, secrets[PostgreSqlProviderConfigurationCodec.AdministratorPasswordSlot]);
+        secrets.TryGetValue(PostgreSqlProviderConfigurationCodec.SystemAccessCredentialSlot, out var system);
+        secrets.TryGetValue(PostgreSqlProviderConfigurationCodec.ApplicationCredentialSlot, out var application);
+        return configuration with { SystemAccessCredential = system, ApplicationCredential = application };
+    }
     public bool CanReplace(ProviderAdapterKey previous) => previous == Key;
     public bool Equivalent(object previous, object candidate) =>
         previous is PostgreSqlProviderConfiguration first && candidate is PostgreSqlProviderConfiguration second && first == second;

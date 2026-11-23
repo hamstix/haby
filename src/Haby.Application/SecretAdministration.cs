@@ -39,7 +39,7 @@ public sealed class SecretAdministration(IEnvironmentQuery environments, IAdmini
         try
         {
             if (env is null || secretName is null || requestId == Guid.Empty || bytes.Length is < 1 or > MaxBytes ||
-                purpose is not (SecretPurpose.ProviderAdministrator or SecretPurpose.Configuration) ||
+                purpose is not (SecretPurpose.ProviderAdministrator or SecretPurpose.Configuration or SecretPurpose.SharedApplicationCredential) ||
                 string.IsNullOrWhiteSpace(actor) || actor.Length > 256)
                 return new(SecretOutcome.InvalidRequest, RequestId: requestId);
         }

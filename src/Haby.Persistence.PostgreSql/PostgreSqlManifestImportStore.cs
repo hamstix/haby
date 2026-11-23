@@ -133,6 +133,9 @@ public static class ManifestCatalogServiceCollectionExtensions
         services.AddSingleton<ProviderDeclarationRegistry>();
         services.AddSingleton<IProviderDeclarationCatalog, PostgreSqlProviderDeclarationCatalog>();
         services.AddSingleton<ProviderAdministration>();
+        services.AddSingleton<PostgreSqlSharedCredentialAuthority>();
+        services.AddSingleton<ISharedCredentialAdministration>(p => p.GetRequiredService<PostgreSqlSharedCredentialAuthority>());
+        services.AddSingleton<ISharedCredentialSystemAccess>(p => p.GetRequiredService<PostgreSqlSharedCredentialAuthority>());
         return services;
     }
 }

@@ -3081,6 +3081,92 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.SharedCredentialBindingRow", b =>
+                {
+                    b.Property<Guid>("ProviderInstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_instance_id");
+
+                    b.Property<long>("RevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.Property<string>("Slot")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("slot");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("EnvironmentRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<Guid>("SecretId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_id");
+
+                    b.Property<Guid>("SecretVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_version_id");
+
+                    b.Property<string>("Use")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("use");
+
+                    b.HasKey("ProviderInstanceId", "RevisionNumber", "Slot");
+
+                    b.ToTable("shared_credential_bindings", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_shared_credential_actor", "length(actor) BETWEEN 1 AND 256");
+
+                            t.HasCheckConstraint("ck_shared_credential_use", "use IN ('SystemAccess', 'ApplicationDelivery')");
+                        });
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.SharedCredentialRevocationRow", b =>
+                {
+                    b.Property<Guid>("ProviderInstanceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_instance_id");
+
+                    b.Property<long>("RevisionNumber")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.Property<string>("Slot")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("slot");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("actor");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("ProviderInstanceId", "RevisionNumber", "Slot");
+
+                    b.ToTable("shared_credential_revocations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_shared_revocation_actor", "length(actor) BETWEEN 1 AND 256");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.WorkloadConfigurationRecipientRow", b =>
                 {
                     b.Property<Guid>("DeploymentId")
@@ -3930,6 +4016,24 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.SecretRow", null)
                         .WithMany()
                         .HasForeignKey("SecretId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.SharedCredentialBindingRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.ProviderRevisionSecretRefRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderInstanceId", "RevisionNumber", "Slot")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.SharedCredentialRevocationRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.SharedCredentialBindingRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderInstanceId", "RevisionNumber", "Slot")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
