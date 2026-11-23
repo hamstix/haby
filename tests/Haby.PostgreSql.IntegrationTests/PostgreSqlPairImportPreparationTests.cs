@@ -51,7 +51,7 @@ public sealed partial class PostgreSqlPairImportTests
             Assert.Single(await db.ProtectedApplicationCredentials.AsNoTracking().Select(x => x.Id).ToArrayAsync());
             Assert.Single(await db.DurableChangeSets.AsNoTracking().Select(x => x.Id).ToArrayAsync());
             Assert.Empty(await db.OperatorImportRequestRecords.AsNoTracking().ToArrayAsync());
-            Assert.Empty(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
         }
         Assert.True(before == await Snapshot(pair), "Preparation changed external identities, owners, ACLs or data.");
         Assert.True(await PasswordUnchanged(passwordGuard, pair), "Preparation changed the existing password verifier.");

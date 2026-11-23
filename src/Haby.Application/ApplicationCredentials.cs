@@ -27,25 +27,3 @@ public interface IApplicationCredentialReader
     ValueTask<ConfirmedApplicationCredential?> FindAsync(ManagedResourceKey owner, SecretRef reference,
         CancellationToken cancellationToken);
 }
-
-public sealed record ImportOperationConfirmation(DurableOperationKey Key, Guid AttemptId, ExternalOperationOutput Output);
-public sealed record ImportCredentialConfirmation(ManagedResourceKey Owner, ProtectedCredentialReference Staged);
-public sealed record ResourceImportAcceptance(IReadOnlyList<ImportOperationConfirmation> Operations,
-    IReadOnlyList<ImportCredentialConfirmation> Credentials, IReadOnlyList<ProviderResourceReservation> Reservations,
-    DurableActionPayload Evidence);
-public sealed record ResourceImportReceipt(Guid Id, DurableActionPayload Evidence,
-    IReadOnlyList<ImportOperationConfirmation> Operations);
-public enum ResourceImportAcceptanceStatus { Accepted, Existing, Conflict, InputUnavailable, StorageUnavailable }
-public sealed record ResourceImportAcceptanceResult(ResourceImportAcceptanceStatus Status)
-{
-    public bool IsSuccess => Status is ResourceImportAcceptanceStatus.Accepted or ResourceImportAcceptanceStatus.Existing;
-}
-
-/// <summary>One catalog transaction confirms the entire accepted import graph, credentials,
-/// reservations, outputs and receipt. External verification precedes this boundary.</summary>
-public interface IResourceImportAcceptance
-{
-    ValueTask<ResourceImportAcceptanceResult> CompleteAsync(ResourceImportAcceptance acceptance, DateTimeOffset at,
-        CancellationToken cancellationToken);
-    ValueTask<ResourceImportReceipt?> FindAsync(DurableOperationKey operation, CancellationToken cancellationToken);
-}

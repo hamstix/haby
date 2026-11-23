@@ -328,7 +328,7 @@ public sealed class OperatorImportRequestPersistenceTests(CatalogServerFixture f
         Assert.Equal(stages, await db.ProtectedApplicationCredentials.CountAsync());
         Assert.Equal(changes, await db.DurableChangeSets.CountAsync());
         Assert.Empty(await db.Secrets.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
         Assert.Empty(await db.OperationOutputs.AsNoTracking().ToArrayAsync());
     }
 

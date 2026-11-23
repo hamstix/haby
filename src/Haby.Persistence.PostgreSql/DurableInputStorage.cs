@@ -6,7 +6,7 @@ namespace Haby.Persistence.PostgreSql;
 /// <summary>One current durable format across every accepted-history reader.</summary>
 internal static class DurableInputStorage
 {
-    internal const int Version = 7;
+    internal const int Version = 8;
     internal static DurablePlanningInputs Inputs(this DurablePlanRow row) => Read(row.SnapshotFormatVersion,
         row.EnvironmentRecordId, row.EnvironmentKey, row.ApplicationRecordId, row.RevisionNumber,
         row.ConfigurationJson, row.ProviderInputsJson, row.GraphJson, row.Fingerprint);
@@ -22,7 +22,7 @@ internal static class DurableInputStorage
         var configuration = ConfigurationPlanningSnapshotCodec.Decode(configurationJson, reference);
         var environmentId = EnvironmentRecordId.Parse(environment.ToString());
         var providers = ExactProviderResolutionSetCodec.Decode(providerInputsJson, configuration.Manifest, environmentId);
-        var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environmentKey), reference, providers) { Configuration = configuration, Import = DurableOperationGraphCodec.Decode(graphJson).Import };
+        var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environmentKey), reference, providers) { Configuration = configuration, Import = DurableOperationGraphCodec.Decode(graphJson).Import, Acquisitions = DurableOperationGraphCodec.Decode(graphJson).Acquisitions };
         if (DurableOperationGraphCodec.Fingerprint(inputs, DurableOperationGraphCodec.Decode(graphJson)) != fingerprint)
             throw new InvalidDataException("Durable input fingerprint mismatch.");
         return inputs;

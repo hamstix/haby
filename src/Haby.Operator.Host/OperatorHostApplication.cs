@@ -279,7 +279,7 @@ public static class OperatorHostApplication
         builder.Services.AddPostgreSqlProviderResourceReservations();
         builder.Services.AddPostgreSqlApplicationLogin();
         builder.Services.AddPostgreSqlApplicationAccess();
-        builder.Services.AddPostgreSqlResourceImportAcceptance();
+        builder.Services.AddPostgreSqlResourceObservationAcceptance();
         builder.Services.AddPostgreSqlExistingPairImport();
         builder.Services.AddPostgreSqlOperatorImportRequests();
         builder.Services.AddPostgreSqlDatabaseRecoveryJournal();

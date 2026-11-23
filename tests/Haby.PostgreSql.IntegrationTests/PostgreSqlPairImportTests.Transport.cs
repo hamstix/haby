@@ -25,7 +25,7 @@ public sealed partial class PostgreSqlPairImportTests
         await using (var services = Services(disabled.Connection))
         {
             Assert.Null((await services.GetRequiredService<DurableGenerationRunner>().RunAsync(disabled.Commit.DeploymentId, disabled.Commit.Generation, default)).StopOutcome);
-            var observation = PostgreSqlImportObservation.Decode((await services.GetRequiredService<IResourceImportAcceptance>().FindAsync(disabled.Key, default))!.Evidence)!;
+            var observation = PostgreSqlImportObservation.Decode((await services.GetRequiredService<IResourceObservationAcceptance>().FindAsync(disabled.Key, default))!.Evidence)!;
             Assert.False(observation.AdministratorTls); Assert.False(observation.ApplicationTls);
         }
         var trusted = new PostgreSqlProviderTransport(tls.RootFile);
@@ -40,7 +40,7 @@ public sealed partial class PostgreSqlPairImportTests
         await using (var services = Services(verified.Connection, transport: trusted))
         {
             Assert.Null((await services.GetRequiredService<DurableGenerationRunner>().RunAsync(verified.Commit.DeploymentId, verified.Commit.Generation, default)).StopOutcome);
-            var observation = PostgreSqlImportObservation.Decode((await services.GetRequiredService<IResourceImportAcceptance>().FindAsync(verified.Key, default))!.Evidence)!;
+            var observation = PostgreSqlImportObservation.Decode((await services.GetRequiredService<IResourceObservationAcceptance>().FindAsync(verified.Key, default))!.Evidence)!;
             Assert.True(observation.AdministratorTls); Assert.True(observation.ApplicationTls);
             // The Binding requests plaintext consumer formatting; it cannot override Provider verification transport.
             Assert.Equal(new Haby.Domain.ConfigurationString("disable"), Assert.Single(verified.Plan.Inputs.Configuration!.RenderPins).Options.Members["sslMode"]);
@@ -59,7 +59,7 @@ public sealed partial class PostgreSqlPairImportTests
         await using (var services = Services(explicitPlaintext.Connection))
         {
             Assert.Null((await services.GetRequiredService<DurableGenerationRunner>().RunAsync(explicitPlaintext.Commit.DeploymentId, explicitPlaintext.Commit.Generation, default)).StopOutcome);
-            var observation = PostgreSqlImportObservation.Decode((await services.GetRequiredService<IResourceImportAcceptance>().FindAsync(explicitPlaintext.Key, default))!.Evidence)!;
+            var observation = PostgreSqlImportObservation.Decode((await services.GetRequiredService<IResourceObservationAcceptance>().FindAsync(explicitPlaintext.Key, default))!.Evidence)!;
             Assert.False(observation.AdministratorTls); Assert.False(observation.ApplicationTls);
         }
         Assert.True(before == await Snapshot(pair), "Transport verification changed existing external state.");

@@ -39,6 +39,7 @@ public sealed record DeploymentChangeSet(DeploymentChangeSetId Id, EnvironmentRe
     DeploymentChangeSetMember Member, DateTimeOffset CreatedAt, string ActorId)
 {
     public ResourceImportIntent? Import { get; init; }
+    public ResourceAcquisitionIntent? Acquisitions { get; init; }
 }
 
 /// <summary>Exact typed inputs captured by planning, with no live alias pointer.</summary>

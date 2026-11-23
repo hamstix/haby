@@ -11,7 +11,7 @@ public sealed class PostgreSqlImportReuseVerifier(ResourceTypeId type, PostgreSq
     public DurableActionAdmissionKey Key => (type == PostgreSqlDatabaseContract.Id
         ? PostgreSqlImportContracts.Database : PostgreSqlImportContracts.Login).Admission;
 
-    public async ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceImportReceipt receipt,
+    public async ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceObservationReceipt receipt,
         CancellationToken cancellationToken)
     {
         if (original.Node.Action.Admission != Key || PostgreSqlImportObservation.Decode(receipt.Evidence) is not { } previous)

@@ -54,6 +54,7 @@ internal static class ConfigurationRenderPinCodec
         {
             0 => ResourceAcquisitionMode.Provision,
             1 => ResourceAcquisitionMode.ImportUseAndRetain,
+            2 => ResourceAcquisitionMode.Reference,
             _ => throw new InvalidDataException("Invalid producer acquisition mode.")
         };
         return new(new(ResourceTypeId.Create(a.GetProperty("resource"u8).GetString()!), ProviderKindId.Create(a.GetProperty("provider"u8).GetString()!),

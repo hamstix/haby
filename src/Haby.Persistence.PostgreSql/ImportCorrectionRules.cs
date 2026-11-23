@@ -46,7 +46,7 @@ internal static class ImportCorrectionRules
     {
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
         if (source is null || source.InternalEffects || source.Inputs().Import is null ||
-            await db.ResourceImportReceipts.AsNoTracking().AnyAsync(x => x.Deployment == deployment, token) ||
+            await db.ResourceObservationReceipts.AsNoTracking().AnyAsync(x => x.Deployment == deployment, token) ||
             await db.OperationOutputs.AsNoTracking().AnyAsync(x => x.DeploymentId == deployment, token)) return false;
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
         if (graph.Baseline is not null || graph.ReusedResources.Count != 0 || graph.RetainedResources.Count != 0 || graph.Nodes.Count == 0 ||

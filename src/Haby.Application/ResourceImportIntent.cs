@@ -4,9 +4,9 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
-public enum ResourceAcquisitionMode { Provision, ImportUseAndRetain }
-public enum ResourceOrigin { Provisioned, Imported }
-public enum ResourceLifecycleAuthority { Provisioned, UseAndRetain }
+public enum ResourceAcquisitionMode { Provision, ImportUseAndRetain, Reference }
+public enum ResourceOrigin { Provisioned, Imported, Referenced }
+public enum ResourceLifecycleAuthority { Provisioned, UseAndRetain, ConsumptionOnly }
 
 /// <summary>Adapter-owned, non-secret verification inputs for one exact accepted Resource.</summary>
 public sealed record ResourceImportRequest(ManifestLocalId Resource, DurableActionPayload Input,

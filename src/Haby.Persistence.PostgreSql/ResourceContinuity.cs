@@ -33,8 +33,8 @@ internal static class ResourceContinuity
         management.Environment == Guid.Parse(inputs.Environment.ToString()) &&
         management.Application == Guid.Parse(inputs.Revision.ApplicationRecordId.ToString()) &&
         inputs.Providers.Declaration.Spec.Resources.Keys.Any(x => x.Value == management.Resource) &&
-        management.Origin == (inputs.Import is null ? ResourceOrigin.Provisioned : ResourceOrigin.Imported) &&
-        management.Authority == (inputs.Import is null ? ResourceLifecycleAuthority.Provisioned : ResourceLifecycleAuthority.UseAndRetain);
+        management.Origin == ResourceAcquisitionIntent.Origin(inputs.Acquisitions.Resource(ManifestLocalId.Create(management.Resource)).Mode) &&
+        management.Authority == ResourceAcquisitionIntent.Authority(inputs.Acquisitions.Resource(ManifestLocalId.Create(management.Resource)).Mode);
 
 
     internal static async Task<bool> ValidateOutputsAsync(ManifestCatalogDbContext db, Guid deployment,
@@ -87,12 +87,12 @@ internal static class ResourceContinuity
             var references = all.Select(x => new ConfirmedOperationOutput(OperationId.Create(x.OperationId), new(x.Contract, x.Key, x.Payload))).ToArray();
             foreach (var node in graph.Nodes)
             {
-                if (node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                if (node.Action.Admission.Mode != ResourceAcquisitionMode.Provision)
                 {
-                    var receipt = await ResourceImportReceiptIntegrity.ReadAsync(db, new(ApplicationDeploymentId.Parse(deployment.ToString()),
+                    var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, new(ApplicationDeploymentId.Parse(deployment.ToString()),
                         DeploymentGeneration.Create(generation), node.Id), token);
                     var validator = contracts.SingleOrDefault(x => x.Producer == node.Action);
-                    if (receipt is null || validator is null || !validator.ValidateImportEvidence(
+                    if (receipt is null || validator is null || !validator.ValidateObservationEvidence(
                         new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return false;
                     if (validateMaterial)
                         foreach (var request in inputs.Import!.Resources.Where(x => x.Credential is not null))
@@ -131,9 +131,10 @@ internal static class ResourceContinuity
             return null;
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
         var inputs = Inputs(source);
-        var imported = inputs.Import is not null;
-        if (management.Origin != (imported ? ResourceOrigin.Imported : ResourceOrigin.Provisioned) ||
-            management.Authority != (imported ? ResourceLifecycleAuthority.UseAndRetain : ResourceLifecycleAuthority.Provisioned)) return null;
+        var mode = inputs.Acquisitions.Resource(ManifestLocalId.Create(management.Resource)).Mode;
+        var imported = mode != ResourceAcquisitionMode.Provision;
+        if (management.Origin != ResourceAcquisitionIntent.Origin(mode) ||
+            management.Authority != ResourceAcquisitionIntent.Authority(mode)) return null;
         // The creation generation may contain reused peers. Its aggregate must have
         // completed; inspect this Resource's original nodes directly, never recurse.
         if (requireApplied && !await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == management.Deployment &&
@@ -146,7 +147,7 @@ internal static class ResourceContinuity
                 (!ids.Contains(x.OperationId) || x.State != nameof(DurableOperationState.Succeeded)), token)) return null;
         var nodes = graph.Nodes.Where(x => x.ResourceId.Value == management.Resource).ToArray();
         if (nodes.Length == 0 || nodes.Any(n => n.Action.Admission.Mode !=
-            (imported ? ResourceAcquisitionMode.ImportUseAndRetain : ResourceAcquisitionMode.Provision) ||
+            mode ||
             imported && (!n.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(n)))) return null;
         var fields = new List<string> { source.Fingerprint, management.Id.ToString(), management.Resource, management.Origin.ToString(), management.Authority.ToString() };
         foreach (var node in nodes)

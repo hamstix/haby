@@ -35,8 +35,8 @@ internal static partial class DurableAggregateCompletion
             {
                 var operation = await db.DurableOperations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == generation && x.OperationId == node.Id.Value, token);
                 if (operation?.State != nameof(DurableOperationState.Succeeded) || operation.ReasonCode is not null || operation.FinalizedAt is null || operation.CurrentAttemptId is not { } attemptId) return null;
-                if (node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain &&
-                    await ResourceImportReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
+                if (node.Action.Admission.Mode != ResourceAcquisitionMode.Provision &&
+                    await ResourceObservationReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
                         Haby.Domain.DeploymentGeneration.Create(generation), node.Id), token) is null) return null;
                 var attempt = await db.DurableOperationAttempts.AsNoTracking().SingleOrDefaultAsync(x => x.AttemptId == attemptId && x.DeploymentId == source.DeploymentId && x.Generation == generation && x.OperationId == node.Id.Value && x.AttemptNumber == operation.AttemptNumber, token);
                 if (attempt?.FinishedAt is null || operation.DispatchedAt != attempt.DispatchedAt || operation.FinalizedAt != attempt.FinishedAt ||
@@ -64,11 +64,11 @@ internal static partial class DurableAggregateCompletion
                         validators.Length == 0 && outputs.Length != 0) return null;
                     if (validators.Length == 1 && !await ValidateTypedOutputAsync(db, source, inputs, original, node,
                         outputs[0], validators[0], codecs, token)) return null;
-                    if (node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                    if (node.Action.Admission.Mode != ResourceAcquisitionMode.Provision)
                     {
-                        var receipt = await ResourceImportReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
+                        var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()),
                             Haby.Domain.DeploymentGeneration.Create(generation), node.Id), token);
-                        if (receipt is null || validators.Length != 1 || !validators[0].ValidateImportEvidence(
+                        if (receipt is null || validators.Length != 1 || !validators[0].ValidateObservationEvidence(
                             new(inputs, original, node, inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return null;
                     }
                 }

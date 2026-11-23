@@ -36,7 +36,7 @@ public sealed class ProtectedApplicationCredentialTests(CatalogServerFixture fix
             Assert.Equal(configuration, (await verify.GetRequiredService<IProviderConfigurationStore>().FindRevisionAsync<SampleConfiguration>(
                 environment, instance, ProviderConfigurationRevisionNumber.Create(1), default))!.Configuration);
             await using var db = await verify.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-            Assert.Empty(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
             Assert.Empty(await db.ProtectedApplicationCredentials.AsNoTracking().ToArrayAsync());
         }
     }
@@ -85,7 +85,7 @@ public sealed class ProtectedApplicationCredentialTests(CatalogServerFixture fix
             Assert.Empty(await db.Secrets.AsNoTracking().ToArrayAsync());
             Assert.Empty(await db.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync());
             Assert.Empty(await db.OperationOutputs.AsNoTracking().ToArrayAsync());
-            Assert.Empty(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+            Assert.Empty(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
         }
     }
 

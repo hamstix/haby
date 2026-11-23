@@ -30,10 +30,10 @@ public sealed class PostgreSqlApplicationCredentialReader(IDbContextFactory<Mani
             x.Application == application && x.Resource == owner.ResourceLocalId.Value && x.Secret == secret && x.Version == version)
             .Select(x => x.ConfirmedReceipt).SingleOrDefaultAsync(token);
         if (receiptId is null) return false;
-        var receipt = await db.ResourceImportReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == receiptId, token);
+        var receipt = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == receiptId, token);
         if (receipt is null) return false;
-        var document = ResourceImportReceiptIntegrity.Decode(receipt.Document);
-        return await ResourceImportReceiptIntegrity.ReadAsync(db, new(ApplicationDeploymentId.Parse(receipt.Deployment.ToString()),
+        var document = ResourceObservationReceiptIntegrity.Decode(receipt.Document);
+        return await ResourceObservationReceiptIntegrity.ReadAsync(db, new(ApplicationDeploymentId.Parse(receipt.Deployment.ToString()),
             DeploymentGeneration.Create(receipt.Generation), OperationId.Create(document.Operations[0].Operation)), token) is not null &&
             await db.SecretPayloads.AsNoTracking().AnyAsync(x => x.SecretVersionId == version && x.Bytes.Length > 0 && x.Bytes.Length <= 65536, token);
     }

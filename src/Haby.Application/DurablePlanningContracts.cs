@@ -7,11 +7,19 @@ public sealed record DurablePlanningInputs(EnvironmentRecordId Environment, Envi
     ManifestRevisionRef Revision, ExactProviderResolutionSet Providers)
 {
     public ConfigurationPlanningSnapshot? Configuration { get; init; }
-    public ResourceImportIntent? Import { get; init; }
+    private ResourceImportIntent? import;
+    public ResourceAcquisitionIntent Acquisitions { get; init; } = ResourceAcquisitionIntent.Provision(Providers.Declaration.Spec.Resources.Keys);
+    public ResourceImportIntent? Import
+    {
+        get => import;
+        init { import = value; if (value is not null) Acquisitions = ResourceAcquisitionIntent.Import(value); }
+    }
 
     public void Validate()
     {
-        Import?.Validate(Providers.Declaration.Spec);
+        Acquisitions.Validate(Providers.Declaration.Spec);
+        if (Import is not null && !Acquisitions.Equals(ResourceAcquisitionIntent.Import(Import)))
+            throw new InvalidDataException("Import intake differs from acquisition set.");
         if (Providers.Environment != Environment || Configuration is { } frozen &&
             (frozen.Revision != Revision || !frozen.Manifest.Equals(Providers.Declaration)))
             throw new InvalidDataException("Durable Provider inputs do not match the accepted declaration.");
@@ -39,7 +47,7 @@ public sealed record DurableChangeSetCreateResult(DurableChangeSetCreateStatus S
 public enum DurablePlanStatus
 {
     Planned, ChangeSetNotFound, ChangeSetStale, RevisionNotFound, AliasNotResolved,
-    ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape, ConfigurationRefused, PlanInputUnavailable, ImportNotSupported
+    ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape, ConfigurationRefused, PlanInputUnavailable, ImportNotSupported, ReferenceNotSupported
 }
 
 public sealed record DurablePlanResult(DurablePlanStatus Status, DurablePlan? Plan = null, ProfileExpansionResult? ConfigurationReport = null)

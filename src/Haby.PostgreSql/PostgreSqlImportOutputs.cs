@@ -14,7 +14,7 @@ public sealed class PostgreSqlImportOutputContract(ResourceTypeId type, PostgreS
         ? new(PostgreSqlDatabaseOutputContract.Contract, PostgreSqlDatabaseOutputContract.Key)
         : new(PostgreSqlApplicationConnectionContract.Contract, PostgreSqlApplicationConnectionContract.Key);
 
-    public bool ValidateImportEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
+    public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
         PostgreSqlImportContracts.Decode(accepted.Node) is { } input &&
         PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs) == input &&
         PostgreSqlImportObservation.Decode(evidence) is { } observed &&

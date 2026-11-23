@@ -44,7 +44,7 @@ public sealed partial class PostgreSqlPairImportTests(PostgreSqlFixture fixture)
             var result = await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(setup.Commit.DeploymentId, setup.Commit.Generation, default);
             Assert.Null(result.StopOutcome);
             Assert.Equal(1, result.Progress!.AppliedGeneration);
-            var accepted = await restart.GetRequiredService<IResourceImportAcceptance>().FindAsync(setup.Key, default);
+            var accepted = await restart.GetRequiredService<IResourceObservationAcceptance>().FindAsync(setup.Key, default);
             Assert.NotNull(accepted);
             receipt = accepted.Id;
             var observed = PostgreSqlImportObservation.Decode(accepted.Evidence)!;
@@ -63,7 +63,7 @@ public sealed partial class PostgreSqlPairImportTests(PostgreSqlFixture fixture)
         await using (var verify = Services(setup.Connection))
         await using (var db = await verify.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
         {
-            Assert.Equal(receipt, (await db.ResourceImportReceipts.AsNoTracking().SingleAsync()).Id);
+            Assert.Equal(receipt, (await db.ResourceObservationReceipts.AsNoTracking().SingleAsync()).Id);
             Assert.Equal(2, await db.OperationOutputs.CountAsync());
             Assert.Equal(2, await db.DurableOperationAttempts.CountAsync());
             Assert.Empty(await db.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync());
@@ -240,7 +240,7 @@ public sealed partial class PostgreSqlPairImportTests(PostgreSqlFixture fixture)
         await using var services = Services(setup.Connection);
         await using var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
         Assert.False(await db.OperationOutputs.AnyAsync(x => x.DeploymentId == Guid.Parse(setup.Commit.DeploymentId.ToString())));
-        Assert.False(await db.ResourceImportReceipts.AnyAsync(x => x.Deployment == Guid.Parse(setup.Commit.DeploymentId.ToString())));
+        Assert.False(await db.ResourceObservationReceipts.AnyAsync(x => x.Deployment == Guid.Parse(setup.Commit.DeploymentId.ToString())));
         Assert.False(await db.Secrets.AnyAsync(x => x.Id == Guid.Parse(setup.Staged.Reference.SecretId.ToString())));
         Assert.Null(await services.GetRequiredService<IApplicationCredentialReader>().FindAsync(setup.Owner, setup.Staged.Reference, default));
     }
@@ -307,7 +307,7 @@ public sealed partial class PostgreSqlPairImportTests(PostgreSqlFixture fixture)
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
             .AddPostgreSqlProviderAliasStore().AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
             .AddPostgreSqlProviderConfigurationCodec().AddPostgreSqlProviderRevisionPreflight().AddPostgreSqlDurableDesiredStateCommitter()
-            .AddPostgreSqlDurableOperationJournal().AddPostgreSqlDurableOperationExecution().AddPostgreSqlResourceImportAcceptance()
+            .AddPostgreSqlDurableOperationJournal().AddPostgreSqlDurableOperationExecution().AddPostgreSqlResourceObservationAcceptance()
             .AddPostgreSqlExistingPairImport();
         services.AddPostgreSqlOperatorImportRequests();
         if (hooks is not null) services.AddSingleton(hooks);

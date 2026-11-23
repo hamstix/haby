@@ -51,7 +51,16 @@ internal static class ImportAdmissionAuthority
     {
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
         if (source is null) return false;
-        var intent = source.Inputs().Import;
+        var inputs = source.Inputs();
+        var intent = inputs.Import;
+        if (inputs.Acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference))
+        {
+            if (source.InternalEffects) return false;
+            await ImportMutationGate.LockAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId, token);
+            if (!await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == deployment && x.DesiredGeneration == generation, token)) return false;
+            foreach (var managed in await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && x.SourceGeneration == generation).ToArrayAsync(token))
+                if (!ResourceContinuity.HasAcquisitionAuthority(managed, inputs) || !await ResourceObservationReceiptIntegrity.IsActiveAsync(db, managed.Id, token)) return false;
+        }
         if (intent is null) return true;
         if (source.InternalEffects) return false;
         await ImportMutationGate.LockAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId, token);

@@ -63,7 +63,7 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
             commit = Assert.IsType<DurableCommitResult.Committed>(await arrange.GetRequiredService<IDurableDesiredStateCommitter>()
                 .CommitAsync(change.Id, plan.Id, "tester", default)).Commit;
         }
-        var confirmations = new List<ImportOperationConfirmation>();
+        var confirmations = new List<ObservationOperationConfirmation>();
         await using (var dispatch = Services(connection))
         {
             var journal = dispatch.GetRequiredService<IDurableOperationJournal>();
@@ -76,8 +76,8 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
                     ? PostgreSqlDatabaseOutputContract.Encode(new(input.DatabaseName, input.DatabaseOid, input.PublicSchemaOid))
                     : PostgreSqlApplicationConnectionContract.Encode(new("localhost", 5432, input.DatabaseName, input.Schema, input.LoginName, staged.Reference))));
             }
-            var service = dispatch.GetRequiredService<IResourceImportAcceptance>();
-            var request = new ResourceImportAcceptance(confirmations, [new(owner, staged)],
+            var service = dispatch.GetRequiredService<IResourceObservationAcceptance>();
+            var request = new ResourceObservationAcceptance(confirmations, [new(owner, staged)],
                 PostgreSqlImportOutputContract.Reservations(plan.Inputs, input), Observation(input));
             Assert.False((await service.CompleteAsync(request with { Operations = [confirmations[0]] }, DateTimeOffset.UtcNow, default)).IsSuccess);
             var corrupt = confirmations.Select(x => x.Key.OperationId.Value == "db-import"
@@ -86,12 +86,12 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
             Assert.False((await service.CompleteAsync(request with { Evidence = new("unknown.observation/v1", "{}") }, DateTimeOffset.UtcNow, default)).IsSuccess);
         }
         await AssertUnconfirmed(connection, staged);
-        var acceptance = new ResourceImportAcceptance(confirmations, [new(owner, staged)],
+        var acceptance = new ResourceObservationAcceptance(confirmations, [new(owner, staged)],
             PostgreSqlImportOutputContract.Reservations(plan.Inputs, input), Observation(input));
         await using (var act = Services(connection))
         {
             // Concurrent exact replay must converge; an ignored successful response is recovered after restart below.
-            var results = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => act.GetRequiredService<IResourceImportAcceptance>()
+            var results = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => act.GetRequiredService<IResourceObservationAcceptance>()
                 .CompleteAsync(acceptance, DateTimeOffset.UtcNow, default).AsTask()));
             Assert.All(results, x => Assert.True(x.IsSuccess));
         }
@@ -99,7 +99,7 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
         string receiptDocument;
         await using (var restart = Services(connection))
         {
-            var service = restart.GetRequiredService<IResourceImportAcceptance>();
+            var service = restart.GetRequiredService<IResourceObservationAcceptance>();
             receipt = (await service.FindAsync(confirmations[0].Key, default))!.Id;
             Assert.True((await service.CompleteAsync(acceptance, DateTimeOffset.UtcNow, default)).IsSuccess);
             Assert.Equal(receipt, (await service.FindAsync(confirmations[1].Key, default))!.Id);
@@ -140,12 +140,18 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
             Assert.Equal(2, await db.OperationOutputs.CountAsync());
             Assert.Equal(2, await db.ResourceManagement.CountAsync(x => x.Origin == ResourceOrigin.Imported && x.Authority == ResourceLifecycleAuthority.UseAndRetain));
             Assert.Equal(4, await db.ProviderResourceReservations.CountAsync());
-            var savedReceipt = await db.ResourceImportReceipts.AsNoTracking().SingleAsync();
+            var savedReceipt = await db.ResourceObservationReceipts.AsNoTracking().SingleAsync();
             Assert.Equal(receipt, savedReceipt.Id);
             receiptDocument = savedReceipt.Document;
             Assert.Empty(await db.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync());
             Assert.All(await db.DurableOperationAttempts.AsNoTracking().ToArrayAsync(), x => Assert.Equal(nameof(DurableAttemptOutcome.Succeeded), x.Outcome));
         }
+        // Historical confirmation is independent of the current association head.
+        await using (var historical = Services(connection))
+        await using (var db = await historical.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            await db.Database.ExecuteSqlRawAsync("DELETE FROM resource_management_heads");
+        await using (var historical = Services(connection))
+            Assert.Equal(receipt, (await historical.GetRequiredService<IResourceObservationAcceptance>().FindAsync(confirmations[0].Key, default))?.Id);
         await using (var corrupt = Services(connection))
         await using (var db = await corrupt.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
             await db.Database.ExecuteSqlRawAsync("""
@@ -153,7 +159,7 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
                 SET document = jsonb_set(document::jsonb, '{{EvidenceJson}}', '"{{}}"'::jsonb)::text
                 """);
         await using (var restart = Services(connection))
-            Assert.Null(await restart.GetRequiredService<IResourceImportAcceptance>().FindAsync(confirmations[0].Key, default));
+            Assert.Null(await restart.GetRequiredService<IResourceObservationAcceptance>().FindAsync(confirmations[0].Key, default));
         await using (var restore = Services(connection))
         await using (var db = await restore.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
             await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE resource_import_receipts SET document = {receiptDocument}");
@@ -162,7 +168,7 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
             await db.Database.ExecuteSqlRawAsync("UPDATE protected_application_credentials SET confirmed_receipt_id = NULL");
         await using (var restart = Services(connection))
         {
-            Assert.Null(await restart.GetRequiredService<IResourceImportAcceptance>().FindAsync(confirmations[0].Key, default));
+            Assert.Null(await restart.GetRequiredService<IResourceObservationAcceptance>().FindAsync(confirmations[0].Key, default));
             Assert.Null(await restart.GetRequiredService<IApplicationCredentialReader>().FindAsync(owner, staged.Reference, default));
             using var unavailable = await restart.GetRequiredService<ISecretStore>().ResolveAsync(new(new SecretOwner.Resource(owner), SecretPurpose.ApplicationLogin), staged.Reference, default);
             Assert.Null(unavailable);
@@ -174,7 +180,7 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
         await using var services = Services(connection);
         await using var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
         Assert.Empty(await db.OperationOutputs.AsNoTracking().ToArrayAsync());
-        Assert.Empty(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
         Assert.Null((await db.ProtectedApplicationCredentials.AsNoTracking().Select(x => x.ConfirmedReceipt).SingleAsync()));
         Assert.False(await db.Secrets.AnyAsync(x => x.Id == Guid.Parse(staged.Reference.SecretId.ToString())));
     }
@@ -192,7 +198,7 @@ public sealed class ResourceImportAcceptanceTests(CatalogServerFixture fixture) 
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore().AddPostgreSqlProviderConfigurationStore()
             .AddPostgreSqlProviderAliasStore().AddSingleton<ICheckpointProviderCapability, PostgreSqlDatabaseCheckpointCapability>()
             .AddPostgreSqlProviderConfigurationCodec().AddSingleton<IProviderRevisionPreflight, AcceptPreflight>()
-            .AddPostgreSqlDurableDesiredStateCommitter().AddPostgreSqlDurableOperationJournal().AddPostgreSqlResourceImportAcceptance();
+            .AddPostgreSqlDurableDesiredStateCommitter().AddPostgreSqlDurableOperationJournal().AddPostgreSqlResourceObservationAcceptance();
         foreach (var type in new[] { PostgreSqlDatabaseContract.Id, PostgreSqlApplicationLoginContract.Id })
         {
             services.AddSingleton<IDurableActionAdmissionHandler>(new PostgreSqlImportAdmission(type));

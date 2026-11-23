@@ -3,8 +3,6 @@ using Haby.Domain;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using System.Text.RegularExpressions;
@@ -26,42 +24,41 @@ public sealed partial class PostgreSqlPairImportTests
         {
             Assert.Null((await execute.GetRequiredService<DurableGenerationRunner>().RunAsync(setup.Commit.DeploymentId, setup.Commit.Generation, default)).StopOutcome);
             await using var db = await execute.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-            receipt = (await db.ResourceImportReceipts.AsNoTracking().SingleAsync()).Document;
+            receipt = (await db.ResourceObservationReceipts.AsNoTracking().SingleAsync()).Document;
             inputs = (await db.DeploymentGenerations.AsNoTracking().SingleAsync()).ProviderInputsJson;
             management = await db.ResourceManagement.AsNoTracking().OrderBy(x => x.Resource).Select(x => x.Id).ToArrayAsync();
         }
-        // No correction exists, so downgrading only this additive slice recreates
-        // the immediately preceding schema without rewriting the imported history.
-        await using (var down = Services(setup.Connection))
-        {
-            await using var db = await down.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-            await db.GetService<IMigrator>().MigrateAsync("20261121200018_PersistOperatorImportRequests");
-            Assert.Equal(receipt, (await db.ResourceImportReceipts.AsNoTracking().SingleAsync()).Document);
-            Assert.Equal(inputs, (await db.DeploymentGenerations.AsNoTracking().SingleAsync()).ProviderInputsJson);
-            Assert.Equal(management, await db.ResourceManagement.AsNoTracking().OrderBy(x => x.Resource).Select(x => x.Id).ToArrayAsync());
-        }
+        // ADR-033 requires a fresh catalog across the observation-model reset boundary.
+        // Verify current-build restart and immutable correction authority instead of
+        // downgrading confirmed history into a superseded alpha schema.
         await using (var up = Services(setup.Connection))
             await up.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         await using var restart = Services(setup.Connection);
         await using (var db = await restart.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
         {
-            Assert.Equal(receipt, (await db.ResourceImportReceipts.AsNoTracking().SingleAsync()).Document);
+            Assert.Equal(receipt, (await db.ResourceObservationReceipts.AsNoTracking().SingleAsync()).Document);
             Assert.Equal(inputs, (await db.DeploymentGenerations.AsNoTracking().SingleAsync()).ProviderInputsJson);
             Assert.Equal(management, await db.CurrentResourceManagement.AsNoTracking().OrderBy(x => x.Resource).Select(x => x.Id).ToArrayAsync());
             Assert.Equal(setup.Staged.Id, (await db.ProtectedCredentialOwners.AsNoTracking().SingleAsync()).Stage);
             Assert.Equal(1, (await db.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
         }
-        Assert.NotNull(await restart.GetRequiredService<IResourceImportAcceptance>().FindAsync(setup.Key, default));
+        Assert.NotNull(await restart.GetRequiredService<IResourceObservationAcceptance>().FindAsync(setup.Key, default));
         Assert.NotNull(await restart.GetRequiredService<IApplicationCredentialReader>().FindAsync(setup.Owner, setup.Staged.Reference, default));
         await DeliveredConnection(restart, setup, pair);
     }
 
-    private static async Task AssertCorrectionDowngradeRefused(ServiceProvider services)
+    private static async Task AssertCurrentCorrectionSchemaStable(ServiceProvider services)
     {
-        await using var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-        var error = await Assert.ThrowsAsync<PostgresException>(() => db.GetService<IMigrator>().MigrateAsync("20261121200018_PersistOperatorImportRequests"));
-        Assert.Equal(PostgresErrorCodes.RaiseException, error.SqlState);
-        Assert.Contains("downgrade is refused", error.MessageText, StringComparison.Ordinal);
+        // Cross-alpha downgrades are outside ADR-033. Initialization of the current
+        // model must preserve live correction state and the complete current schema.
+        string[] applied;
+        await using (var before = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            applied = (await before.Database.GetAppliedMigrationsAsync()).ToArray();
+        await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        await using var after = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+        Assert.Equal(applied, (await after.Database.GetAppliedMigrationsAsync()).ToArray());
+        Assert.Contains(applied, x => x.EndsWith("_ResourceObservationKernel", StringComparison.Ordinal));
+        Assert.True(await after.OperatorImportRequestRecords.AnyAsync(x => x.PreviousRequest != null));
     }
 
     [Fact]
@@ -99,7 +96,7 @@ public sealed partial class PostgreSqlPairImportTests
             using var material = Material(pair.Password);
             var result = await create.GetRequiredService<OperatorImportRequests>().CreateAsync(binding, material, "correcting-operator", default);
             Assert.Equal(OperatorImportRequestStatus.Created, result.Status);
-            await AssertCorrectionDowngradeRefused(create);
+            await AssertCurrentCorrectionSchemaStable(create);
             change = result.Request!.ChangeSetId!;
             candidate = (await create.GetRequiredService<IDurableDeploymentPlanner>().FindChangeSetAsync(change, default))!
                 .Import!.Resources.Single(x => x.Resource == setup.Owner.ResourceLocalId).Credential!;
@@ -118,7 +115,7 @@ public sealed partial class PostgreSqlPairImportTests
         }
         await using (var restart = Services(setup.Connection))
         {
-            await AssertCorrectionDowngradeRefused(restart);
+            await AssertCurrentCorrectionSchemaStable(restart);
             var service = restart.GetRequiredService<OperatorImportRequests>();
             var old = await service.GetAsync(setup.Request, default);
             Assert.Equal(OperatorImportRequestStatus.Superseded, old.Status);
@@ -150,7 +147,7 @@ public sealed partial class PostgreSqlPairImportTests
             Assert.Equal(originalInputs, original.ProviderInputsJson); Assert.Equal(originalGraph, original.GraphJson);
             Assert.Null((await db.ProtectedApplicationCredentials.AsNoTracking().SingleAsync(x => x.Id == setup.Staged.Id)).ConfirmedReceipt);
             Assert.NotNull((await db.ProtectedApplicationCredentials.AsNoTracking().SingleAsync(x => x.Id == candidate.Id)).ConfirmedReceipt);
-            Assert.Equal(2, (await db.ResourceImportReceipts.AsNoTracking().SingleAsync()).Generation);
+            Assert.Equal(2, (await db.ResourceObservationReceipts.AsNoTracking().SingleAsync()).Generation);
             var audit = await db.ImportSupersessions.AsNoTracking().SingleAsync();
             Assert.Equal("committing-operator", audit.Actor);
             Assert.Equal(nameof(OperatorImportCorrectionReason.CredentialRejected), audit.Reason);
