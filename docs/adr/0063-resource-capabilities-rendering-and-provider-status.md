@@ -320,3 +320,156 @@ privilege-independent success, bounded fan-out/deadlines/partial results, typed
 unsupported/timeouts, cancellation and redaction, without accepting status as
 preflight or consumer/dbNum evidence. Real protocol tests belong to separately
 authorized implementation qualification, not this documentation change.
+
+## Accepted shared credential and delivery package (2026-11-23)
+
+The maintainer accepted all decisions below. They amend ADR-029 administrative
+intake and ADR-042/050 delivery authorization, and apply ADR-051 retirement to
+Reference associations. Acceptance is not implementation: #275-A is merged;
+#275-B sharing is in progress; #275-C and #275-D remain planned. Existing
+Provision/Import and static Profile secret-projection semantics remain unchanged.
+
+### 19. Environment-owned shared credentials
+
+Add immutable SecretPurpose `SharedApplicationCredential` with Environment
+ownership and exact immutable material versions. Preserve `ProviderAdministrator`
+for system access without application delivery, `Configuration` for static Profile
+projections, and Resource-owned `ApplicationLogin` for Generated/Imported material.
+No existing purpose is silently changed or reinterpreted.
+
+The same SharedApplicationCredential version may have two explicitly authorized
+uses: `SystemAccess` for adapter-defined Haby checks and `ApplicationDelivery` for
+configuration consumers. One physical version can back both uses without copies
+per Resource or Component. External privileges belong to the external service;
+application delivery grants no operator privileges inside Haby.
+
+### 20. Protected named intake and revision-bound issuance
+
+A trusted operator-admin creates the named secret through the existing protected
+intake with explicit purpose. No password in command arguments, manifests or
+ordinary output. Creating a secret alone authorizes no delivery. Equivalent
+creation retries return the original result; changed value or purpose conflicts.
+Retain ADR-029 durable request receipts and exact-version naming semantics.
+
+The administrator explicitly selects system and application references in the
+closed typed Provider declaration. Accepting the immutable Provider revision
+atomically issues its exact use bindings. No mandatory separate per-Component or
+use-binding creation commands are introduced. Internal bindings support validation
+and revocation; operator selections use names and explicit versions.
+
+Resolve each selection once within the Environment and pin the exact SecretId,
+SecretVersionId, Provider revision and use. No latest resolution. An alias switch,
+new secret version or new Provider revision changes neither old accepted inputs
+nor artifacts. A system binding cannot substitute for an application binding,
+and a binding for one Provider revision cannot authorize another. Concrete
+Provider JSON fields and identity semantics remain adapter-owned.
+
+### 21. Authorized consumers and exact provenance
+
+Accepting the Provider application reference explicitly permits consumers admitted
+through the normal Reference pipeline. Application Resource declarations and
+Component Bindings/configurationSlot select those consumers; operators do not
+assign the shared secret to each Component manually.
+
+Every consumer must have its own confirmed association and valid Binding and
+projection. Freeze the exact association, Provider revision/use binding, confirmed
+output, receiving Component, document and projection. An arbitrary SecretRef,
+matching Resource name, shared password or another consumer's receipt grants no
+access. Shared material does not merge independent association authority.
+
+### 22. Existing configuration delivery pipeline
+
+Use the existing separate ConfigurationDelivery contract, not a raw Provider
+password endpoint. Materialization persists only unresolved immutable documents,
+exact references and validated output/projection provenance. Preview redacts
+confidential nodes. Only authorized retrieval of an exact document resolves
+material and performs its pinned pure deferred formatting.
+
+Delivery never queries an external Provider, replans, selects current Profiles,
+reapplies defaults or follows aliases/latest. Preserve adapter defaults < exact
+Profile binding-rule options < Component Binding options, whole top-level
+replacement, closed validation of each layer and effective values, and frozen
+values/origins/formatter identity. Consumer options cannot replace endpoint,
+credential or mandatory TLS policy. Different Components may use different
+adapter-approved choices such as dbNum with the same credential.
+
+### 23. Explicit per-use revocation
+
+Provide an explicit operator-admin operation to revoke system use, application
+use, or both for one exact Provider revision. Expose a safe dependency summary
+for operator inspection. Application-use revocation blocks subsequently authorized
+delivery from every document referencing that binding, including old documents
+with otherwise valid delivery tokens. Other bindings to the same physical version
+remain independent. System-use revocation denies subsequent operations requiring
+that authorization; it does not imply recall of an already authorized operation.
+No external password, privileges or ownership are changed.
+
+Revocation is durable, irreversible for that binding and idempotent. Regranting
+requires a new Provider revision with new explicit bindings and newly accepted
+configuration artifacts. Never reactivate old documents/grants by toggling an old
+binding back on. Store safe actor/time/scope audit without material or verifiers.
+
+### 24. Uniform request authorization
+
+Both static-token and Kubernetes runtime delivery require authorization for the
+exact document, current exact association and secret-use binding, and saved
+projection. Check these on every request without a positive authorization cache.
+Preserve ADR-042: an already authorized in-flight delivery may complete; subsequent
+authorizations fail after revocation. A delivery grant alone cannot override a
+revoked binding. Haby cannot erase previously returned credentials from clients.
+
+### 25. Retirement, not early declaration removal
+
+Explicit administrative revocation takes effect for subsequent authorizations
+immediately. Planned Reference removal instead closes its association's delivery
+authority at the accepted retirement checkpoint, not at Commit or initial submit.
+For Kubernetes, apply ADR-051's safe transition and completion of old recipients,
+including relevant terminating Pods; one ready replacement is insufficient.
+Preserve permissions still needed by target or other active accepted preparation.
+
+For consumers outside managed Workloads, Haby cannot observe that applications
+have stopped: completing their retirement requires explicit operator confirmation.
+Until the appropriate retirement path exists, removal returns a typed unsupported
+result instead of disabling access early. No automatic external cleanup or general
+removal framework is authorized by this documentation alone.
+
+Retiring one association preserves peers, shared material and immutable historical
+receipts/documents. History proves what happened, not present consumption authority.
+Reintroduction after completed removal creates a new explicit association and
+cannot revive old documents or grants. This does not retroactively change existing
+retained Provision/Import document policies.
+
+### 26. Rotation and whole-response failure
+
+Rotation is explicit: new secret version -> new Provider revision -> verification
+and alias switch -> new generation/documents -> consumer transition -> revoke the
+old binding. Reference never rotates the external service password itself. Haby
+does not promise uninterrupted rotation if the service cannot accept old and new
+credentials concurrently.
+
+Wrong purpose/Environment/version/association, revoked authority or resolution,
+decode/format/size errors refuse the whole response. Never return partial JSON,
+an empty password or a redaction marker as runtime material. Keep material out of
+outputs, receipts, persisted configuration, audit and diagnostics. An authorized
+request may resolve an exact version once; no cross-request material cache.
+Preserve existing bounded buffering and best-effort clearing rules, without
+promising erasure of every managed/library string copy.
+
+### 27. Concrete remaining slices and evidence
+
+After #275-B, implement #275-C: protected shared-secret creation, exact use
+bindings issued with Provider revision, administrative revocation and persistence.
+Then #275-D: confirmed Reference outputs -> Profile/Binding -> materialization ->
+authorized delivery, including two Components with different typed options.
+Neither slice may silently enable incomplete production Reference registration.
+Retirement implementation and production availability remain explicit separate
+readiness items; a test adapter does not prove either complete.
+
+Use a closed typed test adapter through the real shared pipeline; no upstream
+Redis implementation. Required evidence includes exact same-version dual use
+without duplicate material, wrong-purpose/cross-Environment refusal, atomic
+revision/binding issuance and safe retries, restart-preserved revocation, new
+revision without old-grant revival, peer isolation, static/runtime authorization
+before secret reads, exact frozen options and whole-document refusal. Retain
+Provision/Import and static Profile projection regressions and full applicable
+merge gates. No new SDK, plugin loader or runtime listener is required.

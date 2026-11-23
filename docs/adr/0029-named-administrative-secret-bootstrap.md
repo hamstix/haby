@@ -1,5 +1,7 @@
 # ADR-029: Named administrative secrets and durable creation receipts
 
+> Accepted extension: [ADR-063 shared credentials](0063-resource-capabilities-rendering-and-provider-status.md#accepted-shared-credential-and-delivery-package-2026-11-23) adds explicit SharedApplicationCredential intake and revision-bound use authority. The initial administrator-only slice below is historical scope, not permission to reinterpret existing purposes.
+
 - Status: Accepted
 - Date: 2026-10-29
 - Scope: Administrative secret bootstrap through the alpha operator API and CLI
