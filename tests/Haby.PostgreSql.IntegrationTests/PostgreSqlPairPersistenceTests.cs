@@ -260,6 +260,40 @@ public sealed class PostgreSqlPairPersistenceTests(PostgreSqlFixture fixture) : 
                 UPDATE manifest_revisions SET snapshot = jsonb_set(snapshot::jsonb, '{spec,resources,other-login}',
                     snapshot::jsonb #> '{spec,resources,app-login}')::text
                 """, arrange).ExecuteNonQueryAsync();
+            // Keep every frozen input coherent so Commit reaches the competing-owner policy.
+            var envelope = PostgreSqlPairPlanningTests.Example();
+            envelope["manifest"]!["spec"]!["resources"]!["other-login"] = envelope["manifest"]!["spec"]!["resources"]!["app-login"]!.DeepClone();
+            var manifest = Assert.IsType<ManifestCandidateResult.Valid>(ManifestCandidatePipeline.Prepare(
+                PostgreSqlPairPlanningTests.Bytes(envelope), PostgreSqlPairPlanningTests.Catalog)).Candidate.Declaration;
+            var original = setup.Plan.Inputs;
+            var intent = ResourceAcquisitionIntent.Provision(manifest.Spec.Resources.Keys);
+            var providers = new ExactProviderResolutionSet(manifest, original.Environment, original.Providers.Entries.Values.Append(
+                original.Providers.Resource(ManifestLocalId.Create("app-login")) with { Input = new ProviderInput.Resource(ManifestLocalId.Create("other-login")) }));
+            var configuration = Assert.IsType<ConfigurationPlanningSnapshot>(ConfigurationPlanningSnapshot.Prepare(original.Revision,
+                manifest, original.Configuration!.Scopes, original.Configuration.Profiles).Snapshot);
+            var inputs = new DurablePlanningInputs(original.Environment, original.EnvironmentKey, original.Revision, providers)
+            { Configuration = configuration, Acquisitions = intent };
+            static OperationId PeerId(OperationId id) => OperationId.Create(id.Value.Replace("app-login", "other-login", StringComparison.Ordinal));
+            var peers = setup.Plan.Graph.Nodes.Where(n => n.ResourceId.Value == "app-login").Select(n => n with
+            {
+                Id = PeerId(n.Id),
+                ResourceId = ManifestLocalId.Create("other-login"),
+                Input = n.Input with { Json = n.Input.Json.Replace("app-login", "other-login", StringComparison.Ordinal) },
+                Dependencies = n.Dependencies.Select(PeerId).ToArray(),
+                OutputReferences = n.OutputReferences.Select(o => o with { ProducerOperationId = PeerId(o.ProducerOperationId) }).ToArray()
+            });
+            var graph = new DurableOperationGraph(setup.Plan.Graph.Nodes.Concat(peers)) { Acquisitions = intent };
+            await using var request = new NpgsqlCommand("UPDATE deployment_change_sets SET acquisition_intent_json = @intent WHERE id = @id", arrange);
+            request.Parameters.AddWithValue("intent", ResourceAcquisitionIntentCodec.Encode(intent));
+            request.Parameters.AddWithValue("id", Guid.Parse(setup.Change.Id.ToString()));
+            await request.ExecuteNonQueryAsync();
+            await using var frozen = new NpgsqlCommand("UPDATE deployment_plans SET configuration_json = @configuration, provider_inputs_json = @providers, graph_json = @graph, fingerprint = @fingerprint WHERE id = @id", arrange);
+            frozen.Parameters.AddWithValue("configuration", ConfigurationPlanningSnapshotCodec.Encode(configuration));
+            frozen.Parameters.AddWithValue("providers", ExactProviderResolutionSetCodec.Encode(providers));
+            frozen.Parameters.AddWithValue("graph", DurableOperationGraphCodec.Encode(graph));
+            frozen.Parameters.AddWithValue("fingerprint", DurableOperationGraphCodec.Fingerprint(inputs, graph));
+            frozen.Parameters.AddWithValue("id", Guid.Parse(setup.Plan.Id.ToString()));
+            await frozen.ExecuteNonQueryAsync();
         }
         await using (var act = Services(setup.Connection))
         {

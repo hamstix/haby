@@ -276,7 +276,7 @@ public sealed partial class PostgreSqlPairImportTests
                     Assert.NotEqual(DurableExecutionOutcome.Succeeded, (await task).StopOutcome);
                     await AssertCurrentCorrection(services, new(previous, null, null, setup.Staged), replacement, commit);
                     await using var check = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-                    Assert.Empty(await check.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+                    Assert.Empty(await check.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
                     Assert.Empty(await check.OperationOutputs.AsNoTracking().ToArrayAsync());
                     var oldVersion = Guid.Parse(setup.Staged.Reference.SecretVersionId.ToString());
                     var newVersion = Guid.Parse(replacement.Credential!.Reference.SecretVersionId.ToString());

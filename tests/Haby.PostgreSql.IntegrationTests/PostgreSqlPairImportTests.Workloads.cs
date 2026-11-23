@@ -68,7 +68,7 @@ public sealed partial class PostgreSqlPairImportTests
         Assert.True((await history.WaitUpdateAsync(update, "historical-new-observation", "tester", options, new(), default)).Applied);
         Assert.Equal(0, databaseProbe.Calls + loginProbe.Calls);
         await using var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-        Assert.Single(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+        Assert.Single(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
         Assert.Equal(2, await db.DurableOperationAttempts.CountAsync(x => x.Generation == 1));
         Assert.Empty(await db.GeneratedCredentialSlots.AsNoTracking().ToArrayAsync());
     }
@@ -186,7 +186,7 @@ public sealed partial class PostgreSqlPairImportTests
     {
         public DurableActionAdmissionKey Key => key;
         public int Calls;
-        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceImportReceipt receipt, CancellationToken token)
+        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceObservationReceipt receipt, CancellationToken token)
         {
             Calls++;
             throw new InvalidOperationException("Historical observation must not invoke import verification.");

@@ -32,7 +32,7 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
             .AddSingleton(Rendering()).AddSingleton(boundary)
             .AddPostgreSqlManifestCatalog(connection).AddPostgreSqlPlaintextSecretStore()
             .AddPostgreSqlProviderConfigurationStore().AddSingleton<IProviderConfigurationCodec, SampleConfigurationCodec>()
-            .AddPostgreSqlProviderAliasStore().AddPostgreSqlDurableDesiredStateCommitter().AddPostgreSqlDurableOperationJournal()
+            .AddPostgreSqlProviderAliasStore().AddPostgreSqlDurableDesiredStateCommitter().AddPostgreSqlDurableOperationJournal().AddPostgreSqlResourceObservationAcceptance()
             .AddSingleton<DurableOperationSerialization>().AddSingleton<ExactDurableOperationExecutor>()
             .AddSingleton<IDurableOperationExecutor>(p => p.GetRequiredService<ExactDurableOperationExecutor>())
             .AddSingleton<DurableGenerationRunner>().AddSingleton<ImportHandler>()
@@ -260,7 +260,7 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
             ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.Ready));
     }
 
-    private sealed class ImportHandler(IDurableOperationJournal journal, IExternalOperationOutputs outputs, Boundary boundary)
+    private sealed class ImportHandler(IDurableOperationJournal journal, IResourceObservationAcceptance outputs, Boundary boundary)
         : IDurableActionAdmissionHandler, IDurableActionHandler, IDurableResourceReusePolicy, IDurableResourceRetentionPolicy
     {
         public DurableActionExecutionKey Key => ImportKey;
@@ -292,21 +292,21 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
             var started = Assert.IsType<DurableBeginAttemptResult.Started>(await journal.TryBeginAttemptAsync(operation.Key, DateTimeOffset.UtcNow, cancellationToken));
             Assert.IsType<DurableMarkerResult.Committed>(await journal.TryCommitDispatchMarkerAsync(operation.Key, started.AttemptId, DateTimeOffset.UtcNow, cancellationToken));
             Interlocked.Increment(ref boundary.Observations);
-            Assert.True(await outputs.CompleteAsync(operation.Key, started.AttemptId,
-                new(Receipt.Contract, Receipt.Key, "external-42"), DateTimeOffset.UtcNow, cancellationToken));
+            Assert.True((await outputs.CompleteAsync(new([new(operation.Key, started.AttemptId,
+                new(Receipt.Contract, Receipt.Key, "external-42"))], [], [], new("haby.import-observation/v1", "{}")), DateTimeOffset.UtcNow, cancellationToken)).IsSuccess);
             return new(DurableExecutionOutcome.Succeeded, await journal.FindAsync(operation.Key, cancellationToken));
         }
     }
     private sealed class SampleReuseVerifier : IDurableResourceReuseVerifier
     {
         public DurableActionAdmissionKey Key => ImportKey.Admission;
-        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceImportReceipt receipt, CancellationToken token) =>
+        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceObservationReceipt receipt, CancellationToken token) =>
             ValueTask.FromResult(original.Node.Action == ImportKey && receipt.Evidence == new DurableActionPayload("haby.import-observation/v1", "{}")
                 ? ResourceReuseValidationStatus.Confirmed : ResourceReuseValidationStatus.InputUnavailable);
     }
-    private sealed class ImportOutput : IExternalOperationOutputContract
+    private sealed class ImportOutput : IResourceObservationOutputContract
     {
-        public bool ValidateImportEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
+        public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
             accepted.Node.Action == ImportKey && evidence == new DurableActionPayload("haby.import-observation/v1", "{}");
         public DurableActionExecutionKey Producer => ImportKey;
         public ExternalOperationOutputIdentity Identity => Receipt;

@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-19
-- Implementation: Not implemented by this decision; shared foundation in [#267](https://github.com/hamstix/haby/issues/267), Reference in [#275](https://github.com/hamstix/haby/issues/275), bounded Provider status in [#274](https://github.com/hamstix/haby/issues/274)
+- Implementation: This decision alone enables no runtime capability; shared foundation in [#267](https://github.com/hamstix/haby/issues/267), Reference in [#275](https://github.com/hamstix/haby/issues/275), bounded Provider status in [#274](https://github.com/hamstix/haby/issues/274)
 - Amends: [ADR-062](0062-existing-resource-import-and-attachment.md); extends ADR-035, ADR-040, ADR-042 and ADR-057
 - Order: Preserve #263 -> TLS #261 -> PostgreSQL import #267 priority; no runtime or implementation release is granted here
 
@@ -22,6 +22,13 @@ values, while Provider revision preflight can test management privileges. This
 ADR defines required extensions; it does not claim upstream Reference or Provider
 status support already exists. Existing `provider check` and alias-switch
 preflight must not be relabeled as the new status operation.
+
+The bounded [#275-A kernel](../development/275-reference-kernel.md) implements
+per-Resource acquisition, frozen homogeneous observation groups, common Import/Reference
+acceptance, conflict-safe catalog claims and separate historical/active association
+proof. Its Reference adapter is test-only. No production Reference intake, secret
+delivery, sharing or removal capability is registered by that kernel; their accepted
+requirements and outstanding decisions below are not claimed implemented.
 
 ## Decisions
 

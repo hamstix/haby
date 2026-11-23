@@ -7,14 +7,14 @@ namespace Haby.PostgreSql;
 
 /// <summary>Equivalent ordinary output contracts for exact import producers. No CREATE evidence.</summary>
 public sealed class PostgreSqlImportOutputContract(ResourceTypeId type, PostgreSqlProviderConfigurationCodec codec,
-    IApplicationCredentialReader credentials) : IExternalOperationOutputContract
+    IApplicationCredentialReader credentials) : IResourceObservationOutputContract
 {
     public DurableActionExecutionKey Producer => type == PostgreSqlDatabaseContract.Id ? PostgreSqlImportContracts.Database : PostgreSqlImportContracts.Login;
     public ExternalOperationOutputIdentity Identity => type == PostgreSqlDatabaseContract.Id
         ? new(PostgreSqlDatabaseOutputContract.Contract, PostgreSqlDatabaseOutputContract.Key)
         : new(PostgreSqlApplicationConnectionContract.Contract, PostgreSqlApplicationConnectionContract.Key);
 
-    public bool ValidateImportEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
+    public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
         PostgreSqlImportContracts.Decode(accepted.Node) is { } input &&
         PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs) == input &&
         PostgreSqlImportObservation.Decode(evidence) is { } observed &&

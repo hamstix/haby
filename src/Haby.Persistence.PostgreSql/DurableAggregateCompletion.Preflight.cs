@@ -163,11 +163,13 @@ internal static partial class DurableAggregateCompletion
                     }
                     if (operation.State == nameof(DurableOperationState.Succeeded))
                     {
-                        if (node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                        if (node.Action.Admission.Mode != ResourceAcquisitionMode.Provision)
                         {
-                            var receipt = await ResourceImportReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(deployment.ToString()),
+                            var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(deployment.ToString()),
                                 Haby.Domain.DeploymentGeneration.Create(source.Row.Generation), node.Id), token);
-                            if (receipt is null || !contracts.Single(x => x.Producer == node.Action).ValidateImportEvidence(
+                            if (receipt is null || node.Action.Admission.Mode == ResourceAcquisitionMode.Reference &&
+                                !await ResourceObservationReceiptIntegrity.HasActiveAssociationAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(deployment.ToString()), Haby.Domain.DeploymentGeneration.Create(source.Row.Generation), node.Id), token) ||
+                                contracts.Single(x => x.Producer == node.Action) is not IResourceObservationOutputContract observation || !observation.ValidateObservationEvidence(
                                 new(source.Inputs, source.Graph, node, source.Inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return null;
                         }
                         var attempt = attempts.SingleOrDefault(x => x.AttemptId == operation.CurrentAttemptId && x.OperationId == node.Id.Value && x.AttemptNumber == operation.AttemptNumber);

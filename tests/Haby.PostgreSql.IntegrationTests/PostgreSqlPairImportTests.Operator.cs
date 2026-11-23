@@ -150,9 +150,9 @@ public sealed partial class PostgreSqlPairImportTests
                 Assert.Equal(2, await verify.OperatorImportRequestRecords.CountAsync());
                 Assert.Equal(2, await verify.ProtectedApplicationCredentials.CountAsync());
                 Assert.Single(await verify.ImportSupersessions.AsNoTracking().ToArrayAsync());
-                Assert.Single(await verify.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+                Assert.Single(await verify.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
                 Assert.Equal(commit.Commit.Generation, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
-                var receipt = await host.Services.GetRequiredService<IResourceImportAcceptance>().FindAsync(new(ApplicationDeploymentId.Parse(commit.Commit.DeploymentId),
+                var receipt = await host.Services.GetRequiredService<IResourceObservationAcceptance>().FindAsync(new(ApplicationDeploymentId.Parse(commit.Commit.DeploymentId),
                     DeploymentGeneration.Create(commit.Commit.Generation), OperationId.Create("app-login-access")), default);
                 var observed = PostgreSqlImportObservation.Decode(receipt!.Evidence)!;
                 Assert.True(observed.AdministratorTls && observed.ApplicationTls);

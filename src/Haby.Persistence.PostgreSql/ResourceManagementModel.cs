@@ -12,7 +12,7 @@ public sealed partial class ManifestCatalogDbContext
         model.Entity<ResourceManagementRow>(e =>
         {
             e.ToTable("resource_management", t => t.HasCheckConstraint("CK_resource_management_identity",
-                "source_generation > 0 AND length(resource_local_id) > 0 AND ((origin = 'Provisioned' AND authority = 'Provisioned') OR (origin = 'Imported' AND authority = 'UseAndRetain'))"));
+                "source_generation > 0 AND length(resource_local_id) > 0 AND ((origin = 'Provisioned' AND authority = 'Provisioned') OR (origin = 'Imported' AND authority = 'UseAndRetain') OR (origin = 'Referenced' AND authority = 'ConsumptionOnly'))"));
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnName("id");
             e.Property(x => x.Environment).HasColumnName("environment_record_id");

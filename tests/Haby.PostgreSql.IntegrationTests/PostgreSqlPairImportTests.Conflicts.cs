@@ -57,7 +57,7 @@ public sealed partial class PostgreSqlPairImportTests
         await using (var verify = Services(first.Connection))
         await using (var db = await verify.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
         {
-            Assert.Single(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+            Assert.Single(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
             Assert.Equal(2, await db.OperationOutputs.CountAsync());
             Assert.Equal(4, await db.ProviderResourceReservations.CountAsync());
             Assert.Equal(1, await db.ProtectedApplicationCredentials.CountAsync(x => x.ConfirmedReceipt != null));

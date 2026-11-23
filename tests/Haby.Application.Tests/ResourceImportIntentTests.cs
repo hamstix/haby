@@ -58,6 +58,8 @@ public sealed class ResourceImportIntentTests
         var provision = new Admission(ResourceAcquisitionMode.Provision);
         var admission = new DurableActionAdmission(new([provision], []));
         var imported = Inputs with { Import = Intent() };
+        var referenced = Inputs with { Acquisitions = new([new(ManifestLocalId.Create("one-resource"), ResourceAcquisitionMode.Reference, Intent().Resources.Single().Input)]) };
+        Assert.Equal(DurablePlanStatus.ReferenceNotSupported, admission.Admit(Inputs.Providers.Declaration.Spec, Provider, referenced));
         Assert.Equal(DurablePlanStatus.Planned, admission.Admit(Inputs.Providers.Declaration.Spec, Provider, Inputs));
         Assert.Equal(DurablePlanStatus.ImportNotSupported, admission.Admit(Inputs.Providers.Declaration.Spec, Provider, imported));
         Assert.False(admission.HasPlanningSupport(Inputs.Providers.Declaration.Spec, Provider, imported));

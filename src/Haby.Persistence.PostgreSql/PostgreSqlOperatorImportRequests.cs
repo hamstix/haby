@@ -118,8 +118,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImport
             if (!await db.Revisions.AsNoTracking().AnyAsync(x => x.Id == row.ManifestRevision &&
                 x.ApplicationRecordId == row.Application && x.LocalRevisionNumber == row.Revision, token))
                 return new(OperatorImportRequestStatus.StorageUnavailable);
-            var change = AddChangeSet(db, binding.Environment, binding.Revision.ApplicationRecordId, binding.Revision,
-                binding.Correction?.Generation is { } expected ? new DeploymentPrecondition.ExpectedGeneration(expected) : new DeploymentPrecondition.ExpectedAbsence(), intent, actor);
+            var change = await AddChangeSetAsync(db, binding.Environment, binding.Revision.ApplicationRecordId, binding.Revision,
+                binding.Correction?.Generation is { } expected ? new DeploymentPrecondition.ExpectedGeneration(expected) : new DeploymentPrecondition.ExpectedAbsence(), intent, actor, token);
             row.ChangeSet = Guid.Parse(change.Id.ToString());
             row.StagedCredential = credential.Id;
             row.CompletedAt = change.CreatedAt;

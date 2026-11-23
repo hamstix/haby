@@ -36,7 +36,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
 
         var identity = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == changeId, cancellationToken);
         if (identity is null) return new DurableCommitResult.ChangeSetNotFound();
-        if (identity.ImportIntentJson is not null)
+        if (identity.ImportIntentJson is not null || identity.AcquisitionIntentJson is { } acquisitionJson &&
+            ResourceAcquisitionIntentCodec.Decode(acquisitionJson).Resources.Any(x => x.Mode == ResourceAcquisitionMode.ImportUseAndRetain))
             await ImportMutationGate.LockAsync(context, identity.EnvironmentRecordId, identity.ApplicationRecordId, cancellationToken);
 
         // A row lock serializes retries of one ChangeSet. The advisory transaction lock
@@ -107,7 +108,7 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         try
         {
             inputs = plan.Inputs();
-            if (!Equals(inputs.Import, ResourceImportIntentCodec.Decode(change.ImportIntentJson))) return new DurableCommitResult.PlanInputUnavailable();
+            if (!inputs.Acquisitions.Equals(ResourceAcquisitionIntentCodec.Decode(change.AcquisitionIntentJson ?? throw new InvalidDataException())) || !Equals(inputs.Import, ResourceImportIntentCodec.Decode(change.ImportIntentJson))) return new DurableCommitResult.PlanInputUnavailable();
             graph = DurableOperationGraphCodec.Decode(plan.GraphJson);
             if (graph.WorkloadUpdate is not null && mode != DeploymentAdmissionMode.Internal) return new DurableCommitResult.UnsupportedShape();
             var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(x =>
@@ -317,8 +318,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 Resource = resource.Value,
                 Deployment = deploymentGuid,
                 SourceGeneration = generation,
-                Origin = inputs.Import is null ? ResourceOrigin.Provisioned : ResourceOrigin.Imported,
-                Authority = inputs.Import is null ? ResourceLifecycleAuthority.Provisioned : ResourceLifecycleAuthority.UseAndRetain
+                Origin = ResourceAcquisitionIntent.Origin(inputs.Acquisitions.Resource(resource).Mode),
+                Authority = ResourceAcquisitionIntent.Authority(inputs.Acquisitions.Resource(resource).Mode)
             };
             context.ResourceManagement.Add(management);
             managementRows.Add(management);

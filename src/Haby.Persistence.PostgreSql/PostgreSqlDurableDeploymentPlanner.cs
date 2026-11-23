@@ -27,6 +27,11 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         string actorId, CancellationToken cancellationToken) =>
         await CreateChangeSetCoreAsync(environment, application, revision, precondition, null, actorId, cancellationToken);
 
+    internal ValueTask<DurableChangeSetCreateResult> CreateAcquisitionChangeSetAsync(EnvironmentRecordId environment,
+        ApplicationRecordId application, ManifestRevisionRef revision, ResourceAcquisitionIntent acquisitions,
+        string actor, CancellationToken token) => CreateChangeSetCoreAsync(environment, application, revision,
+            new DeploymentPrecondition.ExpectedAbsence(), null, actor, token, acquisitions);
+
     public ValueTask<DurableChangeSetCreateResult> CreateImportChangeSetAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, ResourceImportIntent intent,
         string actorId, CancellationToken cancellationToken)
@@ -37,7 +42,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
 
     private async ValueTask<DurableChangeSetCreateResult> CreateChangeSetCoreAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
-        ResourceImportIntent? intent, string actorId, CancellationToken cancellationToken)
+        ResourceImportIntent? intent, string actorId, CancellationToken cancellationToken, ResourceAcquisitionIntent? acquisitions = null)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(application);
@@ -50,7 +55,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
         var validation = await ValidateChangeSetInputAsync(context, environment, application, revision, intent, false, cancellationToken);
         if (validation is { } refused) return new(refused);
-        var change = AddChangeSet(context, environment, application, revision, precondition, intent, actorId);
+        var change = await AddChangeSetAsync(context, environment, application, revision, precondition, intent, actorId, cancellationToken, acquisitions);
         await context.SaveChangesAsync(cancellationToken);
         return new(DurableChangeSetCreateStatus.Created, change);
     }
@@ -81,16 +86,21 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         return null;
     }
 
-    private DeploymentChangeSet AddChangeSet(ManifestCatalogDbContext context, EnvironmentRecordId environment,
+    private async Task<DeploymentChangeSet> AddChangeSetAsync(ManifestCatalogDbContext context, EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
-        ResourceImportIntent? intent, string actorId)
+        ResourceImportIntent? intent, string actorId, CancellationToken token, ResourceAcquisitionIntent? acquisitions = null)
     {
+        var accepted = PostgreSqlManifestImportStore.Rehydrate(await context.Revisions.AsNoTracking().SingleAsync(x =>
+            x.ApplicationRecordId == Guid.Parse(application.ToString()) && x.LocalRevisionNumber == revision.RevisionNumber.Value, token));
+        acquisitions ??= intent is null ? ResourceAcquisitionIntent.Provision(accepted.Declaration.Spec.Resources.Keys) : ResourceAcquisitionIntent.Import(intent);
+        acquisitions.Validate(accepted.Declaration.Spec);
         var id = DeploymentChangeSetId.New();
         var createdAt = clock.GetUtcNow();
         context.DurableChangeSets.Add(new DurableChangeSetRow
         {
             Id = Guid.Parse(id.ToString()),
             ImportIntentJson = ResourceImportIntentCodec.Encode(intent),
+            AcquisitionIntentJson = ResourceAcquisitionIntentCodec.Encode(acquisitions),
             EnvironmentRecordId = Guid.Parse(environment.ToString()),
             ApplicationRecordId = Guid.Parse(application.ToString()),
             RevisionNumber = revision.RevisionNumber.Value,
@@ -101,7 +111,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         });
         return new DeploymentChangeSet(id, environment,
             new DeploymentChangeSetMember(application, revision, precondition), createdAt, actorId)
-        { Import = intent };
+        { Import = intent, Acquisitions = acquisitions };
     }
 
     public ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId,
@@ -120,7 +130,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var changeId = Guid.Parse(changeSetId.ToString());
         var identity = await context.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == changeId, cancellationToken);
         if (identity is null) return new(DurablePlanStatus.ChangeSetNotFound);
-        if (identity.ImportIntentJson is not null)
+        if (identity.ImportIntentJson is not null || identity.AcquisitionIntentJson is { } acquisitionJson &&
+            ResourceAcquisitionIntentCodec.Decode(acquisitionJson).Resources.Any(x => x.Mode == ResourceAcquisitionMode.ImportUseAndRetain))
             await ImportMutationGate.LockAsync(context, identity.EnvironmentRecordId, identity.ApplicationRecordId, cancellationToken);
         // Commit takes FOR UPDATE on this row. Planning holds FOR SHARE through
         // insertion so a Plan cannot be created after this ChangeSet commits.
@@ -202,7 +213,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
                 : new ExactProviderResolutionSet(revision.Declaration, environmentId, resourceProviders);
         }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
-        var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), reference, providers) { Import = import };
+        var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), reference, providers) { Import = import, Acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()) };
         // Describe supported Resource producers before capturing the complete configuration.
         // Only graph planning uses the final Resource-stage view; accepted inputs stay complete.
         DurablePlanStatus admitted = DurablePlanStatus.Planned;
@@ -235,6 +246,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         resourceInputs = internalEffects ? InternalResourceStage.Project(inputs) : inputs;
+        if (inputs.Acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference) &&
+            (baseline is not null || internalEffects || spec.Components.Count != 0)) return new(DurablePlanStatus.ReferenceNotSupported);
         var resourceSpec = internalEffects ? resourceInputs.Providers.Declaration.Spec : spec;
         DurableOperationGraph graph;
         try
@@ -427,7 +440,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot;
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), revision,
             CaptureProviders(manifest.Declaration, environmentId, alias, resolution.Binding.InstanceId, resolution.Binding.RevisionNumber, resolution.ImplementationId, naming))
-        { Import = ResourceImportIntentCodec.Decode(row.ImportIntentJson) };
+        { Import = ResourceImportIntentCodec.Decode(row.ImportIntentJson), Acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()) };
         var frozen = plan.Inputs.Configuration ?? throw new InvalidDataException();
         if (!manifest.Declaration.Equals(frozen.Manifest)) return (DurablePlanStatus.PlanInputUnavailable, null);
         if (!inputs.Providers.Equals(plan.Inputs.Providers)) return (DurablePlanStatus.Planned, inputs with { Configuration = frozen });
@@ -465,7 +478,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         {
             var provider = new ProviderAdapterKey(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId);
             var imported = (await ImportedProducersAsync(context, inputs, cancellationToken)).Select(x => x.ResourceId).ToHashSet();
-            if (!admission.HasPlanningSupport(spec, provider, inputs, imported)) return inputs.Import is null ? DurablePlanStatus.ProviderCapabilityMismatch : DurablePlanStatus.ImportNotSupported;
+            var support = admission.PlanningSupportStatus(spec, provider, inputs, imported);
+            if (support != DurablePlanStatus.Planned) return support;
             if (!await CodecAvailableAsync(context, revision, cancellationToken)) return DurablePlanStatus.ProviderRevisionUnavailable;
             result = admission.Admit(spec, provider, inputs, PreparedConfiguration(instance.ProviderKindId, revision), imported);
         }
@@ -515,7 +529,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             new DeploymentChangeSetMember(application, revision, row.ExpectedAbsence ? new DeploymentPrecondition.ExpectedAbsence() :
                 new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(row.ExpectedGeneration ?? throw new InvalidDataException()))),
             row.CreatedAt, row.ActorId)
-        { Import = ResourceImportIntentCodec.Decode(row.ImportIntentJson) };
+        { Import = ResourceImportIntentCodec.Decode(row.ImportIntentJson), Acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()) };
     }
 
     private static DurablePlan ToPlan(DurablePlanRow row, DateTimeOffset? closedAt, string? closedByActorId)

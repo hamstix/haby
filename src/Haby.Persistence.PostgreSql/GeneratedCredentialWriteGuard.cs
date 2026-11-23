@@ -6,21 +6,30 @@ public sealed partial class ManifestCatalogDbContext
 {
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        using var identityTransaction = HasIdentityWrites() && Database.CurrentTransaction is null ? Database.BeginTransaction() : null;
+        ValidateIdentityWritesAsync(false, default).GetAwaiter().GetResult();
         ValidateCheckpointWrites();
         ValidateObservationWrites();
         ValidateInternalActionWrites();
         // The synchronous branch performs synchronous queries and never waits on asynchronous I/O.
         ValidateGeneratedWritesAsync(false, default).GetAwaiter().GetResult();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        var result = base.SaveChanges(acceptAllChangesOnSuccess);
+        identityTransaction?.Commit();
+        return result;
     }
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        await using var identityTransaction = HasIdentityWrites() && Database.CurrentTransaction is null
+            ? await Database.BeginTransactionAsync(cancellationToken) : null;
+        await ValidateIdentityWritesAsync(true, cancellationToken);
         ValidateCheckpointWrites();
         ValidateObservationWrites();
         ValidateInternalActionWrites();
         await ValidateGeneratedWritesAsync(true, cancellationToken);
-        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        if (identityTransaction is not null) await identityTransaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private async Task ValidateGeneratedWritesAsync(bool asynchronous, CancellationToken cancellationToken)
@@ -28,7 +37,7 @@ public sealed partial class ManifestCatalogDbContext
         ChangeTracker.DetectChanges();
         await ValidateImportAuthorityWritesAsync(asynchronous, cancellationToken);
         await ValidateOperatorImportRequestWritesAsync(asynchronous, cancellationToken);
-        if (ChangeTracker.Entries<ResourceImportReceiptRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
+        if (ChangeTracker.Entries<ResourceObservationReceiptRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Import receipts are immutable.");
         foreach (var entry in ChangeTracker.Entries<ProtectedApplicationCredentialRow>().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
         {
@@ -39,9 +48,9 @@ public sealed partial class ManifestCatalogDbContext
                 if (saved is null || entry.State == EntityState.Deleted || saved.ConfirmedReceipt is not null || entry.Entity.ConfirmedReceipt is null ||
                     entry.Properties.Any(p => p.IsModified && p.Metadata.Name != nameof(ProtectedApplicationCredentialRow.ConfirmedReceipt)))
                     throw new InvalidOperationException("Protected credential input is immutable.");
-                var receiptQuery = ResourceImportReceipts.AsNoTracking().Where(x => x.Id == entry.Entity.ConfirmedReceipt);
+                var receiptQuery = ResourceObservationReceipts.AsNoTracking().Where(x => x.Id == entry.Entity.ConfirmedReceipt);
                 var receipt = asynchronous ? await receiptQuery.SingleOrDefaultAsync(cancellationToken) : receiptQuery.SingleOrDefault();
-                if (receipt is null || !ResourceImportReceiptIntegrity.Decode(receipt.Document).Credentials.Any(x => x.Staged == saved.Id &&
+                if (receipt is null || !ResourceObservationReceiptIntegrity.Decode(receipt.Document).Credentials.Any(x => x.Staged == saved.Id &&
                     x.Resource == saved.Resource && x.Secret == saved.Secret && x.Version == saved.Version))
                     throw new InvalidOperationException("Protected credential confirmation is unavailable.");
             }

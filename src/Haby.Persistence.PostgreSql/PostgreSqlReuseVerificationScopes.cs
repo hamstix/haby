@@ -11,7 +11,7 @@ namespace Haby.Persistence.PostgreSql;
 public sealed class PostgreSqlReuseVerificationScopes
 {
     internal enum Transition { Begin, Marker, Completion, Aggregate }
-    internal sealed record Original(AcceptedOperation Accepted, ResourceImportReceipt Receipt);
+    internal sealed record Original(AcceptedOperation Accepted, ResourceObservationReceipt Receipt);
     internal sealed record OperationState(string Id, string State, Guid? Attempt, long Number, DateTimeOffset? Dispatched,
         DateTimeOffset? Finalized, string? Reason, string? Outcome, DateTimeOffset? AttemptFinished);
     internal sealed record Capture(string Fingerprint, OperationState? Operation, IReadOnlyList<Original> Originals);
@@ -143,8 +143,8 @@ public sealed class PostgreSqlReuseVerificationScopes
                 if (managed.Authority != ResourceLifecycleAuthority.UseAndRetain) continue;
                 var node = originalGraph.Nodes.First(x => x.ResourceId == reuse.Resource);
                 var key = new DurableOperationKey(ApplicationDeploymentId.Parse(deployment.ToString()), DeploymentGeneration.Create(source.Generation), node.Id);
-                var receipt = await ResourceImportReceiptIntegrity.ReadAsync(db, key, token);
-                var receiptRow = await db.ResourceImportReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == source.Generation, token);
+                var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, key, token);
+                var receiptRow = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == source.Generation, token);
                 if (receipt is null || receiptRow is null) return null;
                 fields.AddRange([receipt.Id.ToString(), receiptRow.Fingerprint]);
                 originals.Add(new(new(originalInputs, originalGraph, node, originalInputs.Configuration!.Manifest.Spec), receipt));

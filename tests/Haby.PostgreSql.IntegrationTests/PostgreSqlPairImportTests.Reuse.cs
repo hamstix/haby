@@ -125,7 +125,7 @@ public sealed partial class PostgreSqlPairImportTests
     private sealed class UnavailableReuse(DurableActionAdmissionKey key) : IDurableResourceReuseVerifier
     {
         public DurableActionAdmissionKey Key => key;
-        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceImportReceipt receipt, CancellationToken token) =>
+        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceObservationReceipt receipt, CancellationToken token) =>
             ValueTask.FromResult(ResourceReuseValidationStatus.Connectivity);
     }
 
@@ -207,8 +207,8 @@ public sealed partial class PostgreSqlPairImportTests
     {
         await using var services = Services(setup.Connection);
         await using var db = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
-        Assert.NotNull(await services.GetRequiredService<IResourceImportAcceptance>().FindAsync(setup.Key, default));
-        Assert.Single(await db.ResourceImportReceipts.AsNoTracking().ToArrayAsync());
+        Assert.NotNull(await services.GetRequiredService<IResourceObservationAcceptance>().FindAsync(setup.Key, default));
+        Assert.Single(await db.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
         Assert.Equal(2, await db.OperationOutputs.CountAsync());
         Assert.Equal(2, await db.DurableOperationAttempts.CountAsync());
     }

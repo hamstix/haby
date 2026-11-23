@@ -10,48 +10,76 @@ internal sealed record ImportReceiptMember(string Operation, Guid Attempt, strin
 internal sealed record ImportReceiptCredential(string Resource, Guid Staged, Guid Secret, Guid Version);
 internal sealed record ImportReceiptReservation(Guid Provider, string Resource, string Namespace, string Value);
 internal sealed record ImportReceiptDocument(int Version, string EvidenceFormat, string EvidenceJson,
-    ImportReceiptMember[] Operations, ImportReceiptCredential[] Credentials, ImportReceiptReservation[] Reservations);
+    ImportReceiptMember[] Operations, ImportReceiptCredential[] Credentials, ImportReceiptReservation[] Reservations, string Group, int Mode, ImportReceiptAssociation[] Associations);
+internal sealed record ImportReceiptAssociation(string Resource, Guid Management);
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, AllowDuplicateProperties = false,
     RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true)]
 [JsonSerializable(typeof(ImportReceiptDocument))]
 internal partial class ImportReceiptJsonContext : JsonSerializerContext;
 
-internal static class ResourceImportReceiptIntegrity
+internal static class ResourceObservationReceiptIntegrity
 {
     internal static string Fingerprint(string sourceFingerprint, string document) =>
         ResourcesReadyCheckpointCodec.Hash(sourceFingerprint + "\n" + document);
     internal static ImportReceiptDocument Decode(string json)
     {
-        if (System.Text.Encoding.UTF8.GetByteCount(json) > 1048576) throw new InvalidDataException("Import receipt exceeds bound.");
+        if (System.Text.Encoding.UTF8.GetByteCount(json) > 1048576) throw new InvalidDataException("Observation receipt exceeds bound.");
         var value = JsonSerializer.Deserialize(json, ImportReceiptJsonContext.Default.ImportReceiptDocument);
-        if (value is null || value.Version != 1 || value.Operations.Length is < 1 or > 256 ||
+        if (value is null || value.Version != 2 || value.Operations.Length is < 1 or > 256 ||
             value.Operations.Select(x => x.Operation).Distinct(StringComparer.Ordinal).Count() != value.Operations.Length ||
             value.Credentials.Select(x => x.Resource).Distinct(StringComparer.Ordinal).Count() != value.Credentials.Length)
-            throw new InvalidDataException("Invalid import receipt.");
+            throw new InvalidDataException("Invalid observation receipt.");
         return value;
     }
 
-    internal static async Task<ResourceImportReceipt?> ReadAsync(ManifestCatalogDbContext db,
+    internal static Task<bool> IsActiveAsync(ManifestCatalogDbContext db, Guid association, CancellationToken token) =>
+        (from head in db.ResourceManagementHeads.AsNoTracking()
+         join history in db.ResourceManagement.AsNoTracking() on head.Management equals history.Id
+         where history.Id == association && head.Environment == history.Environment && head.Application == history.Application && head.Resource == history.Resource
+         select history.Id).AnyAsync(token);
+
+    internal static async Task<bool> HasActiveAssociationAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token)
+    {
+        var receipt = await ReadAsync(db, key, token);
+        if (receipt is null) return false;
+        var row = await db.ResourceObservationReceipts.AsNoTracking().SingleAsync(x => x.Id == receipt.Id, token);
+        var document = Decode(row.Document);
+        foreach (var association in document.Associations)
+            if (!await IsActiveAsync(db, association.Management, token)) return false;
+        return true;
+    }
+
+    internal static async Task<ResourceObservationReceipt?> ReadAsync(ManifestCatalogDbContext db,
         DurableOperationKey key, CancellationToken token)
     {
         var deployment = Guid.Parse(key.DeploymentId.ToString());
-        var row = await db.ResourceImportReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == key.Generation.Value, token);
+        var sourceGraph = await db.DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value).Select(x => x.GraphJson).SingleOrDefaultAsync(token);
+        if (sourceGraph is null) return null;
+        var frozenGroup = DurableOperationGraphCodec.Decode(sourceGraph).ObservationGroups.SingleOrDefault(x => x.Operations.Contains(key.OperationId));
+        if (frozenGroup is null) return null;
+        var row = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == key.Generation.Value && x.Group == frozenGroup.Id, token);
         if (row is null) return null;
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == key.Generation.Value, token);
         if (source is null || row.Fingerprint != Fingerprint(source.Fingerprint, row.Document)) return null;
         var inputs = source.Inputs();
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
         var document = Decode(row.Document);
-        if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != source.Fingerprint || inputs.Import is null || !graph.Nodes.Select(x => x.Id.Value).ToHashSet(StringComparer.Ordinal).SetEquals(document.Operations.Select(x => x.Operation)) ||
-            graph.Nodes.Any(x => x.Action.Admission.Mode != ResourceAcquisitionMode.ImportUseAndRetain) ||
+        var group = graph.ObservationGroups.SingleOrDefault(x => x.Id == document.Group);
+        if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != source.Fingerprint || group is null || row.Group != group.Id ||
+            document.Mode != (int)group.Mode || !group.Operations.Select(x => x.Value).ToHashSet(StringComparer.Ordinal).SetEquals(document.Operations.Select(x => x.Operation)) ||
             document.Operations.All(x => x.Operation != key.OperationId.Value)) return null;
-        foreach (var resource in inputs.Import.Resources)
+        var resources = group.Operations.Select(id => graph.Nodes.Single(x => x.Id == id).ResourceId).Distinct().ToArray();
+        if (document.Associations.Length != resources.Length || document.Associations.Select(x => x.Resource).Distinct().Count() != resources.Length) return null;
+        foreach (var resource in resources)
         {
-            var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Resource == resource.Resource.Value, token);
-            if (managed is null || managed.Environment != source.EnvironmentRecordId || managed.Application != source.ApplicationRecordId ||
+            var association = document.Associations.SingleOrDefault(x => x.Resource == resource.Value);
+            if (association is null) return null;
+            // Historical proof uses immutable source identity, never the current head.
+            var managed = await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == association.Management, token);
+            if (managed is null || managed.Deployment != deployment || managed.Resource != resource.Value ||
                 managed.SourceGeneration != source.Generation || !ResourceContinuity.HasAcquisitionAuthority(managed, inputs)) return null;
         }
-        var operations = new List<ImportOperationConfirmation>();
+        var operations = new List<ObservationOperationConfirmation>();
         foreach (var member in document.Operations)
         {
             var node = graph.Nodes.Single(x => x.Id.Value == member.Operation);
@@ -68,7 +96,7 @@ internal static class ResourceImportReceiptIntegrity
             if (output is null || ResourcesReadyCheckpointCodec.Hash(output.Payload) != member.Fingerprint) return null;
             operations.Add(new(key with { OperationId = node.Id }, member.Attempt, new(output.Contract, output.Key, output.Payload)));
         }
-        var expectedCredentials = inputs.Import.Resources.Where(x => x.Credential is not null).ToArray();
+        var expectedCredentials = inputs.Acquisitions.Resources.Where(x => resources.Contains(x.Resource) && x.Credential is not null).ToArray();
         if (document.Credentials.Length != expectedCredentials.Length) return null;
         foreach (var member in document.Credentials)
         {
@@ -85,9 +113,17 @@ internal static class ResourceImportReceiptIntegrity
                     x.ProtectionFormat == PlaintextProtectionFormat.Name && x.FormatVersion == PlaintextProtectionFormat.Version, token)) return null;
         }
         foreach (var reservation in document.Reservations)
-            if (!await db.ProviderResourceReservations.AsNoTracking().AnyAsync(x => x.ProviderInstanceId == reservation.Provider &&
+        {
+            if (group.Mode == ResourceAcquisitionMode.Reference)
+            {
+                var association = document.Associations.Single(a => a.Resource == reservation.Resource).Management;
+                if (!await db.ResourceIdentityClaims.AsNoTracking().AnyAsync(x => x.Provider == reservation.Provider && x.Namespace == reservation.Namespace &&
+                    x.Value == reservation.Value && x.Association == association, token)) return null;
+            }
+            else if (!await db.ProviderResourceReservations.AsNoTracking().AnyAsync(x => x.ProviderInstanceId == reservation.Provider &&
                 x.EnvironmentRecordId == source.EnvironmentRecordId && x.ApplicationRecordId == source.ApplicationRecordId && x.ResourceLocalId == reservation.Resource &&
                 x.Namespace == reservation.Namespace && x.Value == reservation.Value, token)) return null;
+        }
         return new(row.Id, new(document.EvidenceFormat, document.EvidenceJson), operations);
     }
 }

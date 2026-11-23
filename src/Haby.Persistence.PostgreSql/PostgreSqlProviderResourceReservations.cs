@@ -51,7 +51,7 @@ public sealed class PostgreSqlProviderResourceReservations(IDbContextFactory<Man
             await context.SaveChangesAsync(cancellationToken);
             return true;
         }
-        catch (Exception e) when (e is DbUpdateException or NpgsqlException or IOException)
+        catch (Exception e) when (e is DbUpdateException or NpgsqlException or IOException or InvalidOperationException)
         {
             // Unique constraints arbitrate concurrent callers. Reread after disposal using an
             // independent context, including a possibly committed write with a lost response.
@@ -62,7 +62,8 @@ public sealed class PostgreSqlProviderResourceReservations(IDbContextFactory<Man
             if (existing is not null) return existing.Value == reservation.Value;
             var winner = await reread.ProviderResourceReservations.AsNoTracking().SingleOrDefaultAsync(r =>
                 r.ProviderInstanceId == provider && r.Namespace == reservation.Namespace && r.Value == reservation.Value, cancellationToken);
-            if (winner is not null) return false;
+            if (winner is not null || await reread.ResourceIdentityClaims.AsNoTracking().AnyAsync(x => x.Provider == provider && x.Namespace == reservation.Namespace &&
+                (x.Value == reservation.Value || x.Environment == environment && x.Application == application && x.Resource == resource), cancellationToken)) return false;
             throw new IOException("Provider resource reservation unavailable.");
         }
     }

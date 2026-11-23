@@ -18,7 +18,7 @@ public sealed class NullPostgreSqlImportFaultHooks : IPostgreSqlImportFaultHooks
 /// <summary>Both import nodes coordinate one read-only verification and one atomic catalog acceptance.
 /// An interrupted dispatched import reuses its exact open attempts; Provision remains non-replayable.</summary>
 public sealed class PostgreSqlImportAction(ResourceTypeId type, IDurableOperationJournal journal, IExternalOperationOutputs outputs,
-    IResourceImportAcceptance acceptance, PostgreSqlImportVerifier verifier, IProviderConfigurationStore providers,
+    IResourceObservationAcceptance acceptance, PostgreSqlImportVerifier verifier, IProviderConfigurationStore providers,
     IPostgreSqlImportFaultHooks hooks, TimeProvider clock) : IReadOnlyResourceImportHandler
 {
     public DurableActionExecutionKey Key => type == PostgreSqlDatabaseContract.Id ? PostgreSqlImportContracts.Database : PostgreSqlImportContracts.Login;
@@ -77,7 +77,7 @@ public sealed class PostgreSqlImportAction(ResourceTypeId type, IDurableOperatio
         var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
             accepted.Provider.Instance, accepted.Provider.Configuration, cancellationToken))?.Configuration;
         if (configuration is null) return await Observed(DurableExecutionOutcome.InputUnavailable, operation.Key);
-        var confirmations = accepted.Graph.Nodes.Select(node => new ImportOperationConfirmation(operation.Key with { OperationId = node.Id }, attempts[node.Id],
+        var confirmations = accepted.Graph.Nodes.Select(node => new ObservationOperationConfirmation(operation.Key with { OperationId = node.Id }, attempts[node.Id],
             node.Action == PostgreSqlImportContracts.Database
                 ? PostgreSqlDatabaseOutputContract.Encode(new(input.Pair.DatabaseName, input.Pair.DatabaseOid, input.Pair.PublicSchemaOid))
                 : PostgreSqlApplicationConnectionContract.Encode(new(configuration.Host, configuration.Port, input.Pair.DatabaseName, input.Pair.Schema,
@@ -92,12 +92,12 @@ public sealed class PostgreSqlImportAction(ResourceTypeId type, IDurableOperatio
             await hooks.AfterAcceptanceAsync(cancellationToken);
             return await Observed(DurableExecutionOutcome.Succeeded, operation.Key);
         }
-        if (result.Status == ResourceImportAcceptanceStatus.Conflict)
+        if (result.Status == ResourceObservationAcceptanceStatus.Conflict)
         {
             await ConflictAsync(operation.Key, attempts);
             return await Observed(DurableExecutionOutcome.Failed, operation.Key);
         }
-        return await Observed(result.Status == ResourceImportAcceptanceStatus.StorageUnavailable
+        return await Observed(result.Status == ResourceObservationAcceptanceStatus.StorageUnavailable
             ? DurableExecutionOutcome.RetryableFailure : DurableExecutionOutcome.InputUnavailable, operation.Key);
     }
 
@@ -125,7 +125,7 @@ public static class PostgreSqlImportServices
             services.AddSingleton<IDurableResourceReuseVerifier>(p => new PostgreSqlImportReuseVerifier(type,
                 p.GetRequiredService<PostgreSqlImportVerifier>(), p.GetRequiredService<IPostgreSqlImportFaultHooks>()));
             services.AddSingleton<IDurableActionHandler>(p => new PostgreSqlImportAction(type, p.GetRequiredService<IDurableOperationJournal>(),
-                p.GetRequiredService<IExternalOperationOutputs>(), p.GetRequiredService<IResourceImportAcceptance>(), p.GetRequiredService<PostgreSqlImportVerifier>(),
+                p.GetRequiredService<IExternalOperationOutputs>(), p.GetRequiredService<IResourceObservationAcceptance>(), p.GetRequiredService<PostgreSqlImportVerifier>(),
                 p.GetRequiredService<IProviderConfigurationStore>(), p.GetRequiredService<IPostgreSqlImportFaultHooks>(), p.GetRequiredService<TimeProvider>()));
             services.AddSingleton<IExternalOperationOutputContract>(p => new PostgreSqlImportOutputContract(type,
                 p.GetRequiredService<PostgreSqlProviderConfigurationCodec>(), p.GetRequiredService<IApplicationCredentialReader>()));

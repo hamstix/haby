@@ -38,13 +38,48 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
     public IReadOnlyList<ResourceReuse> ReusedResources { get; }
     public IReadOnlyList<ResourceReuse> RetainedResources { get; }
     public ResourceReuseBaseline? Baseline { get; }
-    public ResourceImportIntent? Import { get; init; }
+    private ResourceImportIntent? import;
+    public ResourceAcquisitionIntent Acquisitions { get; init; }
+    public ResourceImportIntent? Import
+    {
+        get => import;
+        init { import = value; if (value is not null) Acquisitions = ResourceAcquisitionIntent.Import(value); }
+    }
+    private IReadOnlyList<ResourceObservationGroup> observationGroups = [];
+    public IReadOnlyList<ResourceObservationGroup> ObservationGroups
+    {
+        get => observationGroups;
+        init => observationGroups = Array.AsReadOnly(value.Select(x => new ResourceObservationGroup(x.Id, x.Mode,
+            Array.AsReadOnly(x.Operations.OrderBy(id => id.Value, StringComparer.Ordinal).ToArray()))).OrderBy(x => x.Id, StringComparer.Ordinal).ToArray());
+    }
+    public void ValidateObservationGroups()
+    {
+        if (Nodes.Any(n => Acquisitions.Resources.SingleOrDefault(x => x.Resource == n.ResourceId)?.Mode != n.Action.Admission.Mode))
+            throw new InvalidDataException("Graph acquisition mode differs from its Resource.");
+        var observational = Nodes.Where(x => x.Action.Admission.Mode != ResourceAcquisitionMode.Provision).ToArray();
+        var members = ObservationGroups.SelectMany(x => x.Operations).ToArray();
+        if (ObservationGroups.Count > 256 || ObservationGroups.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count() != ObservationGroups.Count ||
+            members.Length != members.Distinct().Count() || !members.ToHashSet().SetEquals(observational.Select(x => x.Id)))
+            throw new InvalidDataException("Observation groups must completely partition observational operations.");
+        foreach (var group in ObservationGroups)
+        {
+            if (group.Id is not { Length: > 0 and <= 128 } || group.Operations.Count == 0 || group.Mode is not (ResourceAcquisitionMode.ImportUseAndRetain or ResourceAcquisitionMode.Reference))
+                throw new InvalidDataException("Invalid observation group.");
+            foreach (var id in group.Operations)
+            {
+                var node = Nodes.Single(x => x.Id == id);
+                if (node.Action.Admission.Mode != group.Mode || !node.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(node) ||
+                    node.Dependencies.Any(group.Operations.Contains) || node.OutputReferences.Any(x => group.Operations.Contains(x.ProducerOperationId)))
+                    throw new InvalidDataException("Unsupported observation group membership or dependency.");
+            }
+        }
+    }
     internal InitialRetirementInventory? Retirement { get; private init; }
     internal WorkloadUpdateInventory? WorkloadUpdate { get; private init; }
     internal DurableOperationGraph WithWorkloadUpdate(WorkloadUpdateInventory inventory) =>
-        new(Nodes, ReusedResources, Baseline, RetainedResources) { Import = Import, WorkloadUpdate = inventory };
+        new(Nodes, ReusedResources, Baseline, RetainedResources) { Import = Import, Acquisitions = Acquisitions, ObservationGroups = ObservationGroups, WorkloadUpdate = inventory };
     internal DurableOperationGraph WithRetirement(InitialRetirementInventory inventory) =>
-        new(Nodes, ReusedResources, Baseline, RetainedResources) { Import = Import, Retirement = inventory };
+        new(Nodes, ReusedResources, Baseline, RetainedResources) { Import = Import, Acquisitions = Acquisitions, ObservationGroups = ObservationGroups, Retirement = inventory };
     public DurableOperationGraph(IEnumerable<DurableOperationNode> nodes,
         IEnumerable<ResourceReuse>? reusedResources = null, ResourceReuseBaseline? baseline = null, IEnumerable<ResourceReuse>? retainedResources = null)
     {
@@ -98,6 +133,15 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
             foreach (var node in ready) { visited.Add(node.Id); remaining.Remove(node); }
         }
         Nodes = Array.AsReadOnly(ordered);
+        Acquisitions = new ResourceAcquisitionIntent(ordered.GroupBy(x => x.ResourceId).Select(g => new ResourceAcquisitionRequest(g.Key,
+            g.First().Action.Admission.Mode, g.First().Action.Admission.Mode == ResourceAcquisitionMode.Provision ? null : g.First().Input))
+            .Concat(active.Select(x => new ResourceAcquisitionRequest(x.Resource, ResourceAcquisitionMode.Provision))));
+        var groups = new List<ResourceObservationGroup>();
+        var imported = ordered.Where(x => x.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain).Select(x => x.Id).ToArray();
+        if (imported.Length > 0) groups.Add(new("import", ResourceAcquisitionMode.ImportUseAndRetain, Array.AsReadOnly(imported)));
+        groups.AddRange(ordered.Where(x => x.Action.Admission.Mode == ResourceAcquisitionMode.Reference).GroupBy(x => x.ResourceId)
+            .Select(g => new ResourceObservationGroup("reference." + g.Key.Value, ResourceAcquisitionMode.Reference, Array.AsReadOnly(g.Select(x => x.Id).ToArray()))));
+        ObservationGroups = groups.AsReadOnly();
         GeneratedCredentialContracts.ValidateGraph(this);
     }
 
@@ -109,6 +153,8 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
     public void ValidateReferences(DurablePlanningInputs inputs)
     {
         inputs.Validate();
+        ValidateObservationGroups();
+        if (!Acquisitions.Equals(inputs.Acquisitions)) throw new InvalidDataException("Acquisition set differs from accepted graph.");
         if (!Equals(Import, inputs.Import) || Import is not null && (Baseline is not null || ReusedResources.Count != 0 || RetainedResources.Count != 0))
             throw new InvalidDataException("Import intent does not match the accepted graph.");
         var active = Nodes.Select(n => n.ResourceId).Concat(ReusedResources.Select(r => r.Resource)).ToHashSet();
@@ -117,8 +163,8 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
         foreach (var node in Nodes)
         {
             var provider = inputs.Providers.Resource(node.ResourceId);
-            if (node.Action.Admission.Mode != (Import is null ? ResourceAcquisitionMode.Provision : ResourceAcquisitionMode.ImportUseAndRetain) ||
-                Import is not null && (!node.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(node)))
+            if (node.Action.Admission.Mode != Acquisitions.Resource(node.ResourceId).Mode ||
+                node.Action.Admission.Mode != ResourceAcquisitionMode.Provision && (!node.RequiresExternalOutput || GeneratedCredentialContracts.IsProducer(node)))
                 throw new InvalidDataException("Operation has no acquisition authority.");
             if (node.Action.Admission.ResourceContract != inputs.Providers.Declaration.Spec.Resources[node.ResourceId].Type)
                 throw new InvalidDataException("Graph Resource contract does not match the declaration.");
@@ -136,7 +182,10 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
 /// <summary>One current, explicitly versioned graph format. No legacy readers.</summary>
 public static class DurableOperationGraphCodec
 {
-    public static string Encode(DurableOperationGraph graph) => JsonSerializer.Serialize(new GraphDocument(6,
+    public static string Encode(DurableOperationGraph graph)
+    {
+        graph.ValidateObservationGroups();
+        return JsonSerializer.Serialize(new GraphDocument(7,
         graph.Nodes.Select(n => new NodeDocument(n.Id.Value, n.ResourceId.Value,
             n.Action.Admission.ResourceContract.Value, n.Action.Admission.ProviderKind.Value,
             n.Action.Admission.ConfigurationContract.Value, n.Action.Admission.ImplementationId.Value,
@@ -147,7 +196,9 @@ public static class DurableOperationGraphCodec
             n.RequiredOutput is { } required ? new(n.Id.Value, required.Contract, required.Key) : null, (int)n.Action.Admission.Mode)).ToArray(),
         graph.ReusedResources.Count == 0 ? null : graph.ReusedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, r.Reintroduced)).ToArray(),
         graph.Baseline is { } b ? new BaselineDocument(b.Deployment.ToString(), b.Generation, b.Fingerprint) : null,
-        graph.RetainedResources.Count == 0 ? null : graph.RetainedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, false)).ToArray(), graph.Retirement?.Document, graph.WorkloadUpdate?.Document, ResourceImportIntentCodec.Encode(graph.Import)), GraphJsonContext.Default.GraphDocument);
+        graph.RetainedResources.Count == 0 ? null : graph.RetainedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, false)).ToArray(), graph.Retirement?.Document, graph.WorkloadUpdate?.Document, ResourceImportIntentCodec.Encode(graph.Import), ResourceAcquisitionIntentCodec.Encode(graph.Acquisitions),
+        graph.ObservationGroups.Select(g => new ObservationGroupDocument(g.Id, (int)g.Mode, g.Operations.Select(x => x.Value).ToArray())).ToArray()), GraphJsonContext.Default.GraphDocument);
+    }
 
     public static DurableOperationGraph Decode(string json)
     {
@@ -155,7 +206,7 @@ public static class DurableOperationGraphCodec
         {
             if (Encoding.UTF8.GetByteCount(json) > 2097152) throw new InvalidDataException("Operation graph exceeds bound.");
             var document = JsonSerializer.Deserialize(json, GraphJsonContext.Default.GraphDocument);
-            if (document is null || document.Version != 6 || document.Nodes is null || document.Retirement is not null && document.WorkloadUpdate is not null)
+            if (document is null || document.Version != 7 || document.Nodes is null || document.Retirement is not null && document.WorkloadUpdate is not null)
                 throw new InvalidDataException("Unsupported operation graph format.");
             var graph = new DurableOperationGraph(document.Nodes.Select(n => new DurableOperationNode(OperationId.Create(n.Id),
                 ManifestLocalId.Create(n.Resource), new(new(ResourceTypeId.Create(n.ResourceContract),
@@ -174,7 +225,13 @@ public static class DurableOperationGraphCodec
                 (document.Reuse ?? []).Select(r => new ResourceReuse(ManifestLocalId.Create(r.Resource), r.Management, r.Generation, r.Evidence) { Reintroduced = r.Reintroduced }),
                 document.Baseline is { } b ? new(ApplicationDeploymentId.Parse(b.Deployment), b.Generation, b.Fingerprint) : null,
                 (document.Retained ?? []).Select(r => new ResourceReuse(ManifestLocalId.Create(r.Resource), r.Management, r.Generation, r.Evidence) { Reintroduced = r.Reintroduced }))
-            { Import = ResourceImportIntentCodec.Decode(document.Import) };
+            {
+                Import = ResourceImportIntentCodec.Decode(document.Import),
+                Acquisitions = ResourceAcquisitionIntentCodec.Decode(document.Acquisitions),
+                ObservationGroups = Array.AsReadOnly(document.Groups.Select(g => new ResourceObservationGroup(g.Id, (ResourceAcquisitionMode)g.Mode,
+                    Array.AsReadOnly(g.Operations.Select(OperationId.Create).ToArray()))).ToArray())
+            };
+            graph.ValidateObservationGroups();
             return document.WorkloadUpdate is { } update ? graph.WithWorkloadUpdate(new(update)) :
                 document.Retirement is { } retirement ? graph.WithRetirement(new(retirement)) : graph;
         }
@@ -194,13 +251,15 @@ public static class DurableOperationGraphCodec
     }
 }
 
+public sealed record ResourceObservationGroup(string Id, ResourceAcquisitionMode Mode, IReadOnlyList<OperationId> Operations);
+internal sealed record ObservationGroupDocument(string Id, int Mode, string[] Operations);
 internal sealed record GraphDocument(int Version, NodeDocument[] Nodes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Reuse = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BaselineDocument? Baseline = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Retained = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InitialRetirementDocument? Retirement = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WorkloadUpdateDocument? WorkloadUpdate = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Import = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Import = null, string Acquisitions = "", ObservationGroupDocument[] Groups = null!);
 internal sealed record ReuseDocument(string Resource, Guid Management, long Generation, string Evidence,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Reintroduced = false);
 internal sealed record BaselineDocument(string Deployment, long Generation, string Fingerprint);

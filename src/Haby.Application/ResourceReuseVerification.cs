@@ -25,6 +25,6 @@ public sealed class ResourceReuseValidationResult(ResourceReuseValidationStatus 
 public interface IDurableResourceReuseVerifier
 {
     DurableActionAdmissionKey Key { get; }
-    ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceImportReceipt receipt,
+    ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceObservationReceipt receipt,
         CancellationToken cancellationToken);
 }

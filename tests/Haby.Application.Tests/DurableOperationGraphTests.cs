@@ -16,7 +16,8 @@ public sealed class DurableOperationGraphTests
         Assert.NotEqual(DurableOperationGraphCodec.Fingerprint(Inputs, changedKey), DurableOperationGraphCodec.Fingerprint(Inputs, required));
         var encoded = DurableOperationGraphCodec.Encode(required);
         Assert.Equal(required, DurableOperationGraphCodec.Decode(encoded));
-        Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Decode(encoded.Replace("\"Version\":6", "\"Version\":2", StringComparison.Ordinal)));
+        Assert.Contains("\"Version\":7", encoded, StringComparison.Ordinal);
+        Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Decode(encoded.Replace("\"Version\":7", "\"Version\":2", StringComparison.Ordinal)));
         Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Decode(encoded.Replace("\"RequiresExternalOutput\":true,", "", StringComparison.Ordinal)));
         Assert.Throws<InvalidDataException>(() => new DurableOperationGraph([Node("create") with { RequiresExternalOutput = true }]));
     }

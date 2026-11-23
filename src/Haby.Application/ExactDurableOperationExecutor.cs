@@ -42,8 +42,8 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
     {
         var operation = await journal.FindAsync(key, cancellationToken);
         if (operation is null) return DurableExecutionResult.NotFound();
-        var readOnlyImport = operation.Node.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain &&
-            registry.Find(operation.Node.Action) is IReadOnlyResourceImportHandler observational &&
+        var readOnlyImport = operation.Node.Action.Admission.Mode is ResourceAcquisitionMode.ImportUseAndRetain or ResourceAcquisitionMode.Reference &&
+            registry.Find(operation.Node.Action) is IReadOnlyResourceObservationHandler observational &&
             registry.MatchesEvidence(operation.Node) && observational.Supports(operation.Node);
         if (operation.State == DurableOperationState.Dispatching && !readOnlyImport)
         {
@@ -73,7 +73,8 @@ public sealed class ExactDurableOperationExecutor(IDurableOperationJournal journ
             return new(DurableExecutionOutcome.Blocked, operation);
         // Admission metadata is not execution capability. Refuse the whole required graph
         // before any effect if even one mandatory exact handler is absent or cannot decode it.
-        if (progress.Nodes.Any(n => registry.Find(n.Operation.Node.Action) is null))
+        if (progress.Nodes.Any(n => registry.Find(n.Operation.Node.Action) is null ||
+            n.Operation.Node.Action.Admission.Mode == ResourceAcquisitionMode.Reference && registry.Find(n.Operation.Node.Action) is not IReadOnlyResourceObservationHandler))
             return new(DurableExecutionOutcome.HandlerUnavailable, operation);
         if (progress.Nodes.Any(n => !registry.MatchesEvidence(n.Operation.Node) || registry.Find(n.Operation.Node.Action)!.Supports(n.Operation.Node) != true))
             return new(DurableExecutionOutcome.InputUnavailable, operation);

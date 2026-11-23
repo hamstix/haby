@@ -515,11 +515,13 @@ public sealed class DurableCreateExecutorTests
     }
     private sealed class ReadOnlyRoutingHandler(DurableActionExecutionKey key, ExternalOperationOutputIdentity identity)
         : RoutingHandler(key, identity), IReadOnlyResourceImportHandler;
-    private sealed class RoutingOutput(DurableActionExecutionKey key, ExternalOperationOutputIdentity identity) : IExternalOperationOutputContract
+    private sealed class RoutingOutput(DurableActionExecutionKey key, ExternalOperationOutputIdentity identity) : IResourceObservationOutputContract
     {
         public DurableActionExecutionKey Producer => key;
         public ExternalOperationOutputIdentity Identity => identity;
         public bool Validate(DurableOperationNode node, ExternalOperationOutput output) => false;
+        public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
+            throw new InvalidOperationException("Dispatch must not probe actual evidence validation.");
     }
 
     private const string OneResource =
