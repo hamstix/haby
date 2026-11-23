@@ -3,7 +3,7 @@
 This slice implements the shared durable kernel for [#275](https://github.com/hamstix/haby/issues/275).
 It does not complete that issue or register a production Reference Provider.
 The closed test-only capability exercises real PostgreSQL persistence and the normal
-ChangeSet в†’ Plan в†’ Commit в†’ exact executor в†’ atomic observation acceptance в†’ safe
+ChangeSet -> Plan -> Commit -> exact executor -> atomic observation acceptance -> safe
 ordinary output path. It is not a protocol qualification or a second production adapter.
 
 ## Acquisition and confirmation
