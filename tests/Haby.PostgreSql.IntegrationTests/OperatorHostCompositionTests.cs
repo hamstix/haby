@@ -10,6 +10,37 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed class OperatorHostCompositionTests
 {
+    [Fact]
+    public async Task Additive_contract_conflict_is_refused_before_listening()
+    {
+        var port = AvailablePort();
+        Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.BuildComposed(
+            ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"],
+            (services, _) => services.AddSingleton(new Haby.Manifest.ResourceTypeDefinition(
+                Haby.Manifest.PostgreSqlDatabaseContract.Id, "{\"type\":\"object\",\"additionalProperties\":false}"))));
+        await RequireNotListeningAsync(port);
+    }
+
+    [Fact]
+    public async Task Missing_contributed_capability_disposes_owned_dependencies_before_listening()
+    {
+        var port = AvailablePort();
+        var owned = new AsyncResource(false);
+        Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.BuildComposed(
+            ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"],
+            (services, _) =>
+            {
+                services.AddSingleton(_ => owned);
+                services.AddSingleton(p =>
+                {
+                    p.GetRequiredService<AsyncResource>();
+                    return new Haby.Manifest.ResourceTypeDefinition(Haby.Domain.ResourceTypeId.Create("sample.missing/v1"), "{\"type\":\"object\"}");
+                });
+            }));
+        Assert.True(owned.Disposed);
+        await RequireNotListeningAsync(port);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -59,6 +90,10 @@ public sealed class OperatorHostCompositionTests
                 });
                 Assert.Equal(0, created);
             });
+        var catalog = app.Services.GetRequiredService<Haby.Manifest.ManifestContractCatalog>();
+        Assert.True(catalog.TryGet(Haby.Manifest.PostgreSqlDatabaseContract.Id, out _));
+        Assert.True(catalog.TryGet(Haby.PostgreSql.PostgreSqlApplicationLoginContract.Id, out _));
+        Assert.True(catalog.TryGet(Haby.Kubernetes.Contracts.KubernetesContract.Definition.Id, out _));
         Assert.Equal(1, calls);
         Assert.Same(app.Configuration, observed);
         Assert.Equal(0, created);

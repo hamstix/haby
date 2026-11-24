@@ -2,8 +2,8 @@
 
 The bounded #275-D implementation connects confirmed Reference outputs to the
 existing ConfigurationProfile/Component Binding, document materialization and
-static/runtime ConfigurationDelivery pipelines. Exact-source review and full
-qualification are pending. The closed typed adapter in integration tests is not a
+static/runtime ConfigurationDelivery pipelines, merged and qualified in
+[PR #294](https://github.com/hamstix/haby/pull/294). The closed typed adapter in integration tests is not a
 production Reference registration. Reference retirement and #275/P3 completion
 remain separate work.
 

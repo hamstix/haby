@@ -28,8 +28,29 @@ public sealed partial class ManifestOperatorService
         else return Result(PlanningStatus.InvalidRequest);
         var environment = await environments.FindAsync(key, context.CancellationToken);
         if (environment is null) return Result(PlanningStatus.EnvironmentNotFound);
-        var result = await planner.CreateChangeSetAsync(environment, reference.ApplicationRecordId, reference,
-            precondition, Actor, context.CancellationToken);
+        ResourceAcquisitionIntent? acquisitions = null;
+        if (request.Acquisitions is not null)
+        {
+            if (request.Acquisitions.Resources.Any(x => x.Mode == AcquisitionMode.ImportUseAndRetain))
+                return Result(PlanningStatus.ImportNotSupported);
+            try
+            {
+                acquisitions = new(request.Acquisitions.Resources.Select(x => new ResourceAcquisitionRequest(
+                    ManifestLocalId.Create(x.Resource), x.Mode switch
+                    {
+                        AcquisitionMode.Provision => ResourceAcquisitionMode.Provision,
+                        AcquisitionMode.Reference => ResourceAcquisitionMode.Reference,
+                        _ => throw new ArgumentException("Invalid acquisition mode.")
+                    }, Payload(x.Input))
+                { SharingRequest = Payload(x.SharingRequest) }));
+                _ = ResourceAcquisitionIntentCodec.Encode(acquisitions);
+            }
+            catch (Exception error) when (error is ArgumentException or InvalidDataException)
+            { return Result(PlanningStatus.InvalidRequest); }
+        }
+        var result = acquisitions is null
+            ? await planner.CreateChangeSetAsync(environment, reference.ApplicationRecordId, reference, precondition, Actor, context.CancellationToken)
+            : await planner.CreateAcquisitionChangeSetAsync(environment, reference.ApplicationRecordId, reference, precondition, acquisitions, Actor, context.CancellationToken);
         return new PlanningReply
         {
             Status = result.Status switch
@@ -39,6 +60,13 @@ public sealed partial class ManifestOperatorService
                 DurableChangeSetCreateStatus.RevisionNotFound => PlanningStatus.RevisionNotFound,
                 DurableChangeSetCreateStatus.RevisionNotOwnedByApplication => PlanningStatus.RevisionNotOwnedByApplication,
                 DurableChangeSetCreateStatus.ExpectedGenerationUnsupported => PlanningStatus.UnsupportedPrecondition,
+                DurableChangeSetCreateStatus.InvalidInput => PlanningStatus.InvalidRequest,
+                DurableChangeSetCreateStatus.ImportNotSupported => PlanningStatus.ImportNotSupported,
+                DurableChangeSetCreateStatus.ReferenceNotSupported => PlanningStatus.ReferenceNotSupported,
+                DurableChangeSetCreateStatus.AliasNotResolved => PlanningStatus.AliasNotResolved,
+                DurableChangeSetCreateStatus.ProviderRevisionUnavailable => PlanningStatus.ProviderRevisionUnavailable,
+                DurableChangeSetCreateStatus.ProviderCapabilityMismatch => PlanningStatus.ProviderCapabilityMismatch,
+                DurableChangeSetCreateStatus.UnsupportedShape => PlanningStatus.UnsupportedShape,
                 _ => throw new InvalidOperationException("Unknown ChangeSet outcome.")
             },
             // Read committed values, including the catalog's timestamp precision.
@@ -47,6 +75,8 @@ public sealed partial class ManifestOperatorService
                     ?? throw new InvalidOperationException("Committed ChangeSet was not found."))
         };
     }
+
+    private static DurableActionPayload? Payload(AcquisitionPayload? value) => value is null ? null : new(value.Format, value.Json);
 
     public override async Task<PlanningReply> GetChangeSet(ChangeSetRequest request, ServerCallContext context)
     {
@@ -79,6 +109,7 @@ public sealed partial class ManifestOperatorService
                 DurablePlanStatus.ConfigurationRefused => PlanningStatus.ConfigurationRefused,
                 DurablePlanStatus.PlanInputUnavailable => PlanningStatus.PlanInputUnavailable,
                 DurablePlanStatus.ImportNotSupported => PlanningStatus.ImportNotSupported,
+                DurablePlanStatus.ReferenceNotSupported => PlanningStatus.ReferenceNotSupported,
                 _ => throw new InvalidOperationException("Unknown Plan outcome.")
             },
             Plan = result.Plan is null ? null : await PlanSummaryAsync(
