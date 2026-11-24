@@ -108,6 +108,9 @@ public sealed partial class PostgreSqlPairImportTests
     [InlineData("late-verification")]
     [InlineData("finished-uncertain")]
     [InlineData("correction-fences-begin")]
+    [InlineData("cross-revision-precommit")]
+    [InlineData("cross-revision-competing-corrections")]
+    [InlineData("cross-revision-old-commit-race")]
     public async Task Explicit_correction_serializes_pending_ownership_execution_and_commit(string scenario)
     {
         var pair = await ExistingPair();
@@ -119,11 +122,14 @@ public sealed partial class PostgreSqlPairImportTests
         }
         await using var services = Services(setup.Connection);
         var original = await NewDraft(services, pair, setup.Owner.EnvironmentRecordId, scenario == "pending-binding");
-        var replacement = await NewCorrection(services, pair, original.Binding, null);
+        var crossRevision = scenario.StartsWith("cross-revision-", StringComparison.Ordinal);
+        if (crossRevision) scenario = scenario["cross-revision-".Length..];
+        var revision = crossRevision ? await CorrectedRevision(services, original.Binding.Revision) : original.Binding.Revision;
+        var replacement = await NewCorrection(services, pair, original.Binding, null, revision);
         var committer = services.GetRequiredService<IDurableDesiredStateCommitter>();
         if (scenario == "competing-corrections")
         {
-            var rival = await NewCorrection(services, pair, original.Binding, null);
+            var rival = await NewCorrection(services, pair, original.Binding, null, revision);
             var results = await Task.WhenAll(committer.CommitAsync(replacement.Change!.Id, replacement.Plan!.Id, "first", default).AsTask(),
                 committer.CommitAsync(rival.Change!.Id, rival.Plan!.Id, "second", default).AsTask());
             var winner = Assert.Single(results.OfType<DurableCommitResult.Committed>());
@@ -195,13 +201,16 @@ public sealed partial class PostgreSqlPairImportTests
         return await LinkDraft(services, prepared.Binding!, pair.Password);
     }
 
-    private static async Task<ImportDraft> NewCorrection(ServiceProvider services, Pair pair, OperatorImportRequestBinding previous, DurableChangeSetCommit? expected)
+    private static async Task<ImportDraft> NewCorrection(ServiceProvider services, Pair pair, OperatorImportRequestBinding previous, DurableChangeSetCommit? expected, ManifestRevisionRef? revision = null)
     {
-        var prepared = await services.GetRequiredService<PrepareResourceImport>().ExecuteAsync(new(Guid.NewGuid(), previous.Environment, previous.Revision,
+        var prepared = await services.GetRequiredService<PrepareResourceImport>().ExecuteAsync(new(Guid.NewGuid(), previous.Environment, revision ?? previous.Revision,
             PostgreSqlImportPreparer.Encode(new(pair.Database, pair.Login, pair.Input.Schema))), default);
         Assert.Equal(ResourceImportPreparationStatus.Prepared, prepared.Status);
-        return await LinkDraft(services, prepared.Binding! with { Correction = new(previous.RequestId, expected?.DeploymentId, expected?.Generation,
-            OperatorImportCorrectionReason.InputCorrection) }, pair.Password);
+        return await LinkDraft(services, prepared.Binding! with
+        {
+            Correction = new(previous.RequestId, expected?.DeploymentId, expected?.Generation,
+            OperatorImportCorrectionReason.InputCorrection)
+        }, pair.Password);
     }
 
     private static async Task<ImportDraft> LinkDraft(ServiceProvider services, OperatorImportRequestBinding binding, string password)

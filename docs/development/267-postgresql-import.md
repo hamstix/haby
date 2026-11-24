@@ -78,8 +78,11 @@ payloads, Plans, logs, receipts or diagnostics.
 A new request may name `OperatorImportCorrectionTarget`: the previous request,
 an explicit expected absence of Commit or exact Deployment/generation, and a
 closed reason (`CredentialRejected`, `InputCorrection` or `ExplicitRetry`). The
-Environment, Application revision and designated credential Resource remain the
-same. It stages a new immutable private credential candidate with a new SecretVersion;
+Environment, Application and designated credential Resource remain the same.
+The revision also remains the same except for explicit pre-Commit `InputCorrection`
+with expected absence: it may select another already-imported immutable revision
+of that same Application. Other reasons and post-Commit correction do not gain
+cross-revision support. It stages a new immutable private credential candidate with a new SecretVersion;
 staging and planning transfer no ownership and expose no usable application Secret.
 Retries must retain the same request, binding and exact credential bytes.
 
@@ -166,6 +169,37 @@ exactly one target: `--expected-uncommitted`, or
 Use a new request ID and the corrected password. Plan/Check/Commit/Execute remain
 separate commands. No target is silently replaced with current state, and closing
 a Plan alone does not release ownership. Confirmed imports refuse correction.
+
+### Correcting a staged request to a new Application revision
+
+If v1 was staged but its declaration failed Plan (for example, an unresolved
+configuration slot), import the corrected v2 declaration normally. Keep the old
+request ID and use a fresh request ID for the explicit correction:
+
+```text
+habyctl manifest import application-v2.json
+habyctl changeset import create <same-application-record-id> <v2-revision> --environment <same-environment> --input names.json --request-id <new-request-id> --corrects-request <old-request-id> --correction-reason input-correction --expected-uncommitted
+habyctl plan create <new-change-set-id>
+habyctl plan check <new-plan-id>
+habyctl changeset commit <new-change-set-id> --plan <new-plan-id>
+habyctl deployment generation execute <deployment-id> <generation>
+habyctl changeset import get <old-request-id>
+```
+
+The generated RPC sequence is `Import`, then `CreateResourceImportChangeSet` with
+`reference=v2`, a fresh `request_id`, `correction.previous_request_id=old`,
+`reason=InputCorrection` and `expected_absence=true`, plus the separate protected
+credential bytes. `GetResourceImportRequest` preserves the old v1 reference and
+reports its successor only after the new Commit. Replaying the old UUID with v2
+is a conflict; retry each UUID with its own exact revision and input.
+
+The new revision and complete import shape still undergo normal validation; a
+failed successor Plan transfers nothing. Closing an ordinary abandoned ChangeSet's
+Plan is separate from protected import ownership: closing a staged import Plan,
+using an unrelated UUID, or importing v2 alone never releases its reservation.
+No manual old-Plan closure is required, and a failed Plan may not exist at all.
+A predecessor Commit that wins before the successor remains authoritative, so the
+expected-uncommitted successor must be reviewed as stale rather than retargeted.
 
 ## Read-only verification and acceptance
 

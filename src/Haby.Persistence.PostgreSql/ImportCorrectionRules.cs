@@ -13,7 +13,9 @@ internal static class ImportCorrectionRules
         var application = Guid.Parse(binding.Revision.ApplicationRecordId.ToString());
         var resource = binding.CredentialResource.Value;
         var previous = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == target.PreviousRequestId, token);
-        if (previous is null || previous.Environment != environment || previous.Application != application || previous.Revision != binding.Revision.RevisionNumber.Value || previous.CredentialResource != resource ||
+        if (previous is null || previous.Environment != environment || previous.Application != application || previous.CredentialResource != resource ||
+            previous.Revision != binding.Revision.RevisionNumber.Value &&
+                (target.Deployment is not null || target.Generation is not null || target.Reason != OperatorImportCorrectionReason.InputCorrection) ||
             await db.ImportSupersessions.AsNoTracking().AnyAsync(x => x.PreviousRequest == previous.Id, token)) return false;
         var owner = await db.ProtectedCredentialOwners.AsNoTracking().SingleOrDefaultAsync(x =>
             x.Environment == environment && x.Application == application && x.Resource == resource, token);
