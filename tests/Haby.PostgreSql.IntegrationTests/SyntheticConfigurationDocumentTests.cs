@@ -57,7 +57,7 @@ public sealed partial class ExactActionAdmissionTests
     {
         public ConfigurationFormatterId Contract => QueueFormatter;
         public ManifestLocalId Identity => QueueImplementation;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) => throw new InvalidOperationException("Formatter must never run.");
+        public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) => throw new InvalidOperationException("Formatter must never run.");
     }
     private static ConfigurationFormatterCatalog QueueFormatting() => new([new QueueFormatDefinition()], [new(QueueImplementation, QueueFormatter)]);
 
@@ -172,7 +172,7 @@ public sealed partial class ExactActionAdmissionTests
                 reference.Reference != new SecretRef(SecretId.Parse(secret), SecretVersionId.Parse(version))) return null;
             return new(reference.Reference, SecretPurpose.ApplicationLogin);
         }
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
+        public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
         {
             Calls++;
             return new("queue://" + ((ConfigurationString)arguments.Members["receipt"]).Value + "/" + material.ToString());

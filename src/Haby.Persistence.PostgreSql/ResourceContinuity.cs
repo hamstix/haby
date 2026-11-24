@@ -123,7 +123,7 @@ internal static class ResourceContinuity
         return true;
     }
     internal static async Task<string?> EvidenceAsync(ManifestCatalogDbContext db, ResourceManagementRow management,
-        CancellationToken token, bool requireApplied = true)
+        CancellationToken token, bool requireApplied = true, bool referenceHistory = false)
     {
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x =>
             x.DeploymentId == management.Deployment && x.Generation == management.SourceGeneration, token);
@@ -139,7 +139,7 @@ internal static class ResourceContinuity
         // completed; inspect this Resource's original nodes directly, never recurse.
         if (requireApplied && !await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == management.Deployment &&
             x.AppliedGeneration >= management.SourceGeneration, token)) return null;
-        if (requireApplied && !await DurableAggregateCompletion.HasProofAsync(db, management.Deployment, management.SourceGeneration, token)) return null;
+        if (requireApplied && !await DurableAggregateCompletion.HasProofAsync(db, management.Deployment, management.SourceGeneration, token, referenceHistory)) return null;
         if (graph.ReusedResources.Any(r => r.Resource.Value == management.Resource)) return null;
         var ids = graph.Nodes.Select(x => x.Id.Value).ToArray();
         if (await db.DurableOperations.CountAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token) != ids.Length ||
@@ -174,7 +174,7 @@ internal static class ResourceContinuity
     }
 
     internal static async Task<bool> ValidateAsync(ManifestCatalogDbContext db, Guid deployment,
-        DurableOperationGraph graph, CancellationToken token)
+        DurableOperationGraph graph, CancellationToken token, bool referenceHistory = false)
     {
         if (graph.Baseline is not { } baseline || Guid.Parse(baseline.Deployment.ToString()) != deployment) return false;
         var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deployment, token);
@@ -190,10 +190,13 @@ internal static class ResourceContinuity
         if (!inventory.SetEquals(requirements.Select(x => x.Resource))) return false;
         foreach (var reuse in requirements)
         {
-            var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token);
+            var managed = referenceHistory
+                ? await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId && x.Origin == ResourceOrigin.Referenced, token) ??
+                    await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token)
+                : await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == reuse.ManagementId, token);
             if (managed is null || managed.Deployment != deployment || managed.Environment != owner.EnvironmentRecordId ||
                 managed.Application != owner.ApplicationRecordId || managed.Resource != reuse.Resource.Value || managed.SourceGeneration != reuse.SourceGeneration ||
-                await EvidenceAsync(db, managed, token) != reuse.EvidenceFingerprint) return false;
+                await EvidenceAsync(db, managed, token, referenceHistory: referenceHistory) != reuse.EvidenceFingerprint) return false;
             if (graph.ReusedResources.Contains(reuse) && reuse.Reintroduced != previousGraph.RetainedResources.Any(x => x.Resource == reuse.Resource)) return false;
             var original = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == reuse.SourceGeneration, token);
             var originalInputs = Inputs(original);

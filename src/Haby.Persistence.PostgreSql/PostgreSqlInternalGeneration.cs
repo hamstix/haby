@@ -81,9 +81,11 @@ internal sealed class InternalAcceptedGenerationBuilder(PostgreSqlDurableDeploym
         => await AcceptForEffectAsync(environment, application, revision, new DeploymentPrecondition.ExpectedGeneration(expected), actor, token);
 
     internal async ValueTask<DurableChangeSetCommit> AcceptForEffectAsync(EnvironmentRecordId environment,
-        ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition, string actor, CancellationToken token)
+        ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition, string actor, CancellationToken token,
+        ResourceAcquisitionIntent? acquisitions = null)
     {
-        var change = await planner.CreateChangeSetAsync(environment, application, revision, precondition, actor, token);
+        var change = acquisitions is null ? await planner.CreateChangeSetAsync(environment, application, revision, precondition, actor, token) :
+            await planner.CreateAcquisitionChangeSetAsync(environment, application, revision, acquisitions, actor, token, precondition);
         if (change.ChangeSet is null) throw new InvalidDataException("Internal ChangeSet refused.");
         var plan = await planner.CreateInternalPlanAsync(change.ChangeSet.Id, actor, token, handlers);
         if (plan.Plan is null) throw new InvalidDataException("Internal Plan refused.");

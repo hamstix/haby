@@ -27,13 +27,15 @@ public interface IConfigurationFormatter
 {
     ConfigurationFormatterId Contract { get; }
     ManifestLocalId Identity { get; }
-    ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material);
+    ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material);
 }
 
 /// <summary>Deliberately has no value equality, hash or material-bearing ToString.</summary>
-public sealed class ConfidentialConfigurationString(string value)
+public sealed class ConfidentialConfigurationValue(ConfigurationValue value)
 {
-    public string Reveal() => value;
+    private readonly ConfigurationValue value = value ?? throw new ArgumentNullException(nameof(value));
+    public ConfidentialConfigurationValue(string text) : this(new ConfigurationString(text)) { }
+    public ConfigurationValue Reveal() => value;
     public override string ToString() => "[Confidential configuration]";
 }
 
@@ -125,7 +127,7 @@ public sealed class ConfigurationRenderingCatalog
         catch (Exception) { return null; }
     }
 
-    public ConfidentialConfigurationString? Format(ConfigurationRenderPin pin, ConfigurationDeferredValue value, ReadOnlySpan<char> material)
+    public ConfidentialConfigurationValue? Format(ConfigurationRenderPin pin, ConfigurationDeferredValue value, ReadOnlySpan<char> material)
     {
         if (!Supports(pin) || value.Formatter != pin.Formatter || _contracts.Validate(value) is not null || material.IsEmpty) return null;
         try { return _formatters[pin.Formatter].Format(value.Arguments, material); }
@@ -138,9 +140,12 @@ public sealed class ConfigurationRenderingCatalog
         d.SupportsProducer(pin.ProducerAction) && d.ValidateOptions(pin.Options, true) &&
         _formatters.TryGetValue(pin.Formatter, out var f) && f.Identity == pin.FormatterImplementation;
 
-    public ConfidentialConfigurationString? FormatDelivery(ConfigurationRenderPin pin, ConfigurationDeferredValue value, ReadOnlySpan<char> material)
+    public bool CanFormatDelivery(ConfigurationRenderPin pin, ConfigurationDeferredValue value) =>
+        SupportsDeliveryFormatter(pin) && value.Formatter == pin.Formatter && _contracts.Validate(value) is null;
+
+    public ConfidentialConfigurationValue? FormatDelivery(ConfigurationRenderPin pin, ConfigurationDeferredValue value, ReadOnlySpan<char> material)
     {
-        if (!SupportsDeliveryFormatter(pin) || value.Formatter != pin.Formatter || _contracts.Validate(value) is not null) return null;
+        if (!CanFormatDelivery(pin, value)) return null;
         try { return _formatters[pin.Formatter].Format(value.Arguments, material); }
         catch (Exception) { return null; }
     }

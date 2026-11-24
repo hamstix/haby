@@ -34,6 +34,7 @@ public sealed partial class ConfigurationDeliveryTests
         public SecretRef Reference = new(SecretId.New(), SecretVersionId.New());
         public int Calls;
         public string? Text;
+        public Func<string, ConfigurationValue>? ValueFactory;
         public bool Throw;
         public bool Cancel;
         public int? FailureOnCall;
@@ -43,12 +44,12 @@ public sealed partial class ConfigurationDeliveryTests
             output.Payload == Reference.SecretId + ":" + Reference.SecretVersionId && value.Formatter == Formatter &&
             new FormatDefinition().ValidateArguments(value.Arguments) && value.Arguments.Members["credential"] is ConfigurationSecretReference r && r.Reference == Reference
                 ? new(Reference, Purpose) : null;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
+        public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
         {
             Calls++;
             if (Cancel) throw new OperationCanceledException();
             if (Throw || Calls == FailureOnCall) throw new InvalidOperationException("private-formatter-diagnostic");
-            return new(Text ?? material.ToString());
+            return ValueFactory is null ? new(Text ?? material.ToString()) : new(ValueFactory(material.ToString()));
         }
     }
     private sealed class Evidence(Adapter adapter) : IConfigurationOutputEvidence

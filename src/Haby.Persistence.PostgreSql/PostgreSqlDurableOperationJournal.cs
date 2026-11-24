@@ -442,6 +442,7 @@ public static class DurableOperationJournalServiceCollectionExtensions
         // Explicit typed deferred dependency: handlers depend on this journal during registry construction.
         services.TryAddSingleton<Func<DurableActionAdmission>>(p => () => p.GetRequiredService<DurableActionAdmission>());
         services.TryAddSingleton<PostgreSqlDurableOperationJournal>();
+        services.TryAddSingleton<PostgreSqlExternalOperationOutputs>();
         services.TryAddSingleton<IExternalOperationOutputs, PostgreSqlExternalOperationOutputs>();
         services.TryAddSingleton<IConfigurationOutputEvidence, PostgreSqlExternalOperationOutputs>();
         services.TryAddSingleton<IDurableOperationJournal>(provider =>

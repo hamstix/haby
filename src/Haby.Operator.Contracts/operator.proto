@@ -1271,6 +1271,21 @@ message SharedCredentialBindingMetadata {
   string issued_at_utc = 9;
   optional string revoked_by = 10;
   optional string revoked_at_utc = 11;
+  repeated SharedCredentialDependencyMetadata dependencies = 12;
+}
+message SharedCredentialDependencyMetadata {
+  string revision_id = 1;
+  string deployment_id = 2;
+  int64 generation = 3;
+  string component_id = 4;
+  string document_id = 5;
+  string application_record_id = 6;
+  string resource_id = 7;
+  string association_id = 8;
+  string projection = 9;
+  string formatter = 10;
+  string formatter_implementation = 11;
+  bool active_association = 12;
 }
 message SharedCredentialReply {
   string status = 1;

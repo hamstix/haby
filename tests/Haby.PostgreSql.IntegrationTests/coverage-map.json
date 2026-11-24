@@ -2,6 +2,28 @@
   "baselineSource": "1720256bd200bf75c67f74829cb3b45afa46651f",
   "baselineCases": 869,
   "classes": {
+    "SharedReferenceDeliveryTests": {
+      "responsibilities": [
+        "Persistence",
+        "Operator/E2E"
+      ],
+      "isolation": "case-database-group-server",
+      "baselineCases": 0,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": true,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": true,
+        "conservativeClassUnion": true
+      },
+      "suite": "functional",
+      "triggers": [
+        "regular-full"
+      ]
+    },
     "SharedCredentialAuthorityTests": {
       "responsibilities": [
         "Persistence"

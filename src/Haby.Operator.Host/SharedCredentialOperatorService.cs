@@ -12,9 +12,13 @@ public sealed partial class ManifestOperatorService
         var target = await SharedTargetAsync(request, context.CancellationToken);
         if (target is null) return new() { Status = "InvalidRequest" };
         var reply = new SharedCredentialReply { Status = "Listed" };
-        reply.Bindings.AddRange((await sharedCredentials.InspectAsync(target.Value.Environment, target.Value.Provider,
-            target.Value.Revision, context.CancellationToken)).Select(BindingMetadata));
-        return reply;
+        try
+        {
+            reply.Bindings.AddRange((await sharedCredentials.InspectAsync(target.Value.Environment, target.Value.Provider,
+                target.Value.Revision, context.CancellationToken)).Select(BindingMetadata));
+            return reply.CalculateSize() <= ConfigurationApplicationLimits.MaxResponseBytes ? reply : new() { Status = "LimitExceeded" };
+        }
+        catch (ConfigurationDocumentLimitException) { return new() { Status = "LimitExceeded" }; }
     }
     public override async Task<SharedCredentialReply> RevokeSharedCredentialUse(SharedCredentialRequest request, ServerCallContext context)
     {
@@ -59,6 +63,21 @@ public sealed partial class ManifestOperatorService
         };
         if (binding.RevokedBy is { } actor) metadata.RevokedBy = actor;
         if (binding.RevokedAt is { } time) metadata.RevokedAtUtc = time.ToString("O");
+        metadata.Dependencies.AddRange(binding.Dependencies.Select(x => new SharedCredentialDependencyMetadata
+        {
+            RevisionId = x.Document.ToString(),
+            DeploymentId = x.Target.Deployment.ToString(),
+            Generation = x.Target.Generation.Value,
+            ComponentId = x.Target.Component.Value,
+            DocumentId = x.Target.Document.Value,
+            ApplicationRecordId = x.Application.ToString(),
+            ResourceId = x.Resource.Value,
+            AssociationId = x.Association.ToString(),
+            Projection = x.Projection,
+            Formatter = x.Formatter.Value,
+            FormatterImplementation = x.FormatterImplementation.Value,
+            ActiveAssociation = x.ActiveAssociation
+        }));
         return metadata;
     }
 }

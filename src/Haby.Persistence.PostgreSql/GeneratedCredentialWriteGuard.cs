@@ -36,6 +36,7 @@ public sealed partial class ManifestCatalogDbContext
     {
         ChangeTracker.DetectChanges();
         await ValidateSharedCredentialWritesAsync(asynchronous, cancellationToken);
+        await ValidateDocumentSharedUsesAsync(asynchronous, cancellationToken);
         await ValidateImportAuthorityWritesAsync(asynchronous, cancellationToken);
         await ValidateOperatorImportRequestWritesAsync(asynchronous, cancellationToken);
         if (ChangeTracker.Entries<ResourceObservationReceiptRow>().Any(e => e.State is EntityState.Modified or EntityState.Deleted))

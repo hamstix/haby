@@ -111,7 +111,7 @@ internal static partial class DurableAggregateCompletion
         catch (InvalidDataException) { return false; }
     }
 
-    internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token, bool internalResourceStage = false, bool completedRead = false)
+    internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token, bool internalResourceStage = false, bool completedRead = false, bool referenceHistory = false)
     {
         if (source.InternalEffects && !internalResourceStage) throw new InvalidDataException("Internal generation is not publicly admitted.");
         var rows = await context.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == ResourcesReadyCheckpoint.Stage).ToArrayAsync(token);
@@ -135,19 +135,19 @@ internal static partial class DurableAggregateCompletion
                 graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)))
             throw new InvalidDataException("Resource checkpoint declaration mismatch.");
         // Historical reads do not resolve credentials or require continued secret availability.
-        var expected = await BuildResultsAsync(context, source, graph, null, [], token, checkCredential: false);
+        var expected = await BuildResultsAsync(context, source, graph, null, [], token, checkCredential: false, referenceHistory: referenceHistory);
         if (expected is null || ResourcesReadyCheckpointCodec.Encode(new(proof.Id, proof.DeploymentId, proof.Generation,
                 proof.InputFingerprint, proof.ConfirmedAt, expected)) != row.EvidenceJson)
             throw new InvalidDataException("Resource checkpoint evidence mismatch.");
         return proof;
     }
 
-    internal static async Task<bool> HasProofAsync(ManifestCatalogDbContext db, Guid deployment, long generation, CancellationToken token)
+    internal static async Task<bool> HasProofAsync(ManifestCatalogDbContext db, Guid deployment, long generation, CancellationToken token, bool referenceHistory = false)
     {
         try
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
-            return source is not null && await ReadAsync(db, source, token) is not null;
+            return source is not null && await ReadAsync(db, source, token, referenceHistory: referenceHistory) is not null;
         }
         catch (InvalidDataException) { return false; }
     }

@@ -7,8 +7,12 @@ public sealed record ComposedConfigurationDocument(ConfigurationValue Tree, IRea
 
 /// <summary>The common one-document seam. Receives only frozen inputs and confirmed containing-generation outputs.</summary>
 public sealed class ComposeConfigurationDocument(ConfigurationRenderingCatalog rendering,
-    ConfigurationFormatterCatalog formatters, IConfigurationOutputEvidence evidence)
+    ConfigurationFormatterCatalog formatters, IConfigurationOutputEvidence evidence,
+    IEnumerable<IConfigurationResolutionBinding>? resolutionBindings = null)
 {
+    internal ConfigurationResolutionPlan ResolutionPlan(ConfigurationDeliveryArtifact artifact, CancellationToken token) =>
+        ConfigurationResolutionPlan.Build(artifact, rendering, resolutionBindings ?? [], token);
+
     public async ValueTask<ComposedConfigurationDocument?> ExecuteAsync(ConfigurationPlanningSnapshot frozen,
         ConfigurationDocumentTarget target, EnvironmentRecordId environment, CancellationToken token)
     {

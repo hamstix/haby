@@ -151,7 +151,7 @@ public sealed class PostgreSqlConnectionFormatter : IConfigurationFormatter
         for (var i = 0; i < exponent; i++) result *= 10;
         return result is >= 1 and <= 65535 ? (int)result : null;
     }
-    public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
+    public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
     {
         if (!Valid(arguments) || material.IsEmpty || material.Length > 65536 || material.Contains('\0')) return null;
         var settings = PostgreSqlConsumerOptions.Parse((ConfigurationObject)arguments.Members["settings"])!;

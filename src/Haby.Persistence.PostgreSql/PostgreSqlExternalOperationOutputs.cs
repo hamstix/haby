@@ -6,7 +6,7 @@ using Npgsql;
 namespace Haby.Persistence.PostgreSql;
 
 /// <summary>Atomic external evidence, exact attempt closure and aggregate completion.</summary>
-public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<ManifestCatalogDbContext> contexts,
+public sealed partial class PostgreSqlExternalOperationOutputs(IDbContextFactory<ManifestCatalogDbContext> contexts,
     IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec>? codecs = null,
     IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null, Func<DurableActionAdmission>? admissionFactory = null) : IExternalOperationOutputs, IConfigurationOutputEvidence
 {
@@ -149,7 +149,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             var operation = await context.DurableOperations.AsNoTracking().SingleOrDefaultAsync(r =>
                 r.DeploymentId == row.DeploymentId && r.Generation == row.Generation && r.OperationId == row.OperationId, cancellationToken);
             return operation?.CurrentAttemptId is { } attempt &&
-                await ConfirmAsync(context, producer, attempt, output, cancellationToken, validateAccepted: false) ? output : null;
+                await ConfirmAsync(context, producer, attempt, output, cancellationToken, validateAccepted: false, associationResource: owner.ResourceLocalId) ? output : null;
         }
         catch (InvalidDataException) { return null; }
     }
@@ -174,7 +174,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
     }
 
     private async Task<bool> ConfirmAsync(ManifestCatalogDbContext context, DurableOperationKey key, Guid attempt,
-        ExternalOperationOutput output, CancellationToken token, bool validateAccepted = true)
+        ExternalOperationOutput output, CancellationToken token, bool validateAccepted = true, ManifestLocalId? associationResource = null)
     {
         var accepted = await AcceptedAsync(context, key, token);
         var contract = accepted is null ? null : contracts.SingleOrDefault(c => c.Producer == accepted.Node.Action);
@@ -182,7 +182,7 @@ public sealed class PostgreSqlExternalOperationOutputs(IDbContextFactory<Manifes
             contract.Identity != new ExternalOperationOutputIdentity(output.Contract, output.Key) || !contract.Validate(accepted.Node, output) ||
             (validateAccepted && !await contract.ValidateAcceptedAsync(key, accepted, output, token))) return false;
         if (accepted.Node.Action.Admission.Mode == ResourceAcquisitionMode.Reference &&
-            !await ResourceObservationReceiptIntegrity.HasActiveAssociationAsync(context, key, token)) return false;
+            !await ResourceObservationReceiptIntegrity.HasActiveAssociationAsync(context, key, token, associationResource)) return false;
         var row = await OutputAsync(context, key, output.Contract, output.Key, token);
         if (row is null || row.Payload != output.Payload) return false;
         if (accepted.Node.Action.Admission.Mode != ResourceAcquisitionMode.Provision)

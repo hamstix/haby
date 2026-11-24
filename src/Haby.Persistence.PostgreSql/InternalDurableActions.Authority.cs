@@ -101,8 +101,10 @@ internal sealed partial class InternalDurableActions
         var receipt = new DurableChangeSetCommit(DeploymentChangeSetId.Parse(accepted.ChangeSetId.ToString()), DeploymentPlanId.Parse(accepted.PlanId.ToString()),
             key.DeploymentId, key.Generation, accepted.CommittedAt, accepted.ActorId);
         var completedRead = purpose != OriginPurpose.CompleteConfiguration;
-        generation = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, receipt, token) : await InternalGenerationAuthority.RequireStageAsync(db, receipt, token);
-        var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true, completedRead);
+        var referenceHistory = purpose == OriginPurpose.AuthenticationIdentity &&
+            generation.Inputs().Acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference);
+        generation = referenceHistory ? await InternalGenerationAuthority.RequireAuthenticationStageAsync(db, receipt, token) : completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, receipt, token) : await InternalGenerationAuthority.RequireStageAsync(db, receipt, token);
+        var proof = await DurableAggregateCompletion.ReadAsync(db, generation, token, true, completedRead, referenceHistory);
         if (intent.FormatVersion != 1 || intent.Marker == Guid.Empty || intent.ManagedIdentity == Guid.Empty || intent.InputFingerprint != generation.Fingerprint ||
             proof is null || proof.Id != intent.CheckpointId || intent.Payload.Length is 0 or > 1_048_576 || System.Text.Encoding.UTF8.GetByteCount(intent.Payload) > 1_048_576 ||
             intent.OperationId != "effect-" + intent.RequestId) throw new InvalidDataException("Immutable action authority mismatch.");
@@ -115,7 +117,7 @@ internal sealed partial class InternalDurableActions
             if (purpose != OriginPurpose.AuthenticationIdentity && selected.Handler.RequiresPreparedConfiguration)
                 await (configurationPreparation ?? throw new InvalidDataException("Configuration authority required.")).RequireCompleteAsync(db, generation, token, completedRead);
         }
-        var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, key.Generation.Value, resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true, completedRead: completedRead);
+        var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, deployment, key.Generation.Value, resourceOutputs, typedCodecs, token, resourceAdmission, internalResourceStage: true, completedRead: completedRead, referenceHistory: referenceHistory);
         var credentialsValid = metadata is not null && (purpose == OriginPurpose.AuthenticationIdentity
             ? await DurableAggregateCompletion.CheckAuthenticationOriginCredentialMetadataAsync(db, metadata, token)
             : await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, token));

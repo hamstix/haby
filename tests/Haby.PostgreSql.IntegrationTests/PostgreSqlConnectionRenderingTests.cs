@@ -141,17 +141,17 @@ public sealed partial class ApplicationConfigurationTests
                 Assert.DoesNotContain(current.Role, preview.Json); Assert.DoesNotContain(password.SecretId.ToString(), preview.Json);
                 Assert.Contains("Information", preview.Json);
                 var formatted = catalog.Format(pin, deferred, material)!;
-                var parsed = new NpgsqlConnectionStringBuilder(formatted.Reveal());
+                var parsed = new NpgsqlConnectionStringBuilder(Assert.IsType<ConfigurationString>(formatted.Reveal()).Value);
                 Assert.Equal(pin.Component.Value == "api" ? 200 : 15, parsed.Timeout);
                 Assert.Equal(30, parsed.CommandTimeout); Assert.Equal(SslMode.Disable, parsed.SslMode); Assert.Null(parsed.SearchPath);
                 // Disable-only fixture: explicit TLS mappings have fast tests; no VerifyFull certificate rehearsal is claimed.
-                await using var connection = new NpgsqlConnection(formatted.Reveal());
+                await using var connection = new NpgsqlConnection(Assert.IsType<ConfigurationString>(formatted.Reveal()).Value);
                 await connection.OpenAsync();
                 await using var command = new NpgsqlCommand("SELECT current_user = $1 AND current_database() = $2 AND current_schema() = 'app'", connection);
                 command.Parameters.AddWithValue(current.Role); command.Parameters.AddWithValue(current.Database);
                 Assert.Equal(30, command.CommandTimeout); Assert.True(await command.ExecuteScalarAsync() is true);
                 var wrong = catalog.Format(pin, deferred, "explicitly-wrong-test-material")!;
-                await using var rejected = new NpgsqlConnection(wrong.Reveal());
+                await using var rejected = new NpgsqlConnection(Assert.IsType<ConfigurationString>(wrong.Reveal()).Value);
                 var error = await Assert.ThrowsAsync<PostgresException>(() => rejected.OpenAsync());
                 Assert.Equal(PostgresErrorCodes.InvalidPassword, error.SqlState);
                 Assert.Null(await renderer.RenderAsync(pin, current.Commit.DeploymentId, current.Commit.Generation,

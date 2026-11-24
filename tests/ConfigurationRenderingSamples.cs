@@ -41,7 +41,7 @@ internal static class ConfigurationRenderingSamples
     {
         public ConfigurationFormatterId Contract => FormatterId;
         public ManifestLocalId Identity => Implementation;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) =>
+        public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) =>
             new FormatterDefinition().ValidateArguments(arguments) && !material.IsEmpty ? new(material.ToString()) : null;
     }
     internal static IReadOnlyList<DurableOperationNode> Producers(NormalizedManifestSpec spec) => spec.Resources.Select(r =>

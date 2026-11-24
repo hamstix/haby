@@ -176,6 +176,8 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<IConfigurationAccessStore>(p => p.GetRequiredService<PostgreSqlConfigurationAccessStore>());
         builder.Services.AddSingleton<IConfigurationDeliveryDocumentStore>(p => p.GetRequiredService<PostgreSqlConfigurationAccessStore>());
         builder.Services.AddSingleton<IConfigurationResolutionBinding, PostgreSqlConnectionResolutionBinding>();
+        builder.Services.AddSingleton<PostgreSqlConfigurationApplicationAuthorization>();
+        builder.Services.AddSingleton<IConfigurationApplicationAuthorization>(p => p.GetRequiredService<PostgreSqlConfigurationApplicationAuthorization>());
         builder.Services.AddSingleton<DeliverConfiguration>();
         builder.Services.AddSingleton<ImportApplicationManifest>();
         builder.Services.AddSingleton<ImportConfigurationProfile>();

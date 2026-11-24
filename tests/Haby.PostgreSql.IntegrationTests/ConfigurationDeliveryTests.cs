@@ -85,7 +85,7 @@ public abstract partial class ApplicationLoginScenario
         public int Count;
         public ConfigurationFormatterId Contract => PostgreSqlConnectionRendering.Formatter;
         public ManifestLocalId Identity => PostgreSqlConnectionRendering.Implementation;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
+        public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
         {
             Count++;
             if (Enabled) throw new InvalidOperationException("private-formatter-material-sentinel");
@@ -213,6 +213,7 @@ public sealed partial class ApplicationConfigurationTests
                 DROP TABLE configuration_access_grants;
                 DROP TABLE resource_identity_claims;
                 DROP TABLE resource_management_heads;
+                DROP TABLE configuration_shared_credential_uses;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';

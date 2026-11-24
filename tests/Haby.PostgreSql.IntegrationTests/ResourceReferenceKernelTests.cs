@@ -71,7 +71,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         return services.BuildServiceProvider();
     }
     private static async Task<Prepared> PrepareAsync(string connection, Boundary boundary, string application = "reference-app",
-        Prepared? scope = null, bool mixed = true, string identity = "shared-service", ResourceAcquisitionMode singleMode = ResourceAcquisitionMode.Reference, string? sharingClass = null, bool secondReference = false, bool newProvider = false)
+        Prepared? scope = null, bool mixed = true, string identity = "shared-service", ResourceAcquisitionMode singleMode = ResourceAcquisitionMode.Reference, string? sharingClass = null, bool secondReference = false, bool newProvider = false, string? components = null)
     {
         await using var services = Services(connection, boundary);
         if (scope is null) await services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
@@ -89,7 +89,7 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         }
         var resources = mixed ? "\"imported\":{\"type\":\"test.capability/v1\",\"providerRef\":\"sample.primary\",\"properties\":{}}," : "";
         if (secondReference) resources += "\"shared-peer\":{\"type\":\"test.capability/v1\",\"providerRef\":\"sample.primary\",\"properties\":{}},";
-        var bytes = Encoding.UTF8.GetBytes("{\"applicationVersion\":\"v1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"" + application + "\"},\"spec\":{\"resources\":{" + resources + "\"referenced\":{\"type\":\"test.capability/v1\",\"providerRef\":\"sample.primary\",\"properties\":{}}}}}}");
+        var bytes = Encoding.UTF8.GetBytes("{\"applicationVersion\":\"v1\",\"manifest\":{\"apiVersion\":\"haby.dev/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"id\":\"" + application + "\"},\"spec\":{\"resources\":{" + resources + "\"referenced\":{\"type\":\"test.capability/v1\",\"providerRef\":\"sample.primary\",\"properties\":{}}}" + (components is null ? "" : ",\"components\":" + components) + "}}}");
         var revision = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(services.GetRequiredService<IManifestImportStore>(),
             new([new(Type, "{\"type\":\"object\",\"additionalProperties\":false}")], [], [], []), TimeProvider.System).ExecuteAsync(bytes, "tester")).ManifestRevisionRef;
         var requests = new List<ResourceAcquisitionRequest> { new(Referenced, singleMode, Payload(identity, sharingClass)) { SharingRequest = sharingClass is null ? null : SharingRequest(sharingClass) } };
@@ -481,7 +481,8 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         {
             var p = inputs.Providers.Resource(resourceId);
             DurableOperationNode Node(string suffix, IReadOnlyList<OperationId> dependencies) => new(OperationId.Create(resourceId.Value + suffix), resourceId, Key,
-                new(p.Environment, p.Instance, p.Configuration, p.Implementation.Value), inputs.Acquisitions.Resource(resourceId).Input!, dependencies) { RequiresExternalOutput = true, RequiredOutput = Output };
+                new(p.Environment, p.Instance, p.Configuration, p.Implementation.Value), inputs.Acquisitions.Resource(resourceId).Input!, dependencies)
+            { RequiresExternalOutput = true, RequiredOutput = Output };
             return mode == ResourceAcquisitionMode.Reference
                 ? [Node("-first", []), Node("-second", boundary.SecondMemberDependsOnImport ? [OperationId.Create("imported-verify")] : [])]
                 : [Node("-verify", [])];

@@ -89,7 +89,7 @@ public sealed class ConfigurationRenderingCatalogTests
         var fragment = catalog.Render(pin, new("sample.output/v1", "value", "{\"Destination\":\"events\"}"))!;
         var deferred = Assert.IsType<ConfigurationDeferredValue>(fragment.Value);
         var result = changed.Format(pin, deferred, "supplied");
-        Assert.True(result?.Reveal() == "supplied");
+        Assert.Equal(new ConfigurationString("supplied"), result?.Reveal());
         Assert.Null(catalog.Render(pin, new("wrong/v1", "value", "{}")));
         Assert.Null(ConfigurationRenderingCatalog.Empty.Render(pin, new("sample.output/v1", "value", "{\"Destination\":\"events\"}")));
         Assert.False(ConfigurationRenderingCatalog.Empty.Supports(pin));

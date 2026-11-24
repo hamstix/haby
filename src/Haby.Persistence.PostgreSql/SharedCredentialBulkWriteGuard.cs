@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Query;
 
 namespace Haby.Persistence.PostgreSql;
 
-/// <summary>Bulk LINQ writes bypass SaveChanges; these two append-only entity types have no supported bulk mutation.</summary>
+/// <summary>Bulk LINQ writes bypass SaveChanges; these append-only entity types have no supported bulk mutation.</summary>
 internal sealed class SharedCredentialBulkWriteGuard : IQueryExpressionInterceptor
 {
     internal static readonly SharedCredentialBulkWriteGuard Instance = new();
@@ -32,7 +32,8 @@ internal sealed class SharedCredentialBulkWriteGuard : IQueryExpressionIntercept
             if (node is EntityQueryRootExpression root)
             {
                 if (root.EntityType.ClrType == typeof(SharedCredentialBindingRow) ||
-                    root.EntityType.ClrType == typeof(SharedCredentialRevocationRow)) Found = true;
+                    root.EntityType.ClrType == typeof(SharedCredentialRevocationRow) ||
+                    root.EntityType.ClrType == typeof(ConfigurationSharedUseRow)) Found = true;
                 return node;
             }
             return base.VisitExtension(node);

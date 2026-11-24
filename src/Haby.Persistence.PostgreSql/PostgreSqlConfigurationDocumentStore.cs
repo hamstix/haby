@@ -10,7 +10,7 @@ namespace Haby.Persistence.PostgreSql;
 
 /// <summary>One immutable artifact per exact target. No delivery, current Provider or secret access.</summary>
 public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    ComposeConfigurationDocument composer, TimeProvider clock) : IConfigurationDocumentStore, IConfigurationApplicationInventory
+    ComposeConfigurationDocument composer, TimeProvider clock, PostgreSqlConfigurationApplicationAuthorization? sharedUses = null) : IConfigurationDocumentStore, IConfigurationApplicationInventory
 {
     public async ValueTask<ConfigurationApplicationInventory> SelectApplicationAsync(ConfigurationApplicationSelection selection, CancellationToken token)
     {
@@ -159,6 +159,8 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
             var fingerprint = ConfigurationDocumentCodec.Fingerprint(payload);
             candidate = candidate with { Metadata = metadata with { Fingerprint = fingerprint } };
             _ = ConfigurationJson.Preview(candidate.Tree); // Both complete byte budgets precede any write.
+            var referenceResolution = composed.Outputs.Any(x => x.Pin.ProducerAction.Admission.Mode == ResourceAcquisitionMode.Reference)
+                ? composer.ResolutionPlan(new(candidate, EnvironmentRecordId.Parse(inputs.EnvironmentRecordId.ToString())), token) : null;
 
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var transaction = await db.Database.BeginTransactionAsync(token);
@@ -192,6 +194,9 @@ public sealed class PostgreSqlConfigurationDocumentStore(IDbContextFactory<Manif
                     x.OperationId == output.Pin.Producer.Value && x.State == nameof(DurableOperationState.Succeeded) && x.CurrentAttemptId == attempt, token))
                     return new(ConfigurationDocumentStatus.InputUnavailable, Target: target);
             }
+            if (referenceResolution is { SharedUses.Length: > 0 } && (sharedUses is null ||
+                !await sharedUses.CaptureAsync(db, new(candidate, EnvironmentRecordId.Parse(inputs.EnvironmentRecordId.ToString())), referenceResolution.SharedUses, token)))
+                return new(ConfigurationDocumentStatus.InputUnavailable, Target: target);
             db.ConfigurationDocuments.Add(new()
             {
                 Id = Guid.Parse(metadata.Id.ToString()),

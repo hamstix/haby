@@ -250,7 +250,7 @@ public sealed partial class ResourceImportAuthorityTests(CatalogServerFixture fi
     {
         public ConfigurationFormatterId Contract => FormatterId;
         public ManifestLocalId Identity => RendererImplementation;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) =>
+        public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material) =>
             new FormatDefinition().ValidateArguments(arguments) ? new("external-42") : null;
     }
 

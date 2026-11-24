@@ -72,7 +72,31 @@ internal static partial class InternalGenerationAuthority
         return row;
     }
 
-    private static async Task<DeploymentGenerationRow> RequireCoreAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, bool readOnly, CancellationToken token, bool stage = false)
+    // Authentication validates immutable identity provenance. Current Reference use is
+    // authorized separately for the exact document before any application material read.
+    internal static async Task<DeploymentGenerationRow> RequireAuthenticationStageAsync(ManifestCatalogDbContext db,
+        DurableChangeSetCommit accepted, CancellationToken token)
+    {
+        var verified = await RequireCoreAsync(db, accepted, true, token, true, referenceHistory: true);
+        var applied = await db.ApplicationDeployments.Where(x => x.Id == verified.DeploymentId).Select(x => x.AppliedGeneration).SingleAsync(token);
+        if (applied >= verified.Generation) _ = await InitialRetirementCompletion.RequireProofAsync(db, verified, token);
+        return verified;
+    }
+
+    internal static async Task<DeploymentGenerationRow> RequireAuthenticationStageAsync(ManifestCatalogDbContext db,
+        DeploymentGenerationRow source, CancellationToken token)
+    {
+        var commit = await db.ChangeSetCommits.AsNoTracking().SingleAsync(x => x.ChangeSetId == source.ChangeSetId, token);
+        var verified = await RequireAuthenticationStageAsync(db, new DurableChangeSetCommit(Haby.Domain.DeploymentChangeSetId.Parse(commit.ChangeSetId.ToString()),
+            Haby.Domain.DeploymentPlanId.Parse(commit.PlanId.ToString()), Haby.Domain.ApplicationDeploymentId.Parse(commit.DeploymentId.ToString()),
+            Haby.Domain.DeploymentGeneration.Create(commit.Generation), commit.CommittedAt, commit.ActorId), token);
+        if (verified.GraphJson != source.GraphJson || verified.Fingerprint != source.Fingerprint || verified.ConfigurationJson != source.ConfigurationJson ||
+            verified.ProviderInputsJson != source.ProviderInputsJson || verified.PlanId != source.PlanId) throw new InvalidDataException("Authentication source mismatch.");
+        return verified;
+    }
+
+    private static async Task<DeploymentGenerationRow> RequireCoreAsync(ManifestCatalogDbContext db, DurableChangeSetCommit accepted, bool readOnly, CancellationToken token,
+        bool stage = false, bool referenceHistory = false)
     {
         var deployment = Guid.Parse(accepted.DeploymentId.ToString());
         var row = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == accepted.Generation.Value, token)
@@ -109,7 +133,7 @@ internal static partial class InternalGenerationAuthority
         var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token)
             ?? throw new InvalidDataException("Accepted declaration unavailable.");
         var manifest = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);
-        if (!manifest.Equals(inputs.Configuration!.Manifest) || mixed && !await ResourceContinuity.ValidateAsync(db, deployment, graph, token) ||
+        if (!manifest.Equals(inputs.Configuration!.Manifest) || mixed && !await ResourceContinuity.ValidateAsync(db, deployment, graph, token, referenceHistory) ||
             initial && await db.CurrentResourceManagement.AsNoTracking().AnyAsync(x => x.Environment == row.EnvironmentRecordId && x.Application == row.ApplicationRecordId, token))
             throw new InvalidDataException("Accepted declaration or original Resource provenance mismatch.");
         var pins = await db.InternalPlanInputs.AsNoTracking().Where(x => x.PlanId == row.PlanId).ToArrayAsync(token);

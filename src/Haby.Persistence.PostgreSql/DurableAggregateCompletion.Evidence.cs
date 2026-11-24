@@ -6,7 +6,7 @@ namespace Haby.Persistence.PostgreSql;
 internal static partial class DurableAggregateCompletion
 {
     private static async Task<ResourceReadyResult[]?> BuildResultsAsync(ManifestCatalogDbContext db, DeploymentGenerationRow target,
-        DurableOperationGraph graph, IExternalOperationOutputContract[]? contracts, IProviderConfigurationCodec[] codecs, CancellationToken token, bool checkCredential)
+        DurableOperationGraph graph, IExternalOperationOutputContract[]? contracts, IProviderConfigurationCodec[] codecs, CancellationToken token, bool checkCredential, bool referenceHistory = false)
     {
         var ids = graph.Nodes.Select(x => x.Id.Value).ToArray();
         var current = await db.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == target.DeploymentId && x.Generation == target.Generation && (!target.InternalEffects || ids.Contains(x.OperationId))).ToArrayAsync(token);
@@ -17,8 +17,12 @@ internal static partial class DurableAggregateCompletion
         foreach (var resource in resources)
         {
             var reuse = graph.ReusedResources.Concat(graph.RetainedResources).SingleOrDefault(x => x.Resource.Value == resource);
-            var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == target.DeploymentId && x.Resource == resource, token);
             var generation = reuse?.SourceGeneration ?? target.Generation;
+            var managed = referenceHistory
+                ? await db.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == target.DeploymentId && x.Resource == resource &&
+                    x.SourceGeneration == generation && x.Origin == ResourceOrigin.Referenced, token) ??
+                    await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == target.DeploymentId && x.Resource == resource, token)
+                : await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == target.DeploymentId && x.Resource == resource, token);
             if (managed is null || managed.Environment != target.EnvironmentRecordId || managed.Application != target.ApplicationRecordId ||
                 managed.SourceGeneration != generation || reuse is not null && managed.Id != reuse.ManagementId) return null;
             var source = generation == target.Generation ? target : await db.DeploymentGenerations.AsNoTracking()

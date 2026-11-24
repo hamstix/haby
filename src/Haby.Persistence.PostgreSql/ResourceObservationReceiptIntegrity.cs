@@ -38,13 +38,15 @@ internal static class ResourceObservationReceiptIntegrity
          where history.Id == association && head.Environment == history.Environment && head.Application == history.Application && head.Resource == history.Resource
          select history.Id).AnyAsync(token);
 
-    internal static async Task<bool> HasActiveAssociationAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token)
+    internal static async Task<bool> HasActiveAssociationAsync(ManifestCatalogDbContext db, DurableOperationKey key, CancellationToken token, ManifestLocalId? resource = null)
     {
         var receipt = await ReadAsync(db, key, token);
         if (receipt is null) return false;
         var row = await db.ResourceObservationReceipts.AsNoTracking().SingleAsync(x => x.Id == receipt.Id, token);
         var document = Decode(row.Document);
-        foreach (var association in document.Associations)
+        var associations = resource is null ? document.Associations : document.Associations.Where(x => x.Resource == resource.Value).ToArray();
+        if (associations.Length == 0 || resource is not null && associations.Length != 1) return false;
+        foreach (var association in associations)
             if (!await IsActiveAsync(db, association.Management, token)) return false;
         return true;
     }

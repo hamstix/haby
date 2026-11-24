@@ -313,7 +313,7 @@ public sealed class SharedCredentialAuthorityTests(PostgreSqlFixture fixture) : 
     public void C_migration_adds_no_new_stored_server_code()
     {
         using var db = Context(fixture.ConnectionString);
-        var migration = db.Database.GetMigrations().Last();
+        var migration = "20261123201454_SharedCredentialAuthorityTransactions";
         var migrator = db.GetService<IMigrator>();
         foreach (var sql in new[] { migrator.GenerateScript("20261123114429_ReferenceSharingAssociations", migration),
             migrator.GenerateScript(migration, "20261123114429_ReferenceSharingAssociations") })
@@ -412,7 +412,8 @@ public sealed class SharedCredentialAuthorityTests(PostgreSqlFixture fixture) : 
         var connection = await Database(migrate: false);
         string[] current;
         await using (var model = Context(connection)) current = model.Database.GetMigrations().ToArray();
-        var prior = current[..^1].Append("20261123153600_SharedCredentialUseAuthority").ToArray();
+        var prior = current.TakeWhile(x => x != "20261123201454_SharedCredentialAuthorityTransactions")
+            .Append("20261123153600_SharedCredentialUseAuthority").ToArray();
         await using (var arrange = Context(connection))
         {
             await arrange.Database.ExecuteSqlRawAsync("""
