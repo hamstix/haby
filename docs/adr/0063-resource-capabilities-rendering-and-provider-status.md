@@ -458,11 +458,14 @@ promising erasure of every managed/library string copy.
 
 ### 27. Concrete remaining slices and evidence
 
-After #275-B, implement #275-C: protected shared-secret creation, exact use
-bindings issued with Provider revision, administrative revocation and persistence.
-Then #275-D: confirmed Reference outputs -> Profile/Binding -> materialization ->
-authorized delivery, including two Components with different typed options.
-Neither slice may silently enable incomplete production Reference registration.
+#275-C is merged in [PR #293](https://github.com/hamstix/haby/pull/293): protected
+shared-secret creation, exact use bindings issued with Provider revision,
+administrative revocation and persistence. #275-D now has a bounded implementation
+of confirmed Reference outputs -> Profile/Binding -> materialization -> authorized
+static/runtime delivery, including two Components with different typed options.
+Its exact-source review and full qualification remain pending; local closed-adapter
+evidence is not release qualification. See the [delivery boundary](../reference-configuration-delivery.md).
+Neither slice enables incomplete production Reference registration.
 Retirement implementation and production availability remain explicit separate
 readiness items; a test adapter does not prove either complete.
 

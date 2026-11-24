@@ -29,8 +29,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
 
     internal ValueTask<DurableChangeSetCreateResult> CreateAcquisitionChangeSetAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, ResourceAcquisitionIntent acquisitions,
-        string actor, CancellationToken token) => CreateChangeSetCoreAsync(environment, application, revision,
-            new DeploymentPrecondition.ExpectedAbsence(), null, actor, token, acquisitions);
+        string actor, CancellationToken token, DeploymentPrecondition? precondition = null) => CreateChangeSetCoreAsync(environment, application, revision,
+            precondition ?? new DeploymentPrecondition.ExpectedAbsence(), null, actor, token, acquisitions);
 
     public ValueTask<DurableChangeSetCreateResult> CreateImportChangeSetAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, ResourceImportIntent intent,
@@ -247,7 +247,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
         resourceInputs = internalEffects ? InternalResourceStage.Project(inputs) : inputs;
         if (inputs.Acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference) &&
-            (baseline is not null || internalEffects || spec.Components.Count != 0)) return new(DurablePlanStatus.ReferenceNotSupported);
+            !(internalEffects && baseline is not null) &&
+            (baseline is not null || internalEffects)) return new(DurablePlanStatus.ReferenceNotSupported);
         var resourceSpec = internalEffects ? resourceInputs.Providers.Declaration.Spec : spec;
         DurableOperationGraph graph;
         try
@@ -567,7 +568,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == Guid.Parse(baseline.Deployment.ToString()), token);
             return owner is not null && owner.EnvironmentRecordId == Guid.Parse(inputs.Environment.ToString()) && owner.ApplicationRecordId == Guid.Parse(inputs.Revision.ApplicationRecordId.ToString()) &&
                 owner.DesiredGeneration == baseline.Generation && owner.AppliedGeneration == baseline.Generation &&
-                (await ReuseGraphAsync(context, owner, spec, revision, inputs, token))?.Equals(new DurableOperationGraph(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources)) == true;
+                (await ReuseGraphAsync(context, owner, spec, revision, inputs, token))?.Equals(new DurableOperationGraph(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources)
+                { Import = graph.Import, Acquisitions = graph.Acquisitions, ObservationGroups = graph.ObservationGroups }) == true;
         }
         var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(r => r.Id == revision.ProviderInstanceId, token);
         return instance is not null && admission.ValidateGraph(spec,

@@ -134,7 +134,7 @@ public sealed partial class PostgreSqlApplicationLoginTests
                         var deferred = Assert.IsType<ConfigurationDeferredValue>(fragment.Value);
                         Assert.Equal(new ConfigurationString(schema), deferred.Arguments.Members["schema"]);
                         var formatted = catalog.Format(pin, deferred, material)!;
-                        await using var consumer = new NpgsqlConnection(formatted.Reveal());
+                        await using var consumer = new NpgsqlConnection(Assert.IsType<ConfigurationString>(formatted.Reveal()).Value);
                         await consumer.OpenAsync();
                         await using var identity = new NpgsqlCommand("SELECT current_user = $1 AND current_schema() = $2 AND current_setting('search_path') = $2", consumer);
                         identity.Parameters.AddWithValue(scenario.Role); identity.Parameters.AddWithValue(schema);

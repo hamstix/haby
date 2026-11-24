@@ -15,7 +15,7 @@ public interface IConfigurationResolutionBinding
     bool ValidateMaterial(ConfigurationRenderPin pin, ReadOnlySpan<char> material) => ValidateMaterial(material);
 }
 
-public sealed record SecretResolutionReference(SecretRef Reference, SecretPurpose Purpose);
+public sealed record SecretResolutionReference(SecretRef Reference, SecretPurpose Purpose, SharedCredentialScope? SharedUse = null);
 
 public enum ConfigurationDeliveryStatus { Delivered, Denied, InputUnavailable, LimitExceeded, StorageUnavailable }
 
@@ -34,10 +34,11 @@ public sealed class ConfigurationDeliveryResult(ConfigurationDeliveryStatus stat
 
 /// <summary>Static grant authorization remains independent of runtime identity.</summary>
 public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConfigurationDeliveryDocumentStore documents,
-    ISecretStore secrets, ConfigurationRenderingCatalog rendering, IEnumerable<IConfigurationResolutionBinding> registrations)
+    ISecretStore secrets, ConfigurationRenderingCatalog rendering, IEnumerable<IConfigurationResolutionBinding> registrations,
+    IConfigurationApplicationAuthorization? applicationAuthorization = null)
 {
     public const int MaxSecretBytes = ConfigurationDeliveryMaterializer.MaxSecretBytes;
-    private readonly ConfigurationDeliveryMaterializer materializer = new(secrets, rendering, registrations);
+    private readonly ConfigurationDeliveryMaterializer materializer = new(secrets, rendering, registrations, applicationAuthorization);
     public async ValueTask<ConfigurationDeliveryResult> ExecuteAsync(string credential, ConfigurationDocumentRevisionId revisionId, CancellationToken token)
     {
         var grant = await access.AuthorizeAsync(credential, revisionId, token);
@@ -57,7 +58,7 @@ public sealed class DeliverConfiguration(IConfigurationAccessStore access, IConf
 
 /// <summary>Saved-artifact-only materialization. Callers establish their distinct authority before entry.</summary>
 internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, ConfigurationRenderingCatalog rendering,
-    IEnumerable<IConfigurationResolutionBinding> registrations)
+    IEnumerable<IConfigurationResolutionBinding> registrations, IConfigurationApplicationAuthorization? applicationAuthorization = null)
 {
     internal const int MaxSecretBytes = 64 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -67,66 +68,14 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
         try
         {
             var revision = artifact.Revision;
-            token.ThrowIfCancellationRequested();
-            ConfigurationDocumentCodec.ValidateTree(revision.Tree);
-            var frozen = ConfigurationPlanningSnapshotCodec.Decode(revision.FrozenInputs, revision.Metadata.Revision);
-            var layout = frozen.Layouts.Single(x => x.Component == revision.Metadata.Target.Component);
-            var staticSecrets = new Dictionary<string, (SecretDefinition Definition, ConfigurationProjectedSecret Node)>(StringComparer.Ordinal);
-            foreach (var contribution in layout.Contributions.Where(x => x.Contribution.Document == revision.Metadata.Target.Document))
-                foreach (var projection in contribution.Contribution.SecretProjections)
-                {
-                    if (!frozen.FrozenSecrets.TryGetValue(projection.SecretRef, out var exact)) throw new InvalidDataException();
-                    var path = contribution.Contribution.Path + projection.Path;
-                    if (At(revision.Tree, path) is not ConfigurationProjectedSecret node || node.Reference != exact ||
-                        node.Format != projection.Format || !staticSecrets.TryAdd(path,
-                            (new(new SecretOwner.Environment(artifact.Environment), SecretPurpose.Configuration), node)))
-                        throw new InvalidDataException();
-                }
-            using var associations = JsonDocument.Parse(revision.OutputAssociations);
-            if (associations.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
-            var outputs = associations.RootElement.EnumerateArray().Select(a =>
-            {
-                if (a.ValueKind != JsonValueKind.Array || a.GetArrayLength() != 5 || !Guid.TryParse(a[1].GetString(), out var attempt) || attempt == Guid.Empty) throw new InvalidDataException();
-                return (Producer: a[0].GetString(), Attempt: attempt, Output: new ExternalOperationOutput(a[2].GetString()!, a[3].GetString()!, a[4].GetString()!));
-            }).ToArray();
-            var authorized = new Dictionary<string, (ConfigurationRenderPin Pin, ConfigurationDeferredValue Value, SecretDefinition Definition, SecretRef Reference, IConfigurationResolutionBinding Adapter)>(StringComparer.Ordinal);
-            var nextOutput = 0;
-            var confirmed = new Dictionary<(string Producer, string Contract, string Key), (Guid Attempt, ExternalOperationOutput Output)>();
-            for (var i = 0; i < layout.BindingRequests.Count; i++)
-            {
-                token.ThrowIfCancellationRequested();
-                var request = layout.BindingRequests[i];
-                var projections = request.Projections.Where(x => x.Document == revision.Metadata.Target.Document).ToArray();
-                if (projections.Length == 0) continue;
-                var pin = frozen.RenderPins.Single(x => x.Component == layout.Component && x.Request == i);
-                // Composition saves one occurrence per participating request, in frozen
-                // request order. Reuse is valid only with the same confirmed evidence.
-                if (nextOutput >= outputs.Length) throw new InvalidDataException();
-                var output = outputs[nextOutput++];
-                if (output.Producer != pin.Producer.Value || output.Output.Contract != pin.OutputContract || output.Output.Key != pin.OutputKey)
-                    throw new InvalidDataException();
-                var key = (pin.Producer.Value, pin.OutputContract, pin.OutputKey);
-                if (confirmed.TryGetValue(key, out var prior) && (prior.Attempt != output.Attempt || prior.Output != output.Output))
-                    throw new InvalidDataException();
-                confirmed[key] = (output.Attempt, output.Output);
-                var adapters = bindings.Where(x => x.Formatter == pin.Formatter && x.Implementation == pin.FormatterImplementation).ToArray();
-                if (adapters.Length != 1 || !rendering.SupportsDeliveryFormatter(pin)) throw new InvalidDataException();
-                foreach (var projection in projections)
-                {
-                    if (At(revision.Tree, projection.Path) is not ConfigurationDeferredValue deferred) throw new InvalidDataException();
-                    var bound = adapters[0].Bind(pin, output.Output, deferred) ?? throw new InvalidDataException();
-                    if (bound.Purpose != SecretPurpose.ApplicationLogin) throw new InvalidDataException();
-                    var references = References(deferred.Arguments).ToArray();
-                    if (references.Length != 1 || references[0] != bound.Reference) throw new InvalidDataException();
-                    authorized.Add(projection.Path, (pin, deferred, new(new SecretOwner.Resource(new(artifact.Environment,
-                        revision.Metadata.Revision.ApplicationRecordId, pin.ResourceLocalId)), bound.Purpose), bound.Reference, adapters[0]));
-                }
-            }
-            if (nextOutput != outputs.Length) throw new InvalidDataException();
-            // Validate every confidential node before resolving even the first SecretRef.
-            Validate(revision.Tree, "");
+            var plan = ConfigurationResolutionPlan.Build(artifact, rendering, bindings, token);
+            if (plan.SharedUses.Length != 0 && (applicationAuthorization is null ||
+                !await applicationAuthorization.AuthorizeAsync(artifact, plan.SharedUses, token)))
+                return new(ConfigurationDeliveryStatus.Denied);
+            var staticSecrets = plan.StaticSecrets;
+            var authorized = plan.Authorized;
             long expansionBudget = ConfigurationDocumentCodec.MaxBytes - ConfigurationJson.MeasureUnresolvedDelivery(revision.Tree, token);
-            var resolved = new Dictionary<string, ConfidentialConfigurationString>(StringComparer.Ordinal);
+            var resolved = new Dictionary<string, ConfidentialConfigurationValue>(StringComparer.Ordinal);
             var projected = new Dictionary<string, ConfigurationValue>(StringComparer.Ordinal);
             foreach (var group in staticSecrets.GroupBy(x => (x.Value.Definition, x.Value.Node.Reference)))
             {
@@ -174,7 +123,7 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
                         if (!binding.Adapter.ValidateMaterial(binding.Pin, chars)) throw new InvalidDataException();
                         var value = rendering.FormatDelivery(binding.Pin, binding.Value, chars) ?? throw new InvalidDataException();
                         token.ThrowIfCancellationRequested();
-                        expansionBudget -= ConfigurationJson.MeasureResolvedValue(new ConfigurationString(value.Reveal()), token);
+                        expansionBudget -= ConfigurationJson.MeasureResolvedValue(value.Reveal(), token);
                         if (expansionBudget < 0) throw new ConfigurationDocumentLimitException();
                         resolved.Add(path, value);
                     }
@@ -182,29 +131,14 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
                 finally { CryptographicOperations.ZeroMemory(bytes); if (chars is not null) Array.Clear(chars); }
             }
             token.ThrowIfCancellationRequested();
-            var json = ConfigurationJson.SerializeDelivery(ReplaceProjected(revision.Tree, ""), resolved, token);
+            var json = ConfigurationJson.SerializeDelivery(ReplaceProjected(revision.Tree, ""), token);
             if (token.IsCancellationRequested) { CryptographicOperations.ZeroMemory(json); token.ThrowIfCancellationRequested(); }
             return new(ConfigurationDeliveryStatus.Delivered, json, revision.Metadata.Fingerprint);
 
-            void Validate(ConfigurationValue node, string path)
-            {
-                token.ThrowIfCancellationRequested();
-                switch (node)
-                {
-                    case ConfigurationDeferredValue d:
-                        if (!authorized.TryGetValue(path, out var binding) || binding.Value != d) throw new InvalidDataException();
-                        break;
-                    case ConfigurationSecretReference: throw new InvalidDataException();
-                    case ConfigurationProjectedSecret s:
-                        if (!staticSecrets.TryGetValue(path, out var bound) || bound.Node != s) throw new InvalidDataException();
-                        break;
-                    case ConfigurationObject o: foreach (var (key, child) in o.Members) Validate(child, path + "/" + ConfigurationComposer.Escape(key)); break;
-                    case ConfigurationArray a: for (var j = 0; j < a.Items.Count; j++) Validate(a.Items[j], path + "/" + j.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
-                }
-            }
             ConfigurationValue ReplaceProjected(ConfigurationValue node, string path) => node switch
             {
                 ConfigurationProjectedSecret => projected.TryGetValue(path, out var value) ? value : throw new InvalidDataException(),
+                ConfigurationDeferredValue => resolved.TryGetValue(path, out var confidential) ? confidential.Reveal() : throw new InvalidDataException(),
                 ConfigurationObject o => new ConfigurationObject(o.Members.Select(x => KeyValuePair.Create(x.Key,
                     ReplaceProjected(x.Value, path + "/" + ConfigurationComposer.Escape(x.Key))))),
                 ConfigurationArray a => new ConfigurationArray(a.Items.Select((x, i) => ReplaceProjected(x,
@@ -218,22 +152,6 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
         catch (Exception) { return new(ConfigurationDeliveryStatus.InputUnavailable); }
     }
 
-    private static ConfigurationValue At(ConfigurationValue tree, string path)
-    {
-        if (path.Length == 0) return tree;
-        if (!path.StartsWith('/')) throw new InvalidDataException();
-        foreach (var segment in path[1..].Split('/'))
-        {
-            var key = segment.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
-            if (ConfigurationComposer.Escape(key) != segment) throw new InvalidDataException();
-            if (tree is ConfigurationObject o && o.Members.TryGetValue(key, out var child)) tree = child;
-            else if (tree is ConfigurationArray a && int.TryParse(key, System.Globalization.NumberStyles.None,
-                System.Globalization.CultureInfo.InvariantCulture, out var index) && index >= 0 && index < a.Items.Count &&
-                key == index.ToString(System.Globalization.CultureInfo.InvariantCulture)) tree = a.Items[index];
-            else throw new InvalidDataException();
-        }
-        return tree;
-    }
     private static ConfigurationValue ParseConfigurationSecret(byte[] bytes, ProfileSecretFormat format)
     {
         var text = StrictUtf8.GetString(bytes);
@@ -265,14 +183,5 @@ internal sealed class ConfigurationDeliveryMaterializer(ISecretStore secrets, Co
             return new ConfigurationObject(members.Select(x => KeyValuePair.Create(x.Name, Convert(x.Value))));
         }
     }
-    private static IEnumerable<SecretRef> References(ConfigurationValue value)
-    {
-        switch (value)
-        {
-            case ConfigurationSecretReference s: yield return s.Reference; break;
-            case ConfigurationObject o: foreach (var child in o.Members.Values) foreach (var r in References(child)) yield return r; break;
-            case ConfigurationArray a: foreach (var child in a.Items) foreach (var r in References(child)) yield return r; break;
-            case ConfigurationDeferredValue: throw new InvalidDataException();
-        }
-    }
+
 }

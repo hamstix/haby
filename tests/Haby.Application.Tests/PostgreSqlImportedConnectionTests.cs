@@ -37,7 +37,7 @@ public sealed class PostgreSqlImportedConnectionTests
         Assert.Equal(new ConfigurationSecretReference(reference), deferred.Arguments.Members["password"]);
         var formatted = new PostgreSqlConnectionFormatter().Format(deferred.Arguments, "existing password;with=punctuation");
         Assert.NotNull(formatted);
-        var builder = new Npgsql.NpgsqlConnectionStringBuilder(formatted.Reveal());
+        var builder = new Npgsql.NpgsqlConnectionStringBuilder(Assert.IsType<ConfigurationString>(formatted.Reveal()).Value);
         Assert.Equal("app_login", builder.Username);
         Assert.Equal("existing password;with=punctuation", builder.Password);
     }

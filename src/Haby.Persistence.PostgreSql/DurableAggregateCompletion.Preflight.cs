@@ -24,8 +24,8 @@ internal static partial class DurableAggregateCompletion
     internal static Task<ReadinessMetadata?> InspectMetadataAsync(ManifestCatalogDbContext db, Guid deployment,
         long generation, IEnumerable<IExternalOperationOutputContract> registrations,
         IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token,
-        DurableActionAdmission? admission = null, PendingResult? pending = null, bool internalResourceStage = false, bool completedRead = false) =>
-        InspectMetadataCoreAsync(db, deployment, generation, registrations, codecs, token, admission, pending, internalResourceStage ? EvidencePurpose.InternalResourceStage : EvidencePurpose.Aggregate, completedRead);
+        DurableActionAdmission? admission = null, PendingResult? pending = null, bool internalResourceStage = false, bool completedRead = false, bool referenceHistory = false) =>
+        InspectMetadataCoreAsync(db, deployment, generation, registrations, codecs, token, admission, pending, internalResourceStage ? EvidencePurpose.InternalResourceStage : EvidencePurpose.Aggregate, completedRead, referenceHistory);
 
     internal static Task<ReadinessMetadata?> InspectPublicationAsync(ManifestCatalogDbContext db, PendingResult pending,
         IEnumerable<IExternalOperationOutputContract> registrations, IEnumerable<IProviderConfigurationCodec> codecs,
@@ -35,7 +35,7 @@ internal static partial class DurableAggregateCompletion
     private static async Task<ReadinessMetadata?> InspectMetadataCoreAsync(ManifestCatalogDbContext db, Guid deployment,
         long generation, IEnumerable<IExternalOperationOutputContract> registrations,
         IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token,
-        DurableActionAdmission? admission, PendingResult? pending, EvidencePurpose purpose, bool completedRead = false)
+        DurableActionAdmission? admission, PendingResult? pending, EvidencePurpose purpose, bool completedRead = false, bool referenceHistory = false)
     {
         try
         {
@@ -62,7 +62,12 @@ internal static partial class DurableAggregateCompletion
             var resourceIds = (closure is null
                 ? target.Nodes.Select(x => x.ResourceId.Value).Concat(target.ReusedResources.Select(x => x.Resource.Value)).Concat(target.RetainedResources.Select(x => x.Resource.Value))
                 : target.Nodes.Where(x => closure.Contains(x.Id)).Select(x => x.ResourceId.Value)).Distinct(StringComparer.Ordinal).ToArray();
-            var managed = await db.CurrentResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && resourceIds.Contains(x.Resource)).ToArrayAsync(token);
+            var currentManagement = await db.CurrentResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && resourceIds.Contains(x.Resource)).ToArrayAsync(token);
+            var sourceGenerations = target.ReusedResources.Concat(target.RetainedResources).Select(x => x.SourceGeneration).Append(generation).Distinct().ToArray();
+            var historical = referenceHistory ? await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment &&
+                resourceIds.Contains(x.Resource) && sourceGenerations.Contains(x.SourceGeneration) && x.Origin == ResourceOrigin.Referenced).ToArrayAsync(token) : [];
+            var managed = currentManagement.Where(x => !historical.Any(h => h.Resource == x.Resource)).Concat(historical.Where(x =>
+                x.SourceGeneration == (target.ReusedResources.Concat(target.RetainedResources).SingleOrDefault(r => r.Resource.Value == x.Resource)?.SourceGeneration ?? generation))).ToArray();
             var identities = new Dictionary<string, Guid>(StringComparer.Ordinal);
             foreach (var resource in resourceIds)
             {
@@ -72,7 +77,7 @@ internal static partial class DurableAggregateCompletion
                     identity.SourceGeneration != (reuse?.SourceGeneration ?? generation) || reuse is not null && identity.Id != reuse.ManagementId) return null;
                 identities.Add(resource, identity.Id);
             }
-            if (closure is null && target.Baseline is not null && !InternalResourceStage.IsEmpty(root.Inputs(), target) && !await ResourceContinuity.ValidateAsync(db, deployment, target, token)) return null;
+            if (closure is null && target.Baseline is not null && !InternalResourceStage.IsEmpty(root.Inputs(), target) && !await ResourceContinuity.ValidateAsync(db, deployment, target, token, referenceHistory)) return null;
             var generations = closure is null ? target.ReusedResources.Concat(target.RetainedResources).Select(x => x.SourceGeneration).Append(generation).Distinct().ToArray() : [generation];
             if (generations.Any(x => x > generation)) return null;
             var sources = new List<ReadinessSource>();
@@ -90,7 +95,7 @@ internal static partial class DurableAggregateCompletion
                     !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                         graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
                     graph.Nodes.Count + graph.ReusedResources.Count == 0 && !(row.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))) return null;
-                if (row.InternalEffects) _ = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, row, token) : await InternalGenerationAuthority.RequireStageAsync(db, row, token);
+                if (row.InternalEffects) _ = referenceHistory ? await InternalGenerationAuthority.RequireAuthenticationStageAsync(db, row, token) : completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, row, token) : await InternalGenerationAuthority.RequireStageAsync(db, row, token);
                 if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint || admission is not null && !admission.Supports(graph)) return null;
                 var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token);
                 if (revision is null) return null;
@@ -109,7 +114,7 @@ internal static partial class DurableAggregateCompletion
                         ? matches is not [var validator] || node.RequiredOutput != validator.Identity
                         : matches.Length != 0 || node.RequiredOutput is not null) return null;
                 }
-                if (admission is not null && !await ValidateSourceGraphAsync(db, row, inputs, graph, typedCodecs, admission, token, completedRead)) return null;
+                if (admission is not null && !await ValidateSourceGraphAsync(db, row, inputs, graph, typedCodecs, admission, token, completedRead, referenceHistory)) return null;
                 sources.Add(new(row, inputs, graph, selected));
             }
             // All registration identities and accepted source contexts above precede
@@ -167,7 +172,7 @@ internal static partial class DurableAggregateCompletion
                         {
                             var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(deployment.ToString()),
                                 Haby.Domain.DeploymentGeneration.Create(source.Row.Generation), node.Id), token);
-                            if (receipt is null || node.Action.Admission.Mode == ResourceAcquisitionMode.Reference &&
+                            if (receipt is null || node.Action.Admission.Mode == ResourceAcquisitionMode.Reference && !referenceHistory &&
                                 !await ResourceObservationReceiptIntegrity.HasActiveAssociationAsync(db, new(Haby.Domain.ApplicationDeploymentId.Parse(deployment.ToString()), Haby.Domain.DeploymentGeneration.Create(source.Row.Generation), node.Id), token) ||
                                 contracts.Single(x => x.Producer == node.Action) is not IResourceObservationOutputContract observation || !observation.ValidateObservationEvidence(
                                 new(source.Inputs, source.Graph, node, source.Inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return null;
@@ -208,17 +213,18 @@ internal static partial class DurableAggregateCompletion
 
     private static async Task<bool> ValidateSourceGraphAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
         DurablePlanningInputs inputs, DurableOperationGraph graph, IProviderConfigurationCodec[] codecs,
-        DurableActionAdmission admission, CancellationToken token, bool completedRead = false)
+        DurableActionAdmission admission, CancellationToken token, bool completedRead = false, bool referenceHistory = false)
     {
         if (source.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))
         {
-            _ = completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, source, token) : await InternalGenerationAuthority.RequireStageAsync(db, source, token);
+            _ = referenceHistory ? await InternalGenerationAuthority.RequireAuthenticationStageAsync(db, source, token) : completedRead ? await InternalGenerationAuthority.RequireStageReadAsync(db, source, token) : await InternalGenerationAuthority.RequireStageAsync(db, source, token);
             return true;
         }
         if (source.InternalEffects)
         {
             inputs = InternalResourceStage.Project(inputs);
-            graph = new(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources);
+            graph = new(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources)
+            { Import = graph.Import, Acquisitions = graph.Acquisitions, ObservationGroups = graph.ObservationGroups };
         }
         var pin = inputs.Providers.RequireUniformResourceProvider();
         var id = Guid.Parse(pin.Instance.ToString());

@@ -117,7 +117,7 @@ public sealed class PostgreSqlConnectionRenderingTests
         {
             var result = new PostgreSqlConnectionFormatter().Format(deferred.Arguments, material)!;
             Assert.DoesNotContain(material, result.ToString());
-            var parsed = new NpgsqlConnectionStringBuilder(result.Reveal());
+            var parsed = new NpgsqlConnectionStringBuilder(Assert.IsType<ConfigurationString>(result.Reveal()).Value);
             Assert.True(parsed.Password == material, "Password round-trip failed.");
             Assert.Equal(200, parsed.Timeout); Assert.Equal(45, parsed.CommandTimeout); Assert.Equal(driverMode, parsed.SslMode);
             Assert.Null(parsed.SearchPath); Assert.Null(parsed.Options); Assert.Null(parsed.Passfile);

@@ -85,7 +85,7 @@ public abstract partial class ApplicationLoginScenario
         public int Count;
         public ConfigurationFormatterId Contract => PostgreSqlConnectionRendering.Formatter;
         public ManifestLocalId Identity => PostgreSqlConnectionRendering.Implementation;
-        public ConfidentialConfigurationString? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
+        public ConfidentialConfigurationValue? Format(ConfigurationObject arguments, ReadOnlySpan<char> material)
         {
             Count++;
             if (Enabled) throw new InvalidOperationException("private-formatter-material-sentinel");

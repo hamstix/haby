@@ -55,7 +55,15 @@ internal static class ImportAdmissionAuthority
         var intent = inputs.Import;
         if (inputs.Acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference))
         {
-            if (source.InternalEffects) return false;
+            if (source.InternalEffects)
+            {
+                var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+                if (graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
+                    graph.ReusedResources.Count != inputs.Providers.Declaration.Spec.Resources.Count) return false;
+                await ImportMutationGate.LockAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId, token);
+                return await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == deployment && x.DesiredGeneration == generation, token) &&
+                    await ResourceContinuity.ValidateAsync(db, deployment, graph, token);
+            }
             await ImportMutationGate.LockAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId, token);
             if (!await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == deployment && x.DesiredGeneration == generation, token)) return false;
             foreach (var managed in await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && x.SourceGeneration == generation).ToArrayAsync(token))

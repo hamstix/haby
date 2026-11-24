@@ -72,6 +72,7 @@ internal sealed class DeliverRuntimeConfiguration(RuntimeAuthentication authenti
             return new(result.Status switch
             {
                 ConfigurationDeliveryStatus.Delivered => RuntimeDeliveryOutcome.Delivered,
+                ConfigurationDeliveryStatus.Denied => RuntimeDeliveryOutcome.PermissionDenied,
                 ConfigurationDeliveryStatus.LimitExceeded => RuntimeDeliveryOutcome.OutputLimit,
                 ConfigurationDeliveryStatus.StorageUnavailable => RuntimeDeliveryOutcome.Unavailable,
                 _ => RuntimeDeliveryOutcome.FailedPrecondition

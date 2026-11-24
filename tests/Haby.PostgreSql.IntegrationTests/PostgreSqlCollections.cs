@@ -26,10 +26,10 @@ public sealed class PostgreSqlCollections(ITestAssembly assembly, IMessageSink s
         "OperatorHostIntegrationTests", "DurableDeploymentPlanningTests", "ExactActionAdmissionTests",
         "PostgreSqlPairPersistenceTests", "GeneratedCredentialSlotTests", "ProviderConfigurationStoreTests",
         "PostgreSqlIntegrationTests", "DurableExecutionTests", "PostgreSqlRestrictTests", "TestCatalogPoolTests", "ProviderDeclarationTests",
-        "SharedCredentialAuthorityTests"
+        "SharedCredentialAuthorityTests", "SharedReferenceDeliveryTests"
     ];
     internal static readonly string[] HeavyHostClasses =
-        ["ApplicationConfigurationTests", "ApplicationGenerationTests", "OperatorHostIntegrationTests", "PostgreSqlIntegrationTests"];
+        ["ApplicationConfigurationTests", "ApplicationGenerationTests", "OperatorHostIntegrationTests", "PostgreSqlIntegrationTests", "SharedReferenceDeliveryTests"];
 
     internal static int Lane(string name, int servers, int hosts)
     {

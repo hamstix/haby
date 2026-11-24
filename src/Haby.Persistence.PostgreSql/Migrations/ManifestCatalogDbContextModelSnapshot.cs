@@ -232,6 +232,107 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ConfigurationSharedUseRow", b =>
+                {
+                    b.Property<Guid>("Document")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_revision_id");
+
+                    b.Property<string>("ProjectionHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("projection_hash");
+
+                    b.Property<Guid>("Application")
+                        .HasColumnType("uuid")
+                        .HasColumnName("application_record_id");
+
+                    b.Property<Guid>("Association")
+                        .HasColumnType("uuid")
+                        .HasColumnName("association_id");
+
+                    b.Property<Guid>("Attempt")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attempt_id");
+
+                    b.Property<Guid>("Environment")
+                        .HasColumnType("uuid")
+                        .HasColumnName("environment_record_id");
+
+                    b.Property<string>("Formatter")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("formatter");
+
+                    b.Property<string>("Implementation")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("formatter_implementation");
+
+                    b.Property<string>("Producer")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("producer");
+
+                    b.Property<string>("Projection")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("projection");
+
+                    b.Property<Guid>("Provider")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_instance_id");
+
+                    b.Property<string>("Resource")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)")
+                        .HasColumnName("resource_local_id");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revision_number");
+
+                    b.Property<Guid>("Secret")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_id");
+
+                    b.Property<string>("Slot")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("slot");
+
+                    b.Property<string>("Use")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("use");
+
+                    b.Property<Guid>("Version")
+                        .HasColumnType("uuid")
+                        .HasColumnName("secret_version_id");
+
+                    b.HasKey("Document", "ProjectionHash");
+
+                    b.HasIndex("Attempt");
+
+                    b.HasIndex("Provider", "Revision", "Slot");
+
+                    b.HasIndex("Association", "Environment", "Application", "Resource");
+
+                    b.HasIndex("Provider", "Revision", "Slot", "Environment", "Secret", "Version", "Use")
+                        .HasDatabaseName("IX_configuration_shared_credential_uses_provider_instance_id_~1");
+
+                    b.ToTable("configuration_shared_credential_uses", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_configuration_shared_use", "use = 'ApplicationDelivery' AND revision_number > 0");
+                        });
+                });
+
             modelBuilder.Entity("Haby.Persistence.PostgreSql.DeploymentGenerationRow", b =>
                 {
                     b.Property<Guid>("DeploymentId")
@@ -3126,8 +3227,6 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasKey("ProviderInstanceId", "RevisionNumber", "Slot");
 
-                    b.HasIndex("ProviderInstanceId", "RevisionNumber", "Slot", "EnvironmentRecordId", "SecretId", "SecretVersionId");
-
                     b.ToTable("shared_credential_bindings", null, t =>
                         {
                             t.HasCheckConstraint("ck_shared_credential_actor", "length(actor) BETWEEN 1 AND 256");
@@ -3277,6 +3376,35 @@ namespace Haby.Persistence.PostgreSql.Migrations
                     b.HasOne("Haby.Persistence.PostgreSql.DeploymentGenerationRow", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId", "Generation")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Haby.Persistence.PostgreSql.ConfigurationSharedUseRow", b =>
+                {
+                    b.HasOne("Haby.Persistence.PostgreSql.DurableOperationAttemptRow", null)
+                        .WithMany()
+                        .HasForeignKey("Attempt")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ConfigurationDocumentRow", null)
+                        .WithMany()
+                        .HasForeignKey("Document")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.ResourceManagementRow", null)
+                        .WithMany()
+                        .HasForeignKey("Association", "Environment", "Application", "Resource")
+                        .HasPrincipalKey("Id", "Environment", "Application", "Resource")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Haby.Persistence.PostgreSql.SharedCredentialBindingRow", null)
+                        .WithMany()
+                        .HasForeignKey("Provider", "Revision", "Slot", "Environment", "Secret", "Version", "Use")
+                        .HasPrincipalKey("ProviderInstanceId", "RevisionNumber", "Slot", "EnvironmentRecordId", "SecretId", "SecretVersionId", "Use")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

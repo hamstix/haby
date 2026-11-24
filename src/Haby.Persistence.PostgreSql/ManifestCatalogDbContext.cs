@@ -58,6 +58,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
         ConfigureOperatorAccess(modelBuilder);
         ConfigureConfigurationAccess(modelBuilder);
         ConfigureConfigurationDocuments(modelBuilder);
+        ConfigureConfigurationSharedUses(modelBuilder);
         ConfigureProfileRevisions(modelBuilder);
         ConfigurePlacementRevisions(modelBuilder);
         ConfigurePlacementSelections(modelBuilder);

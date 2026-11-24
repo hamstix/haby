@@ -61,16 +61,15 @@ public static class ConfigurationJson
         return new(Encoding.UTF8.GetString(stream.ToArray()), paths);
     }
 
-    internal static byte[] SerializeDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved = null,
-        CancellationToken token = default)
+    internal static byte[] SerializeDelivery(ConfigurationValue value, CancellationToken token = default)
     {
         ConfigurationDocumentCodec.ValidateTree(value);
-        if (resolved is null && Confidential(value)) throw new InvalidDataException();
-        MeasureDelivery(value, resolved, token);
+        if (Confidential(value)) throw new InvalidDataException();
+        MeasureDelivery(value, token);
         using var stream = new ConfigurationBoundedStream(ConfigurationDocumentCodec.MaxBytes, reserve: true);
         try
         {
-            using (var writer = Writer(stream)) Write(writer, value, "", null, resolved, token);
+            using (var writer = Writer(stream)) Write(writer, value, "", null, token);
             return stream.ToArray();
         }
         finally
@@ -82,13 +81,12 @@ public static class ConfigurationJson
     // Count actual escaped UTF-8 before Utf8JsonWriter can allocate a large value buffer.
     // The same pinned encoder is used below; bounded scratch space never grows with material.
     internal static long MeasureUnresolvedDelivery(ConfigurationValue value, CancellationToken token) =>
-        MeasureDelivery(value, null, token, allowUnresolved: true);
+        MeasureDelivery(value, token, allowUnresolved: true);
 
     internal static long MeasureResolvedValue(ConfigurationValue value, CancellationToken token) =>
-        MeasureDelivery(value, null, token);
+        MeasureDelivery(value, token);
 
-    private static long MeasureDelivery(ConfigurationValue value, IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved,
-        CancellationToken token, bool allowUnresolved = false)
+    private static long MeasureDelivery(ConfigurationValue value, CancellationToken token, bool allowUnresolved = false)
     {
         long remaining = ConfigurationDocumentCodec.MaxBytes;
         Visit(value, "");
@@ -121,7 +119,6 @@ public static class ConfigurationJson
                 case ConfigurationBoolean b: Charge(b.Value ? 4 : 5); break;
                 case ConfigurationNumber n: Charge(n.CanonicalText.Length); break;
                 case ConfigurationString s: Text(s.Value); break;
-                case ConfigurationDeferredValue when resolved is not null && resolved.TryGetValue(path, out var confidential): Text(confidential.Reveal()); break;
                 case ConfigurationDeferredValue or ConfigurationProjectedSecret when allowUnresolved: break;
                 case ConfigurationObject o:
                     Charge(2 + Math.Max(0, o.Members.Count - 1));
@@ -145,7 +142,7 @@ public static class ConfigurationJson
         _ => false
     };
     private static void Write(Utf8JsonWriter writer, ConfigurationValue value, string path, List<string>? redacted,
-        IReadOnlyDictionary<string, ConfidentialConfigurationString>? resolved = null, CancellationToken token = default)
+        CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
         switch (value)
@@ -157,7 +154,7 @@ public static class ConfigurationJson
             case ConfigurationArray array:
                 writer.WriteStartArray();
                 for (var i = 0; i < array.Items.Count; i++)
-                    Write(writer, array.Items[i], path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), redacted, resolved, token);
+                    Write(writer, array.Items[i], path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), redacted, token);
                 writer.WriteEndArray();
                 break;
             case ConfigurationObject obj:
@@ -165,12 +162,9 @@ public static class ConfigurationJson
                 foreach (var (key, child) in obj.Members.OrderBy(x => x.Key, StringComparer.Ordinal))
                 {
                     writer.WritePropertyName(key);
-                    Write(writer, child, path + "/" + ConfigurationComposer.Escape(key), redacted, resolved, token);
+                    Write(writer, child, path + "/" + ConfigurationComposer.Escape(key), redacted, token);
                 }
                 writer.WriteEndObject();
-                break;
-            case ConfigurationDeferredValue when resolved is not null && resolved.TryGetValue(path, out var confidential):
-                writer.WriteStringValue(confidential.Reveal());
                 break;
             case ConfigurationSecretReference or ConfigurationDeferredValue or ConfigurationProjectedSecret when redacted is not null:
                 writer.WriteStringValue(RedactedMarker);

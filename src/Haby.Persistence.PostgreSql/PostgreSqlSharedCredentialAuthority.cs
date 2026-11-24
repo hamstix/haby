@@ -12,13 +12,17 @@ public sealed class PostgreSqlSharedCredentialAuthority(IDbContextFactory<Manife
         ProviderInstanceId provider, ProviderConfigurationRevisionNumber revision, CancellationToken token)
     {
         await using var db = await contexts.CreateDbContextAsync(token);
+        await using var snapshot = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, token);
         var env = Guid.Parse(environment.ToString());
         var id = Guid.Parse(provider.ToString());
         var rows = await db.SharedCredentialBindings.AsNoTracking().Where(x => x.EnvironmentRecordId == env &&
             x.ProviderInstanceId == id && x.RevisionNumber == revision.Value).OrderBy(x => x.Slot).ToArrayAsync(token);
         var revocations = await db.SharedCredentialRevocations.AsNoTracking().Where(x => x.ProviderInstanceId == id &&
             x.RevisionNumber == revision.Value).ToArrayAsync(token);
-        return rows.Select(x =>
+        var result = new List<SharedCredentialBinding>();
+        var dependencyCount = 0;
+        long projectionCharacters = 0;
+        foreach (var x in rows)
         {
             var revoked = revocations.SingleOrDefault(r => r.Slot == x.Slot);
             var use = x.Use switch
@@ -27,10 +31,47 @@ public sealed class PostgreSqlSharedCredentialAuthority(IDbContextFactory<Manife
                 "ApplicationDelivery" => SharedCredentialUse.ApplicationDelivery,
                 _ => throw new InvalidDataException("Shared credential use is unavailable.")
             };
-            return new SharedCredentialBinding(new(environment, provider, revision, x.Slot, use,
+            var dependencies = await DependenciesAsync(db, x, 512 - dependencyCount, 1048576 - projectionCharacters, token);
+            dependencyCount += dependencies.Count;
+            projectionCharacters += dependencies.Sum(d => (long)d.Projection.Length);
+            result.Add(new SharedCredentialBinding(new(environment, provider, revision, x.Slot, use,
                 new(SecretId.Parse(x.SecretId.ToString()), SecretVersionId.Parse(x.SecretVersionId.ToString()))),
-                x.Actor, x.CreatedAt, revoked?.Actor, revoked?.CreatedAt);
-        }).ToArray();
+                x.Actor, x.CreatedAt, revoked?.Actor, revoked?.CreatedAt)
+            { Dependencies = dependencies });
+        }
+        return result;
+    }
+
+    private static async Task<IReadOnlyList<SharedCredentialDependency>> DependenciesAsync(ManifestCatalogDbContext db,
+        SharedCredentialBindingRow binding, int maximum, long characterBudget, CancellationToken token)
+    {
+        var query = from use in db.ConfigurationSharedUses.AsNoTracking()
+                    join document in db.ConfigurationDocuments.AsNoTracking() on use.Document equals document.Id
+                    where use.Provider == binding.ProviderInstanceId && use.Revision == binding.RevisionNumber && use.Slot == binding.Slot &&
+                        use.Environment == binding.EnvironmentRecordId && use.Secret == binding.SecretId && use.Version == binding.SecretVersionId && use.Use == binding.Use
+                    select new { Use = use, document.DeploymentId, document.Generation, document.Component, Name = document.Document };
+        if (await query.LongCountAsync(token) > maximum || (await query.SumAsync(x => (long?)x.Use.Projection.Length, token) ?? 0) > characterBudget)
+            throw new ConfigurationDocumentLimitException();
+        var rows = await query.OrderBy(x => x.Use.Document).ThenBy(x => x.Use.ProjectionHash).Select(x => new
+        {
+            x.Use.Document,
+            x.Use.Application,
+            x.Use.Resource,
+            x.Use.Association,
+            x.Use.Projection,
+            x.Use.Formatter,
+            x.Use.Implementation,
+            x.DeploymentId,
+            x.Generation,
+            x.Component,
+            x.Name,
+            Active = db.ResourceManagementHeads.Any(h => h.Management == x.Use.Association && h.Environment == x.Use.Environment &&
+                h.Application == x.Use.Application && h.Resource == x.Use.Resource)
+        }).ToArrayAsync(token);
+        return rows.Select(x => new SharedCredentialDependency(ConfigurationDocumentRevisionId.Parse(x.Document.ToString()),
+            new(ApplicationDeploymentId.Parse(x.DeploymentId.ToString()), DeploymentGeneration.Create(x.Generation), ManifestLocalId.Create(x.Component), ManifestLocalId.Create(x.Name)),
+            ApplicationRecordId.Parse(x.Application.ToString()), ManifestLocalId.Create(x.Resource), x.Association, x.Projection,
+            ConfigurationFormatterId.Create(x.Formatter), ManifestLocalId.Create(x.Implementation), x.Active)).ToArray();
     }
 
     public async ValueTask<SharedCredentialRevocationOutcome> RevokeAsync(SharedCredentialScope scope, string actor, CancellationToken token)
