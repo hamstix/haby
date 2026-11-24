@@ -83,16 +83,13 @@ public static class ConfigurationJson
     internal static long MeasureUnresolvedDelivery(ConfigurationValue value, CancellationToken token) =>
         MeasureDelivery(value, token, allowUnresolved: true);
 
-    internal static long MeasureResolvedValue(ConfigurationValue value, CancellationToken token)
-    {
-        ConfigurationDocumentCodec.ValidateTree(value);
-        return MeasureDelivery(value, token);
-    }
+    internal static long MeasureResolvedValue(ConfigurationValue value, CancellationToken token) =>
+        MeasureDelivery(value, token);
 
     private static long MeasureDelivery(ConfigurationValue value, CancellationToken token, bool allowUnresolved = false)
     {
         long remaining = ConfigurationDocumentCodec.MaxBytes;
-        Visit(value, "");
+        Visit(value, 0);
         return ConfigurationDocumentCodec.MaxBytes - remaining;
         void Charge(long count) { remaining -= count; if (remaining < 0) throw new ConfigurationDocumentLimitException(); }
         void Text(string text)
@@ -113,9 +110,11 @@ public static class ConfigurationJson
             }
             finally { encoded.Clear(); }
         }
-        void Visit(ConfigurationValue node, string path)
+        void Visit(ConfigurationValue node, int depth)
         {
             token.ThrowIfCancellationRequested();
+            if (node is ConfigurationObject or ConfigurationArray && ++depth > ConfigurationDocumentCodec.MaxContainers)
+                throw new ConfigurationDocumentLimitException();
             switch (node)
             {
                 case ConfigurationNull: Charge(4); break;
@@ -125,11 +124,11 @@ public static class ConfigurationJson
                 case ConfigurationDeferredValue or ConfigurationProjectedSecret when allowUnresolved: break;
                 case ConfigurationObject o:
                     Charge(2 + Math.Max(0, o.Members.Count - 1));
-                    foreach (var (key, child) in o.Members) { Text(key); Charge(1); Visit(child, path + "/" + ConfigurationComposer.Escape(key)); }
+                    foreach (var (key, child) in o.Members) { Text(key); Charge(1); Visit(child, depth); }
                     break;
                 case ConfigurationArray a:
                     Charge(2 + Math.Max(0, a.Items.Count - 1));
-                    for (var i = 0; i < a.Items.Count; i++) Visit(a.Items[i], path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    for (var i = 0; i < a.Items.Count; i++) Visit(a.Items[i], depth);
                     break;
                 default: throw new InvalidDataException();
             }
