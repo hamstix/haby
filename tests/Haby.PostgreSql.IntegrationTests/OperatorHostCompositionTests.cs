@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Haby.Application;
 using Haby.Operator.Host;
+using Haby.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Xunit;
@@ -153,6 +154,30 @@ public sealed partial class OperatorHostCompositionTests
         string[] args = ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"];
         await using var stock = OperatorHostApplication.Build(args);
         await using var internalNull = OperatorHostApplication.Build(args, null);
+        // Missing stock capabilities must still permit historical reads and safe runtime refusal.
+        foreach (var missing in new[] { typeof(IDurableActionHandler), typeof(IExternalOperationOutputContract) })
+        {
+            var owned = new AsyncResource(false);
+            await using (var degraded = OperatorHostApplication.BuildComposed(args, (services, _) =>
+            {
+                var descriptor = services.Single(x => x.ServiceType == missing && x.ImplementationType ==
+                    (missing == typeof(IDurableActionHandler) ? typeof(PostgreSqlApplicationAccessAction) : typeof(PostgreSqlApplicationConnectionContract)));
+                services.Remove(descriptor);
+                services.AddSingleton(_ => owned);
+                services.AddSingleton(p =>
+                {
+                    p.GetRequiredService<AsyncResource>();
+                    return new ProviderPreflightRegistry(p.GetServices<IProviderPreflightHandler>(),
+                        p.GetServices<IProviderConfigurationCodec>(), p.GetServices<IProviderDeclarationAdapter>());
+                });
+            }))
+            {
+                Assert.Null(degraded.Services.GetRequiredService<DurableActionRegistry>().Find(PostgreSqlApplicationAccessAction.RegistrationKey));
+                Assert.False(owned.Disposed);
+                Assert.Empty(degraded.Urls);
+            }
+            Assert.True(owned.Disposed);
+        }
         Assert.Throws<ArgumentNullException>(() => OperatorHostApplication.BuildComposed(args, null!));
         await Assert.ThrowsAsync<ArgumentNullException>(() => OperatorHostApplication.BuildComposedMigratedAsync(args, null!));
         // Compile the old default-token and named-token forms without opening a database.

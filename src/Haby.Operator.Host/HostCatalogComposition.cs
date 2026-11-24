@@ -63,7 +63,8 @@ internal static class HostCatalogComposition
                 renderers.Count(x => x.Contract == definition.Id) != 1 ||
                 formatters.SingleOrDefault(x => x.Contract == definition.Formatter) is not { } formatter ||
                 bindings.Count(x => x.Formatter == formatter.Contract && x.Implementation == formatter.Identity) != 1 ||
-                registry.Find(definition.ProducerAction) is null)
+                // Stock capability absence remains a runtime safe-refusal condition for stored history.
+                (definition.Id != PostgreSqlConnectionRendering.Renderer && registry.Find(definition.ProducerAction) is null))
                 throw new InvalidOperationException("Configuration capability registration is incomplete.");
         }
     }
