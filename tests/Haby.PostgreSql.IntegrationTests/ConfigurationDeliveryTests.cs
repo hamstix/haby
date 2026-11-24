@@ -213,6 +213,7 @@ public sealed partial class ApplicationConfigurationTests
                 DROP TABLE configuration_access_grants;
                 DROP TABLE resource_identity_claims;
                 DROP TABLE resource_management_heads;
+                DROP TABLE configuration_shared_credential_uses;
                 DROP TABLE resource_management;
                 ALTER TABLE deployment_change_sets DROP COLUMN expected_generation CASCADE;
                 DELETE FROM "__EFMigrationsHistory" WHERE "MigrationId" LIKE '%ReuseManagedResources' OR "MigrationId" LIKE '%AddResourceNaming';
