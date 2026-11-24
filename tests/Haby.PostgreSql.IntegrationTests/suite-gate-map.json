@@ -4,7 +4,7 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 115,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1358,
+  "currentPostgresql": 1360,
   "currentFast": 2144,
   "currentKubernetesApiObjects": 29,
   "currentKubernetesDurableActions": 36,
@@ -14,6 +14,8 @@
   "supersededFor257": [{"method":"Haby.Kubernetes.Tests.ConfiguredDeploymentTests.Configured_update_and_superseded_format_refuse_but_absent_configuration_has_no_runtime_fields","case":"fde60248bd607ce4472526778ef63be8dbc29b8abf7b4db8a8f55f6e130d933f","suite":"fast","gate":"validate","trigger":"every-change","addedFor223":true}],
   "supersededFor275Adr026": [{"method":"Haby.PostgreSql.IntegrationTests.SharedCredentialAuthorityTests.Immutable_database_guards_refuse_late_issuance_mutation_and_unrevocation","case":"04681af98c4f92ffddbfeada9e20ad5323e132bc70bf1e615b88a25cc2986c73","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true}],
   "entries": [
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Public_Reference_evidence_preserves_primary_cleanup_and_cleanup_only_failure","case":"d38bd1190e3ff2a22bebfa2b5843452d9259e6472e8d395e42aeb7449bf37c2c","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Public_Reference_evidence_has_closed_phase_type_values_counts_and_exact_case_identity","case":"467361fed1df78a832b8ecc591991ee9a1819b11993da729ddae41fa8d733bb2","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
     {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Complete_Reference_registration_for_stock_Resource_preserves_stock_and_caller_owned_lifecycle","case":"d3eda7654036ee751f9ea018bf37779d904b8681a35e55b76f2b1bd785fb231c","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
     {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Reference_registration_requires_exact_admission_execution_and_evidence_before_listening","case":"14de0e4450d56a0b9e3c421e024066fdeafc959469ef978c7fe7a4658a960662","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
     {"method":"Haby.PostgreSql.IntegrationTests.OperatorHostCompositionTests.Reference_registration_requires_exact_admission_execution_and_evidence_before_listening","case":"37d0b8ebc3b202e48205fb94ca9cbf8bf218c4009cea8602891c850dbdad2175","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},

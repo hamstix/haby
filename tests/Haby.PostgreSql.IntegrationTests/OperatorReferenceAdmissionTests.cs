@@ -18,128 +18,163 @@ public sealed partial class OperatorHostIntegrationTests
     [Fact]
     public async Task Published_Reference_adapter_uses_stock_authenticated_intake_confirmation_delivery_and_restart()
     {
-        var binary = Environment.GetEnvironmentVariable("HABY_COMPOSITION_SAMPLE_PATH");
-        Assert.True(Path.IsPathFullyQualified(binary!) && File.Exists(binary), "The separately published nonfriend executable is required.");
-        var connection = await NewDatabaseAsync();
-        var root = Path.Combine(Path.GetTempPath(), "haby275e-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        await File.WriteAllTextAsync(Path.Combine(root, "appsettings.json"), """{"Logging":{"LogLevel":{"Default":"None"}}}""");
-        string? credential = null;
-        RevisionReference? revision = null;
-        DurableCommitSummary? committed = null;
-        ConfigurationAccessReply? grant = null;
-        string? provider = null;
-        try
+        var diagnostic = new PublicReferenceFailureDiagnostics();
+        await diagnostic.RunAsync(async cleanup =>
         {
+            diagnostic.At(PublicReferenceCheckpoint.PublishedSample);
+            var binary = Environment.GetEnvironmentVariable("HABY_COMPOSITION_SAMPLE_PATH");
+            Assert.True(Path.IsPathFullyQualified(binary!) && File.Exists(binary), "The separately published nonfriend executable is required.");
+            diagnostic.At(PublicReferenceCheckpoint.Catalog);
+            var connection = await NewDatabaseAsync();
+            var root = Path.Combine(Path.GetTempPath(), "haby275e-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            cleanup(() => { Directory.Delete(root, true); return ValueTask.CompletedTask; });
+            await File.WriteAllTextAsync(Path.Combine(root, "appsettings.json"), """{"Logging":{"LogLevel":{"Default":"None"}}}""");
+            string? credential = null;
+            RevisionReference? revision = null;
+            DurableCommitSummary? committed = null;
+            ConfigurationAccessReply? grant = null;
+            string? provider = null;
             for (var startup = 0; startup < 2; startup++)
             {
-                var port = OperatorHostCompositionTests.AvailablePort();
-                await using var child = new CompositionProcess(binary!, connection, root,
-                    ["--contentRoot=" + root, "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"]);
-                await child.ExpectAsync("composition-built");
-                if (startup == 0)
+                diagnostic.Startup(startup);
+                await diagnostic.RunAsync(async release =>
                 {
-                    var tokenPath = Path.Combine(root, "operator.token");
-                    await using var issuance = new CompositionProcess(binary!, connection, root,
-                        ["operator-token-issue", "--token-output-file", tokenPath]);
-                    await issuance.RequireExitAsync(0);
-                    credential = (await File.ReadAllTextAsync(tokenPath)).TrimEnd();
-                }
-                await child.SendAsync("start");
-                await child.ExpectAsync("composition-started");
-                using var channel = GrpcChannel.ForAddress("http://127.0.0.1:" + port);
-                var client = OperatorTestCredentials.Client(channel, credential!);
-                var anonymous = new ManifestOperator.ManifestOperatorClient(channel);
-                await AuthDenied(async () => await anonymous.CreateChangeSetAsync(new()));
-                var deliveryOnly = OperatorTestCredentials.Client(channel, ConfigurationDeliveryCredential.Create(Guid.CreateVersion7()));
-                await AuthDenied(async () => await deliveryOnly.CreateChangeSetAsync(new()));
-                if (startup == 0)
-                {
-                    Assert.Equal(EnvironmentStatus.Created, (await client.CreateEnvironmentAsync(new() { Name = "pilot" })).Status);
-                    Assert.Equal(SecretStatus.Created, (await client.CreateSecretAsync(new()
+                    diagnostic.At(PublicReferenceCheckpoint.Build);
+                    var port = OperatorHostCompositionTests.AvailablePort();
+                    var child = new CompositionProcess(binary!, connection, root,
+                        ["--contentRoot=" + root, "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"]);
+                    release(async () =>
                     {
-                        Environment = "pilot",
-                        Name = "shared",
-                        Purpose = "SharedApplicationCredential",
-                        RequestId = Guid.NewGuid().ToString(),
-                        Material = ByteString.CopyFromUtf8("sample-shared-test-material")
-                    })).Status);
-                    var applied = await client.ApplyProviderAsync(new() { Declaration = ByteString.CopyFromUtf8(ReferenceProvider) });
-                    Assert.Equal(ProviderStatus.Created, applied.Status);
-                    provider = applied.Provider.InstanceId;
-                    Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(new()
-                    {
-                        Environment = "pilot",
-                        Alias = "sample.primary",
-                        ExpectedAbsent = true,
-                        Target = new() { Name = "sample", Revision = 1 }
-                    })).Status);
-                    Assert.Equal(ProfileStatus.Created, (await client.ImportProfileAsync(new() { Payload = ByteString.CopyFromUtf8(ReferenceProfile) })).Status);
-                    Assert.Equal(ProfileAssignmentStatus.Created, (await client.ApplyProfileAssignmentAsync(new()
-                    { Environment = "pilot", ExpectedAbsence = true, Payload = ByteString.CopyFromUtf8(ReferenceAssignment) })).Status);
-                    revision = await ImportReference(client, "reference-consumer");
-                    await InvalidReferenceRequests(client, connection, revision);
-                    committed = await ConfirmReference(client, revision);
-                    Assert.Equal(ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new()
-                    { Environment = "pilot", ApplicationId = "reference-consumer" })).Status);
-                    grant = await client.CreateConfigurationAccessAsync(new()
-                    {
-                        Selector = new()
-                        { Environment = "pilot", ApplicationId = "reference-consumer", ComponentId = "api", DocumentId = "settings" }
+                        try { await child.DisposeAsync(); }
+                        finally { diagnostic.ChildExit(startup == 0 ? PublicReferenceChild.First : PublicReferenceChild.Restart, child.DiagnosticExitCode); }
                     });
-                    Assert.Equal(ConfigurationAccessStatus.Created, grant.Status);
-                    var peer = await ImportReference(client, "reference-peer");
-                    await ConfirmReference(client, peer);
-                    Assert.Equal(ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new()
-                    { Environment = "pilot", ApplicationId = "reference-peer" })).Status);
-                }
-                Assert.NotNull(committed);
-                var before = await ReferenceSnapshot(connection);
-                Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new()
-                { DeploymentId = committed.DeploymentId, Generation = committed.Generation })).Status);
-                Assert.Equal(before, await ReferenceSnapshot(connection));
-                var delivery = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
-                var document = new DeliverConfigurationRequest { RevisionId = grant!.Grant.Document.RevisionId };
-                var headers = new Metadata { { "authorization", "Bearer " + grant.Credential } };
-                Assert.Equal(StatusCode.PermissionDenied, (await Assert.ThrowsAsync<RpcException>(async () =>
-                    await delivery.DeliverAsync(document, OperatorHeaders(credential!)))).StatusCode);
-                var delivered = await delivery.DeliverAsync(document, headers);
-                using (var json = JsonDocument.Parse(delivered.Json.Memory))
-                {
-                    Assert.Equal("sample-shared-test-material", json.RootElement.GetProperty("Access"u8).GetProperty("credential"u8).GetString());
-                    Assert.Equal("api", json.RootElement.GetProperty("Access"u8).GetProperty("label"u8).GetString());
-                }
-                var shared = await client.GetSharedCredentialBindingsAsync(new() { Environment = "pilot", ProviderInstanceId = provider!, Revision = 1 });
-                Assert.Equal(2, shared.Bindings.Count);
-                var use = shared.Bindings.Single(x => x.Use == "ApplicationDelivery");
-                Assert.Equal(4, use.Dependencies.Count);
-                Assert.DoesNotContain("sample-shared-test-material", shared.ToString());
-                if (startup == 1)
-                {
-                    var closed = ReferenceChange(revision!);
-                    closed.Precondition = PlanningPrecondition.ExpectedGeneration;
-                    closed.ExpectedGeneration = committed.Generation;
-                    Assert.Equal(PlanningStatus.ReferenceNotSupported, (await client.CreateChangeSetAsync(closed)).Status);
-                    await ReferenceWorkloadPreparation(client, connection, committed);
-                    Assert.Equal("Revoked", (await client.RevokeSharedCredentialUseAsync(new()
+                    await child.ExpectAsync("composition-built");
+                    if (startup == 0)
                     {
-                        Environment = "pilot",
-                        ProviderInstanceId = provider!,
-                        Revision = 1,
-                        Slot = use.Slot,
-                        Use = use.Use,
-                        SecretId = use.SecretId,
-                        SecretVersionId = use.SecretVersionId
-                    })).Status);
-                    Assert.Equal(StatusCode.PermissionDenied, (await Assert.ThrowsAsync<RpcException>(async () => await delivery.DeliverAsync(document, headers))).StatusCode);
-                }
-                await child.SendAsync("stop");
-                await child.ExpectAsync("composition-stopped");
-                await child.RequireExitAsync(0);
-                await OperatorHostCompositionTests.RequireNotListeningAsync(port);
+                        diagnostic.At(PublicReferenceCheckpoint.Issuance);
+                        await diagnostic.RunAsync(async issuedCleanup =>
+                        {
+                            var tokenPath = Path.Combine(root, "operator.token");
+                            var issuance = new CompositionProcess(binary!, connection, root,
+                            ["operator-token-issue", "--token-output-file", tokenPath]);
+                            issuedCleanup(async () =>
+                        {
+                            try { await issuance.DisposeAsync(); }
+                            finally { diagnostic.ChildExit(PublicReferenceChild.Issuance, issuance.DiagnosticExitCode); }
+                        });
+                            await issuance.RequireExitAsync(0);
+                            credential = (await File.ReadAllTextAsync(tokenPath)).TrimEnd();
+                        });
+                    }
+                    diagnostic.At(PublicReferenceCheckpoint.Start);
+                    await child.SendAsync("start");
+                    await child.ExpectAsync("composition-started");
+                    using var channel = GrpcChannel.ForAddress("http://127.0.0.1:" + port);
+                    var client = OperatorTestCredentials.Client(channel, credential!);
+                    diagnostic.At(PublicReferenceCheckpoint.Authentication);
+                    var anonymous = new ManifestOperator.ManifestOperatorClient(channel);
+                    await AuthDenied(async () => await anonymous.CreateChangeSetAsync(new()));
+                    var deliveryOnly = OperatorTestCredentials.Client(channel, ConfigurationDeliveryCredential.Create(Guid.CreateVersion7()));
+                    await AuthDenied(async () => await deliveryOnly.CreateChangeSetAsync(new()));
+                    if (startup == 0)
+                    {
+                        diagnostic.At(PublicReferenceCheckpoint.Setup);
+                        Assert.Equal(EnvironmentStatus.Created, (await client.CreateEnvironmentAsync(new() { Name = "pilot" })).Status);
+                        Assert.Equal(SecretStatus.Created, (await client.CreateSecretAsync(new()
+                        {
+                            Environment = "pilot",
+                            Name = "shared",
+                            Purpose = "SharedApplicationCredential",
+                            RequestId = Guid.NewGuid().ToString(),
+                            Material = ByteString.CopyFromUtf8("sample-shared-test-material")
+                        })).Status);
+                        var applied = await client.ApplyProviderAsync(new() { Declaration = ByteString.CopyFromUtf8(ReferenceProvider) });
+                        Assert.Equal(ProviderStatus.Created, applied.Status);
+                        provider = applied.Provider.InstanceId;
+                        Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(new()
+                        {
+                            Environment = "pilot",
+                            Alias = "sample.primary",
+                            ExpectedAbsent = true,
+                            Target = new() { Name = "sample", Revision = 1 }
+                        })).Status);
+                        Assert.Equal(ProfileStatus.Created, (await client.ImportProfileAsync(new() { Payload = ByteString.CopyFromUtf8(ReferenceProfile) })).Status);
+                        Assert.Equal(ProfileAssignmentStatus.Created, (await client.ApplyProfileAssignmentAsync(new()
+                        { Environment = "pilot", ExpectedAbsence = true, Payload = ByteString.CopyFromUtf8(ReferenceAssignment) })).Status);
+                        revision = await ImportReference(client, "reference-consumer");
+                        diagnostic.At(PublicReferenceCheckpoint.InvalidIntake);
+                        await InvalidReferenceRequests(client, connection, revision);
+                        diagnostic.At(PublicReferenceCheckpoint.ConsumerConfirmation);
+                        committed = await ConfirmReference(client, revision);
+                        Assert.Equal(ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new()
+                        { Environment = "pilot", ApplicationId = "reference-consumer" })).Status);
+                        grant = await client.CreateConfigurationAccessAsync(new()
+                        {
+                            Selector = new()
+                            { Environment = "pilot", ApplicationId = "reference-consumer", ComponentId = "api", DocumentId = "settings" }
+                        });
+                        Assert.Equal(ConfigurationAccessStatus.Created, grant.Status);
+                        diagnostic.At(PublicReferenceCheckpoint.PeerConfirmation);
+                        var peer = await ImportReference(client, "reference-peer");
+                        await ConfirmReference(client, peer);
+                        Assert.Equal(ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new()
+                        { Environment = "pilot", ApplicationId = "reference-peer" })).Status);
+                    }
+                    diagnostic.At(PublicReferenceCheckpoint.Reuse);
+                    Assert.NotNull(committed);
+                    var before = await ReferenceSnapshot(connection);
+                    Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new()
+                    { DeploymentId = committed.DeploymentId, Generation = committed.Generation })).Status);
+                    Assert.Equal(before, await ReferenceSnapshot(connection));
+                    diagnostic.At(PublicReferenceCheckpoint.Delivery);
+                    var delivery = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
+                    var document = new DeliverConfigurationRequest { RevisionId = grant!.Grant.Document.RevisionId };
+                    var headers = new Metadata { { "authorization", "Bearer " + grant.Credential } };
+                    Assert.Equal(StatusCode.PermissionDenied, (await Assert.ThrowsAsync<RpcException>(async () =>
+                        await delivery.DeliverAsync(document, OperatorHeaders(credential!)))).StatusCode);
+                    var delivered = await delivery.DeliverAsync(document, headers);
+                    using (var json = JsonDocument.Parse(delivered.Json.Memory))
+                    {
+                        Assert.Equal("sample-shared-test-material", json.RootElement.GetProperty("Access"u8).GetProperty("credential"u8).GetString());
+                        Assert.Equal("api", json.RootElement.GetProperty("Access"u8).GetProperty("label"u8).GetString());
+                    }
+                    diagnostic.At(PublicReferenceCheckpoint.Bindings);
+                    var shared = await client.GetSharedCredentialBindingsAsync(new() { Environment = "pilot", ProviderInstanceId = provider!, Revision = 1 });
+                    Assert.Equal(2, shared.Bindings.Count);
+                    var use = shared.Bindings.Single(x => x.Use == "ApplicationDelivery");
+                    Assert.Equal(4, use.Dependencies.Count);
+                    Assert.DoesNotContain("sample-shared-test-material", shared.ToString());
+                    if (startup == 1)
+                    {
+                        diagnostic.At(PublicReferenceCheckpoint.ClosedUpdate);
+                        var closed = ReferenceChange(revision!);
+                        closed.Precondition = PlanningPrecondition.ExpectedGeneration;
+                        closed.ExpectedGeneration = committed.Generation;
+                        Assert.Equal(PlanningStatus.ReferenceNotSupported, (await client.CreateChangeSetAsync(closed)).Status);
+                        diagnostic.At(PublicReferenceCheckpoint.Preparation);
+                        await ReferenceWorkloadPreparation(client, connection, committed, diagnostic);
+                        diagnostic.At(PublicReferenceCheckpoint.Revocation);
+                        Assert.Equal("Revoked", (await client.RevokeSharedCredentialUseAsync(new()
+                        {
+                            Environment = "pilot",
+                            ProviderInstanceId = provider!,
+                            Revision = 1,
+                            Slot = use.Slot,
+                            Use = use.Use,
+                            SecretId = use.SecretId,
+                            SecretVersionId = use.SecretVersionId
+                        })).Status);
+                        Assert.Equal(StatusCode.PermissionDenied, (await Assert.ThrowsAsync<RpcException>(async () => await delivery.DeliverAsync(document, headers))).StatusCode);
+                    }
+                    diagnostic.At(PublicReferenceCheckpoint.Stop);
+                    await child.SendAsync("stop");
+                    await child.ExpectAsync("composition-stopped");
+                    await child.RequireExitAsync(0);
+                    await OperatorHostCompositionTests.RequireNotListeningAsync(port);
+                });
             }
-        }
-        finally { Directory.Delete(root, true); }
+        });
     }
 
     private static readonly string ReferenceProvider = """

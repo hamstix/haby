@@ -17,7 +17,7 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed partial class OperatorHostIntegrationTests
 {
     private static async Task ReferenceWorkloadPreparation(ManifestOperator.ManifestOperatorClient client, string connection,
-        DurableCommitSummary baseline)
+        DurableCommitSummary baseline, PublicReferenceFailureDiagnostics diagnostic)
     {
         // Real stock Kubernetes transport against an explicitly synthetic HTTP backend.
         // No internal constructor, registry replacement or additional Kubernetes hook is used.
@@ -25,46 +25,48 @@ public sealed partial class OperatorHostIntegrationTests
         var pfx = issuedCertificate.Export(X509ContentType.Pkcs12);
         using var certificate = X509CertificateLoader.LoadPkcs12(pfx, null, X509KeyStorageFlags.DefaultKeySet);
         CryptographicOperations.ZeroMemory(pfx);
-        var builder = WebApplication.CreateSlimBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listener => listener.UseHttps(certificate)));
-        await using var backend = builder.Build();
-        var accounts = new ConcurrentDictionary<string, string>();
-        var externalWrites = 0;
-        var calls = new ConcurrentQueue<string>();
-        backend.Run(async context =>
+        await diagnostic.RunAsync(async cleanup =>
         {
-            context.Response.ContentType = "application/json";
-            var path = context.Request.Path.Value!;
-            calls.Enqueue(context.Request.Method + " " + path);
-            string? reply = null;
-            if (path.EndsWith("/selfsubjectreviews", StringComparison.Ordinal))
-                reply = """{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview","status":{"userInfo":{"username":"sample-operator","groups":["system:authenticated"]}}}""";
-            else if (path.EndsWith("/selfsubjectaccessreviews", StringComparison.Ordinal))
-                reply = """{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","status":{"allowed":true}}""";
-            else if (path == "/api/v1/namespaces/test")
-                reply = """{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"test","uid":"namespace-test"},"status":{"phase":"Active"}}""";
-            else if (path.StartsWith("/api/v1/namespaces/test/serviceaccounts", StringComparison.Ordinal))
+            var builder = WebApplication.CreateSlimBuilder();
+            builder.Logging.ClearProviders();
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0, listener => listener.UseHttps(certificate)));
+            var backend = builder.Build();
+            cleanup(() => backend.DisposeAsync());
+            cleanup(async () => await backend.StopAsync());
+            var accounts = new ConcurrentDictionary<string, string>();
+            var externalWrites = 0;
+            var calls = new ConcurrentQueue<string>();
+            backend.Run(async context =>
             {
-                if (context.Request.Method == "POST")
+                context.Response.ContentType = "application/json";
+                var path = context.Request.Path.Value!;
+                calls.Enqueue(context.Request.Method + " " + path);
+                string? reply = null;
+                if (path.EndsWith("/selfsubjectreviews", StringComparison.Ordinal))
+                    reply = """{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview","status":{"userInfo":{"username":"sample-operator","groups":["system:authenticated"]}}}""";
+                else if (path.EndsWith("/selfsubjectaccessreviews", StringComparison.Ordinal))
+                    reply = """{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","status":{"allowed":true}}""";
+                else if (path == "/api/v1/namespaces/test")
+                    reply = """{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"test","uid":"namespace-test"},"status":{"phase":"Active"}}""";
+                else if (path.StartsWith("/api/v1/namespaces/test/serviceaccounts", StringComparison.Ordinal))
                 {
-                    var account = (await JsonNode.ParseAsync(context.Request.Body))!;
-                    account["metadata"]!["uid"] = Guid.NewGuid().ToString();
-                    account["metadata"]!["resourceVersion"] = "1";
-                    reply = account.ToJsonString();
-                    accounts["/api/v1/namespaces/test/serviceaccounts/" + account["metadata"]!["name"]!.GetValue<string>()] = reply;
-                    Interlocked.Increment(ref externalWrites);
+                    if (context.Request.Method == "POST")
+                    {
+                        var account = (await JsonNode.ParseAsync(context.Request.Body))!;
+                        account["metadata"]!["uid"] = Guid.NewGuid().ToString();
+                        account["metadata"]!["resourceVersion"] = "1";
+                        reply = account.ToJsonString();
+                        accounts["/api/v1/namespaces/test/serviceaccounts/" + account["metadata"]!["name"]!.GetValue<string>()] = reply;
+                        Interlocked.Increment(ref externalWrites);
+                    }
+                    else if (!accounts.TryGetValue(path, out reply))
+                    { context.Response.StatusCode = 404; reply = """{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}"""; }
                 }
-                else if (!accounts.TryGetValue(path, out reply))
-                { context.Response.StatusCode = 404; reply = """{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}"""; }
-            }
-            // Refuse the Deployment phase: this case qualifies preparation, never rollout.
-            if (reply is null) { context.Response.StatusCode = 403; reply = """{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403}"""; }
-            await context.Response.WriteAsync(reply);
-        });
-        await backend.StartAsync();
-        try
-        {
+                // Refuse the Deployment phase: this case qualifies preparation, never rollout.
+                if (reply is null) { context.Response.StatusCode = 403; reply = """{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403}"""; }
+                await context.Response.WriteAsync(reply);
+            });
+            await backend.StartAsync();
             Assert.Equal(SecretStatus.Created, (await client.CreateSecretAsync(new()
             {
                 Environment = "pilot",
@@ -72,6 +74,7 @@ public sealed partial class OperatorHostIntegrationTests
                 RequestId = Guid.NewGuid().ToString(),
                 Material = ByteString.CopyFromUtf8("sample-kubernetes-test-token")
             })).Status);
+            diagnostic.At(PublicReferenceCheckpoint.ProviderPreflight);
             var declaration = JsonNode.Parse("""
                 {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"runtime","environment":"pilot"},"spec":{
                 "revision":1,"providerKind":"kubernetes/v1","configurationContract":"haby.kubernetes.connection/v1","implementationId":"haby.kubernetes/v1",
@@ -138,6 +141,7 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(PlanningStatus.ReferenceNotSupported, (await client.CreateChangeSetAsync(refusal)).Status);
             }
             Assert.Equal(before, await ReferenceSnapshot(connection));
+            diagnostic.At(PublicReferenceCheckpoint.PlanCommit);
             var change = await client.CreateChangeSetAsync(request);
             Assert.Equal(PlanningStatus.Created, change.Status);
             var planned = await client.CreatePlanAsync(new() { ChangeSetId = change.ChangeSet.ChangeSetId });
@@ -148,13 +152,17 @@ public sealed partial class OperatorHostIntegrationTests
             long attempts, outputs;
             await using (var read = ReferenceReadContext(connection))
             { attempts = await read.DurableOperationAttempts.CountAsync(x => x.OperationId == "left-reference" || x.OperationId == "right-reference"); outputs = await read.OperationOutputs.CountAsync(x => x.Contract == "sample.access/v1"); }
+            diagnostic.At(PublicReferenceCheckpoint.Submit);
             var prepared = await client.SubmitGenerationAsync(new() { DeploymentId = committed.Commit.DeploymentId, Generation = committed.Commit.Generation });
+            diagnostic.At(PublicReferenceCheckpoint.PreparationResult);
+            diagnostic.Observe(prepared, externalWrites);
             Assert.True(prepared.Stage == "Deployment", "Preparation: " + prepared.Outcome + "/" + prepared.Stage + "/" + prepared.Reason + "; writes=" + externalWrites + "; calls=" + string.Join(';', calls));
             // Preparation must be complete. The deliberately unsupported Deployment backend may
             // refuse immediately or close through the stock bounded request budget; neither proves rollout.
             Assert.Contains(prepared.Outcome, new[] { "stopped", "cancelled" });
             Assert.Equal(2, externalWrites); // Only synthetic ServiceAccount preparation, no Deployment write.
             Assert.All(prepared.Progress.Members, x => Assert.Equal("prepared", x.Documents));
+            diagnostic.At(PublicReferenceCheckpoint.PreparationPostconditions);
             await using (var verify = ReferenceReadContext(connection))
             {
                 Assert.Equal(attempts, await verify.DurableOperationAttempts.CountAsync(x => x.OperationId == "left-reference" || x.OperationId == "right-reference"));
@@ -167,7 +175,6 @@ public sealed partial class OperatorHostIntegrationTests
                 Assert.Equal(2, await verify.RuntimeIdentityBindings.CountAsync(x => x.Status == "Prepared"));
                 Assert.Equal(2, await verify.RuntimeConfigurationPermissions.CountAsync(x => x.Status == "Published"));
             }
-        }
-        finally { await backend.StopAsync(); }
+        });
     }
 }

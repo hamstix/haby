@@ -51,6 +51,17 @@ internal static class HostFailureDiagnostics
             File.AppendAllText(Path.Combine(directory, "host-diagnostics.csv"), diagnostic.Render(phase, error) + Environment.NewLine);
         }
     }
+    internal static void RecordPublicReference(PublicReferenceFailureDiagnostics diagnostic, string kind, Exception? error, PublicReferenceChild child, int? code)
+    {
+        var directory = Environment.GetEnvironmentVariable("HABY_TEST_TIMING_DIRECTORY");
+        if (directory is null) return;
+        lock (Gate)
+        {
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "host-diagnostics.csv"), diagnostic.Render(kind, error, child, code) + Environment.NewLine);
+        }
+    }
+
     internal const string Method = "Haby.PostgreSql.IntegrationTests.OperatorHostConfigurationTests.Disabled_tls_serves_grpc_on_loopback_without_certificate_settings";
 
     internal static string Render(HostFailurePhase phase, Exception error, StatusCode? observed)
