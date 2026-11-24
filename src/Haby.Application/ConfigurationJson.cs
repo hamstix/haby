@@ -83,8 +83,11 @@ public static class ConfigurationJson
     internal static long MeasureUnresolvedDelivery(ConfigurationValue value, CancellationToken token) =>
         MeasureDelivery(value, token, allowUnresolved: true);
 
-    internal static long MeasureResolvedValue(ConfigurationValue value, CancellationToken token) =>
-        MeasureDelivery(value, token);
+    internal static long MeasureResolvedValue(ConfigurationValue value, CancellationToken token)
+    {
+        ConfigurationDocumentCodec.ValidateTree(value);
+        return MeasureDelivery(value, token);
+    }
 
     private static long MeasureDelivery(ConfigurationValue value, CancellationToken token, bool allowUnresolved = false)
     {

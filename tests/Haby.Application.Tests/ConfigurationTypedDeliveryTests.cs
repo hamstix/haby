@@ -7,6 +7,17 @@ namespace Haby.Application.Tests;
 public sealed partial class ConfigurationDeliveryTests
 {
     [Fact]
+    public void Resolved_value_measurement_rejects_the_first_container_beyond_the_subtree_depth_limit()
+    {
+        ConfigurationValue value = ConfigurationNull.Instance;
+        for (var i = 0; i < ConfigurationDocumentCodec.MaxContainers; i++) value = new ConfigurationArray([value]);
+        // Each array adds two ASCII delimiters; the null leaf contributes four bytes.
+        Assert.Equal(2L * ConfigurationDocumentCodec.MaxContainers + 4, ConfigurationJson.MeasureResolvedValue(value, default));
+        value = new ConfigurationArray([value]);
+        Assert.Throws<ConfigurationDocumentLimitException>(() => ConfigurationJson.MeasureResolvedValue(value, default));
+    }
+
+    [Fact]
     public async Task Typed_deferred_formatter_delivers_complete_JSON_without_changing_unresolved_artifact()
     {
         var h = await Prepare(2);
