@@ -8,11 +8,24 @@ public sealed partial class HostFailureDiagnosticsTests
     [Fact]
     public async Task Reference_preparation_continuation_inspects_once_preserves_first_and_exact_generation()
     {
-        foreach (var stage in new[] { "Documents", "Identity", "Publication" })
+        foreach (var prefix in new[] { "before-documents", "mixed-documents", "after-documents", "mixed-identities", "confirmed-identities" })
         {
+            var stage = prefix is "before-documents" or "mixed-documents" ? "Documents" : prefix == "confirmed-identities" ? "Publication" : "Identity";
             var accepted = ContinuationCommit(); var revision = ContinuationRevision();
             var request = new GenerationRequest { DeploymentId = accepted.DeploymentId, Generation = accepted.Generation };
-            var first = new WorkloadSubmissionReply { Outcome = "cancelled", Stage = stage, Reason = "cancelled", RequiresInspection = true };
+            var current = ContinuationProgress(accepted, revision);
+            foreach (var member in current.WorkloadSubmission.Members)
+            {
+                if (prefix != "confirmed-identities" && !(prefix == "mixed-identities" && member.Component == "api"))
+                    member.Identity = "notAttempted";
+                if (prefix == "before-documents" || prefix == "mixed-documents" && member.Component == "worker")
+                    member.Documents = "notAttempted";
+                // Real configured-Workload projection: selected settings + no binding/identity intent => unavailable.
+                member.RuntimeAuthority = "unavailable";
+            }
+            if (prefix == "before-documents") current.WorkloadSubmission.Submission = "notSubmitted";
+            var firstWrites = prefix == "confirmed-identities" ? 2 : prefix == "mixed-identities" ? 1 : 0;
+            var first = new WorkloadSubmissionReply { Outcome = "cancelled", Stage = stage, Reason = "cancelled", RequiresInspection = true, Progress = current.WorkloadSubmission.Clone() };
             var sequence = new List<string>(); var identities = new List<GenerationRequest>(); var observations = new List<WorkloadSubmissionReply>();
             var evidence = new List<string>(); var diagnostic = new PublicReferenceFailureDiagnostics(evidence.Add);
             var replies = await ReferencePreparationContinuation.RunAsync(request, accepted, revision, 1,
@@ -25,18 +38,21 @@ public sealed partial class HostFailureDiagnosticsTests
                 {
                     identities.Add(input.Clone()); sequence.Add("inspect:same-principal");
                     first.Outcome = "unavailable"; first.Stage = "unknown"; // First snapshot must remain independent.
-                    return Task.FromResult(ContinuationProgress(accepted, revision));
+                    first.Progress.Members[0].Documents = "unknown";
+                    return Task.FromResult(current);
                 }, (reply, attempt) =>
                 {
                     observations.Add(reply.Clone()); sequence.Add("observe:" + attempt);
                     diagnostic.At(attempt == 1 ? PublicReferenceCheckpoint.PreparationFirstResult : PublicReferenceCheckpoint.PreparationContinuationResult);
-                    diagnostic.Observe(reply, 2);
+                    diagnostic.Observe(reply, attempt == 1 ? firstWrites : 2);
                 });
             Assert.Equal(new[] { "submit:same-principal", "observe:1", "inspect:same-principal", "submit:same-principal", "observe:2" }, sequence);
             Assert.Equal(3, identities.Count);
             Assert.All(identities, identity => Assert.Equal(request, identity));
             Assert.Equal("cancelled", replies.First.Outcome); Assert.Equal(stage, replies.First.Stage);
             Assert.Equal("cancelled", observations[0].Outcome); Assert.Equal(stage, observations[0].Stage);
+            Assert.Equal(current.WorkloadSubmission.Members[0].Documents, replies.First.Progress.Members[0].Documents);
+            Assert.Equal(current.WorkloadSubmission.Members[0].Documents, observations[0].Progress.Members[0].Documents);
             Assert.Equal("Deployment", replies.Final.Stage);
             Assert.Equal(2, evidence.Count);
             Assert.Contains(",PreparationFirstResult,None,Cancelled," + stage + ",", evidence[0]);
@@ -95,6 +111,9 @@ public sealed partial class HostFailureDiagnosticsTests
             x => x.WorkloadSubmission.Members[0].RuntimeAuthority = "revoked",
             x => x.WorkloadSubmission.Members[0].RuntimeAuthority = "unknown",
             x => x.WorkloadSubmission.Members[0].Identity = "uncertain",
+            x => x.WorkloadSubmission.Members[0].Identity = "pending",
+            x => { x.WorkloadSubmission.Members[0].Identity = "notAttempted"; x.WorkloadSubmission.Members[0].RuntimeAuthority = "notApplicable"; },
+            x => { x.WorkloadSubmission.Members[0].Documents = "notAttempted"; x.WorkloadSubmission.Members[0].Identity = "notAttempted"; x.WorkloadSubmission.Members[0].RuntimeAuthority = "notApplicable"; },
             x => x.WorkloadSubmission.Members[0].Submission = "pending",
             x => x.WorkloadSubmission.Members[0].Publication = "partial",
             x => { x.WorkloadSubmission.Members[0].Publication = "published"; x.WorkloadSubmission.Members[0].RuntimeAuthority = "unavailable"; }

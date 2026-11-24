@@ -91,10 +91,11 @@ internal static class ReferencePreparationContinuation
         {
             Assert.Equal("notAttempted", member.Submission); Assert.False(member.HasOperationId);
             // With exactly one selected document per Workload, partial/uncertain/revoked is not a compatible prefix.
-            // Confirmed identity + unpublished permission may be unavailable; this is not generic unavailable authority.
+            // Selected documents without a binding/identity intent project unavailable, not notApplicable.
+            // Each unavailable case remains tied to the exact proof and known identity/publication state.
             var compatible = (member.Documents, member.Identity, member.Publication, member.RuntimeAuthority) is
-                ("notAttempted", "notAttempted", "notAttempted", "notApplicable") or
-                ("prepared", "notAttempted", "notAttempted", "notApplicable") or
+                ("notAttempted", "notAttempted", "notAttempted", "unavailable") or
+                ("prepared", "notAttempted", "notAttempted", "unavailable") or
                 ("prepared", "confirmed", "notAttempted", "unavailable") or
                 ("prepared", "confirmed", "published", "available");
             Assert.True(compatible, "Inspected preparation state lacks compatible current-authority proof.");
