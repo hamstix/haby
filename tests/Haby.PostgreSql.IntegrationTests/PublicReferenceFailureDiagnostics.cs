@@ -11,10 +11,14 @@ internal enum PublicReferenceCheckpoint
     Submit, PreparationFirstResult, PreparationInspection, PreparationContinuation, PreparationContinuationResult,
     PreparationResult, PreparationPostconditions, Revocation, Stop, Unknown
 }
+internal enum ReferencePreparationPredicate
+{
+    None, CatalogResourceShape, CatalogRead, CatalogAccepted, CatalogFingerprint, CatalogCheckpoint, CatalogOriginalResults, CatalogProofPresent, ResourceReferenceIdentities, ResourceReuseMatches, ReadyTarget, InspectionWriteBound, InspectionRpc, InspectionReplyReceived, Found, DesiredPresent, DesiredDeployment, DesiredGeneration, DesiredChangeSet, DesiredPlan, DesiredActor, DesiredEnvironment, DesiredRevision, DescriptionPresent, DescriptionAvailable, DescriptionMembers, DescriptionDocuments, ResourceProgressPresent, ResourceDeployment, ResourceGeneration, ResourceDesired, ResourceNotSuperseded, ResourceAppliedPresent, ResourceApplied, ResourceCompleted, ResourceNotStopped, ResourceReused, ResourceRetained, ResourceReintroduced, ReadyPresent, ReadyIdentity, ReadyVersion, ReadyFingerprint, ReadyActive, ReadyRetained, ReadyOriginalResults, SubmissionPresent, SubmissionDeployment, SubmissionGeneration, SubmissionDesired, SubmissionAppliedPresent, SubmissionApplied, SubmissionReadyPresent, SubmissionReadyMatches, SubmissionNotSubmitted, SubmissionState, SubmissionTotal, SubmissionCompleted, SubmissionMembers, MemberNotAttempted, MemberNoOperation, MemberDocuments, MemberIdentity, MemberPublication, MemberAuthority, MemberCompatible
+}
 internal enum PublicReferenceChild { None, Issuance, First, Restart }
 
 // One non-parameterized fact owns this state. No identifiers, exception text or child output enter the CSV.
-// Columns: method, case, startup, event, phase, type, outcome, stage, members, prepared documents, writes, child, exit.
+// Columns: method, case, startup, event, phase, type, outcome, stage, members, prepared documents, writes, child, exit, predicate, status, actual count, expected count, flag.
 // Phase is an explicit last checkpoint, never an inferred cause.
 internal sealed class PublicReferenceFailureDiagnostics(Action<string>? capture = null)
 {
@@ -25,8 +29,40 @@ internal sealed class PublicReferenceFailureDiagnostics(Action<string>? capture 
     private PublicReferenceCheckpoint checkpoint;
     private int startup = -1, members = -1, documents = -1, writes = -1;
     private string outcome = "Missing", stage = "Missing";
+    private ReferencePreparationPredicate predicate;
+    private string inspectedStatus = "Missing", inspectedFlag = "Missing";
+    private int actual = -1, expected = -1;
 
-    internal void At(PublicReferenceCheckpoint value) => checkpoint = value;
+    internal void At(PublicReferenceCheckpoint value)
+    {
+        checkpoint = value; predicate = ReferencePreparationPredicate.None;
+        inspectedStatus = inspectedFlag = "Missing"; actual = expected = -1;
+    }
+    internal void Predicate(ReferencePreparationPredicate value, string? status = null, int actualCount = -1, int expectedCount = -1, bool? flag = null)
+    {
+        predicate = Enum.IsDefined(value) ? value : ReferencePreparationPredicate.None;
+        inspectedStatus = status switch
+        {
+            null or "" => "Missing",
+            "found" => "Found",
+            "available" => "Available",
+            "unavailable" => "Unavailable",
+            "partial" => "Partial",
+            "notSubmitted" => "NotSubmitted",
+            "notAttempted" => "NotAttempted",
+            "prepared" => "Prepared",
+            "confirmed" => "Confirmed",
+            "published" => "Published",
+            "pending" => "Pending",
+            "uncertain" => "Uncertain",
+            "revoked" => "Revoked",
+            "notApplicable" => "NotApplicable",
+            _ => "Other"
+        };
+        actual = Bound(actualCount); expected = Bound(expectedCount);
+        inspectedFlag = flag is true ? "True" : flag is false ? "False" : "Missing";
+        Emit("predicate", null);
+    }
     internal void Startup(int value) => startup = value is 0 or 1 ? value : -1;
     internal Task RunAsync(Func<Action<Func<ValueTask>>, Task> body) =>
         HostFailureDiagnostics.RunAsync(body, () => HostFailurePhase.Catalog, () => null, Record);
@@ -70,7 +106,7 @@ internal sealed class PublicReferenceFailureDiagnostics(Action<string>? capture 
     internal string Render(string kind, Exception? error, PublicReferenceChild child = PublicReferenceChild.None, int? code = null)
     {
         // Even direct test calls cannot make the formatter copy arbitrary strings or type names.
-        var entry = kind switch { "primary" => "primary", "cleanup" => "cleanup", "child-exit" => "child-exit", "observation" => "observation", _ => "unknown" };
+        var entry = kind switch { "primary" => "primary", "cleanup" => "cleanup", "child-exit" => "child-exit", "observation" => "observation", "predicate" => "predicate", _ => "unknown" };
         var phase = entry == "cleanup" ? "Cleanup" : Enum.IsDefined(checkpoint) ? checkpoint.ToString() : "Unknown";
         var type = error switch
         {
@@ -85,7 +121,8 @@ internal sealed class PublicReferenceFailureDiagnostics(Action<string>? capture 
         return string.Join(',', Method, Case, startup.ToString(CultureInfo.InvariantCulture), entry, phase, type,
             outcome, stage, members.ToString(CultureInfo.InvariantCulture), documents.ToString(CultureInfo.InvariantCulture),
             writes.ToString(CultureInfo.InvariantCulture), Enum.IsDefined(child) ? child.ToString() : "Unknown",
-            (code ?? -1).ToString(CultureInfo.InvariantCulture));
+            (code ?? -1).ToString(CultureInfo.InvariantCulture), predicate.ToString(), inspectedStatus,
+            actual.ToString(CultureInfo.InvariantCulture), expected.ToString(CultureInfo.InvariantCulture), inspectedFlag);
     }
 
     private void Emit(string kind, Exception? error, PublicReferenceChild child = PublicReferenceChild.None, int? code = null)

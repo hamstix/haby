@@ -1,4 +1,7 @@
 using Haby.Operator.Contracts;
+using Haby.Application;
+using WorkloadSubmissionMember = Haby.Operator.Contracts.WorkloadSubmissionMember;
+using Haby.Domain;
 using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
@@ -45,7 +48,7 @@ public sealed partial class HostFailureDiagnosticsTests
                     observations.Add(reply.Clone()); sequence.Add("observe:" + attempt);
                     diagnostic.At(attempt == 1 ? PublicReferenceCheckpoint.PreparationFirstResult : PublicReferenceCheckpoint.PreparationContinuationResult);
                     diagnostic.Observe(reply, attempt == 1 ? firstWrites : 2);
-                });
+                }, readResources: _ => Task.FromResult(ContinuationCatalog(accepted)));
             Assert.Equal(new[] { "submit:same-principal", "observe:1", "inspect:same-principal", "submit:same-principal", "observe:2" }, sequence);
             Assert.Equal(3, identities.Count);
             Assert.All(identities, identity => Assert.Equal(request, identity));
@@ -69,16 +72,31 @@ public sealed partial class HostFailureDiagnosticsTests
     public async Task Reference_preparation_continuation_refuses_unknown_authority_proof_and_second_partial_result()
     {
         var accepted = ContinuationCommit(); var revision = ContinuationRevision();
-        async Task Verify(WorkloadSubmissionReply first, Action<CommitReply>? fault, WorkloadSubmissionReply? second, int expectedCalls, int expectedReads)
+        async Task Verify(WorkloadSubmissionReply first, Action<CommitReply>? fault, WorkloadSubmissionReply? second, int expectedCalls, int expectedReads, Func<ReferencePreparationCatalogProof, ReferencePreparationCatalogProof>? proofFault = null)
         {
             var calls = 0; var reads = 0;
             var error = await Record.ExceptionAsync(() => ReferencePreparationContinuation.RunAsync(
                 new() { DeploymentId = accepted.DeploymentId, Generation = accepted.Generation }, accepted, revision, 1,
                 _ => { calls++; Assert.InRange(calls, 1, 2); return Task.FromResult(calls == 1 ? first : second ?? ContinuationCompleted(accepted, revision)); },
-                _ => { reads++; Assert.Equal(1, reads); var progress = ContinuationProgress(accepted, revision); fault?.Invoke(progress); return Task.FromResult(progress); }, (_, _) => { }));
-            Assert.IsAssignableFrom<Xunit.Sdk.XunitException>(error);
+                _ => { reads++; Assert.Equal(1, reads); var progress = ContinuationProgress(accepted, revision); fault?.Invoke(progress); return Task.FromResult(progress); }, (_, _) => { }, readResources: _ => Task.FromResult(proofFault?.Invoke(ContinuationCatalog(accepted)) ?? ContinuationCatalog(accepted))));
+            if (proofFault is null) Assert.IsAssignableFrom<Xunit.Sdk.XunitException>(error);
+            else Assert.True(error is Xunit.Sdk.XunitException or InvalidDataException);
             Assert.Equal(expectedCalls, calls); Assert.Equal(expectedReads, reads);
         }
+        // A primary failure names the exact assertion and only closed status/count/boolean evidence.
+        var predicateLines = new List<string>();
+        var predicateDiagnostic = new PublicReferenceFailureDiagnostics(predicateLines.Add);
+        predicateDiagnostic.At(PublicReferenceCheckpoint.PreparationInspection);
+        var missingProgress = ContinuationProgress(accepted, revision); missingProgress.WorkloadSubmission.ResourcesReadyId = Guid.NewGuid().ToString();
+        var predicateCalls = 0;
+        var predicateError = await Record.ExceptionAsync(() => predicateDiagnostic.RunAsync(_ => ReferencePreparationContinuation.RunAsync(
+            new() { DeploymentId = accepted.DeploymentId, Generation = accepted.Generation }, accepted, revision, 1,
+            _ => { predicateCalls++; return Task.FromResult(new WorkloadSubmissionReply { Outcome = "cancelled", Stage = "Publication", Reason = "cancelled", RequiresInspection = true }); },
+            _ => Task.FromResult(missingProgress), (_, _) => { }, predicateDiagnostic, _ => Task.FromResult(ContinuationCatalog(accepted)))));
+        Assert.IsAssignableFrom<Xunit.Sdk.XunitException>(predicateError);
+        Assert.Equal(1, predicateCalls);
+        Assert.EndsWith(",SubmissionReadyMatches,Missing,-1,-1,False", predicateLines.Last());
+        Assert.Contains(",primary,", predicateLines.Last());
         foreach (var first in new[]
         {
             new WorkloadSubmissionReply { Outcome = "stopped", Stage = "Publication", Reason = "storage-unavailable" },
@@ -100,9 +118,6 @@ public sealed partial class HostFailureDiagnosticsTests
             x => x.DesiredGeneration.TechnicalActorId = "different-principal",
             x => x.DesiredGeneration.WorkloadDescription.Status = "unavailable",
             x => x.DesiredGeneration.WorkloadDescription.Items[0].Documents.Clear(),
-            x => x.Progress.ResourcesReady = null,
-            x => x.Progress.ResourcesReady.CheckpointId = Guid.NewGuid().ToString(),
-            x => x.Progress.SupersededByGeneration = 3,
             x => x.WorkloadSubmission.DesiredGeneration++,
             x => x.WorkloadSubmission.AppliedGeneration = 2,
             x => x.WorkloadSubmission.Submission = "unknown",
@@ -119,6 +134,25 @@ public sealed partial class HostFailureDiagnosticsTests
             x => { x.WorkloadSubmission.Members[0].Publication = "published"; x.WorkloadSubmission.Members[0].RuntimeAuthority = "unavailable"; }
         ];
         foreach (var fault in faults) await Verify(cancelled, fault, null, 1, 1);
+        foreach (var proofFault in new Func<ReferencePreparationCatalogProof, ReferencePreparationCatalogProof>[]
+        {
+            x => x with { Generation = 3 },
+            x => x with { Deployment = Guid.NewGuid() },
+            x => x with { Desired = 3 },
+            x => x with { Applied = 2 },
+            x => x with { Superseded = true },
+            x => x with { Fingerprint = "v6:" + new string('1', 64) },
+            x => x with { FormatVersion = 2 },
+            x => x with { Ready = new(Guid.NewGuid(), x.Deployment, x.Generation, x.Fingerprint, x.Ready.ConfirmedAt, x.Ready.Resources) },
+            x => x with { Ready = new(x.Ready.Id, x.Deployment, 1, x.Fingerprint, x.Ready.ConfirmedAt, x.Ready.Resources) },
+            x => x with { Reused = x.Reused.Select((r, i) => i == 0 ? r with { SourceGeneration = 2 } : r).ToArray() },
+            x => x with { Reused = x.Reused.Select((r, i) => i == 0 ? r with { ManagementId = Guid.NewGuid() } : r).ToArray() },
+            x => x with { Reused = x.Reused.Select((r, i) => i == 0 ? r with { Reintroduced = true } : r).ToArray() },
+            x => x with { ReferenceResources = ["left", "foreign"] },
+            x => x with { OriginalResources = x.OriginalResources.Take(1).ToArray() },
+            x => x with { OriginalResources = x.OriginalResources.Select(r => new ResourceReadyResult(r.Resource, r.ManagementId, r.SourceGeneration,
+                r.SourceFingerprint, false, false, r.Operations.Skip(1))).ToArray() }
+        }) await Verify(cancelled, null, null, 1, 1, proofFault);
         foreach (var second in new[]
         {
             new WorkloadSubmissionReply { Outcome = "cancelled", Stage = "Publication" },
@@ -167,15 +201,6 @@ public sealed partial class HostFailureDiagnosticsTests
                 Reference = revision.Clone(),
                 WorkloadDescription = new() { Status = "available" }
             },
-            Progress = new()
-            {
-                DeploymentId = accepted.DeploymentId,
-                Generation = 2,
-                DesiredGeneration = 2,
-                AppliedGeneration = 1,
-                ReusedResources = 2,
-                ResourcesReady = new() { CheckpointId = checkpoint, FormatVersion = 1, InputFingerprint = "frozen", ActiveResources = 2, OriginalResults = 2 }
-            },
             WorkloadSubmission = new()
             {
                 DeploymentId = accepted.DeploymentId,
@@ -187,6 +212,8 @@ public sealed partial class HostFailureDiagnosticsTests
                 Total = 2
             }
         };
+        foreach (var reuse in ContinuationCatalog(accepted).Reused)
+            reply.DesiredGeneration.ReusedResources.Add(new ReusedResourceSummary() { ResourceId = reuse.Resource.Value, ManagementId = reuse.ManagementId.ToString(), SourceGeneration = reuse.SourceGeneration });
         foreach (var component in new[] { "api", "worker" })
         {
             var item = new WorkloadReviewItem { ComponentId = component, WorkloadId = "main" }; item.Documents.Add("settings");
@@ -204,4 +231,17 @@ public sealed partial class HostFailureDiagnosticsTests
         }
         return reply;
     }
+    private static ReferencePreparationCatalogProof ContinuationCatalog(DurableCommitSummary accepted)
+    {
+        var deployment = Guid.Parse(accepted.DeploymentId); var fingerprint = "v6:" + new string('0', 64);
+        var reused = new[] { "left", "right" }.Select((name, i) => new ResourceReuse(ManifestLocalId.Create(name),
+            Guid.Parse(i == 0 ? "44444444-4444-4444-4444-444444444444" : "55555555-5555-5555-5555-555555555555"), 1, fingerprint)).ToArray();
+        // Three original operations for two Resources deliberately disprove an operation-count == Resource-count assumption.
+        var originals = reused.Select((r, i) => new ResourceReadyResult(r.Resource.Value, r.ManagementId, r.SourceGeneration, fingerprint, false, false,
+            Enumerable.Range(0, i == 0 ? 2 : 1).Select(n => new ResourceOperationResult(r.Resource.Value + "-" + n, Guid.Parse(n == 0 ? "66666666-6666-6666-6666-666666666666" : "77777777-7777-7777-7777-777777777777"), 1, null, [])))).ToArray();
+        var ready = new ResourcesReadyCheckpoint(Guid.Parse("33333333-3333-3333-3333-333333333333"u8), deployment, accepted.Generation,
+            fingerprint, DateTimeOffset.UnixEpoch, originals);
+        return new(deployment, accepted.Generation, accepted.Generation, 1, false, fingerprint, 1, ready, reused, [], ["left", "right"], originals);
+    }
+
 }

@@ -25,7 +25,7 @@ try {
     }
     # The allowlisted per-case Host writer owns this file; timing export must preserve it.
     $hostEvidence = Join-Path $safe 'host-diagnostics.csv'
-    $phaseEvidence = 'Haby.Tests.Fixture,primary,PreparationResult,XunitException,Stopped,Deployment,1,1,2'
+    $phaseEvidence = 'Haby.Tests.Fixture,closed-case,1,primary,PreparationInspection,XunitException,Cancelled,Publication,2,2,2,None,-1,ResourceProgressPresent,Missing,-1,-1,False'
     [IO.File]::WriteAllText($hostEvidence, $phaseEvidence)
     & "$PSScriptRoot/export-postgresql-timing.ps1" -TrxPath $raw -OutputDirectory $safe
     if ([IO.File]::ReadAllText($hostEvidence) -cne $phaseEvidence) { throw 'Safe Host checkpoint was discarded by timing export.' }

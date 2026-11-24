@@ -56,15 +56,26 @@ public sealed partial class HostFailureDiagnosticsTests
         diagnostic.Observe(reply, 2);
         Assert.Contains(",Stopped,Deployment,1,1,2,", Assert.Single(lines));
         diagnostic.ChildExit(PublicReferenceChild.Restart, 137);
-        Assert.EndsWith(",Restart,137", lines.Last());
+        Assert.Contains(",Restart,137,", lines.Last());
         Assert.Equal(PublicReferenceFailureDiagnostics.Case, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             PublicReferenceFailureDiagnostics.Method + "\n" + PublicReferenceFailureDiagnostics.Method))).ToLowerInvariant());
+        foreach (var predicate in Enum.GetValues<ReferencePreparationPredicate>())
+        {
+            diagnostic.Predicate(predicate, secret, int.MaxValue, int.MinValue, false);
+            var predicateLine = lines.Last();
+            Assert.Contains(",predicate,PreparationResult,None,", predicateLine);
+            Assert.EndsWith("," + predicate + ",Other,-1,-1,False", predicateLine);
+            Assert.DoesNotContain(secret, predicateLine);
+            Assert.Equal(18, predicateLine.Split(',').Length);
+        }
+        diagnostic.Predicate((ReferencePreparationPredicate)999, secret, int.MaxValue, int.MinValue);
+        Assert.EndsWith(",None,Other,-1,-1,Missing", lines.Last());
         reply.Outcome = secret; reply.Stage = secret; reply.Progress = null;
         diagnostic.Observe(reply, int.MaxValue);
         diagnostic.Startup(999);
         diagnostic.At((PublicReferenceCheckpoint)999);
         var line = diagnostic.Render(secret, new HostileSubmissionFailure(), (PublicReferenceChild)999, int.MinValue);
-        Assert.Equal(13, line.Split(',').Length);
+        Assert.Equal(18, line.Split(',').Length);
         Assert.Contains(",-1,unknown,Unknown,Other,Other,Other,-1,-1,-1,Unknown,-2147483648", line);
         Assert.DoesNotContain(secret, line);
         Assert.DoesNotContain('\r', line); Assert.DoesNotContain('\n', line);

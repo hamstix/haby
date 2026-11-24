@@ -162,13 +162,17 @@ public sealed partial class OperatorHostIntegrationTests
                 }, async input =>
                 {
                     diagnostic.At(PublicReferenceCheckpoint.PreparationInspection);
+                    diagnostic.Predicate(ReferencePreparationPredicate.InspectionWriteBound, actualCount: externalWrites, expectedCount: 2, flag: externalWrites is >= 0 and <= 2);
                     Assert.InRange(externalWrites, 0, 2);
-                    return await client.GetGenerationAsync(input);
+                    diagnostic.Predicate(ReferencePreparationPredicate.InspectionRpc);
+                    var inspected = await client.GetGenerationAsync(input);
+                    diagnostic.Predicate(ReferencePreparationPredicate.InspectionReplyReceived, flag: true);
+                    return inspected;
                 }, (reply, attempt) =>
                 {
                     diagnostic.At(attempt == 1 ? PublicReferenceCheckpoint.PreparationFirstResult : PublicReferenceCheckpoint.PreparationContinuationResult);
                     diagnostic.Observe(reply, externalWrites);
-                });
+                }, diagnostic, input => ReferencePreparationCatalog.ReadAsync(connection, input, committed.Commit, imported.Created.Revision.Reference, diagnostic));
             // First is an independent snapshot; its safe observation is never overwritten by a continuation.
             var firstSubmission = replies.First;
             var prepared = replies.Final;

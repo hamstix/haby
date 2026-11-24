@@ -4,7 +4,7 @@
   "fastBaseline": 1299,
   "nativePerPlatform": 115,
   "regularFullRetainsQualification": true,
-  "currentPostgresql": 1362,
+  "currentPostgresql": 1364,
   "currentFast": 2147,
   "currentKubernetesApiObjects": 29,
   "currentKubernetesDurableActions": 36,
@@ -14,6 +14,9 @@
   "supersededFor257": [{"method":"Haby.Kubernetes.Tests.ConfiguredDeploymentTests.Configured_update_and_superseded_format_refuse_but_absent_configuration_has_no_runtime_fields","case":"fde60248bd607ce4472526778ef63be8dbc29b8abf7b4db8a8f55f6e130d933f","suite":"fast","gate":"validate","trigger":"every-change","addedFor223":true}],
   "supersededFor275Adr026": [{"method":"Haby.PostgreSql.IntegrationTests.SharedCredentialAuthorityTests.Immutable_database_guards_refuse_late_issuance_mutation_and_unrevocation","case":"04681af98c4f92ffddbfeada9e20ad5323e132bc70bf1e615b88a25cc2986c73","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true}],
   "entries": [
+    {"method":"Haby.PostgreSql.IntegrationTests.SharedReferenceDeliveryTests.Exact_Reference_preparation_inspection_preserves_target_proof_after_interruption","case":"a95710afe7fcb4e2968fdc145e972477c68943da11d409c8091d13fdac2b6080","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.SharedReferenceDeliveryTests.Exact_Reference_preparation_inspection_preserves_target_proof_after_interruption","case":"dace6f74fad7cd9fe9a35224c5f64239fc27c6c05c444cf80a160e433b942400","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
+
     {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Reference_preparation_continuation_inspects_once_preserves_first_and_exact_generation","case":"13250ce4587b9f6cb20037cb9fcff238ac58dc3bfa8a722f604965b1b1fa284b","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
     {"method":"Haby.PostgreSql.IntegrationTests.HostFailureDiagnosticsTests.Reference_preparation_continuation_refuses_unknown_authority_proof_and_second_partial_result","case":"30e96d4fa4912f532332deee1367800aeb93ec8cba0012c29fc80e3bcc9b5acc","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true},
     {"method":"Haby.Application.Tests.WorkloadSubmissionTests.Cancellation_at_Identity_Publication_boundary_never_starts_Deployment","case":"f45d4f722dc742ff73cf033d5fd3829f4b79747276cbb3cd339411dbdba5a825","suite":"fast","gate":"validate","trigger":"every-change","addedFor275":true},
