@@ -2,14 +2,46 @@ using System.Net;
 using System.Net.Sockets;
 using Haby.Application;
 using Haby.Operator.Host;
+using Haby.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class OperatorHostCompositionTests
+public sealed partial class OperatorHostCompositionTests
 {
+    [Fact]
+    public async Task Additive_contract_conflict_is_refused_before_listening()
+    {
+        var port = AvailablePort();
+        Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.BuildComposed(
+            ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"],
+            (services, _) => services.AddSingleton(new Haby.Manifest.ResourceTypeDefinition(
+                Haby.Manifest.PostgreSqlDatabaseContract.Id, "{\"type\":\"object\",\"additionalProperties\":false}"))));
+        await RequireNotListeningAsync(port);
+    }
+
+    [Fact]
+    public async Task Missing_contributed_capability_disposes_owned_dependencies_before_listening()
+    {
+        var port = AvailablePort();
+        var owned = new AsyncResource(false);
+        Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.BuildComposed(
+            ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"],
+            (services, _) =>
+            {
+                services.AddSingleton(_ => owned);
+                services.AddSingleton(p =>
+                {
+                    p.GetRequiredService<AsyncResource>();
+                    return new Haby.Manifest.ResourceTypeDefinition(Haby.Domain.ResourceTypeId.Create("sample.missing/v1"), "{\"type\":\"object\"}");
+                });
+            }));
+        Assert.True(owned.Disposed);
+        await RequireNotListeningAsync(port);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -59,6 +91,10 @@ public sealed class OperatorHostCompositionTests
                 });
                 Assert.Equal(0, created);
             });
+        var catalog = app.Services.GetRequiredService<Haby.Manifest.ManifestContractCatalog>();
+        Assert.True(catalog.TryGet(Haby.Manifest.PostgreSqlDatabaseContract.Id, out _));
+        Assert.True(catalog.TryGet(Haby.PostgreSql.PostgreSqlApplicationLoginContract.Id, out _));
+        Assert.True(catalog.TryGet(Haby.Kubernetes.Contracts.KubernetesContract.Definition.Id, out _));
         Assert.Equal(1, calls);
         Assert.Same(app.Configuration, observed);
         Assert.Equal(0, created);
@@ -118,6 +154,30 @@ public sealed class OperatorHostCompositionTests
         string[] args = ["--Haby:PostgreSql:ConnectionString=Host=localhost", "--Haby:Port=0", "--Haby:Tls:Enabled=false"];
         await using var stock = OperatorHostApplication.Build(args);
         await using var internalNull = OperatorHostApplication.Build(args, null);
+        // Missing stock capabilities must still permit historical reads and safe runtime refusal.
+        foreach (var missing in new[] { typeof(IDurableActionHandler), typeof(IExternalOperationOutputContract) })
+        {
+            var owned = new AsyncResource(false);
+            await using (var degraded = OperatorHostApplication.BuildComposed(args, (services, _) =>
+            {
+                var descriptor = services.Single(x => x.ServiceType == missing && x.ImplementationType ==
+                    (missing == typeof(IDurableActionHandler) ? typeof(PostgreSqlApplicationAccessAction) : typeof(PostgreSqlApplicationConnectionContract)));
+                services.Remove(descriptor);
+                services.AddSingleton(_ => owned);
+                services.AddSingleton(p =>
+                {
+                    p.GetRequiredService<AsyncResource>();
+                    return new ProviderPreflightRegistry(p.GetServices<IProviderPreflightHandler>(),
+                        p.GetServices<IProviderConfigurationCodec>(), p.GetServices<IProviderDeclarationAdapter>());
+                });
+            }))
+            {
+                Assert.Null(degraded.Services.GetRequiredService<DurableActionRegistry>().Find(PostgreSqlApplicationAccessAction.RegistrationKey));
+                Assert.False(owned.Disposed);
+                Assert.Empty(degraded.Urls);
+            }
+            Assert.True(owned.Disposed);
+        }
         Assert.Throws<ArgumentNullException>(() => OperatorHostApplication.BuildComposed(args, null!));
         await Assert.ThrowsAsync<ArgumentNullException>(() => OperatorHostApplication.BuildComposedMigratedAsync(args, null!));
         // Compile the old default-token and named-token forms without opening a database.

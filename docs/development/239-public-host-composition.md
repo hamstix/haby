@@ -3,8 +3,8 @@
 Issue [#239](https://github.com/hamstix/haby/issues/239) adds a narrow build-time
 composition boundary for a downstream executable. Reference
 `src/Haby.Operator.Host/Haby.Operator.Host.csproj` from a .NET 10 Web SDK project.
-This alpha boundary does not package an SDK or extend Provider catalogs, runtime
-plugin loading or CLI commands.
+This alpha boundary does not package an SDK, load runtime plugins or extend CLI
+commands. The bounded #275-E addition below accepts typed catalog contributions.
 
 ```csharp
 await using var app = await OperatorHostApplication.BuildComposedMigratedAsync(
@@ -27,9 +27,18 @@ Register services and factories in the callback; do not construct another provid
 The existing `Build` and `BuildMigratedAsync` entrypoints remain available; their
 default cancellation-token calls remain unambiguous.
 
-The callback is trusted additive application composition. Replacing authentication,
-authorization, engine registrations or Provider/renderer catalogs is outside this
-contract. It is not a plugin sandbox and does not police service descriptors.
+The callback is trusted additive application composition. Under #275-E it can add
+existing typed Resource/output/renderer/formatter definitions and implementations;
+the Host constructs one stock-inclusive catalog snapshot before validation or
+listening. Conflicting definitions, ambiguous implementations and missing related
+current capability registrations fail startup with the existing disposal behavior.
+Provider declaration/codec/preflight and action/output interfaces retain their
+existing exact enumerable registrations. See [initial Reference admission](275-public-reference-admission.md)
+for the supported shape and a complete registration example.
+
+Replacing authentication, authorization, engine registrations or catalog singletons
+is outside this contract. This addition is not a plugin sandbox and does not police
+arbitrary service descriptors or validate superseded persisted histories.
 
 ## Configuration and publication
 

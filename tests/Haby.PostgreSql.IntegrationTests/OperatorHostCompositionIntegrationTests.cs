@@ -145,6 +145,7 @@ public sealed partial class OperatorHostIntegrationTests
     {
         private readonly Process _process;
         private readonly Task<string> _error;
+        internal int? DiagnosticExitCode { get; private set; }
         internal CompositionProcess(string binary, string connection, string working, string[] args)
         {
             var start = new ProcessStartInfo("dotnet")
@@ -187,6 +188,7 @@ public sealed partial class OperatorHostIntegrationTests
                 if (!_process.HasExited) _process.Kill(entireProcessTree: true);
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 await _process.WaitForExitAsync(timeout.Token);
+                DiagnosticExitCode = _process.ExitCode;
                 await _error;
             }
             finally { _process.Dispose(); }

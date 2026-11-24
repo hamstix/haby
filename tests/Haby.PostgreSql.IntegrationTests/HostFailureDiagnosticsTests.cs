@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class HostFailureDiagnosticsTests
+public sealed partial class HostFailureDiagnosticsTests
 {
     private sealed class HostileSubmissionFailure : Exception
     {

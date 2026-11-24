@@ -95,9 +95,11 @@ require explicit fresh initialization; startup refuses those histories before
 applying this migration. It never resets a catalog or external Resources. The EF
 migration is generated from the current model, not a runtime schema workaround.
 
-Full #275 still requires explicit Environment shared application-secret authority,
-typed renderer/delivery and lifecycle slices, followed
-by a separately admitted real capability. System/administrator access does not gain
+Environment shared application-secret authority and bounded typed rendering/delivery
+are delivered by merged #275-C / PR #293 and #275-D / PR #294. #275-E adds
+[initial downstream public admission](275-public-reference-admission.md) using the
+same kernel. Full #275 still requires retirement and a separately admitted real
+capability. System/administrator access does not gain
 application delivery authority. This kernel changes no purpose, static projection,
 endpoint/TLS option or retirement decision. Provider status #274, Redis, general CLI,
 SDK and runtime plugin work remain separate.

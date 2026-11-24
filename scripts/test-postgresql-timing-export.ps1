@@ -23,6 +23,14 @@ try {
     foreach ($file in Get-ChildItem $safe -File) {
         if ((Get-Content $file.FullName -Raw).Contains($sentinel)) { throw 'Protected content escaped.' }
     }
+    # The allowlisted per-case Host writer owns this file; timing export must preserve it.
+    $hostEvidence = Join-Path $safe 'host-diagnostics.csv'
+    $phaseEvidence = 'Haby.Tests.Fixture,closed-case,1,primary,PreparationInspection,XunitException,Cancelled,Publication,2,2,2,None,-1,ResourceProgressPresent,Missing,-1,-1,False'
+    [IO.File]::WriteAllText($hostEvidence, $phaseEvidence)
+    & "$PSScriptRoot/export-postgresql-timing.ps1" -TrxPath $raw -OutputDirectory $safe
+    if ([IO.File]::ReadAllText($hostEvidence) -cne $phaseEvidence) { throw 'Safe Host checkpoint was discarded by timing export.' }
+    $workflow = Get-Content (Join-Path $PSScriptRoot '../.github/workflows/build.yml') -Raw
+    if (-not $workflow.Contains('.artifacts/postgresql-measurement/safe/functional/host-diagnostics.csv')) { throw 'Hosted Host diagnostic upload path missing.' }
     $cases = @(Get-Content (Join-Path $safe 'cases.json') -Raw | ConvertFrom-Json)
     if ($cases.Count -ne 2 -or $cases[0].case -eq $cases[1].case -or @($cases | Where-Object outcome -eq Failed).Count -ne 1) { throw 'Case inventory/outcomes changed.' }
     $refused = $false
