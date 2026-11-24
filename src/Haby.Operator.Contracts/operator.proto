@@ -301,6 +301,7 @@ enum PlanningStatus {
   PLANNING_STATUS_PLAN_INPUT_UNAVAILABLE = 21;
   PLANNING_STATUS_CONFIGURATION_REFUSED = 22;
   PLANNING_STATUS_IMPORT_NOT_SUPPORTED = 23;
+  PLANNING_STATUS_REFERENCE_NOT_SUPPORTED = 24;
 }
 enum PlanningPrecondition {
   PLANNING_PRECONDITION_UNSPECIFIED = 0;
@@ -313,7 +314,23 @@ message CreateChangeSetRequest {
   RevisionReference reference = 2;
   PlanningPrecondition precondition = 3;
   optional int64 expected_generation = 4;
+  // Presence distinguishes legacy Provision from an explicit complete set, including an empty set.
+  ResourceAcquisitionSet acquisitions = 5;
 }
+enum AcquisitionMode {
+  ACQUISITION_MODE_UNSPECIFIED = 0;
+  ACQUISITION_MODE_PROVISION = 1;
+  ACQUISITION_MODE_IMPORT_USE_AND_RETAIN = 2;
+  ACQUISITION_MODE_REFERENCE = 3;
+}
+message AcquisitionPayload { string format = 1; string json = 2; }
+message ResourceAcquisitionMember {
+  string resource = 1;
+  AcquisitionMode mode = 2;
+  AcquisitionPayload input = 3;
+  AcquisitionPayload sharing_request = 4;
+}
+message ResourceAcquisitionSet { repeated ResourceAcquisitionMember resources = 1; }
 message ChangeSetRequest { string change_set_id = 1; }
 message PlanRequest { string plan_id = 1; }
 message DurableChangeSetSummary {

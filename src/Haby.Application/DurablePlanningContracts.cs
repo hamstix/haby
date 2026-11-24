@@ -39,7 +39,8 @@ public sealed record DurablePlan(DeploymentPlanId Id, DeploymentChangeSetId Chan
 public enum DurableChangeSetCreateStatus
 {
     Created, EnvironmentNotFound, RevisionNotFound, RevisionNotOwnedByApplication,
-    ExpectedGenerationUnsupported, ImportNotSupported
+    ExpectedGenerationUnsupported, ImportNotSupported, InvalidInput, ReferenceNotSupported,
+    AliasNotResolved, ProviderRevisionUnavailable, ProviderCapabilityMismatch, UnsupportedShape
 }
 
 public sealed record DurableChangeSetCreateResult(DurableChangeSetCreateStatus Status, DeploymentChangeSet? ChangeSet = null);
@@ -63,6 +64,12 @@ public enum DurablePlanCurrentStatus
 
 public interface IDurableDeploymentPlanner
 {
+    /// <summary>Complete explicit Provision/Reference intake. Protected Import has its own intake.</summary>
+    ValueTask<DurableChangeSetCreateResult> CreateAcquisitionChangeSetAsync(EnvironmentRecordId environment,
+        ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
+        ResourceAcquisitionIntent acquisitions, string actor, CancellationToken token) =>
+        ValueTask.FromResult(new DurableChangeSetCreateResult(DurableChangeSetCreateStatus.ReferenceNotSupported));
+
     ValueTask<DurableChangeSetCreateResult> CreateImportChangeSetAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, ResourceImportIntent intent,
         string actorId, CancellationToken cancellationToken) =>

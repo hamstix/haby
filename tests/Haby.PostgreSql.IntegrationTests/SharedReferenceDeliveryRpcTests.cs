@@ -4,6 +4,7 @@ using Grpc.Net.Client;
 using Haby.Application;
 using Haby.Configuration.Contracts;
 using Haby.Domain;
+using Haby.Manifest;
 using Haby.Operator.Host;
 using Haby.Persistence.PostgreSql;
 using Microsoft.AspNetCore.Builder;
@@ -19,7 +20,6 @@ public sealed partial class SharedReferenceDeliveryTests
     private static async Task<WebApplication> DeliveryHost(Scenario scenario, InternalDurableActions actions)
     {
         var rendering = new Rendering(scenario.Boundary);
-        var formatters = new ConfigurationFormatterCatalog([new FormatDefinition()], [new(Implementation, FormatterId)]);
         var host = OperatorHostApplication.Build(["--Haby:PostgreSql:ConnectionString=" + scenario.Connection,
             "--Haby:Port=0", "--Haby:Tls:Enabled=false"], services =>
         {
@@ -27,7 +27,12 @@ public sealed partial class SharedReferenceDeliveryTests
                 .AddSingleton<IDurableActionAdmissionHandler>(p => p.GetRequiredService<Handler>())
                 .AddSingleton<IDurableActionHandler>(p => p.GetRequiredService<Handler>())
                 .AddSingleton<IExternalOperationOutputContract, Evidence>();
-            services.AddSingleton(formatters).AddSingleton(new ConfigurationRenderingCatalog([new Definition()], [rendering], formatters, [rendering]))
+            services.AddSingleton(new ResourceTypeDefinition(Type, "{\"type\":\"object\",\"additionalProperties\":false}", OptionsSchema));
+            services.AddSingleton(new OutputContractDefinition(OutputContractId.Create(Output.Contract), OptionsSchema));
+            services.AddSingleton<ConfigurationRendererContract>(new Definition());
+            services.AddSingleton<ConfigurationFormatterContract>(new FormatDefinition());
+            services.AddSingleton(new ConfigurationFormatterImplementation(Implementation, FormatterId));
+            services.AddSingleton<IConfigurationRenderer>(rendering).AddSingleton<IConfigurationFormatter>(rendering)
                 .AddSingleton<IConfigurationResolutionBinding>(rendering);
             services.RemoveAll<IRuntimeAuthenticator>();
             services.AddSingleton<IRuntimeAuthenticator, ExactRuntimeIdentity>();

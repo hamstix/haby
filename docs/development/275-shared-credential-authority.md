@@ -1,9 +1,9 @@
 # Shared credential authority (275-C)
 
 275-B is merged in PR #291. This slice implements protected shared-credential
-intake and revision-bound authority. Qualification is in progress. 275-D Reference
-configuration materialization/delivery and Reference retirement remain pending;
-neither issue #275 nor P3 is complete. No production Reference registration is
+intake and revision-bound authority, merged and qualified in PR #293. Bounded
+275-D configuration materialization/delivery is merged and qualified in PR #294;
+Reference retirement remains pending; neither issue #275 nor P3 is complete. No production Reference registration is
 introduced here.
 
 ## Protected named intake
@@ -71,7 +71,7 @@ for an exact Environment/Provider/revision, including independent uses of the
 same Secret/version and issuance/revocation actors and UTC times. This is the
 current dependency summary: each entry identifies its exact Provider revision,
 slot, use and material identity. No consumer/document dependencies are created in
-275-C; 275-D must bind and inspect those separately through its accepted pipeline.
+275-C; merged 275-D binds and inspects those separately through its accepted pipeline.
 No material, material length, hash or verifier is returned.
 
 RevokeSharedCredentialUse selects that full exact scope and uses the authenticated
@@ -89,7 +89,7 @@ old revocation. There is no un-revoke operation or positive authorization cache.
 
 ApplicationDelivery issuance is stored for the next slice; no material resolver,
 raw password endpoint or production Reference delivery path is opened for it.
-275-D must enforce exact document, current association, frozen projection and
+Merged 275-D enforces exact document, current association, frozen projection and
 this exact unrevoked use binding on every static-token/runtime request, preserving
 whole-response failure. This slice does not implement retirement or rotation.
 

@@ -161,11 +161,7 @@ public static class OperatorHostApplication
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, OperatorAuthentication>(OperatorAuthentication.SchemeName, _ => { });
         builder.Services.AddAuthorization(options => options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
             .AddAuthenticationSchemes(OperatorAuthentication.SchemeName).RequireAuthenticatedUser().Build());
-        builder.Services.AddSingleton(PostgreSqlConnectionRendering.CreateCatalog());
-        builder.Services.AddSingleton(PostgreSqlConnectionRendering.FormatterCatalog());
-        builder.Services.AddSingleton(new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition, PostgreSqlApplicationLoginContract.Definition], [Haby.Kubernetes.Contracts.KubernetesContract.Definition],
-            [new(OutputContractId.Create(PostgreSqlApplicationConnectionContract.Contract), PostgreSqlConsumerOptions.Schema)],
-            [new(PostgreSqlConnectionRendering.Renderer)]));
+        HostCatalogComposition.Register(builder.Services);
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<ComposeConfigurationDocument>();
         builder.Services.AddSingleton<PostgreSqlConfigurationDocumentStore>();
@@ -305,6 +301,7 @@ public static class OperatorHostApplication
         _ = app.Services.GetRequiredService<IProviderConfigurationStore>();
         _ = app.Services.GetRequiredService<ProviderPreflightRegistry>();
         _ = app.Services.GetRequiredService<DurableActionRegistry>();
+        HostCatalogComposition.Validate(app.Services);
         app.UseRouting();
         app.UseAuthentication();
         app.UseAuthorization();

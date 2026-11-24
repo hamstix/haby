@@ -51,6 +51,42 @@ public sealed class WorkloadSubmissionTests
         Assert.Equal("unknown", result.Progress!.Submission);
         Assert.True(result.RequiresInspection);
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cancellation_at_Identity_Publication_boundary_never_starts_Deployment(bool insidePublication)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var steps = new PublicationBoundarySteps(cancellation, insidePublication);
+        var result = await new SubmitWorkloadGeneration(steps).ExecuteAsync(cancellation.Token);
+        Assert.Equal("cancelled", result.Outcome); Assert.Equal("Publication", result.Stage);
+        Assert.True(result.RequiresInspection);
+        Assert.DoesNotContain("Deployment", steps.Calls);
+        Assert.Equal(insidePublication, steps.Calls.Contains("Publication"));
+    }
+    [Fact]
+    public async Task Completed_preparation_reaches_deliberate_Deployment_boundary()
+    {
+        var steps = new PublicationBoundarySteps(null, false);
+        var result = await new SubmitWorkloadGeneration(steps).ExecuteAsync(default);
+        Assert.Equal("stopped", result.Outcome); Assert.Equal("Deployment", result.Stage);
+        Assert.Equal(new[] { "Inspection", "Recovery", "Documents", "Identity", "Publication", "Deployment" }, steps.Calls);
+    }
+    private sealed class PublicationBoundarySteps(CancellationTokenSource? cancellation, bool insidePublication) : IWorkloadSubmissionSteps
+    {
+        public List<string> Calls { get; } = [];
+        public ValueTask<WorkloadSubmissionStep> InspectAsync(CancellationToken token) { Calls.Add("Inspection"); return ValueTask.FromResult(new WorkloadSubmissionStep()); }
+        public ValueTask<WorkloadSubmissionStep> RecoverAsync(CancellationToken token) { Calls.Add("Recovery"); return ValueTask.FromResult(new WorkloadSubmissionStep()); }
+        public ValueTask<WorkloadSubmissionStep> PrepareAsync(WorkloadSubmissionStage stage, CancellationToken token)
+        {
+            Calls.Add(stage.ToString());
+            if (cancellation is not null && stage == (insidePublication ? WorkloadSubmissionStage.Publication : WorkloadSubmissionStage.Identity))
+            { cancellation.Cancel(); if (insidePublication) token.ThrowIfCancellationRequested(); }
+            return ValueTask.FromResult(stage == WorkloadSubmissionStage.Deployment ? new WorkloadSubmissionStep("deliberate-boundary") : new());
+        }
+        public ValueTask<WorkloadSubmissionProgress> ReadAsync(CancellationToken token) => ValueTask.FromResult(new WorkloadSubmissionProgress(
+            "deployment", 2, 2, 1, "partial", Guid.NewGuid(), null, []));
+    }
     private sealed class Steps(string? failure, bool complete = false, CancellationTokenSource? cancel = null, string? submission = null) : IWorkloadSubmissionSteps
     {
         public List<string> Calls { get; } = [];

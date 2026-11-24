@@ -326,8 +326,9 @@ authorized implementation qualification, not this documentation change.
 The maintainer accepted all decisions below. They amend ADR-029 administrative
 intake and ADR-042/050 delivery authorization, and apply ADR-051 retirement to
 Reference associations. Acceptance is not implementation: #275-A and #275-B are merged (PRs #290/#291);
-#275-C authority implementation/qualification is in progress; #275-D delivery and
-Reference retirement remain pending. See [275-C scope](../development/275-shared-credential-authority.md). Existing
+#275-C authority and #275-D bounded delivery are merged and qualified in
+[PR #293](https://github.com/hamstix/haby/pull/293) and
+[PR #294](https://github.com/hamstix/haby/pull/294). Reference retirement remains pending. See [275-C scope](../development/275-shared-credential-authority.md). Existing
 Provision/Import and static Profile secret-projection semantics remain unchanged.
 
 ### 19. Environment-owned shared credentials
@@ -460,11 +461,19 @@ promising erasure of every managed/library string copy.
 
 #275-C is merged in [PR #293](https://github.com/hamstix/haby/pull/293): protected
 shared-secret creation, exact use bindings issued with Provider revision,
-administrative revocation and persistence. #275-D now has a bounded implementation
-of confirmed Reference outputs -> Profile/Binding -> materialization -> authorized
-static/runtime delivery, including two Components with different typed options.
-Its exact-source review and full qualification remain pending; local closed-adapter
-evidence is not release qualification. See the [delivery boundary](../reference-configuration-delivery.md).
+administrative revocation and persistence. #275-D is merged and qualified in
+[PR #294](https://github.com/hamstix/haby/pull/294): confirmed Reference outputs ->
+Profile/Binding -> materialization -> authorized static/runtime delivery, including
+two Components with different typed options. See the [delivery boundary](../reference-configuration-delivery.md).
+
+The bounded #275-E extension admits initial downstream Reference through the
+existing authenticated operator ChangeSet/Plan/Commit/Execute API. An explicitly
+present acquisition set covers every Resource; absent input retains Provision.
+Import retains its separate protected intake. Trusted build composition may add
+existing typed Resource/output/renderer/formatter contributions to the stock
+catalogs before validation; replacing catalogs/engine/authentication is not part
+of this extension to #239. It adds no SDK or runtime plugin loader. See the
+[public admission boundary](../development/275-public-reference-admission.md).
 Neither slice enables incomplete production Reference registration.
 Retirement implementation and production availability remain explicit separate
 readiness items; a test adapter does not prove either complete.
