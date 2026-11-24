@@ -152,10 +152,28 @@ public sealed partial class OperatorHostIntegrationTests
             long attempts, outputs;
             await using (var read = ReferenceReadContext(connection))
             { attempts = await read.DurableOperationAttempts.CountAsync(x => x.OperationId == "left-reference" || x.OperationId == "right-reference"); outputs = await read.OperationOutputs.CountAsync(x => x.Contract == "sample.access/v1"); }
-            diagnostic.At(PublicReferenceCheckpoint.Submit);
-            var prepared = await client.SubmitGenerationAsync(new() { DeploymentId = committed.Commit.DeploymentId, Generation = committed.Commit.Generation });
+            var exact = new GenerationRequest { DeploymentId = committed.Commit.DeploymentId, Generation = committed.Commit.Generation };
+            var submissions = 0;
+            var replies = await ReferencePreparationContinuation.RunAsync(exact, committed.Commit, imported.Created.Revision.Reference, baseline.Generation,
+                input =>
+                {
+                    diagnostic.At(submissions++ == 0 ? PublicReferenceCheckpoint.Submit : PublicReferenceCheckpoint.PreparationContinuation);
+                    return client.SubmitGenerationAsync(input).ResponseAsync;
+                }, async input =>
+                {
+                    diagnostic.At(PublicReferenceCheckpoint.PreparationInspection);
+                    Assert.InRange(externalWrites, 0, 2);
+                    return await client.GetGenerationAsync(input);
+                }, (reply, attempt) =>
+                {
+                    diagnostic.At(attempt == 1 ? PublicReferenceCheckpoint.PreparationFirstResult : PublicReferenceCheckpoint.PreparationContinuationResult);
+                    diagnostic.Observe(reply, externalWrites);
+                });
+            // First is an independent snapshot; its safe observation is never overwritten by a continuation.
+            var firstSubmission = replies.First;
+            var prepared = replies.Final;
+            Assert.NotSame(firstSubmission, prepared);
             diagnostic.At(PublicReferenceCheckpoint.PreparationResult);
-            diagnostic.Observe(prepared, externalWrites);
             Assert.True(prepared.Stage == "Deployment", "Preparation: " + prepared.Outcome + "/" + prepared.Stage + "/" + prepared.Reason + "; writes=" + externalWrites + "; calls=" + string.Join(';', calls));
             // Preparation must be complete. The deliberately unsupported Deployment backend may
             // refuse immediately or close through the stock bounded request budget; neither proves rollout.

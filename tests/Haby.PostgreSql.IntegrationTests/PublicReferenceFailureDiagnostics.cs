@@ -8,7 +8,8 @@ internal enum PublicReferenceCheckpoint
 {
     PublishedSample, Catalog, Build, Issuance, Start, Authentication, Setup, InvalidIntake, ConsumerConfirmation,
     PeerConfirmation, Reuse, Delivery, Bindings, ClosedUpdate, Preparation, ProviderPreflight, PlanCommit,
-    Submit, PreparationResult, PreparationPostconditions, Revocation, Stop, Unknown
+    Submit, PreparationFirstResult, PreparationInspection, PreparationContinuation, PreparationContinuationResult,
+    PreparationResult, PreparationPostconditions, Revocation, Stop, Unknown
 }
 internal enum PublicReferenceChild { None, Issuance, First, Restart }
 
