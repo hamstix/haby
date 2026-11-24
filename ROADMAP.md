@@ -266,7 +266,7 @@ capabilities, not prerequisites for this milestone.
 - [x] Accept [ADR-060](docs/adr/0060-explicit-kubernetes-provider-tls-policy.md): explicit Kubernetes Provider TLS trust/revocation policy, unchanged omitted Online default and an explicit fresh-catalog format-2 transition.
 - [ ] Implement [issue #261](https://github.com/hamstix/haby/issues/261) after merged #259 and test-cycle separation #263, covering every production client/frozen input path and controlled TLS evidence. Then deliver existing Resource import/attachment under ADR-062 and #267 before public CLI composition/NuGet and lower-priority feature work. Successive UPDATE qualification, ADR-052 correction, integrated rehearsal and public operational UPDATE remain required; CLI composition remains after operational UPDATE. TLS policy acceptance is not implementation or P3 completion.
 
-- [x] Accept [ADR-061](docs/adr/0061-focused-development-and-final-qualification.md): focused development and exact-SHA full merge qualification.
+- [x] Accept [ADR-061](docs/adr/0061-focused-development-and-final-qualification.md): focused development; the 2026-11-24 amendment below replaces full merge qualification with targeted checks, nightly regression and full release qualification.
 - [ ] Implement [#263](https://github.com/hamstix/haby/issues/263) after #259 and before #261: independent focused PG/Kubernetes scenarios, fast ordinary iteration and a mechanical current-candidate full qualification gate. Existing checks remain until a safe approved transition.
 
 ### Accepted P3 execution order
@@ -413,6 +413,32 @@ SDK/NuGet packaging, general downstream server extension and CLI composition are
 later work (apart from the narrow #239 Host application-service boundary), informed by several real adapters rather than prerequisites for P4.
 Dynamic managed DLL loading, runtime provider protocols and WebAssembly execution
 are not introduced.
+
+## Accepted validation policy - 2026-11-24
+
+[ADR-061](docs/adr/0061-focused-development-and-final-qualification.md) now separates
+merge readiness from release readiness. This amendment supersedes earlier roadmap
+wording requiring a complete PostgreSQL/installed campaign for every merge, once
+the safe mechanical gate transition is deployed.
+
+- [x] Accept fast checks, independent review, relevant real PostgreSQL integration
+  tests and a small fixed smoke set before merge; expand relevant coverage for
+  migrations, transactions/locks, secret authority and shared persistence.
+- [x] Accept full PostgreSQL regression nightly on pinned main, with prioritized
+  failure triage; unrelated work is not automatically blocked by every failure.
+- [x] Require full exact-candidate qualification before release or updating a real
+  installation. A development merge does not declare installation readiness.
+- [ ] Implement [#297](https://github.com/hamstix/haby/issues/297): bounded CI scheduling/selection and distinct merge/release gates;
+  preserve all regression tests, safe reporting and existing execution venues.
+  Update CONTRIBUTING and agent/routing guidance during implementation. Do not
+  mass-rewrite tests to EF InMemory or make another fixture rearchitecture a
+  prerequisite. Frozen #263 is historical context, not an execution dependency.
+
+Until deployed, current required checks remain effective. No bypass or retroactive
+approval is authorized. Exact remote protection changes require maintainer approval.
+Keep the next functional priority on pre-Commit import correction after #275-E;
+coordinate this CI change without overlapping the same executor or reopening a
+broad infrastructure campaign.
 
 ## Post-P4 - Deferred mass-start qualification
 
