@@ -33,11 +33,17 @@ internal static class HostCatalogComposition
         var registry = services.GetRequiredService<DurableActionRegistry>();
         var admissions = services.GetServices<IDurableActionAdmissionHandler>().ToArray();
         var providers = services.GetRequiredService<ProviderDeclarationRegistry>();
-        bool Complete(IDurableActionAdmissionHandler action) => manifest.TryGet(action.Key.Admission.ResourceContract, out _) &&
-            providers.Find(new(action.Key.Admission.ProviderKind.Value, action.Key.Admission.ConfigurationContract.Value, action.Key.Admission.ImplementationId.Value)) is not null &&
-            registry.Find(action.Key) is { } executor && (action.Key.Admission.Mode != ResourceAcquisitionMode.Reference ||
-                executor is IReadOnlyResourceObservationHandler && executor.RequiresExternalOutput && executor.OutputIdentity is not null);
-        if (admissions.Where(x => x.Key.Admission.Mode == ResourceAcquisitionMode.Reference).Any(x => !Complete(x)))
+        var executors = services.GetServices<IDurableActionHandler>().ToArray();
+        var evidence = services.GetServices<IExternalOperationOutputContract>().ToArray();
+        bool Complete(DurableActionExecutionKey key) => manifest.TryGet(key.Admission.ResourceContract, out _) &&
+            providers.Find(new(key.Admission.ProviderKind.Value, key.Admission.ConfigurationContract.Value, key.Admission.ImplementationId.Value)) is not null &&
+            registry.Find(key.Admission)?.Key == key && registry.Find(key) is { } executor &&
+            (key.Admission.Mode != ResourceAcquisitionMode.Reference || executor is IReadOnlyResourceObservationHandler &&
+                executor.RequiresExternalOutput && executor.OutputIdentity is not null &&
+                evidence.SingleOrDefault(x => x.Producer == key) is IResourceReferenceOutputContract output && output.Identity == executor.OutputIdentity);
+        var references = admissions.Select(x => x.Key).Concat(executors.Select(x => x.Key)).Concat(evidence.Select(x => x.Producer))
+            .Where(x => x.Admission.Mode == ResourceAcquisitionMode.Reference).Distinct();
+        if (references.Any(key => !Complete(key)))
             throw new InvalidOperationException("Reference capability registration is incomplete.");
         // Only the current build's contributed capabilities are checked, never stored history.
         var contributed = services.GetServices<ResourceTypeDefinition>().Where(x =>
@@ -45,7 +51,7 @@ internal static class HostCatalogComposition
         foreach (var resource in contributed)
         {
             var actions = admissions.Where(x => x.Key.Admission.ResourceContract == resource.Id).ToArray();
-            if (actions.Length == 0 || actions.Any(x => !Complete(x)))
+            if (actions.Length == 0 || actions.Any(x => !Complete(x.Key)))
                 throw new InvalidOperationException("Contributed Resource capability is incomplete.");
         }
         var renderers = services.GetServices<IConfigurationRenderer>().ToArray();

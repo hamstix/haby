@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Haby.PostgreSql.IntegrationTests;
 
-public sealed class OperatorHostCompositionTests
+public sealed partial class OperatorHostCompositionTests
 {
     [Fact]
     public async Task Additive_contract_conflict_is_refused_before_listening()
