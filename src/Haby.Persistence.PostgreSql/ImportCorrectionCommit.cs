@@ -17,7 +17,9 @@ internal static class ImportCorrectionCommit
         var previous = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == target.PreviousRequestId, token);
         if (successor is null || previous is null || !PostgreSqlDurableDeploymentPlanner.SameImportRequest(successor, binding) ||
             successor.ChangeSet != commit.ChangeSetId || successor.StagedCredential is not { } newStage || previous.Environment != environment ||
-            previous.Application != application || previous.Revision != successor.Revision || previous.CredentialResource != resource ||
+            previous.Application != application || previous.CredentialResource != resource ||
+            previous.Revision != successor.Revision &&
+                (target.Deployment is not null || target.Generation is not null || target.Reason != OperatorImportCorrectionReason.InputCorrection) ||
             await db.ImportSupersessions.AsNoTracking().AnyAsync(x => x.PreviousRequest == previous.Id, token)) return false;
         var stage = await PostgreSqlDurableDeploymentPlanner.ReadRequestCredentialAsync(db, newStage, token);
         if (!PostgreSqlDurableDeploymentPlanner.MatchesRequestCredential(stage, successor) || stage!.ConfirmedReceipt is not null) return false;

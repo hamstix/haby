@@ -116,6 +116,19 @@ retain the old binding, intent, attempts, referenced inputs and immutable
 actor/time/reason audit. Do not overwrite staged material or delete history.
 Closing a Plan or choosing a new UUID alone does not free a credential owner.
 
+Accepted pre-Commit revision correction (#296): an explicit `InputCorrection`
+with expected absence may target a different already-imported immutable revision
+of the same Application, in the same Environment and for the same designated
+credential Resource. Revalidate the entire successor declaration, pair, Provider
+inputs and capabilities through ordinary preparation and Plan. This supports a
+staged request whose declaration failed planning; no old Plan needs to be closed.
+Staging/planning does not supersede the predecessor. Commit rechecks absence and
+atomically transfers only the pending owner with its immutable supersession audit.
+A racing predecessor Commit makes the expected-absence successor stale, never an
+implicit post-Commit correction. Each request/replay remains bound to its original
+revision. Other cross-revision correction reasons and post-Commit cross-revision
+correction remain unsupported; existing same-revision correction is unchanged.
+
 Transfer the pending credential-owner reservation atomically using compare-and-swap
 and reference-integrity guards. Refuse transfer if a confirmed receipt, usable
 output, Applied association, active execution or live consumer reference makes
