@@ -1,3 +1,4 @@
+using Haby.TestDiagnostics;
 using System.Security.Claims;
 using Grpc.Core;
 using Haby.Operator.Composition.Sample.Wire;
@@ -10,6 +11,8 @@ if (args.FirstOrDefault() == "operator-token-issue")
 await using var app = await OperatorHostApplication.BuildComposedMigratedAsync(args, (services, configuration) =>
 {
     ReferenceAdapter.Register(services);
+    if (CompositionExceptionDiagnostics.FromEnvironment() is { } diagnostics)
+        services.AddLogging(logging => logging.AddProvider(diagnostics).AddFilter<CompositionExceptionDiagnostics>((category, level) => true));
     services.AddSingleton(provider => new SampleValue(
         configuration["Sample:Value"] ?? throw new InvalidOperationException("Sample:Value is required."),
         provider.GetRequiredService<TimeProvider>()));

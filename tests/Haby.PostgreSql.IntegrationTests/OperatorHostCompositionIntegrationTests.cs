@@ -1,3 +1,4 @@
+using Haby.TestDiagnostics;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -146,7 +147,8 @@ public sealed partial class OperatorHostIntegrationTests
         private readonly Process _process;
         private readonly Task<string> _error;
         internal int? DiagnosticExitCode { get; private set; }
-        internal CompositionProcess(string binary, string connection, string working, string[] args)
+        private readonly string? _stagePath;
+        internal CompositionProcess(string binary, string connection, string working, string[] args, bool retainDiagnostics = false)
         {
             var start = new ProcessStartInfo("dotnet")
             {
@@ -162,8 +164,43 @@ public sealed partial class OperatorHostIntegrationTests
             start.Environment["Haby__PostgreSql__ConnectionString"] = connection;
             start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
             start.Environment["DOTNET_ENVIRONMENT"] = "Production";
+            if (retainDiagnostics)
+            {
+                var id = Guid.NewGuid().ToString("N");
+                var output = Environment.GetEnvironmentVariable("HABY_TEST_TIMING_DIRECTORY") ?? Path.Combine(Path.GetTempPath(), "haby-composition-evidence");
+                Directory.CreateDirectory(output);
+                _stagePath = Path.Combine(working, "composition-stage-" + id);
+                var identityPath = Path.Combine(output, "composition-" + id + ".identity.json");
+                var testAssembly = typeof(OperatorHostIntegrationTests).Assembly.Location;
+                var directory = Path.GetDirectoryName(binary)!;
+                string Hash(string file) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).ToLowerInvariant();
+                string Source(string file)
+                {
+                    var value = FileVersionInfo.GetVersionInfo(file).ProductVersion?.Split('+').Last();
+                    return value?.Length == 40 && value.All(char.IsAsciiHexDigit) ? value.ToLowerInvariant() : "unknown";
+                }
+                var identity = new CompositionDiagnosticIdentity(Source(binary), Hash(binary), Hash(Path.Combine(directory, "Haby.Persistence.PostgreSql.dll")),
+                    Hash(Path.Combine(directory, "Haby.Application.dll")), Source(testAssembly), Hash(testAssembly));
+                File.WriteAllText(identityPath, JsonSerializer.Serialize(identity, CompositionDiagnosticJson.Default.CompositionDiagnosticIdentity));
+                SetDiagnosticStage(CompositionDiagnosticStage.Inactive);
+                start.Environment["HABY_TEST_COMPOSITION_STAGE"] = _stagePath;
+                start.Environment["HABY_TEST_COMPOSITION_IDENTITY"] = identityPath;
+                start.Environment["HABY_TEST_COMPOSITION_RECORDS"] = Path.Combine(output, "composition-" + id + ".exceptions.jsonl");
+            }
             _process = Process.Start(start)!;
             _error = _process.StandardError.ReadToEndAsync();
+        }
+        private void SetDiagnosticStage(CompositionDiagnosticStage stage)
+        {
+            if (_stagePath is null) return;
+            try { File.WriteAllText(_stagePath, stage.ToString()); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+        internal async Task<T> AtDiagnosticStageAsync<T>(CompositionDiagnosticStage stage, Func<Task<T>> body)
+        {
+            SetDiagnosticStage(stage);
+            try { return await body(); }
+            finally { SetDiagnosticStage(CompositionDiagnosticStage.Inactive); }
         }
         internal async Task ExpectAsync(string expected)
         {

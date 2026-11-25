@@ -1,3 +1,4 @@
+using Haby.TestDiagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Google.Protobuf;
@@ -47,12 +48,13 @@ public sealed partial class PostgreSqlPairImportTests
             {
                 var port = OperatorHostCompositionTests.AvailablePort();
                 await using var child = new OperatorHostIntegrationTests.CompositionProcess(binary!, catalog, root,
-                    ["--contentRoot=" + root, "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"]);
+                    ["--contentRoot=" + root, "--Haby:Port=" + port, "--Haby:Tls:Enabled=false"], retainDiagnostics: true);
                 await child.ExpectAsync("composition-built"); await child.SendAsync("start"); await child.ExpectAsync("composition-started");
                 using var channel = GrpcChannel.ForAddress("http://127.0.0.1:" + port);
                 var client = OperatorTestCredentials.Client(channel, credential);
                 if (startup == 0)
                 {
+                    var checkedPlans = 0;
                     var environment = await client.CreateEnvironmentAsync(new() { Name = "pilot" });
                     Assert.Equal(EnvironmentStatus.Created, environment.Status);
                     var control = new NpgsqlConnectionStringBuilder(Control());
@@ -126,7 +128,9 @@ public sealed partial class PostgreSqlPairImportTests
                     async Task<DurableCommitSummary> Confirm(string change)
                     {
                         var plan = await client.CreatePlanAsync(new() { ChangeSetId = change }); Assert.Equal(PlanningStatus.Planned, plan.Status);
-                        Assert.Equal(PlanningStatus.Current, (await client.CheckPlanAsync(new() { PlanId = plan.Plan.PlanId })).Status);
+                        var stage = ++checkedPlans == 1 ? CompositionDiagnosticStage.InitialProtectedImportBaselineCheckPlan : CompositionDiagnosticStage.AdditiveCheckPlan;
+                        Assert.Equal(PlanningStatus.Current, (await child.AtDiagnosticStageAsync(stage,
+                            async () => await client.CheckPlanAsync(new() { PlanId = plan.Plan.PlanId }))).Status);
                         var commit = await client.CommitDesiredStateAsync(new() { ChangeSetId = change, PlanId = plan.Plan.PlanId }); Assert.Equal(CommitStatus.Committed, commit.Status); return commit.Commit;
                     }
                 }

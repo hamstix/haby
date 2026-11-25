@@ -4,6 +4,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\CompositionExceptionDiagnostics.cs" Link="CompositionExceptionDiagnostics.cs" />
     <InternalsVisibleTo Include="Haby.Kubernetes.Qualification" />
     <Compile Include="..\InternalKubernetesFixturePreflight.cs" Link="InternalKubernetesFixturePreflight.cs" />
     <Compile Include="..\DurableInputSamples.cs" Link="DurableInputSamples.cs" />
