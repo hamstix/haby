@@ -90,16 +90,28 @@ public sealed class CliInvocationContext
     /// <summary>The returned session owns its channel. Dispose it after the command, including failures.</summary>
     public async ValueTask<CliRegistrySession> OpenRegistryAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var context = await _resolver.ResolveAsync(Selection, cancellationToken);
-        var address = CliApplication.ParseEndpoint(context.Endpoint?.AbsoluteUri, context.AllowInsecureHttp) ?? throw new InvalidDataException();
-        cancellationToken.ThrowIfCancellationRequested();
-        var credential = context.Credentials is null ? null : await context.Credentials.GetCredentialAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (credential is not null && !CliOperatorCredential.Valid(credential)) throw new InvalidDataException();
+        CliResolvedContext context;
+        Uri address;
+        string? credential;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            context = await _resolver.ResolveAsync(Selection, cancellationToken);
+            address = CliApplication.ParseEndpoint(context.Endpoint?.AbsoluteUri, context.AllowInsecureHttp) ?? throw new InvalidDataException();
+            cancellationToken.ThrowIfCancellationRequested();
+            credential = context.Credentials is null ? null : await context.Credentials.GetCredentialAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (credential is not null && !CliOperatorCredential.Valid(credential)) throw new InvalidDataException();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or
+            FormatException or NotSupportedException or InvalidRegistryEndpointException)
+        { throw new CliRegistryAdmissionException(); }
+
         return new CliRegistrySession(address, context.SkipTlsCertificateValidation, credential, context.Environment);
     }
 }
+
+internal sealed class CliRegistryAdmissionException : Exception;
 
 public sealed class CliRegistrySession : IDisposable
 {

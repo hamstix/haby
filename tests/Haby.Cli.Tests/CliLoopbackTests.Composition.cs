@@ -61,6 +61,7 @@ public sealed partial class CliLoopbackTests
         }
         try
         {
+            var admissionExits = new List<int>();
             var custom = await Run("sample"); Assert.Equal(0, custom.Exit); Assert.Equal("custom", custom.Output.Trim());
             var help = await Run("--config", "missing", "registry", "manifest", "--help"); Assert.Equal(0, help.Exit); Assert.Contains("registry-sample registry manifest", help.Output);
             var group = await Run("registry", "manifest", "--output", "json"); Assert.Equal(2, group.Exit); Assert.Contains("Commands:", group.Error); Assert.Equal("", group.Output);
@@ -69,6 +70,7 @@ public sealed partial class CliLoopbackTests
             Assert.True(valid.Exit == 0, valid.Error); using (var json = JsonDocument.Parse(valid.Output)) Assert.Equal("valid", json.RootElement.GetProperty("outcome").GetString());
             var customRpc = await Run("sample-registry", "--output", "json"); Assert.Equal(0, customRpc.Exit); Assert.Contains("valid", customRpc.Output);
             var explicitBad = await Run("registry", "manifest", "validate", envelope, "--config", Path.Combine(directory, "missing")); Assert.Equal(2, explicitBad.Exit);
+            admissionExits.Add((await Run("sample-registry", "--config", Path.Combine(directory, "missing"))).Exit);
             var mutate = await Run("config", "set-credential", "registry", "--token-file", tokenFile, "--normalize", "--new-config-file", destination);
             Assert.Equal(0, mutate.Exit); var updated = JsonSerializer.Deserialize(await File.ReadAllTextAsync(destination), SampleJsonContext.Default.SampleDocument)!;
             Assert.Equal(document, updated with { Values = document.Values }); Assert.Equal("blue", updated.Values["color"]);
@@ -84,11 +86,16 @@ public sealed partial class CliLoopbackTests
             await File.WriteAllTextAsync(config, originalText);
             await File.WriteAllTextAsync(tokenFile, "invalid-token-sentinel");
             var badToken = await Run("registry", "manifest", "validate", envelope); Assert.Equal(2, badToken.Exit); Assert.DoesNotContain("invalid-token-sentinel", badToken.Error);
+            var customBadToken = await Run("sample-registry"); admissionExits.Add(customBadToken.Exit); Assert.DoesNotContain("invalid-token-sentinel", customBadToken.Error);
             var offline = await Run("config", "view"); Assert.Equal(0, offline.Exit);
             await File.WriteAllTextAsync(tokenFile, "haby_operator_v1.22222222222222222222222222222222." + new string('a', 64));
             var unauthorized = await Run("registry", "manifest", "validate", envelope); Assert.Equal(3, unauthorized.Exit); Assert.Contains("Unauthenticated", unauthorized.Error); Assert.DoesNotContain("server details", unauthorized.Error);
+            var customUnauthorized = await Run("sample-registry"); Assert.Equal(3, customUnauthorized.Exit);
+            Assert.Contains("Unauthenticated", customUnauthorized.Error); Assert.DoesNotContain("server details", customUnauthorized.Error);
             await File.WriteAllTextAsync(config, JsonSerializer.Serialize(document with { Endpoint = "http://remote.example", TokenFile = Path.Combine(directory, "missing-token") }, SampleJsonContext.Default.SampleDocument));
             var transport = await Run("registry", "manifest", "validate", envelope); Assert.Equal(2, transport.Exit); Assert.Contains("loopback", transport.Error);
+            admissionExits.Add((await Run("sample-registry")).Exit);
+            Assert.Equal(new[] { explicitBad.Exit, badToken.Exit, transport.Exit }, admissionExits);
         }
         finally
         {

@@ -64,7 +64,7 @@ public sealed class CliCompositionTests
         builder.AddCommand(builder.Root, new Command("call"), async (_, context, token) =>
         { using var session = await context.OpenRegistryAsync(token); return 0; });
         var runtime = builder.Build();
-        Assert.Equal(3, await runtime.RunAsync(["call"]));
+        Assert.Equal(2, await runtime.RunAsync(["call"]));
         Assert.Equal(1, source.Calls); Assert.Equal(0, source.CredentialCalls); Assert.False(source.Disposed);
         source.Endpoint = new Uri("http://127.0.0.1:1");
         Assert.Equal(0, await runtime.RunAsync(["call"]));
@@ -80,10 +80,12 @@ public sealed class CliCompositionTests
     {
         var builder = NewBuilder(new Resolver()); var error = new StringWriter(); builder.Error = error;
         builder.AddCommand(builder.Root, new Command("fail"), (_, _, _) => throw new InvalidOperationException("credential-sentinel"));
+        builder.AddCommand(builder.Root, new Command("file-fail"), (_, _, _) => throw new IOException("credential-sentinel"));
         builder.AddCommand(builder.Root, new Command("cancel"), async (_, _, token) => { await Task.Delay(Timeout.Infinite, token); return 0; });
         builder.AddCommand(builder.Root, new Command("ok"), (_, _, _) => Task.FromResult(0));
         var runtime = builder.Build();
         Assert.Equal(3, await runtime.RunAsync(["fail"])); Assert.DoesNotContain("credential-sentinel", error.ToString());
+        Assert.Equal(3, await runtime.RunAsync(["file-fail"])); Assert.DoesNotContain("credential-sentinel", error.ToString());
         using var canceled = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
         Assert.Equal(3, await runtime.RunAsync(["cancel"], canceled.Token));
         Assert.Equal(0, await runtime.RunAsync(["ok"]));

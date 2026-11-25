@@ -109,6 +109,8 @@ internal sealed partial class CliApplication(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         { error.WriteLine("Operation canceled."); return TransportError; }
+        catch (CliRegistryAdmissionException)
+        { error.WriteLine("Invalid CLI configuration."); return UsageError; }
         catch (Exception exception)
         { error.WriteLine(CliApplication.SafeError(exception)); return TransportError; }
     }
