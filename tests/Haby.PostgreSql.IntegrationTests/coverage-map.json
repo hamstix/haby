@@ -21,7 +21,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "SharedCredentialAuthorityTests": {
@@ -42,7 +44,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
   "ResourceReferenceKernelTests": {
@@ -63,7 +67,9 @@
     },
     "suite": "functional",
     "triggers": [
-      "regular-full"
+      "relevant-merge",
+        "nightly-full",
+        "release-full"
     ]
   },
     "OperatorImportRequestPersistenceTests": {
@@ -84,7 +90,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PostgreSqlPairImportTests": {
@@ -107,7 +115,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ResourceImportAcceptanceTests": {
@@ -128,7 +138,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ProtectedApplicationCredentialTests": {
@@ -149,7 +161,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ResourceImportAuthorityTests": {
@@ -170,7 +184,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "AdministrativeSecretTests": {
@@ -191,7 +207,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ConfigurationProfilePersistenceTests": {
@@ -212,7 +230,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "DurableDeploymentPlanningTests": {
@@ -235,7 +255,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "DurableExecutionTests": {
@@ -257,7 +279,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ExactActionAdmissionTests": {
@@ -279,7 +303,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ExactActionRegistrationTests": {
@@ -300,7 +326,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "FiveStepCompositionTests": {
@@ -321,7 +349,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "GeneratedCredentialSlotTests": {
@@ -342,7 +372,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "IndependentPairPlanningTests": {
@@ -363,7 +395,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ManifestCatalogPersistenceTests": {
@@ -384,7 +418,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "RuntimeDeliveryHostTests": {
@@ -405,7 +441,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "OperatorHostCompositionTests": {
@@ -426,7 +464,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "OperatorHostConfigurationTests": {
@@ -447,7 +487,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "OperatorHostIntegrationTests": {
@@ -468,7 +510,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "OperatorProviderAccessTests": {
@@ -490,7 +534,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PlacementRevisionPersistenceTests": {
@@ -511,7 +557,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PlaintextSecretStoreTests": {
@@ -532,7 +580,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PostgreSqlApplicationLoginTests": {
@@ -555,7 +605,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PostgreSqlIntegrationTests": {
@@ -578,7 +630,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PostgreSqlPairPersistenceTests": {
@@ -599,7 +653,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PostgreSqlPairPlanningTests": {
@@ -620,7 +676,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "PostgreSqlRestrictTests": {
@@ -642,7 +700,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ProviderAliasTests": {
@@ -664,7 +724,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ProviderConfigurationStoreTests": {
@@ -685,7 +747,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ProviderDeclarationTests": {
@@ -706,7 +770,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ProviderPreflightCompatibilityTests": {
@@ -728,7 +794,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "RetainedPairPlanningTests": {
@@ -749,7 +817,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "TestCatalogPoolTests": {
@@ -770,7 +840,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "HostFailureDiagnosticsTests": {
@@ -791,7 +863,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ApplicationConfigurationTests": {
@@ -814,7 +888,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ApplicationGenerationTests": {
@@ -837,7 +913,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "ApplicationLoginLoggingTests": {
@@ -860,7 +938,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "FixtureLayoutTests": {
@@ -881,7 +961,9 @@
       },
       "suite": "functional",
       "triggers": [
-        "regular-full"
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
       ]
     },
     "OwnedInfrastructureTests": {
@@ -902,7 +984,9 @@
       },
       "suite": "infrastructure-qualification",
       "triggers": [
-        "regular-full",
+        "relevant-merge",
+        "nightly-full",
+        "release-full",
         "infrastructure-path",
         "weekly",
         "manual"

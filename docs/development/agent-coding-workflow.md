@@ -749,3 +749,14 @@ direction, contract compatibility, deterministic behavior, cancellation,
 redaction, missing tests and unrelated changes. If no blocking issue exists,
 state that explicitly and list any residual risks separately.
 ```
+
+## PostgreSQL qualification scheduling
+
+Follow [#297 selection/transition](297-nightly-postgresql.md). Exact independent
+review and architect merge approval remain separate. After installation, use the
+trusted Merge qualification outcome for relevant real PostgreSQL plus fixed smoke
+and current applicable contours; broad shared/sensitive changes remain full.
+Full nightly is pinned main regression, not a prerequisite to every intervening
+merge. Full Final is exact release/install readiness. Before #297 installation,
+its implementation candidate retains previous full requirements. Coordinator
+artifacts are acquired once and shared with the independent reviewer.

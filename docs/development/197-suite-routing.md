@@ -1,12 +1,11 @@
 # Functional suites and infrastructure qualification
 
-> Accepted amendment: [ADR-061](../adr/0061-focused-development-and-final-qualification.md)
-> separates focused iteration from exact-SHA full merge qualification in #263,
-> after #259 and before #261. Earlier every-change/full-gate wording describes
-> current execution until that safe mechanical gate transition is implemented.
-> Full applicable qualification before merge remains mandatory; this documentation
-> changes no workflow, required context or remote protection setting.
-
+> Current policy: [ADR-061](../adr/0061-focused-development-and-final-qualification.md)
+> and [#297 selection/transition](297-nightly-postgresql.md) distinguish targeted
+> merge qualification, nightly full PostgreSQL and full release/install Final.
+> Earlier every-change/full-merge descriptions below are historical inventory
+> and remain effective only until the reviewed #297 implementation is installed.
+> The implementation candidate itself receives the old full qualification.
 
 Issue #237 declares 1759 fast, 1148 PostgreSQL total, 104 native cases per platform
 and 24 configured-consumer assertions. Its additions are 17 fast, 27 functional,

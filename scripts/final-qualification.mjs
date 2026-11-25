@@ -213,7 +213,7 @@ function cleanup(text, identity, marker, gate = 'kubernetes-provider-access', me
 
 // Read only the compact, existing per-gate reports and the candidate's existing
 // coverage plan. Never import, execute or print candidate artifacts.
-export function validateEvidence(identity, plan, artifacts, attempt) {
+export function validateEvidence(identity, plan, artifacts, attempt, selection = null) {
   requireThat(Array.isArray(plan.entries) && plan.entries.length > 0, 'Coverage plan is missing.', { code: 'coverage-plan-incomplete', gate: 'control', member: 'suite-gate-map.json' });
   const names = artifactNames(identity, attempt);
   const gates = { fast: 'validate', windows: 'Native AOT (win-x64)', linux: 'Native AOT (linux-x64)', postgresql: 'postgresql-integration', composition: 'postgresql-integration', provider: 'kubernetes-provider-access', configured: 'kubernetes-configured-deployment', durable: 'kubernetes-durable-actions', kernel: 'kubernetes-deployment-kernel' };
@@ -236,35 +236,7 @@ export function validateEvidence(identity, plan, artifacts, attempt) {
     }
     summary.push({ gate: name, cases: rows.length, status: 'complete' });
   }
-  const pg = files('postgresql'); const rows = expected('postgresql-integration');
-  inventory(rows, array(json(pg, 'cases.json')), { gate: 'postgresql-integration', member: 'cases.json' }); counts(pg, '', rows.length);
-  const coverage = json(pg, 'coverage.json'); const measurement = json(pg, 'measurement.json');
-  requireThat(coverage.status === 'complete' && coverage.selection === 'full' && coverage.discovered === rows.length && coverage.executed === rows.length, 'Focused or partial PostgreSQL evidence cannot qualify.',
-    { code: 'coverage-incomplete', gate: 'postgresql-integration', member: 'coverage.json' });
-  requireThat(measurement.source === identity.merge && measurement.sourceChangedDuringRun === false && measurement.untrackedFileCountAtStart === 0 &&
-    measurement.requiredAot === true && measurement.testExitCode === 0 && measurement.reportingFailed === false && measurement.selection === 'full', 'PostgreSQL source or outcome incomplete.',
-    { code: 'postgresql-execution-incomplete', gate: 'postgresql-integration', member: 'measurement.json', cleanup: measurement.preflightCleanupExitCode === 0 ? 'not-established' : 'incomplete' });
-  requireThat(measurement.preflightCleanupExitCode === 0, 'PostgreSQL preflight cleanup incomplete.',
-    { code: 'preflight-cleanup-incomplete', gate: 'postgresql-integration', member: 'measurement.json', cleanup: 'incomplete' });
-  requireThat(measurement.groups?.length === 2 && ['functional', 'infrastructure-qualification'].every(suite => measurement.groups.filter(group => group.suite === suite && group.phase === 'complete' && group.testExitCode === 0).length === 1), 'Complete PostgreSQL suites missing.',
-    { code: 'suite-coverage-incomplete', gate: 'postgresql-integration', member: 'measurement.json' });
-  resources(json(pg, 'resources.json'));
-  const preflight = json(pg, 'preflight.json');
-  requireThat(['prerequisites', 'ownedServer'].every(key => preflight[key]?.exitCode === 0 && preflight[key]?.cleanup === 'ok'), 'PostgreSQL preflight/cleanup evidence incomplete.',
-    { code: 'preflight-incomplete', gate: 'postgresql-integration', member: 'preflight.json', cleanup: ['prerequisites', 'ownedServer'].every(key => preflight[key]?.cleanup === 'ok') ? 'not-established' : 'incomplete' });
-  for (const suite of ['functional', 'infrastructure-qualification']) {
-    inventory(expected('postgresql-integration', suite), array(json(pg, `${suite}/cases.json`)), { gate: 'postgresql-integration', member: `${suite}/cases.json` });
-    resources(json(pg, `${suite}/resources.json`), `${suite}/resources.json`);
-    requireThat(json(pg, `${suite}/failure-evidence.json`).failedCases === 0, 'PostgreSQL suite failure present.',
-      { code: 'test-failure', gate: 'postgresql-integration', member: `${suite}/failure-evidence.json` });
-  }
-  const precheck = json(pg, 'anonymous-reflection-precheck/precheck.json');
-  requireThat(precheck.source === identity.merge && precheck.status === 'passed' && precheck.exitCode === 0 && precheck.testExitCode === 0 && precheck.reportingFailed === false && precheck.cleanup === 'confirmed-by-named-test-lifecycle', 'Named reflection precheck incomplete.',
-    { code: 'precheck-incomplete', gate: 'postgresql-integration', member: 'anonymous-reflection-precheck/precheck.json', cleanup: precheck.cleanup === 'confirmed-by-named-test-lifecycle' ? 'not-established' : 'not-confirmed' });
-  const composition = files('composition');
-  requireThat(composition.has('Haby.Operator.Composition.Sample.dll') && createHash('sha256').update(composition.get('Haby.Operator.Composition.Sample.dll')).digest('hex') === measurement.compositionSampleSha256, 'Tested composition executable missing or different.',
-    { code: 'composition-incomplete', gate: 'postgresql-integration', member: 'Haby.Operator.Composition.Sample.dll' });
-  summary.push({ gate: 'postgresql-integration', cases: rows.length, status: 'complete', cleanup: 'confirmed' });
+  summary.push(...validatePostgreSqlEvidence(identity, plan, artifacts, attempt, selection));
   for (const [key, name, markers] of [
     ['kernel', 'kubernetes-deployment-kernel', ['PASS kernel-cleanup-ownership', 'PASS kernel-namespace-absence-after-UID-delete']],
     ['durable', 'kubernetes-durable-actions', ['PASS durable-owned-catalog-cleanup']],
@@ -440,4 +412,49 @@ export async function publish(github, identity, runId, attempt, checkId, summary
     completed_at: new Date().toISOString(), output: { title: 'Exact candidate qualification', summary },
     details_url: `https://github.com/${identity.repository}/actions/runs/${runId}/attempts/${attempt}` });
   requireThat(conclusion === 'success', 'Final qualification did not pass.');
+}
+
+export { assertClassification, assertDocsResults, docsChecks, boundedFailure, readControlArtifact, artifactTiming };
+
+export function validatePostgreSqlEvidence(identity, plan, artifacts, attempt, selection = null) {
+  const names = artifactNames(identity, attempt);
+  const files = key => {
+    requireThat(artifacts.has(names[key]), 'Missing PG artifact.');
+    const content = artifacts.get(names[key]); content.qualificationGate = 'postgresql-integration'; return content;
+  };
+  const expected = (name, suite) => plan.entries.filter(row => row.gate === name && (!suite || row.suite === suite));
+  const summary = [];
+  const pg = files('postgresql'); const targeted = selection?.scope === 'targeted';
+  const rows = targeted ? selection.cases : expected('postgresql-integration');
+  inventory(rows, array(json(pg, 'cases.json')), { gate: 'postgresql-integration', member: 'cases.json' }); counts(pg, '', rows.length);
+  const coverage = json(pg, 'coverage.json'); const measurement = json(pg, 'measurement.json');
+  requireThat(coverage.status === (targeted ? 'focused' : 'complete') && coverage.selection === (targeted ? 'focused' : 'full') && coverage.discovered === rows.length && coverage.executed === rows.length, 'Focused or partial PostgreSQL evidence cannot qualify.',
+    { code: 'coverage-incomplete', gate: 'postgresql-integration', member: 'coverage.json' });
+  requireThat(measurement.source === identity.merge && measurement.sourceChangedDuringRun === false && measurement.untrackedFileCountAtStart === 0 &&
+    measurement.requiredAot === true && measurement.testExitCode === 0 && measurement.reportingFailed === false && measurement.selection === (targeted ? 'focused' : 'full'), 'PostgreSQL source or outcome incomplete.',
+    { code: 'postgresql-execution-incomplete', gate: 'postgresql-integration', member: 'measurement.json', cleanup: measurement.preflightCleanupExitCode === 0 ? 'not-established' : 'incomplete' });
+  requireThat(measurement.preflightCleanupExitCode === 0, 'PostgreSQL preflight cleanup incomplete.',
+    { code: 'preflight-cleanup-incomplete', gate: 'postgresql-integration', member: 'measurement.json', cleanup: 'incomplete' });
+  requireThat(measurement.groups?.length === (targeted ? new Set(rows.map(row => row.suite)).size : 2) && (targeted ? [...new Set(rows.map(row => row.suite))] : ['functional', 'infrastructure-qualification']).every(suite => measurement.groups.filter(group => group.suite === suite && group.phase === 'complete' && group.testExitCode === 0).length === 1), 'Complete PostgreSQL suites missing.',
+    { code: 'suite-coverage-incomplete', gate: 'postgresql-integration', member: 'measurement.json' });
+  resources(json(pg, 'resources.json'));
+  const preflight = json(pg, 'preflight.json');
+  requireThat(['prerequisites', 'ownedServer'].every(key => preflight[key]?.exitCode === 0 && preflight[key]?.cleanup === 'ok'), 'PostgreSQL preflight/cleanup evidence incomplete.',
+    { code: 'preflight-incomplete', gate: 'postgresql-integration', member: 'preflight.json', cleanup: ['prerequisites', 'ownedServer'].every(key => preflight[key]?.cleanup === 'ok') ? 'not-established' : 'incomplete' });
+  for (const suite of (targeted ? [...new Set(rows.map(row => row.suite))] : ['functional', 'infrastructure-qualification'])) {
+    inventory(targeted ? rows.filter(row => row.suite === suite) : expected('postgresql-integration', suite), array(json(pg, `${suite}/cases.json`)), { gate: 'postgresql-integration', member: `${suite}/cases.json` });
+    resources(json(pg, `${suite}/resources.json`), `${suite}/resources.json`);
+    requireThat(json(pg, `${suite}/failure-evidence.json`).failedCases === 0, 'PostgreSQL suite failure present.',
+      { code: 'test-failure', gate: 'postgresql-integration', member: `${suite}/failure-evidence.json` });
+  }
+  if (!targeted) {
+    const precheck = json(pg, 'anonymous-reflection-precheck/precheck.json');
+    requireThat(precheck.source === identity.merge && precheck.status === 'passed' && precheck.exitCode === 0 && precheck.testExitCode === 0 && precheck.reportingFailed === false && precheck.cleanup === 'confirmed-by-named-test-lifecycle', 'Named reflection precheck incomplete.',
+      { code: 'precheck-incomplete', gate: 'postgresql-integration', member: 'anonymous-reflection-precheck/precheck.json', cleanup: precheck.cleanup === 'confirmed-by-named-test-lifecycle' ? 'not-established' : 'not-confirmed' });
+  }
+  const composition = files('composition');
+  requireThat(composition.has('Haby.Operator.Composition.Sample.dll') && createHash('sha256').update(composition.get('Haby.Operator.Composition.Sample.dll')).digest('hex') === measurement.compositionSampleSha256, 'Tested composition executable missing or different.',
+    { code: 'composition-incomplete', gate: 'postgresql-integration', member: 'Haby.Operator.Composition.Sample.dll' });
+  summary.push({ gate: 'postgresql-integration', cases: rows.length, status: targeted ? 'targeted-complete' : 'complete', cleanup: 'confirmed' });
+  return summary;
 }

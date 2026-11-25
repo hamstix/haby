@@ -85,9 +85,13 @@ use `export HABY_TEST_SOURCE_ROOT="$PWD"`. Data-only schema/corpus tests read co
 test assets instead of searching output ancestors. See the
 [suite/gate and qualification guide](docs/development/197-suite-routing.md) for
 `full`/`functional`/`infrastructure-qualification`, Host group limits, complete
-accounting and the Windows-to-hosted workflow. Regular Build keeps both PostgreSQL
-suites and both published Native AOT targets mandatory for code, mixed and unknown
-changes. The accepted #253 exception routes proven ordinary documentation through
+accounting and the Windows-to-hosted workflow. After installed #297 transition, regular PR Build runs deterministic relevant real
+PostgreSQL plus the fixed two-fact smoke, both published Native AOT targets and
+other applicable current contours. Shared/sensitive/unknown changes broaden to
+both full PostgreSQL suites. Nightly runs both suites on captured main; full
+exact-candidate Final remains mandatory before release or actual installation.
+The #297 implementation candidate itself still requires the previous full gates.
+See [selection and transition](docs/development/297-nightly-postgresql.md). The accepted #253 exception routes proven ordinary documentation through
 mandatory lightweight `validate`: routing controls, added whitespace checks and
 practical local Markdown link validation, without SDK setup or solution execution.
 The explicit allowlist is root `README.md`, `ROADMAP.md`, `CONTRIBUTING.md`,

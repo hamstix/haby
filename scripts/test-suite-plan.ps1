@@ -7,7 +7,17 @@ function Get-HabyPostgreSqlSuites([string]$Selection) {
     }
 }
 
-function Test-HabyFocusedPostgreSqlArguments([string]$TestCase, [string]$TestGroup) {
+function Test-HabyFocusedPostgreSqlArguments([string]$TestCase, [string]$TestGroup, [string]$SelectionPath = '') {
+    if ($SelectionPath) {
+        if ($TestCase -or $TestGroup) { throw 'Union selection cannot be combined with author filters.' }
+        $selection = Get-Content -LiteralPath $SelectionPath -Raw | ConvertFrom-Json
+        if ($selection.version -ne 1 -or $selection.scope -cne 'targeted' -or @($selection.cases).Count -lt 2) { throw 'Invalid targeted selection record.' }
+        $fixed = @(
+            'Haby.PostgreSql.IntegrationTests.ManifestCatalogPersistenceTests.Migration_and_fresh_provider_preserve_complete_typed_revision_and_original_history#47a4427250a45570b86cc662504bee1709141be4c30be469aaafb3333f96a90f',
+            'Haby.PostgreSql.IntegrationTests.OperatorHostIntegrationTests.Explicit_execution_uses_production_singleton_and_pinned_inputs_and_survives_restart#4d3138b78192e0daf927d9bfac70b8669e7960c53f66fea13e7544293b6b9b4d')
+        foreach ($key in $fixed) { if (@($selection.cases | Where-Object { ($_.method + '#' + $_.case) -ceq $key }).Count -ne 1) { throw 'Fixed smoke missing, duplicated or changed.' } }
+        return $true
+    }
     if ($TestCase -and $TestGroup) { throw 'Select one PostgreSQL testcase or group, not both.' }
     foreach ($value in @($TestCase, $TestGroup)) {
         if ($value -and $value -cnotmatch '^Haby\.PostgreSql\.IntegrationTests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$') {
@@ -17,8 +27,20 @@ function Test-HabyFocusedPostgreSqlArguments([string]$TestCase, [string]$TestGro
     return [bool]($TestCase -or $TestGroup)
 }
 
-function Get-HabyFocusedPostgreSqlSelection([object[]]$Cases, [string]$TestCase, [string]$TestGroup) {
-    if (-not (Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup)) { return $null }
+function Get-HabyFocusedPostgreSqlSelection([object[]]$Cases, [string]$TestCase, [string]$TestGroup, [string]$SelectionPath = '') {
+    if (-not (Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup $SelectionPath)) { return $null }
+    if ($SelectionPath) {
+        $selection = Get-Content -LiteralPath $SelectionPath -Raw | ConvertFrom-Json
+        $wanted = @($selection.cases)
+        $selected = @($Cases | Where-Object { $row = $_; @($wanted | Where-Object { $_.method -ceq $row.method -and $_.case -ceq $row.case }).Count -eq 1 })
+        Assert-HabyInventory $wanted $selected
+        $suites = @($selected.suite | Sort-Object -Unique)
+        if ($suites.Count -ne 1) { throw 'Mixed-suite targeted union requires the full BOTH-suite entrypoint.' }
+        $methods = @($selected.method | Sort-Object -Unique)
+        # A method filter executes every theory row: partial theory selection is forbidden.
+        Assert-HabyInventory $selected @($Cases | Where-Object { $_.method -cin $methods })
+        return [pscustomobject]@{ cases=$selected; suites=@($selected.suite | Sort-Object -Unique); filter=(($methods | ForEach-Object { 'FullyQualifiedName=' + $_ }) -join '|') }
+    }
     $selected = @($Cases | Where-Object {
         if ($TestCase) { $_.method -ceq $TestCase }
         else { $_.method.Substring(0, $_.method.LastIndexOf('.')) -ceq $TestGroup }
@@ -34,18 +56,18 @@ function Get-HabyFocusedPostgreSqlSelection([object[]]$Cases, [string]$TestCase,
 
 # Static current-plan admission precedes owned runtime setup; live discovery and
 # executed theory identities are independently reconciled later.
-function Assert-HabyFocusedPostgreSqlPlan([string]$PlanPath, [string]$TestCase, [string]$TestGroup) {
-    if (-not (Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup)) { return }
+function Assert-HabyFocusedPostgreSqlPlan([string]$PlanPath, [string]$TestCase, [string]$TestGroup, [string]$SelectionPath = '') {
+    if (-not (Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup $SelectionPath)) { return }
     $plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
     $rows = @($plan.entries | Where-Object { $_.gate -ceq 'postgresql-integration' })
-    try { $null = Get-HabyFocusedPostgreSqlSelection $rows $TestCase $TestGroup }
+    try { $null = Get-HabyFocusedPostgreSqlSelection $rows $TestCase $TestGroup $SelectionPath }
     catch { throw 'Focused selector absent from current coverage plan.' }
 }
 
-function Assert-HabyFocusedGatePlan([object[]]$Cases, [string]$PlanPath, [string]$TestCase, [string]$TestGroup, [string[]]$Suites) {
+function Assert-HabyFocusedGatePlan([object[]]$Cases, [string]$PlanPath, [string]$TestCase, [string]$TestGroup, [string[]]$Suites, [string]$SelectionPath = '') {
     $plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
     $planned = @($plan.entries | Where-Object { $_.gate -ceq 'postgresql-integration' -and $_.suite -cin $Suites })
-    $selection = Get-HabyFocusedPostgreSqlSelection $planned $TestCase $TestGroup
+    $selection = Get-HabyFocusedPostgreSqlSelection $planned $TestCase $TestGroup $SelectionPath
     Assert-HabyInventory $selection.cases $Cases
 }
 

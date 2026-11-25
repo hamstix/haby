@@ -7,6 +7,11 @@ on:
         description: Immutable tested commit supplied by installed trusted control
         required: true
         type: string
+      postgresql-selection:
+        description: Trusted installed merge-control selection JSON; absent means full
+        required: false
+        default: ''
+        type: string
   push:
     branches: [main]
   pull_request:
@@ -35,10 +40,14 @@ jobs:
           fetch-depth: 0
 
       - name: Verify fail-closed CI routing and documentation controls
-        run: node --test ./scripts/test-ci-change-routing.mjs
+        run: node --test ./scripts/test-ci-change-routing.mjs ./scripts/test-postgresql-relevance.mjs ./scripts/test-merge-qualification.mjs
 
       - name: Verify installed final control isolation and fail-closed reduction
         run: node --test ./scripts/test-final-qualification.mjs
+
+      - name: Verify exact PostgreSQL union accounting without runtime
+        shell: pwsh
+        run: ./scripts/test-postgresql-union.ps1
 
       - name: Classify complete change and validate documentation
         id: routing
@@ -267,7 +276,7 @@ jobs:
 
   postgresql-integration:
     needs: validate
-    if: needs.validate.outputs.runtime == 'true'
+    if: needs.validate.outputs.runtime == 'true' && (github.event_name != 'push' || inputs.candidate != '')
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -275,6 +284,7 @@ jobs:
         with:
           ref: ${{ inputs.candidate || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -291,7 +301,22 @@ jobs:
           HABY_AOT_CLI_REQUIRED: '1'
           HABY_IMPORT_REHEARSAL_ISOLATED_PROFILE: '1'
           HABY_AOT_CLI_PATH: ${{ github.workspace }}/.artifacts/aot/linux-x64/habyctl
-        run: ./scripts/test-postgresql-measured.ps1 -Docker -Suite full -AnonymousReflectionPrecheck -ResultsDirectory ./.artifacts/postgresql-measurement
+          TRUSTED_SELECTION: ${{ inputs.postgresql-selection }}
+          CANDIDATE: ${{ inputs.candidate }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          $selectionPath = Join-Path $PWD '.artifacts/postgresql-selection.json'
+          if ($env:TRUSTED_SELECTION) {
+            [IO.File]::WriteAllText($selectionPath, $env:TRUSTED_SELECTION)
+          } elseif (-not $env:CANDIDATE -and $env:PR_BASE) {
+            node ./scripts/postgresql-relevance.mjs $PWD $env:PR_BASE (git rev-parse HEAD) $selectionPath
+            if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL selection unavailable.' }
+          }
+          if ((Test-Path $selectionPath) -and (Get-Content $selectionPath -Raw | ConvertFrom-Json).scope -ceq 'targeted') {
+            ./scripts/test-postgresql-measured.ps1 -Docker -SelectionPath $selectionPath -ResultsDirectory ./.artifacts/postgresql-measurement
+          } else {
+            ./scripts/test-postgresql-measured.ps1 -Docker -Suite full -AnonymousReflectionPrecheck -ResultsDirectory ./.artifacts/postgresql-measurement
+          }
       - name: Publish external composition executable bytes
         if: success()
         uses: actions/upload-artifact@v4
