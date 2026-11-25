@@ -4,7 +4,7 @@ namespace Haby.Cli.Commands.Config;
 
 internal static class ConfigCommands
 {
-    internal static Command Create(CliCommandContext context)
+    internal static Command Create(CliCommandContext context, CliConfigurationCapabilities? capabilities = null)
     {
         var config = new Command("config", "Inspect local CLI configuration.");
         config.SetAction(_ => context.MissingSubcommand());
@@ -17,9 +17,10 @@ internal static class ConfigCommands
         var destination = new Option<string?>("--new-config-file"); var normalize = new Option<bool>("--normalize");
         credential.Arguments.Add(instance); credential.Options.Add(tokenFile); credential.Options.Add(stdin); credential.Options.Add(destination); credential.Options.Add(normalize);
         credential.SetAction((p, ct) => context.SetCredentialAsync(p.GetValue(instance)!, p.GetValue(tokenFile), p.GetValue(stdin), p.GetValue(destination), p.GetValue(normalize), ct));
-        config.Subcommands.Add(credential);
-        config.Subcommands.Add(view);
-        config.Subcommands.Add(current);
+        var supported = capabilities ?? (CliConfigurationCapabilities.View | CliConfigurationCapabilities.CurrentContext | CliConfigurationCapabilities.SetCredential);
+        if (supported.HasFlag(CliConfigurationCapabilities.SetCredential)) config.Subcommands.Add(credential);
+        if (supported.HasFlag(CliConfigurationCapabilities.View)) config.Subcommands.Add(view);
+        if (supported.HasFlag(CliConfigurationCapabilities.CurrentContext)) config.Subcommands.Add(current);
         return config;
     }
 }

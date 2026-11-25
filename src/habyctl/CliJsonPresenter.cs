@@ -64,8 +64,9 @@ internal sealed record CliCurrentContextData([property: JsonIgnore(Condition = J
 [JsonSerializable(typeof(CliEnvelope<CliCurrentContextData>))]
 internal partial class CliOutputJsonContext : JsonSerializerContext;
 
-internal sealed partial class CliJsonPresenter(TextWriter output)
+internal sealed partial class CliJsonPresenter(TextWriter output, Func<string>? commandPrefix = null)
 {
+    private string CommandPrefix => commandPrefix?.Invoke() ?? "habyctl";
     private static readonly CliDiagnostic[] NoDiagnostics = [];
 
     private void Write<T>(string command, string outcome, T? data, CliDiagnostic[] diagnostics,

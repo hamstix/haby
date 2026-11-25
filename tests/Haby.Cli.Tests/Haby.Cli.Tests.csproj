@@ -22,10 +22,16 @@
     <ProjectReference Include="..\..\examples\Haby.RuntimeStartup.Consumer\Haby.RuntimeStartup.Consumer.csproj" />
     <ProjectReference Include="..\..\src\Haby.Configuration.Contracts\Haby.Configuration.Contracts.csproj" />
     <ProjectReference Include="..\..\src\habyctl\habyctl.csproj" />
+    <ProjectReference Include="..\..\examples\Haby.Cli.Composition\Haby.Cli.Composition.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\TestPaths.cs" Link="TestPaths.cs" />
   </ItemGroup>
+  <Target Name="RecordCliCompositionTarget" AfterTargets="Build">
+    <ItemGroup><CliCompositionTarget Include="@(ReferencePath)" Condition="'%(ReferencePath.Filename)' == 'Haby.Cli.Composition'" /></ItemGroup>
+    <Error Condition="'@(CliCompositionTarget->Count())' != '1'" Text="CLI composition target must resolve once." />
+    <WriteLinesToFile File="$(OutDir)cli-composition.target" Lines="@(CliCompositionTarget->'%(FullPath)')" Overwrite="true" Encoding="UTF-8" />
+  </Target>
   <Target Name="RecordRuntimeStartupConsumerTarget" AfterTargets="Build">
     <ItemGroup>
       <RuntimeStartupConsumerTarget Include="@(ReferencePath)" Condition="'%(ReferencePath.Filename)' == 'Haby.RuntimeStartup.Consumer'" />

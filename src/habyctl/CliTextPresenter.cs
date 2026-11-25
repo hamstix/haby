@@ -2,9 +2,10 @@ using Haby.Operator.Contracts;
 
 namespace Haby.Cli;
 
-internal sealed partial class CliTextPresenter(TextWriter output)
+internal sealed partial class CliTextPresenter(TextWriter output, Func<string>? commandPrefix = null)
 {
     private readonly TextWriter _output = output;
+    private string CommandPrefix => commandPrefix?.Invoke() ?? "habyctl";
 
     internal int Print(ValidateReply reply)
     {

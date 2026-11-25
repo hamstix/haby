@@ -410,8 +410,12 @@ Synthetic second-type tests alone are not production Provider support.
 
 Needed Providers may be implemented before Workload lifecycle is complete.
 Build-time trusted composition remains the supported model under ADR-003. Public
-SDK/NuGet packaging, general downstream server extension and CLI composition are separate
-later work (apart from the narrow #239 Host application-service boundary), informed by several real adapters rather than prerequisites for P4.
+SDK/NuGet packaging and general downstream server extension remain separate later
+work (apart from the narrow #239 Host application-service boundary), informed by
+several real adapters rather than prerequisites for P4. The bounded public CLI
+composition implementation is tracked by [#292](https://github.com/hamstix/haby/issues/292)
+and the [composition guide](docs/development/292-public-cli-composition.md); it does
+not implement shell completion or publish a NuGet SDK.
 Dynamic managed DLL loading, runtime provider protocols and WebAssembly execution
 are not introduced.
 

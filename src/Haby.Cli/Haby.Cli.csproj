@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../habyctl/**/*.cs" Exclude="../habyctl/Program.cs;../habyctl/bin/**;../habyctl/obj/**" LinkBase="Implementation" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="YamlDotNet" />
+    <ProjectReference Include="../Haby.Operator.Contracts/Haby.Operator.Contracts.csproj" />
+  </ItemGroup>
+</Project>

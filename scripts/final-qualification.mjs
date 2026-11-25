@@ -228,10 +228,12 @@ export function validateEvidence(identity, plan, artifacts, attempt, selection =
     const value = gate(content, prefix, identity, name, rows);
     counts(content, prefix, rows.length);
     if (key !== 'fast') {
-      requireThat(value.requiredAot === true && /^[0-9a-f]{64}$/.test(value.nativeSha256) && /^[0-9a-f]{64}$/.test(value.runtimeConsumerSha256), 'Published native evidence missing.',
+      requireThat(value.requiredAot === true && /^[0-9a-f]{64}$/.test(value.nativeSha256) && /^[0-9a-f]{64}$/.test(value.runtimeConsumerSha256) && /^[0-9a-f]{64}$/.test(value.cliCompositionSha256), 'Published native evidence missing.',
         { code: 'published-native-incomplete', gate: name, member: `${prefix}gate.json` });
       const compiler = json(content, 'compiler.json');
-      requireThat(compiler.source === identity.merge && compiler.rid === (key === 'windows' ? 'win-x64' : 'linux-x64') && compiler.packs?.length === 2, 'Native compiler identity missing.',
+      requireThat(compiler.source === identity.merge && compiler.rid === (key === 'windows' ? 'win-x64' : 'linux-x64') && compiler.packs?.length === 2 &&
+        typeof compiler.cliCompositionCompiler?.compiler === 'string' && compiler.cliCompositionCompiler.compiler.startsWith('Microsoft.DotNet.ILCompiler/10.') &&
+        compiler.cliCompositionCompiler.runtimeCompiler === `runtime.${compiler.rid}.${compiler.cliCompositionCompiler.compiler}`, 'Native compiler identity missing.',
         { code: 'native-compiler-incomplete', gate: name, member: 'compiler.json' });
     }
     summary.push({ gate: name, cases: rows.length, status: 'complete' });

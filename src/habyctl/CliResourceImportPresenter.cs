@@ -36,10 +36,10 @@ internal static class ResourceImportPresentation
         _ => throw new InvalidDataException("Unknown import request outcome.")
     };
 
-    internal static CliResourceImportRecovery Recovery(string request) => new($"habyctl changeset import get {request}", request,
+    internal static CliResourceImportRecovery Recovery(string request, string prefix = "habyctl") => new($"{prefix} changeset import get {request}", request,
         "Lookup observes durable metadata, not rollback. To replay create, retain this exact request ID, Environment, Application revision, names/correction target and exact password bytes. Do not generate a new ID as a retry.");
 
-    internal static CliResourceImportData Data(ResourceImportRequestReply reply)
+    internal static CliResourceImportData Data(ResourceImportRequestReply reply, string prefix = "habyctl")
     {
         _ = Outcome(reply.Status);
         if (!Uuid(reply.RequestId)) throw new InvalidDataException("Invalid import request identity.");
@@ -65,7 +65,7 @@ internal static class ResourceImportPresentation
                 view.HasSupersededByRequestId ? view.SupersededByRequestId : null);
         }
         return new(reply.RequestId, record, reply.Status is ResourceImportRequestStatus.StorageUnavailable or ResourceImportRequestStatus.Connectivity or
-            ResourceImportRequestStatus.NotFound ? Recovery(reply.RequestId) : null);
+            ResourceImportRequestStatus.NotFound ? Recovery(reply.RequestId, prefix) : null);
     }
 
     private static CliResourceImportCorrection Correction(ResourceImportCorrection value, string request)
@@ -97,13 +97,13 @@ internal sealed partial class CliJsonPresenter
 {
     internal int PrintResourceImport(string command, ResourceImportRequestReply reply)
     {
-        var data = ResourceImportPresentation.Data(reply);
+        var data = ResourceImportPresentation.Data(reply, CommandPrefix);
         Write(command, ResourceImportPresentation.Outcome(reply.Status), data, NoDiagnostics, CliResourceImportJsonContext.Default.CliEnvelopeCliResourceImportData);
         return ResourceImportPresentation.Exit(command, reply.Status);
     }
     internal int PrintImportTicket(string command, Guid request, bool sent, int exit)
     {
-        Write(command, sent ? "uncertain" : "notSubmitted", new CliResourceImportData(request.ToString(), null, ResourceImportPresentation.Recovery(request.ToString())),
+        Write(command, sent ? "uncertain" : "notSubmitted", new CliResourceImportData(request.ToString(), null, ResourceImportPresentation.Recovery(request.ToString(), CommandPrefix)),
             NoDiagnostics, CliResourceImportJsonContext.Default.CliEnvelopeCliResourceImportData);
         return exit;
     }
@@ -113,7 +113,7 @@ internal sealed partial class CliTextPresenter
 {
     internal int PrintResourceImport(string command, ResourceImportRequestReply reply)
     {
-        var data = ResourceImportPresentation.Data(reply);
+        var data = ResourceImportPresentation.Data(reply, CommandPrefix);
         _output.WriteLine($"RequestId: {data.RequestId}; {ResourceImportPresentation.Outcome(reply.Status)}");
         if (data.Request is { } view)
         {
@@ -128,7 +128,7 @@ internal sealed partial class CliTextPresenter
     internal int PrintImportTicket(string command, Guid request, bool sent, int exit)
     {
         _output.WriteLine($"RequestId: {request}; {(sent ? "outcome uncertain" : "not submitted")}");
-        var recovery = ResourceImportPresentation.Recovery(request.ToString());
+        var recovery = ResourceImportPresentation.Recovery(request.ToString(), CommandPrefix);
         _output.WriteLine(recovery.LookupCommand); _output.WriteLine(recovery.Instruction);
         return exit;
     }

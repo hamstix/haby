@@ -673,3 +673,12 @@ test('publisher request budgets shrink across delays and slow reads', async () =
     assert.equal(f.updates.at(-1).conclusion, 'success');
   } finally { f.cleanup(); }
 });
+
+
+test('published CLI composition executable is mandatory native evidence', () => {
+  const f = fixture();
+  const value = JSON.parse(f.artifacts.get(f.names.linux).get('safe/gate.json'));
+  delete value.cliCompositionSha256;
+  f.put('linux', 'safe/gate.json', value);
+  assert.throws(() => validateEvidence(f.identity, f.plan, f.artifacts, 1), /Published native evidence missing/);
+});

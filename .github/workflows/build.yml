@@ -189,6 +189,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native AOT publish failed: $LASTEXITCODE" }
           dotnet publish ./examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj -c Release -r ${{ env.HABY_NATIVE_RID }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/runtime-consumer/${{ env.HABY_NATIVE_RID }}
           if ($LASTEXITCODE -ne 0) { throw "Runtime consumer Native AOT publish failed: $LASTEXITCODE" }
+          dotnet publish ./examples/Haby.Cli.Composition/Haby.Cli.Composition.csproj -c Release -r ${{ env.HABY_NATIVE_RID }} --self-contained true -p:PublishAot=true -p:TreatWarningsAsErrors=true @toolchain -o ./.artifacts/cli-composition/${{ env.HABY_NATIVE_RID }}
+          if ($LASTEXITCODE -ne 0) { throw "CLI composition Native AOT publish failed: $LASTEXITCODE" }
       - name: Record actual patched Native AOT compiler selection
         run: |
           $rid = '${{ env.HABY_NATIVE_RID }}'
@@ -203,9 +205,16 @@ jobs:
             if ($runtimeCompiler -notin $assets.libraries.PSObject.Properties.Name) { throw 'Runtime compiler pack does not match selected compiler.' }
             [pscustomobject]@{ project = $project; compiler = $compiler[0]; runtimeCompiler = $runtimeCompiler }
           })
+          $sampleAssets = Get-Content 'examples/Haby.Cli.Composition/obj/project.assets.json' -Raw | ConvertFrom-Json
+          $sampleCompiler = @($sampleAssets.libraries.PSObject.Properties.Name | Where-Object { $_.StartsWith('Microsoft.DotNet.ILCompiler/', [StringComparison]::Ordinal) })
+          if ($sampleCompiler.Count -ne 1) { throw 'CLI composition compiler selection evidence missing.' }
+          $sampleVersion = [Version]$sampleCompiler[0].Split('/')[1]
+          $sampleRuntime = "runtime.$rid.Microsoft.DotNet.ILCompiler/$sampleVersion"
+          if ($sampleVersion.Major -ne 10 -or $sampleVersion -lt [Version]'10.0.14' -or $sampleRuntime -notin $sampleAssets.libraries.PSObject.Properties.Name) { throw 'CLI composition compiler does not meet the patched baseline.' }
+          $samplePack = [pscustomobject]@{ compiler = $sampleCompiler[0]; runtimeCompiler = $sampleRuntime }
           $directory = ".artifacts/native-results/$rid"
           New-Item -ItemType Directory -Force $directory | Out-Null
-          [pscustomobject]@{ source = (& git rev-parse HEAD); sdk = (& dotnet --version); rid = $rid; packs = $packs } |
+          [pscustomobject]@{ source = (& git rev-parse HEAD); sdk = (& dotnet --version); rid = $rid; packs = $packs; cliCompositionCompiler = $samplePack } |
             ConvertTo-Json -Depth 5 | Set-Content "$directory/compiler.json" -Encoding utf8
       - name: Execute published help and version
         run: |
@@ -220,6 +229,8 @@ jobs:
           $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ env.HABY_NATIVE_RID }}/${{ env.HABY_NATIVE_EXECUTABLE }}).Path
           $consumer = if ($IsWindows) { 'Haby.RuntimeStartup.Consumer.exe' } else { 'Haby.RuntimeStartup.Consumer' }
           $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ env.HABY_NATIVE_RID }}/$consumer).Path
+          $composition = if ($IsWindows) { 'Haby.Cli.Composition.exe' } else { 'Haby.Cli.Composition' }
+          $env:HABY_AOT_COMPOSITION_PATH = (Resolve-Path ./.artifacts/cli-composition/${{ env.HABY_NATIVE_RID }}/$composition).Path
           dotnet test ./tests/Haby.Cli.Tests/Haby.Cli.Tests.csproj -c Release --filter FullyQualifiedName~CliLoopbackTests -p:TreatWarningsAsErrors=true --logger trx --results-directory ./.artifacts/native-results/${{ env.HABY_NATIVE_RID }}/private
           if ($LASTEXITCODE -ne 0) { throw "Native AOT loopback tests failed: $LASTEXITCODE" }
       - name: Verify published-native case and parameter gate inventory
@@ -229,6 +240,8 @@ jobs:
           $env:HABY_AOT_CLI_PATH = (Resolve-Path ./.artifacts/aot/${{ env.HABY_NATIVE_RID }}/${{ env.HABY_NATIVE_EXECUTABLE }}).Path
           $consumer = if ($IsWindows) { 'Haby.RuntimeStartup.Consumer.exe' } else { 'Haby.RuntimeStartup.Consumer' }
           $env:HABY_AOT_RUNTIME_CONSUMER_PATH = (Resolve-Path ./.artifacts/runtime-consumer/${{ env.HABY_NATIVE_RID }}/$consumer).Path
+          $composition = if ($IsWindows) { 'Haby.Cli.Composition.exe' } else { 'Haby.Cli.Composition' }
+          $env:HABY_AOT_COMPOSITION_PATH = (Resolve-Path ./.artifacts/cli-composition/${{ env.HABY_NATIVE_RID }}/$composition).Path
           $trx = @(Get-ChildItem ./.artifacts/native-results/${{ env.HABY_NATIVE_RID }}/private -Filter *.trx -File).FullName
           ./scripts/export-test-gate.ps1 -TrxPath $trx -OutputDirectory ./.artifacts/native-results/${{ env.HABY_NATIVE_RID }}/safe -Gate 'Native AOT (${{ env.HABY_NATIVE_RID }})' -Suite published-native
       - name: Publish allowlisted native inventory

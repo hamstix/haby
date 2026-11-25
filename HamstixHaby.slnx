@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/examples/">
+    <Project Path="examples/Haby.Cli.Composition/Haby.Cli.Composition.csproj" />
     <Project Path="examples/Haby.Configuration.Client/Haby.Configuration.Example.csproj" />
     <Project Path="examples/Haby.RuntimeStartup.Consumer/Haby.RuntimeStartup.Consumer.csproj" />
   </Folder>
@@ -14,6 +15,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Haby.Application/Haby.Application.csproj" />
+    <Project Path="src/Haby.Cli/Haby.Cli.csproj" />
     <Project Path="src/Haby.Configuration.Client/Haby.Configuration.Client.csproj" />
     <Project Path="src/Haby.Configuration.Contracts/Haby.Configuration.Contracts.csproj" />
     <Project Path="src/Haby.Domain/Haby.Domain.csproj" />

@@ -1,12 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <IsAotCompatible>true</IsAotCompatible>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Grpc.Net.Client" />
-    <PackageReference Include="System.CommandLine" />
-    <PackageReference Include="YamlDotNet" />
-    <ProjectReference Include="..\Haby.Operator.Contracts\Haby.Operator.Contracts.csproj" />
-  </ItemGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><IsAotCompatible>true</IsAotCompatible><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><Compile Include="Program.cs" /><ProjectReference Include="../Haby.Cli/Haby.Cli.csproj" /></ItemGroup>
 </Project>

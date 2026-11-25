@@ -12,16 +12,18 @@ $root = Split-Path $PSScriptRoot -Parent
 $sha = (& git -C $root rev-parse HEAD | Out-String).Trim()
 $diff = (& git -C $root diff --binary HEAD | Out-String)
 $untracked = @(& git -C $root ls-files --others --exclude-standard)
-$required = $env:HABY_AOT_CLI_REQUIRED -ceq '1'; $nativeHash = $null; $runtimeConsumerHash = $null
+$required = $env:HABY_AOT_CLI_REQUIRED -ceq '1'; $nativeHash = $null; $runtimeConsumerHash = $null; $compositionHash = $null
 if ($Gate.StartsWith('Native AOT (', [StringComparison]::Ordinal)) {
     if (-not $required -or -not $env:HABY_AOT_CLI_PATH -or -not (Test-Path -LiteralPath $env:HABY_AOT_CLI_PATH -PathType Leaf)) { throw 'Required native artifact is missing.' }
     $nativeHash = (Get-FileHash -LiteralPath $env:HABY_AOT_CLI_PATH).Hash.ToLowerInvariant()
     if (-not $env:HABY_AOT_RUNTIME_CONSUMER_PATH -or -not (Test-Path -LiteralPath $env:HABY_AOT_RUNTIME_CONSUMER_PATH -PathType Leaf)) { throw 'Required native runtime consumer is missing.' }
     $runtimeConsumerHash = (Get-FileHash -LiteralPath $env:HABY_AOT_RUNTIME_CONSUMER_PATH).Hash.ToLowerInvariant()
+    if (-not $env:HABY_AOT_COMPOSITION_PATH -or -not (Test-Path -LiteralPath $env:HABY_AOT_COMPOSITION_PATH -PathType Leaf)) { throw 'Required native CLI composition executable is missing.' }
+    $compositionHash = (Get-FileHash -LiteralPath $env:HABY_AOT_COMPOSITION_PATH).Hash.ToLowerInvariant()
 }
 [pscustomobject]@{ source = $sha; trackedDiffSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($diff))).ToLowerInvariant()
     dirty = -not [string]::IsNullOrWhiteSpace($diff) -or $untracked.Count -ne 0; untrackedFileCount = $untracked.Count
-    sdk = (& dotnet --version | Out-String).Trim(); requiredAot = $required; nativeSha256 = $nativeHash; runtimeConsumerSha256 = $runtimeConsumerHash
+    sdk = (& dotnet --version | Out-String).Trim(); requiredAot = $required; nativeSha256 = $nativeHash; runtimeConsumerSha256 = $runtimeConsumerHash; cliCompositionSha256 = $compositionHash
     gate = $Gate; suite = $Suite; cases = $cases.Count; status = 'complete' } |
     ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'gate.json') -Encoding utf8
 } catch { throw 'Gate inventory export/validation failed; protected parser/test content withheld.' }

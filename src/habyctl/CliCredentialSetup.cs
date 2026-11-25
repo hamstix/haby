@@ -11,8 +11,9 @@ internal sealed partial class CliCommandContext
         try
         {
             if ((tokenFile is null) == !stdin || newConfigFile is null || !normalize) throw new InvalidDataException();
-            var config = await configuration.LoadAsync(options().File, token);
-            if (!config.Instances.TryGetValue(instanceName, out var instance)) throw new InvalidDataException();
+            var config = configAdapter is null ? await configuration.LoadAsync(options().File, token) : null;
+            CliInstance? instance = null;
+            if (config is not null && !config!.Instances.TryGetValue(instanceName, out instance)) throw new InvalidDataException();
             string? inline = null;
             if (stdin)
             {
@@ -27,12 +28,19 @@ internal sealed partial class CliCommandContext
             else
             {
                 tokenFile = Path.GetFullPath(tokenFile!);
-                _ = await CliOperatorCredential.ResolveAsync(new(instance.Endpoint, TokenFile: tokenFile), token);
+                _ = await CliOperatorCredential.ResolveAsync(new(instance?.Endpoint ?? "http://localhost", TokenFile: tokenFile), token);
+            }
+            if (configAdapter is not null)
+            {
+                await configAdapter.ApplyCredentialAsync(new(options().File, options().Context),
+                    new(instanceName, inline, tokenFile, newConfigFile, normalize), token);
+                output.WriteLine("Credential configuration written to the new file. Select it explicitly with --config. The original remains unchanged.");
+                return CliApplication.Success;
             }
             var instances = new SortedDictionary<string, CliInstance>(StringComparer.Ordinal);
-            foreach (var pair in config.Instances) instances.Add(pair.Key, pair.Value);
-            instances[instanceName] = instance with { Token = inline, TokenFile = tokenFile };
-            var normalized = config with { Instances = instances };
+            foreach (var pair in config!.Instances) instances.Add(pair.Key, pair.Value);
+            instances[instanceName] = instance! with { Token = inline, TokenFile = tokenFile };
+            var normalized = config! with { Instances = instances };
             var contents = NormalizedConfiguration(normalized);
             if (Encoding.UTF8.GetByteCount(contents) > CliConfigurationService.MaxBytes) throw new InvalidDataException();
             _ = CliConfigurationService.Parse(contents);
@@ -55,6 +63,8 @@ internal sealed partial class CliCommandContext
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or OperationCanceledException or InvalidDataException)
         { error.WriteLine("Credential setup failed. Use a known instance, exactly one --token-file or --stdin, --normalize and --new-config-file <new-path>."); return CliApplication.UsageError; }
+        catch (Exception exception)
+        { error.WriteLine(CliApplication.SafeError(exception)); return CliApplication.TransportError; }
         finally
         {
             if (temporary is not null)
@@ -69,8 +79,8 @@ internal sealed partial class CliCommandContext
         static string Q(string value) => "\"" + JsonEncodedText.Encode(value).ToString() + "\"";
         var s = new StringBuilder("formatVersion: 1\r\n");
         if (config.CurrentContext is { } current) s.Append("currentContext: ").Append(Q(current)).Append("\r\n");
-        s.Append(config.Instances.Count == 0 ? "instances: {}\r\n" : "instances:\r\n");
-        foreach (var (name, instance) in config.Instances)
+        s.Append(config!.Instances.Count == 0 ? "instances: {}\r\n" : "instances:\r\n");
+        foreach (var (name, instance) in config!.Instances)
         {
             s.Append("  ").Append(Q(name)).Append(":\r\n    endpoint: ").Append(Q(instance.Endpoint)).Append("\r\n");
             if (instance.Token is { } value) s.Append("    token: ").Append(Q(value)).Append("\r\n");

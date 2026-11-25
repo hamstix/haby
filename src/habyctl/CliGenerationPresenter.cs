@@ -129,7 +129,7 @@ internal sealed partial class CliTextPresenter
         {
             _output.WriteLine("Execution incomplete. Stop and inspect persisted progress before any explicit repeat; uncertainty does not authorize retry or recovery.");
             if (reply.Progress is { } p)
-                _output.WriteLine($"Inspect: habyctl deployment generation get {p.DeploymentId} {p.Generation}");
+                _output.WriteLine($"Inspect: {CommandPrefix} deployment generation get {p.DeploymentId} {p.Generation}");
         }
         return exit;
     }

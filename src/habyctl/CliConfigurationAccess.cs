@@ -61,7 +61,7 @@ internal sealed partial class CliCommandContext
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or Grpc.Core.RpcException or OperationCanceledException or HttpRequestException)
                 {
                     if (grantId is not null)
-                        error.WriteLine($"Credential transfer was not confirmed. Grant {grantId} may be active. Inspect: habyctl configuration access get {grantId}; revoke: habyctl configuration access revoke {grantId}. No token recovery or rollback is available.");
+                        error.WriteLine($"Credential transfer was not confirmed. Grant {grantId} may be active. Inspect: {commandPrefix?.Invoke() ?? "habyctl"} configuration access get {grantId}; revoke: {commandPrefix?.Invoke() ?? "habyctl"} configuration access revoke {grantId}. No token recovery or rollback is available.");
                     else error.WriteLine(received ? "Creation response was invalid; a grant may be active. No credential recovery is available." : "Creation outcome is uncertain. No automatic retry or credential recovery is available; a new creation issues a separate grant.");
                     return CliApplication.TransportError;
                 }
