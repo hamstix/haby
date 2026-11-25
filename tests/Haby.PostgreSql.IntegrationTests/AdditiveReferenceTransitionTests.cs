@@ -44,6 +44,16 @@ public sealed partial class ResourceReferenceKernelTests
         Assert.Equal(2, completed.Progress!.AppliedGeneration);
         Assert.Null((await restart.GetRequiredService<DurableGenerationRunner>().RunAsync(commit.DeploymentId, commit.Generation, default)).StopOutcome);
         Assert.Equal(3, boundary.Observations);
+        var acceptedGroup = (await restart.GetRequiredService<IResourceObservationAcceptance>().FindAsync(
+            new(commit.DeploymentId, commit.Generation, OperationId.Create("added-first")), default))!;
+        var exactReplay = new ResourceObservationAcceptance(acceptedGroup.Operations, [],
+            [new(secondProvider, baseline.Environment, revision.ApplicationRecordId, ManifestLocalId.Create("added"), "test.service", "added-service")], acceptedGroup.Evidence);
+        var checks = boundary.ReuseChecks;
+        boundary.ReuseDrift = true;
+        Assert.Equal(ResourceObservationAcceptanceStatus.Existing, (await restart.GetRequiredService<IResourceObservationAcceptance>()
+            .CompleteAsync(exactReplay, DateTimeOffset.UtcNow, default)).Status);
+        Assert.Equal(checks, boundary.ReuseChecks);
+        boundary.ReuseDrift = false;
         var followupEnvelope = JsonNode.Parse("""
             {"applicationVersion":"v3","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"reference-app"},"spec":{"resources":{"referenced":{"type":"test.capability/v1","providerRef":"sample.primary","properties":{}},"added":{"type":"test.capability/v1","providerRef":"sample.secondary","properties":{}},"peer":{"type":"test.capability/v1","providerRef":"sample.secondary","properties":{}}}}}}
             """u8)!;
@@ -66,6 +76,12 @@ public sealed partial class ResourceReferenceKernelTests
         Assert.Equal(ResourceOrigin.Imported, retained.Origin);
         Assert.Equal(ResourceLifecycleAuthority.UseAndRetain, retained.Authority);
         Assert.Equal(1, retained.SourceGeneration);
+        var checksBeforeAuthorityDrift = boundary.ReuseChecks;
+        await using (var mutation = await restart.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            await mutation.Database.ExecuteSqlRawAsync("DELETE FROM resource_management_heads");
+        Assert.Equal(ResourceObservationAcceptanceStatus.Existing, (await restart.GetRequiredService<IResourceObservationAcceptance>()
+            .CompleteAsync(exactReplay, DateTimeOffset.UtcNow, default)).Status);
+        Assert.Equal(checksBeforeAuthorityDrift, boundary.ReuseChecks);
     }
     private async Task<(string Connection, Boundary Boundary, Prepared Baseline, ManifestRevisionRef Revision, ProviderInstanceId AddedProvider)> AdditiveTransitionAsync(string? fault = null)
     {
@@ -173,6 +189,32 @@ public sealed partial class ResourceReferenceKernelTests
         Assert.Equal(1, (await verify.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
         Assert.Single(await verify.ResourceManagement.AsNoTracking().ToArrayAsync());
         Assert.Single(await verify.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("operation-deployment")]
+    [InlineData("operation-generation")]
+    [InlineData("reservation-environment")]
+    [InlineData("reservation-application")]
+    public async Task Accepted_Reference_replay_refuses_modified_complete_owner_scope(string fault)
+    {
+        var connection = await CreateDatabaseAsync("reference_replay_scope_");
+        var boundary = new Boundary();
+        var item = await PrepareAsync(connection, boundary, mixed: false);
+        await using var services = Services(connection, boundary);
+        var acceptance = services.GetRequiredService<IResourceObservationAcceptance>();
+        var request = await StageAsync(services, item, Referenced);
+        Assert.True((await acceptance.CompleteAsync(request, DateTimeOffset.UtcNow, default)).IsSuccess);
+        var modified = fault.StartsWith("operation", StringComparison.Ordinal)
+            ? request with { Operations = request.Operations.Select((x, i) => i == 0 ? x : x with { Key = fault == "operation-deployment"
+                ? x.Key with { DeploymentId = ApplicationDeploymentId.New() } : x.Key with { Generation = DeploymentGeneration.Create(2) } }).ToArray() }
+            : request with { Reservations = request.Reservations.Select(x => fault == "reservation-environment"
+                ? x with { EnvironmentRecordId = EnvironmentRecordId.New() } : x with { ApplicationRecordId = ApplicationRecordId.New() }).ToArray() };
+        Assert.Equal(ResourceObservationAcceptanceStatus.InputUnavailable, (await acceptance.CompleteAsync(modified, DateTimeOffset.UtcNow, default)).Status);
+        Assert.Equal(ResourceObservationAcceptanceStatus.Existing, (await acceptance.CompleteAsync(request, DateTimeOffset.UtcNow, default)).Status);
+        await using var verify = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync();
+        Assert.Single(await verify.ResourceObservationReceipts.AsNoTracking().ToArrayAsync());
+        Assert.Equal(2, await verify.OperationOutputs.CountAsync());
     }
 
 }

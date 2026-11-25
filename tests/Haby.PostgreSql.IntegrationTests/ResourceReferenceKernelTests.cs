@@ -30,6 +30,8 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
     {
         public int Observations;
         public int HandlerCalls;
+        public int ReuseChecks;
+        public bool ReuseDrift;
         public bool SecondMemberDependsOnImport;
         public CancellationTokenSource? CancelBeforeAcceptance;
     }
@@ -68,16 +70,18 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
                         ? new ObservationOnlyEvidence(mode) : mode == ResourceAcquisitionMode.Reference && !sharingCapability
                             ? new ReferenceOnlyEvidence(mode) : new Evidence(mode, sharingContract, sharingAvailable));
         }
-        services.AddSingleton<IDurableResourceReuseVerifier>(new CapabilityReuseVerifier(ResourceAcquisitionMode.ImportUseAndRetain));
-        services.AddSingleton<IDurableResourceReuseVerifier>(new CapabilityReuseVerifier(ResourceAcquisitionMode.Reference));
+        services.AddSingleton<IDurableResourceReuseVerifier>(new CapabilityReuseVerifier(ResourceAcquisitionMode.ImportUseAndRetain, boundary));
+        services.AddSingleton<IDurableResourceReuseVerifier>(new CapabilityReuseVerifier(ResourceAcquisitionMode.Reference, boundary));
         return services.BuildServiceProvider();
     }
-    private sealed class CapabilityReuseVerifier(ResourceAcquisitionMode mode) : IDurableResourceReuseVerifier
+    private sealed class CapabilityReuseVerifier(ResourceAcquisitionMode mode, Boundary boundary) : IDurableResourceReuseVerifier
     {
         public DurableActionAdmissionKey Key => ResourceReferenceKernelTests.Key(mode).Admission;
         public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceObservationReceipt receipt, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref boundary.ReuseChecks);
+            if (boundary.ReuseDrift) return ValueTask.FromResult(ResourceReuseValidationStatus.Conflict);
             return ValueTask.FromResult(new Evidence(mode).ValidateObservationEvidence(original, receipt.Evidence)
                 ? ResourceReuseValidationStatus.Confirmed : ResourceReuseValidationStatus.InputUnavailable);
         }

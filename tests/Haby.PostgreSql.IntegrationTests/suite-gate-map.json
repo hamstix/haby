@@ -5,7 +5,7 @@
   "nativePerPlatform": 116,
   "regularFullRetainsQualification": false,
   "nightlyAndReleaseRetainFullQualification": true,
-  "currentPostgresql": 1393,
+  "currentPostgresql": 1399,
   "currentFast": 2165,
   "currentKubernetesApiObjects": 29,
   "currentKubernetesDurableActions": 36,
@@ -15,6 +15,13 @@
   "supersededFor257": [{"method":"Haby.Kubernetes.Tests.ConfiguredDeploymentTests.Configured_update_and_superseded_format_refuse_but_absent_configuration_has_no_runtime_fields","case":"fde60248bd607ce4472526778ef63be8dbc29b8abf7b4db8a8f55f6e130d933f","suite":"fast","gate":"validate","trigger":"every-change","addedFor223":true}],
   "supersededFor275Adr026": [{"method":"Haby.PostgreSql.IntegrationTests.SharedCredentialAuthorityTests.Immutable_database_guards_refuse_late_issuance_mutation_and_unrevocation","case":"04681af98c4f92ffddbfeada9e20ad5323e132bc70bf1e615b88a25cc2986c73","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true}],
   "entries": [
+    {"method":"Haby.PostgreSql.IntegrationTests.ResourceReferenceKernelTests.Accepted_Reference_replay_refuses_modified_complete_owner_scope","case":"bb88fce62f06617d262ff3e6e4fc556332f0aee11125eb105a9daa7412fddd3c","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.ResourceReferenceKernelTests.Accepted_Reference_replay_refuses_modified_complete_owner_scope","case":"e7b92d6f04cd31e4cb1ebe9188946d04c1a103f259ae281bffe45f8c9c0ceb3d","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.ResourceReferenceKernelTests.Accepted_Reference_replay_refuses_modified_complete_owner_scope","case":"edffc6f3e8ba96360816eaadeaf0e3e6403284dc78fcbd1122260a57699ad38f","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.ResourceReferenceKernelTests.Accepted_Reference_replay_refuses_modified_complete_owner_scope","case":"715e9036ee7310f70884d1753adb61f0b94298b76b2fd3079320a4eaea8ea410","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.PostgreSqlPairImportTests.Accepted_import_replay_refuses_modified_credential_owner_scope","case":"4e699028e516c4d51acc487760b020e02d1dd6182daaaa244ba3d750b4ea9a69","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.PostgreSqlPairImportTests.Accepted_import_replay_refuses_modified_credential_owner_scope","case":"f42186f9e7d57e7a6b62588cf9122e7946d4e8e6f6e555fc555c4ef49f1f7bd5","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
+
     {"method":"Haby.PostgreSql.IntegrationTests.ResourceReferenceKernelTests.Applied_import_retains_server_acquisition_when_new_Reference_is_added","case":"12ec38cd5c57458e54166e25b28ad8750b357e57b7c07def524aa212a7bb3d34","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
     {"method":"Haby.PostgreSql.IntegrationTests.ResourceReferenceKernelTests.Additive_Reference_refuses_untrusted_existing_inputs_missing_capability_and_stale_baseline","case":"89b8048fc6952843457d64a9604b2a3e340119593a22295773f5bd6ba6f224ee","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},
     {"method":"Haby.PostgreSql.IntegrationTests.ResourceReferenceKernelTests.Additive_Reference_refuses_untrusted_existing_inputs_missing_capability_and_stale_baseline","case":"07378a0ecdcf6079b886709a9d4b7378549d695c5277d70c54238e4b14c02f1a","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor303":true},

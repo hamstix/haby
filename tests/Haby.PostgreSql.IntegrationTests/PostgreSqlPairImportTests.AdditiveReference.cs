@@ -9,6 +9,7 @@ using Haby.Operator.Contracts;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
 using ImportStatus = Haby.Operator.Contracts.ResourceImportRequestStatus;
@@ -143,4 +144,27 @@ public sealed partial class PostgreSqlPairImportTests
         }
         finally { Directory.Delete(root, true); }
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Accepted_import_replay_refuses_modified_credential_owner_scope(bool application)
+    {
+        var setup = await AcceptedPair(await ExistingPair());
+        await using var services = Services(setup.Connection);
+        var acceptance = services.GetRequiredService<IResourceObservationAcceptance>();
+        var receipt = (await acceptance.FindAsync(setup.Key, default))!;
+        ProviderResourceReservation[] reservations;
+        await using (var read = await services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>().CreateDbContextAsync())
+            reservations = (await read.ProviderResourceReservations.AsNoTracking().ToArrayAsync()).Select(x => new ProviderResourceReservation(
+                Haby.Domain.ProviderInstanceId.Parse(x.ProviderInstanceId.ToString()), setup.Owner.EnvironmentRecordId, setup.Owner.ApplicationRecordId,
+                Haby.Domain.ManifestLocalId.Create(x.ResourceLocalId), x.Namespace, x.Value)).ToArray();
+        var owner = application ? setup.Owner with { ApplicationRecordId = Haby.Domain.ApplicationRecordId.New() }
+            : setup.Owner with { EnvironmentRecordId = Haby.Domain.EnvironmentRecordId.New() };
+        var request = new ResourceObservationAcceptance(receipt.Operations, [new(setup.Owner, setup.Staged)], reservations, receipt.Evidence);
+        var modified = request with { Credentials = [new(owner, setup.Staged)] };
+        Assert.Equal(ResourceObservationAcceptanceStatus.InputUnavailable, (await acceptance.CompleteAsync(modified, DateTimeOffset.UtcNow, default)).Status);
+        Assert.Equal(ResourceObservationAcceptanceStatus.Existing, (await acceptance.CompleteAsync(request, DateTimeOffset.UtcNow, default)).Status);
+        await AssertOriginalReceipt(setup);
+    }
+
 }

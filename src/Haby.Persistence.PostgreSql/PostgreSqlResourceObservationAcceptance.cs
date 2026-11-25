@@ -244,6 +244,20 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
         var prior = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == source.Generation && x.Group == group.Id, token);
         if (prior is null) return null;
         var resources = graph.Nodes.Where(x => group.Operations.Contains(x.Id)).Select(x => x.ResourceId.Value).Distinct().ToArray();
+        var inputs = source.Inputs();
+        var credentials = inputs.Acquisitions.Resources.Where(x => resources.Contains(x.Resource.Value) && x.Credential is not null).ToArray();
+        // Receipt documents omit enclosing owner keys. Bind those keys to the immutable
+        // source before comparing the stored group; no current health/authority probe.
+        if (acceptance.Operations.Count != group.Operations.Count ||
+            !group.Operations.ToHashSet().SetEquals(acceptance.Operations.Select(x => x.Key.OperationId)) ||
+            acceptance.Operations.Any(x => x.Key.DeploymentId != first.DeploymentId || x.Key.Generation != first.Generation) ||
+            acceptance.Credentials.Count != credentials.Length ||
+            acceptance.Credentials.Select(x => x.Owner.ResourceLocalId).Distinct().Count() != acceptance.Credentials.Count ||
+            acceptance.Credentials.Any(x => x.Owner.EnvironmentRecordId != inputs.Environment || x.Owner.ApplicationRecordId != inputs.Revision.ApplicationRecordId ||
+                !credentials.Any(e => e.Resource == x.Owner.ResourceLocalId && e.Credential == x.Staged)) ||
+            acceptance.Reservations.Any(x => x.EnvironmentRecordId != inputs.Environment || x.ApplicationRecordId != inputs.Revision.ApplicationRecordId ||
+                !resources.Contains(x.ResourceLocalId.Value) || x.ProviderInstanceId != inputs.Providers.Resource(x.ResourceLocalId).Instance))
+            return new(ResourceObservationAcceptanceStatus.InputUnavailable);
         var associations = await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && x.SourceGeneration == source.Generation && resources.Contains(x.Resource)).ToArrayAsync(token);
         var document = JsonSerializer.Serialize(Document(acceptance, group, associations), ImportReceiptJsonContext.Default.ImportReceiptDocument);
         // Only an exact historical replay skips current-state verification. A changed
