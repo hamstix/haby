@@ -84,7 +84,7 @@ internal static class ConfiguredDeploymentCases
                 KubernetesProviderConfiguration configuration, CancellationToken ct) => new KubernetesPreflightHandler(new KubernetesProviderConfigurationCodec(),
                     (scope, exact, cancellation) => KubernetesClientFactory.CreateFixture(new(new(scope.ToString(), binding.InstanceId.ToString(), binding.RevisionNumber.Value,
                         KubernetesProviderConfigurationCodec.Implementation), exact.Endpoint, exact.ServerCaPem, exact.BearerToken, exact.ClientCertificate, exact.ClientPrivateKey), store, [], cancellation))
-                    .CheckTypedAsync(environment, configuration, ct);
+                    .CheckTypedAsync(new(environment, binding.InstanceId, binding.RevisionNumber), configuration, ct);
             Console.WriteLine("Q243 configured accepted-plan start");
             var scenario = await new DurableDeploymentPlanningTests(postgres).InternalScenarioAsync(Configuration, ns, actualKubernetesProbe: Preflight, initialOnly: true,
                 configureManifest: envelope =>

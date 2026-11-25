@@ -87,7 +87,7 @@ public sealed class ProviderAdministrationTests
         var api = new ReviewApi(username, status);
         var handler = new KubernetesPreflightHandler(new(), (_, _, _) => ValueTask.FromResult(new KernelClient(
             new k8s.Kubernetes(new KubernetesClientConfiguration { Host = "https://fixture.invalid" }, api))));
-        Assert.Equal(expected, (await handler.CheckTypedAsync(EnvironmentRecordId.New(), Configuration(), default)).Outcome);
+        Assert.Equal(expected, (await handler.CheckTypedAsync(new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), Configuration(), default)).Outcome);
         Assert.Equal(1, api.Calls);
     }
 
@@ -97,9 +97,9 @@ public sealed class ProviderAdministrationTests
         var secrets = new Secrets(); var environment = EnvironmentRecordId.New();
         var handler = new KubernetesPreflightHandler(new(), secrets);
         using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await handler.CheckTypedAsync(environment, Configuration(), cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await handler.CheckTypedAsync(new(environment, ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), Configuration(), cancellation.Token));
         Assert.Equal(0, secrets.Reads);
-        Assert.Equal(ProviderPreflightOutcome.SecretUnavailable, (await handler.CheckTypedAsync(environment, Configuration(), default)).Outcome);
+        Assert.Equal(ProviderPreflightOutcome.SecretUnavailable, (await handler.CheckTypedAsync(new(environment, ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), Configuration(), default)).Outcome);
         Assert.Equal(new(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), secrets.Definition);
     }
 
@@ -128,7 +128,7 @@ public sealed class ProviderAdministrationTests
             throw new InvalidOperationException("Unreachable.");
         });
         using var caller = new CancellationTokenSource();
-        var check = handler.CheckTypedAsync(EnvironmentRecordId.New(), Configuration(), caller.Token).AsTask();
+        var check = handler.CheckTypedAsync(new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), Configuration(), caller.Token).AsTask();
         await entered.Task;
         if (callerCancellation)
         {

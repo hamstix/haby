@@ -21,6 +21,114 @@ namespace Haby.PostgreSql.IntegrationTests;
 public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : IClassFixture<PostgreSqlFixture>
 {
     [Fact]
+    public async Task Downstream_preflight_receives_persisted_identity_and_real_shared_credential_authority()
+    {
+        var connection = await NewDatabaseAsync();
+        var evidence = new SharedPreflightEvidence();
+        await using var host = OperatorHostApplication.Build(
+            ["--Haby:PostgreSql:ConnectionString=" + connection, "--Haby:Tls:Enabled=false", "--Haby:Port=0"], services => services
+                .AddSingleton(evidence).AddSingleton<SharedSampleCodec>()
+                .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<SharedSampleCodec>())
+                .AddSingleton<IProviderDeclarationAdapter, SharedSampleAdapter>()
+                .AddSingleton<IProviderPreflightHandler, SharedSamplePreflight>());
+        await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
+        await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
+        using var channel = GrpcChannel.ForAddress(host.Urls.Single());
+        var client = OperatorTestCredentials.Client(channel);
+        await client.CreateEnvironmentAsync(new() { Name = "pilot" });
+        Assert.Equal(SecretStatus.Created, (await client.CreateSecretAsync(new()
+        {
+            Environment = "pilot", Name = "sample-secret", Purpose = "SharedApplicationCredential",
+            RequestId = Guid.NewGuid().ToString(), Material = ByteString.CopyFrom(new byte[] { 1, 2, 3 })
+        })).Status);
+        foreach (var revision in new[] { 1, 2 })
+            Assert.Equal(ProviderStatus.Created, (await client.ApplyProviderAsync(new() { Declaration = ByteString.CopyFromUtf8(SampleDeclaration(revision)) })).Status);
+        var provider = (await client.GetProviderAsync(new() { Environment = "pilot", Name = "sample" })).Provider;
+        var environment = (await host.Services.GetRequiredService<IEnvironmentQuery>().FindAsync(EnvironmentId.Create("pilot"), default))!;
+        var expected = new ProviderPreflightContext(environment, ProviderInstanceId.Parse(provider.InstanceId), ProviderConfigurationRevisionNumber.Create(1));
+        Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(Set(null, 1))).Status);
+        evidence.BeforeResolve = async () =>
+        {
+            evidence.BeforeResolve = null;
+            Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(Set(1, 2))).Status);
+        };
+        Assert.Equal(ProviderPreflightStatus.Ready, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
+        Assert.Equal(expected, evidence.Context);
+        Assert.Equal(2, (await client.GetProviderAliasAsync(new() { Environment = "pilot", Alias = "sample.primary" })).Binding.Revision);
+        var scope = evidence.Scope!;
+        foreach (var wrong in new Func<SharedCredentialScope, SharedCredentialScope>[]
+        {
+            x => x with { Environment = EnvironmentRecordId.New() }, x => x with { Provider = ProviderInstanceId.New() },
+            x => x with { Revision = ProviderConfigurationRevisionNumber.Create(99) }, x => x with { Slot = "other" },
+            x => x with { Reference = new(x.Reference.SecretId, SecretVersionId.New()) },
+            x => x with { Use = SharedCredentialUse.ApplicationDelivery }
+        })
+        {
+            evidence.ChangeScope = wrong;
+            Assert.Equal(ProviderPreflightStatus.SecretUnavailable, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
+        }
+        evidence.ChangeScope = null;
+        Assert.Equal(SharedCredentialRevocationOutcome.Revoked,
+            await host.Services.GetRequiredService<ISharedCredentialAdministration>().RevokeAsync(scope, "revoker", default));
+        Assert.Equal(ProviderPreflightStatus.SecretUnavailable, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
+        await host.StopAsync();
+    }
+
+    private sealed class SharedPreflightEvidence
+    {
+        public ProviderPreflightContext? Context;
+        public SharedCredentialScope? Scope;
+        public Func<Task>? BeforeResolve;
+        public Func<SharedCredentialScope, SharedCredentialScope>? ChangeScope;
+    }
+    private sealed class SharedSampleCodec : ProviderConfigurationCodec<CredentialSampleConfiguration>
+    {
+        private readonly CredentialSampleCodec _inner = new();
+        public override string ProviderKindId => _inner.ProviderKindId;
+        public override string ShapeId => _inner.ShapeId;
+        public override int PayloadFormatVersion => _inner.PayloadFormatVersion;
+        public override CredentialSampleConfiguration DecodeTyped(string json) => _inner.DecodeTyped(json);
+        public override PreparedProviderConfiguration Encode(CredentialSampleConfiguration value)
+        {
+            var prepared = _inner.Encode(value);
+            return prepared with { SecretReferences = prepared.SecretReferences.Select(x => x with { SharedUse = SharedCredentialUse.SystemAccess }).ToArray() };
+        }
+    }
+    private sealed class SharedSampleAdapter(SharedSampleCodec codec) : IProviderDeclarationAdapter
+    {
+        private readonly CredentialSampleAdapter _inner = new(new CredentialSampleCodec());
+        public ProviderAdapterKey Key => _inner.Key;
+        public IProviderConfigurationCodec Codec => codec;
+        public IReadOnlyList<string> RequiredSecretSlots => ["credential"];
+        public IReadOnlyDictionary<string, SharedCredentialUse> SharedCredentialSlots { get; } =
+            new Dictionary<string, SharedCredentialUse> { ["credential"] = SharedCredentialUse.SystemAccess };
+        public object ParseProperties(JsonElement properties) => _inner.ParseProperties(properties);
+        public object Bind(object properties, IReadOnlyDictionary<string, SecretRef> secrets) => _inner.Bind(properties, secrets);
+        public bool CanReplace(ProviderAdapterKey previous) => _inner.CanReplace(previous);
+        public bool Equivalent(object previous, object candidate) => _inner.Equivalent(previous, candidate);
+        public bool SameEndpoint(object previous, object candidate) => _inner.SameEndpoint(previous, candidate);
+    }
+    private sealed class SharedSamplePreflight(SharedSampleCodec codec, ISharedCredentialSystemAccess system,
+        SharedPreflightEvidence evidence) : ProviderPreflightHandler<CredentialSampleConfiguration>(codec)
+    {
+        public override IReadOnlyList<ProviderAdapterKey> Keys { get; } =
+            [new("credential-sample/v1", "credential-sample.configuration/v1", "credential-sample.impl/v1")];
+        public override async ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context,
+            CredentialSampleConfiguration configuration, CancellationToken token)
+        {
+            if (evidence.BeforeResolve is { } before) await before();
+            evidence.Context = context;
+            var scope = new SharedCredentialScope(context.Environment, context.Provider, context.Revision, "credential",
+                SharedCredentialUse.SystemAccess, new(SecretId.Parse(configuration.SecretId), SecretVersionId.Parse(configuration.SecretVersionId)));
+            evidence.Scope = scope;
+            using var material = await system.ResolveAsync(evidence.ChangeScope?.Invoke(scope) ?? scope, 100, token);
+            if (material is null) return new(ProviderPreflightOutcome.SecretUnavailable);
+            Assert.Equal(new byte[] { 1, 2, 3 }, material.CopyBytes());
+            return new(ProviderPreflightOutcome.Ready);
+        }
+    }
+
+    [Fact]
     public async Task Exact_preflight_and_aliases_cross_real_Host_declaration_reload_restart_and_native_transport()
     {
         var connection = await NewDatabaseAsync();
@@ -330,11 +438,11 @@ internal sealed class CredentialFakePreflight(CredentialSampleCodec codec, ISecr
 {
     public override IReadOnlyList<ProviderAdapterKey> Keys { get; } =
         [new("credential-sample/v1", "credential-sample.configuration/v1", "credential-sample.impl/v1")];
-    public override async ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment, CredentialSampleConfiguration configuration, CancellationToken token)
+    public override async ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context, CredentialSampleConfiguration configuration, CancellationToken token)
     {
         Interlocked.Increment(ref evidence.Calls);
         Assert.Equal("queue-cluster", configuration.Target);
-        using var material = await secrets.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(environment), SecretPurpose.ProviderAdministrator), new(SecretId.Parse(configuration.SecretId), SecretVersionId.Parse(configuration.SecretVersionId)), token);
+        using var material = await secrets.ResolveAsync(new SecretDefinition(new SecretOwner.Environment(context.Environment), SecretPurpose.ProviderAdministrator), new(SecretId.Parse(configuration.SecretId), SecretVersionId.Parse(configuration.SecretVersionId)), token);
         Assert.NotNull(material);
         Assert.Equal(new byte[] { 1, 2, 3 }, material.CopyBytes());
         return new(evidence.Outcome);

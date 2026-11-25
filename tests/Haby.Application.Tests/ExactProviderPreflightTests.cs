@@ -19,6 +19,8 @@ public sealed class ExactProviderPreflightTests
         var binding = new ProviderAliasBinding(ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(7));
         Assert.Equal(outcome, (await preflight.CheckAsync(environment, binding, default)).Outcome);
         Assert.Equal((environment, binding), reader.Request);
+        if (outcome == ProviderPreflightOutcome.Ready)
+            Assert.Equal(new ProviderPreflightContext(environment, binding.InstanceId, binding.RevisionNumber), handler.Context);
         Assert.Equal(outcome == ProviderPreflightOutcome.Ready ? 1 : 0, handler.Calls);
     }
     [Fact]
@@ -68,12 +70,14 @@ public sealed class ExactProviderPreflightTests
     }
     private sealed class CompatibleHandler(params Codec[] readers) : ProviderPreflightHandler<Settings>(readers)
     {
+        public ProviderPreflightContext? Context { get; set; }
         public int Calls;
         public override IReadOnlyList<ProviderAdapterKey> Keys => Readers.Select(reader =>
             new ProviderAdapterKey(reader.ProviderKindId, reader.ShapeId, "impl-a")).Distinct().ToArray();
-        public override ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment, Settings configuration, CancellationToken token)
+        public override ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context, Settings configuration, CancellationToken token)
         {
             Assert.Equal(42, configuration.QueueLimit);
+            Context = context;
             Calls++;
             return ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.Ready));
         }
@@ -90,10 +94,12 @@ public sealed class ExactProviderPreflightTests
     private sealed class Handler(Codec codec) : ProviderPreflightHandler<Settings>(codec)
     {
         public int Calls;
+        public ProviderPreflightContext? Context { get; set; }
         public override IReadOnlyList<ProviderAdapterKey> Keys => [new("queue/v1", "queue.settings/v1", "impl-a"), new("queue/v1", "queue.settings/v1", "impl-b")];
-        public override ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment, Settings configuration, CancellationToken token)
+        public override ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context, Settings configuration, CancellationToken token)
         {
             Assert.Equal(42, configuration.QueueLimit);
+            Context = context;
             Calls++;
             return ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.Ready));
         }

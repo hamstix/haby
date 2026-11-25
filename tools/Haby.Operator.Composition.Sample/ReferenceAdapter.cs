@@ -102,7 +102,7 @@ internal static class ReferenceAdapter
     private sealed class Preflight(Codec codec) : ProviderPreflightHandler<Configuration>(codec)
     {
         public override IReadOnlyList<ProviderAdapterKey> Keys => [Provider];
-        public override ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment, Configuration configuration, CancellationToken token)
+        public override ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context, Configuration configuration, CancellationToken token)
         { token.ThrowIfCancellationRequested(); return ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.Ready)); }
     }
 

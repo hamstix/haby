@@ -120,7 +120,7 @@ public sealed class PostgreSqlPreflightHandler(PostgreSqlProviderConfigurationCo
 {
     public override IReadOnlyList<ProviderAdapterKey> Keys { get; } =
         [new(PostgreSqlProviderConfigurationCodec.Kind, PostgreSqlProviderConfigurationCodec.Shape, PostgreSqlDatabaseProvisioner.ImplementationId)];
-    public override ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment,
+    public override ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context,
         PostgreSqlProviderConfiguration configuration, CancellationToken cancellationToken) =>
-        preflight.CheckConfigurationAsync(environment, configuration, cancellationToken);
+        preflight.CheckConfigurationAsync(context.Environment, configuration, cancellationToken);
 }

@@ -24,7 +24,7 @@ public sealed class KubernetesPreflightHandler : ProviderPreflightHandler<Kubern
     public override IReadOnlyList<ProviderAdapterKey> Keys { get; } = [new(KubernetesProviderConfigurationCodec.Kind,
         KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation)];
 
-    public override async ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment,
+    public override async ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context,
         KubernetesProviderConfiguration configuration, CancellationToken cancellationToken)
     {
         ProviderPreflightResult Result(ProviderPreflightOutcome outcome, ProviderConnectionDiagnostic? diagnostic = null) => new(outcome)
@@ -37,7 +37,7 @@ public sealed class KubernetesPreflightHandler : ProviderPreflightHandler<Kubern
         deadline.CancelAfter(TimeSpan.FromSeconds(10));
         try
         {
-            using var client = await _connect(environment, configuration, deadline.Token);
+            using var client = await _connect(context.Environment, configuration, deadline.Token);
             // Unlike /version or /readyz, this proves the supplied credentials were authenticated.
             // The review is discarded by the API server; it creates no persistent probe object.
             var review = await client.Client.AuthenticationV1.CreateSelfSubjectReviewAsync(new V1SelfSubjectReview(), cancellationToken: deadline.Token);

@@ -26,11 +26,11 @@ internal sealed class InternalKubernetesFixturePreflight(KubernetesProviderConfi
 {
     public override IReadOnlyList<ProviderAdapterKey> Keys { get; } = [new(KubernetesProviderConfigurationCodec.Kind,
         KubernetesProviderConfigurationCodec.Shape, KubernetesProviderConfigurationCodec.Implementation)];
-    public override ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment,
+    public override ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context,
         KubernetesProviderConfiguration configuration, CancellationToken token)
     {
         _ = codec.Encode(configuration);
-        return probe(secrets, environment, configuration, token);
+        return probe(secrets, context.Environment, configuration, token);
     }
     // Explicit deterministic double for catalog-only tests. It accepts only this
     // fixture's endpoint, credential alternative and exact scoped sentinel material.
