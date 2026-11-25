@@ -1,0 +1,96 @@
+name: Nightly PostgreSQL regression
+
+on:
+  schedule:
+    - cron: '17 1 * * *'
+  workflow_call:
+    inputs:
+      rehearsal:
+        required: true
+        type: boolean
+      expected_head:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      expected_head:
+        description: Exact expected SHA required for non-main rehearsal
+        required: false
+        type: string
+      rehearsal:
+        description: Explicit bounded manual route rehearsal on this immutable ref; never nightly main or release credit
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# Never cancel a run merely because main advanced or another run was queued.
+concurrency:
+  group: nightly-postgresql-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    outputs:
+      source: ${{ steps.capture.outputs.source }}
+    steps:
+      - uses: actions/github-script@v7
+        id: capture
+        env:
+          REHEARSAL: ${{ inputs.rehearsal }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        with:
+          script: |
+            if (context.ref !== 'refs/heads/main' && !(context.eventName === 'workflow_dispatch' && process.env.REHEARSAL === 'true')) throw new Error('Main or explicit manual rehearsal required.');
+            if (process.env.REHEARSAL === 'true' && (process.env.EXPECTED_HEAD !== context.sha || context.payload.inputs?.testcase || context.payload.inputs?.testgroup)) throw new Error('Exact rehearsal SHA and no focused arguments required.');
+            if (!/^[0-9a-f]{40}$/.test(context.sha)) throw new Error('Immutable nightly source required.');
+            core.setOutput('source', context.sha);
+            await core.summary.addRaw(`Captured ${context.sha}; ${context.ref}; ${context.eventName}; rehearsal=${process.env.REHEARSAL === 'true'}. No release readiness.`).write();
+  regression:
+    needs: capture
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+    with:
+      candidate: ${{ needs.capture.outputs.source }}
+  report:
+    needs: [capture, regression]
+    if: always() && needs.capture.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: .nightly-evidence
+      - name: Verify complete immutable PostgreSQL inventory and cleanup
+        id: verify
+        continue-on-error: true
+        env:
+          SOURCE: ${{ needs.capture.outputs.source }}
+          RESULT: ${{ needs.regression.result }}
+        run: node ./scripts/nightly-postgresql.mjs "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/.nightly-evidence" "$SOURCE" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RESULT" nightly-postgresql-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-postgresql-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: nightly-postgresql-summary.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Report missing or failed nightly honestly
+        if: always()
+        env:
+          VERIFIED: ${{ steps.verify.outcome }}
+        run: |
+          echo 'Full PostgreSQL nightly captured above. Failure requires prioritized disposition; data/authorization regressions block affected work and release. No unchanged automatic retry.' >> "$GITHUB_STEP_SUMMARY"
+          test "$VERIFIED" = success

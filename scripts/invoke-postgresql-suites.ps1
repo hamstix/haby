@@ -2,8 +2,8 @@ function Invoke-HabyPostgreSqlSuites {
     param([string]$Project, [string]$Artifacts, [string]$Private, [string]$Safe,
         [object[]]$Coverage, [string[]]$Suites, [string]$MapPath, [string]$PlanPath,
         [int]$ServerLimit, [int]$HostLimit, [switch]$AnonymousReflectionPrecheck, [string]$Source,
-        [string]$TestCase = '', [string]$TestGroup = '', [switch]$ExternalFocused)
-    $focused = Get-HabyFocusedPostgreSqlSelection $Coverage $TestCase $TestGroup
+        [string]$TestCase = '', [string]$TestGroup = '', [switch]$ExternalFocused, [string]$SelectionPath = '')
+    $focused = Get-HabyFocusedPostgreSqlSelection $Coverage $TestCase $TestGroup $SelectionPath
     if ($ExternalFocused -and -not $focused) { throw 'External focused accounting cannot waive full resource checks.' }
     if ($focused -and $AnonymousReflectionPrecheck) { throw 'Focused execution cannot run the full reflection precheck.' }
     if ($focused) { $Suites = @($focused.suites) }
@@ -49,7 +49,7 @@ function Invoke-HabyPostgreSqlSuites {
                 & "$PSScriptRoot/export-postgresql-timing.ps1" -TrxPath $path -OutputDirectory $output
                 $executed = @(Get-Content (Join-Path $output 'cases.json') -Raw | ConvertFrom-Json)
                 Assert-PostgreSqlCoverage $expected $executed
-                if ($focused) { Assert-HabyFocusedGatePlan $executed $PlanPath $TestCase $TestGroup @($suite) }
+                if ($focused) { Assert-HabyFocusedGatePlan $executed $PlanPath $TestCase $TestGroup @($suite) $SelectionPath }
                 else { Assert-HabyGatePlan $executed $PlanPath 'postgresql-integration' @($suite) }
                 if (-not $ExternalFocused) {
                     $resources = Get-Content (Join-Path $output 'resources.json') -Raw | ConvertFrom-Json

@@ -267,7 +267,7 @@ capabilities, not prerequisites for this milestone.
 - [ ] Implement [issue #261](https://github.com/hamstix/haby/issues/261) after merged #259 and test-cycle separation #263, covering every production client/frozen input path and controlled TLS evidence. Then deliver existing Resource import/attachment under ADR-062 and #267 before public CLI composition/NuGet and lower-priority feature work. Successive UPDATE qualification, ADR-052 correction, integrated rehearsal and public operational UPDATE remain required; CLI composition remains after operational UPDATE. TLS policy acceptance is not implementation or P3 completion.
 
 - [x] Accept [ADR-061](docs/adr/0061-focused-development-and-final-qualification.md): focused development; the 2026-11-24 amendment below replaces full merge qualification with targeted checks, nightly regression and full release qualification.
-- [ ] Implement [#263](https://github.com/hamstix/haby/issues/263) after #259 and before #261: independent focused PG/Kubernetes scenarios, fast ordinary iteration and a mechanical current-candidate full qualification gate. Existing checks remain until a safe approved transition.
+- [ ] Frozen historical [#263](https://github.com/hamstix/haby/issues/263): preserve its provenance lessons; it is not an execution prerequisite. The accepted #297 amendment below replaces its former full-before-every-merge policy after safe deployment.
 
 ### Accepted P3 execution order
 

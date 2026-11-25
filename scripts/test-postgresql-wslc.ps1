@@ -1,10 +1,15 @@
 param([string]$ResultsDirectory = (Join-Path $PSScriptRoot ('../.artifacts/postgresql-' + [Guid]::NewGuid().ToString('N'))),
-    [string]$TestCase = '', [string]$TestGroup = '')
+    [string]$TestCase = '', [string]$TestGroup = '', [string]$SelectionPath = '')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/test-suite-plan.ps1"
-$null = Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup
-Assert-HabyFocusedPostgreSqlPlan (Join-Path $PSScriptRoot '../tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json') $TestCase $TestGroup
+$null = Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup $SelectionPath
+Assert-HabyFocusedPostgreSqlPlan (Join-Path $PSScriptRoot '../tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json') $TestCase $TestGroup $SelectionPath
 
+if ($SelectionPath) {
+    $selection = Get-Content -LiteralPath $SelectionPath -Raw | ConvertFrom-Json
+    $root = Split-Path $PSScriptRoot -Parent
+    if ($selection.source -cne ((& git -C $root rev-parse HEAD | Out-String).Trim()) -or $selection.tree -cne ((& git -C $root rev-parse 'HEAD^{tree}' | Out-String).Trim())) { throw 'Stale union source/tree before WSLc startup.' }
+}
 if (-not (Get-Command wslc -ErrorAction SilentlyContinue)) { throw 'wslc is unavailable in this PowerShell process.' }
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw 'dotnet is unavailable in this PowerShell process.' }
 $helpText = (& wslc run --help 2>&1 | Out-String)
@@ -39,7 +44,7 @@ try {
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_EXTERNAL', '1')
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONNECTION', $builder.ConnectionString)
     [Environment]::SetEnvironmentVariable('HABY_POSTGRESQL_EPHEMERAL_CONTAINER', $name)
-    & (Join-Path $PSScriptRoot 'test-postgresql-measured.ps1') -ResultsDirectory $ResultsDirectory -TestCase $TestCase -TestGroup $TestGroup
+    & (Join-Path $PSScriptRoot 'test-postgresql-measured.ps1') -ResultsDirectory $ResultsDirectory -TestCase $TestCase -TestGroup $TestGroup -SelectionPath $SelectionPath
     $testExitCode = $LASTEXITCODE
     $primaryExitCode = $testExitCode
 }

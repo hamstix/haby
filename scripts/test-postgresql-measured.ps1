@@ -1,16 +1,22 @@
 param([Parameter(Mandatory)][string]$ResultsDirectory, [switch]$Docker, [AllowEmptyString()][string]$Suite = 'full', [switch]$AnonymousReflectionPrecheck,
-    [string]$TestCase = '', [string]$TestGroup = '')
+    [string]$TestCase = '', [string]$TestGroup = '', [string]$SelectionPath = '')
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path $PSScriptRoot -Parent
 . "$PSScriptRoot/test-suite-plan.ps1"
 $selectedSuites = @(Get-HabyPostgreSqlSuites $Suite)
-$focused = Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup
-Assert-HabyFocusedPostgreSqlPlan (Join-Path $PSScriptRoot '../tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json') $TestCase $TestGroup
+$focused = Test-HabyFocusedPostgreSqlArguments $TestCase $TestGroup $SelectionPath
+Assert-HabyFocusedPostgreSqlPlan (Join-Path $PSScriptRoot '../tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json') $TestCase $TestGroup $SelectionPath
 if ($focused -and ($Suite -cne 'full' -or $AnonymousReflectionPrecheck)) { throw 'Focused selection cannot be combined with suite selection or the full reflection precheck.' }
 $gateSuites = if ($Suite -ceq 'full') { @('functional','infrastructure-qualification') } else { @($Suite) }
 if (-not $Docker -and $Suite -cne 'full') { throw 'Explicit suite selection requires the Docker entrypoint.' }
 if ($AnonymousReflectionPrecheck -and (-not $Docker -or $Suite -cne 'full')) { throw 'Named reflection precheck requires Docker full mode.' }
+if ($SelectionPath) {
+    $selection = Get-Content -LiteralPath $SelectionPath -Raw | ConvertFrom-Json
+    $head = (& git -C $root rev-parse HEAD | Out-String).Trim()
+    $tree = (& git -C $root rev-parse 'HEAD^{tree}' | Out-String).Trim()
+    if ($selection.source -cne $head -or $selection.tree -cne $tree) { throw 'Stale union selection source/tree.' }
+}
 $destination = [IO.Path]::GetFullPath($ResultsDirectory)
 if (Test-Path $destination) { throw 'Use a new results directory for each measurement.' }
 New-Item -ItemType Directory -Force $destination | Out-Null
@@ -102,7 +108,7 @@ try {
                 $selectedCoverage = @($coverage | Where-Object { $_.suite -cin $selectedSuites })
                 $allCoverage = $coverage
                 if ($focused) {
-                    $selection = Get-HabyFocusedPostgreSqlSelection $coverage $TestCase $TestGroup
+                    $selection = Get-HabyFocusedPostgreSqlSelection $coverage $TestCase $TestGroup $SelectionPath
                     $selectedCoverage = @($selection.cases)
                     $selectedSuites = @($selection.suites)
                     $gateSuites = $selectedSuites
@@ -112,7 +118,7 @@ try {
                 $primaryPhase = 'test'
                 $assemblyPath = Join-Path $artifacts 'bin/Haby.PostgreSql.IntegrationTests/debug/Haby.PostgreSql.IntegrationTests.dll'
                 if (Test-Path $assemblyPath) { $assemblyHash = (Get-FileHash $assemblyPath -Algorithm SHA256).Hash.ToLowerInvariant() }
-                $suiteExecution = Invoke-HabyPostgreSqlSuites -Project $project -Artifacts $artifacts -Private $private -Safe $safe -Coverage $coverage -Suites $selectedSuites -MapPath (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/coverage-map.json') -PlanPath $planPath -ServerLimit $prerequisites.serverLimit -HostLimit $prerequisites.hostGroupLimit -AnonymousReflectionPrecheck:$AnonymousReflectionPrecheck -Source $sha -TestCase $TestCase -TestGroup $TestGroup -ExternalFocused:($focused -and -not $Docker)
+                $suiteExecution = Invoke-HabyPostgreSqlSuites -Project $project -Artifacts $artifacts -Private $private -Safe $safe -Coverage $coverage -Suites $selectedSuites -MapPath (Join-Path $root 'tests/Haby.PostgreSql.IntegrationTests/coverage-map.json') -PlanPath $planPath -ServerLimit $prerequisites.serverLimit -HostLimit $prerequisites.hostGroupLimit -AnonymousReflectionPrecheck:$AnonymousReflectionPrecheck -Source $sha -TestCase $TestCase -TestGroup $TestGroup -ExternalFocused:($focused -and -not $Docker) -SelectionPath $SelectionPath
                 if ($suiteExecution.precheck -and $suiteExecution.precheck.exitCode -ne 0) { $primaryPhase = 'anonymous-reflection-precheck' }
                 $testExit = $suiteExecution.exitCode; $reportFailed = $suiteExecution.reportingFailed
                 $rawTrxPaths = @($suiteExecution.trxPaths); $coverage = if ($Suite -ceq 'full' -and -not $focused) { $allCoverage } else { $selectedCoverage }
@@ -147,7 +153,7 @@ try {
                     $resources = Get-Content -LiteralPath (Join-Path $safe 'resources.json') -Raw | ConvertFrom-Json
                     Assert-HabyResourceCounts $resources $preflight.prerequisites.serverLimit $preflight.prerequisites.hostGroupLimit
                 }
-                if ($focused) { Assert-HabyFocusedGatePlan $executed $planPath $TestCase $TestGroup $gateSuites }
+                if ($focused) { Assert-HabyFocusedGatePlan $executed $planPath $TestCase $TestGroup $gateSuites $SelectionPath }
                 else { Assert-HabyGatePlan $executed $planPath 'postgresql-integration' $gateSuites }
                 [pscustomobject]@{ status = $(if ($focused) { 'focused' } elseif ($Suite -ceq 'full') { 'complete' } else { 'selected-complete' }); selection = $(if ($focused) { 'focused' } else { $Suite }); selectedSuites = $selectedSuites
                     discovered = $coverage.Count; executed = $executed.Count; cases = $coverage } |

@@ -29,6 +29,12 @@ User instructions override this file. A more specific nested `AGENTS.md`, if add
 4. Run focused validation, then all applicable solution validation.
 5. Run `git diff --check` and inspect the final diff and Git status.
 6. Report code failures separately from environment, restore, network or permission blockers.
+7. Follow [#297 selection and transition](docs/development/297-nightly-postgresql.md):
+   after installed transition, use exact targeted Merge qualification with fixed
+   real PostgreSQL smoke, full nightly regression and full exact release/install
+   Final. Unknown/shared/sensitive changes broaden; selected evidence is never
+   full release credit. Until transition, including the implementation candidate,
+   retain the previous full gates. No settings mutation or unchanged failure retry.
 
 For persisted EF Core behavior, follow the database-test isolation rules in [CONTRIBUTING.md](CONTRIBUTING.md): arrange, act and assert with separate `DbContext` instances unless tracking behavior is explicitly under test.
 

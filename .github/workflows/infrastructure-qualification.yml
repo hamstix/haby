@@ -5,6 +5,10 @@ on:
     - cron: '23 4 * * 1'
   workflow_dispatch:
     inputs:
+      nightly_full_rehearsal:
+        description: Bounded manual invocation of the full nightly route on this exact ref; not release credit
+        type: boolean
+        default: false
       testcase:
         description: Exact current PostgreSQL test method (focused only)
         type: string
@@ -22,7 +26,18 @@ permissions:
   contents: read
 
 jobs:
+  nightly-rehearsal:
+    if: github.event_name == 'workflow_dispatch' && inputs.nightly_full_rehearsal
+    uses: ./.github/workflows/nightly-postgresql.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      rehearsal: true
+      expected_head: ${{ inputs.expected_head }}
+
   owned-infrastructure:
+    if: inputs.nightly_full_rehearsal != true
     name: ${{ github.event_name == 'workflow_dispatch' && (inputs.testcase != '' || inputs.testgroup != '') && 'Focused PostgreSQL (not final)' || 'owned-infrastructure' }}
     runs-on: ubuntu-latest
     env:
