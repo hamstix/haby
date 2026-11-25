@@ -117,6 +117,37 @@ ImportUseAndRetain is explicitly refused through this new intake; use the existi
 protected Resource Import request instead. This envelope has no credential-material
 or protected-owner fields.
 
+### Add Reference Resources to Applied imported state
+
+For the configuration-only transition in [ADR-064](../adr/0064-composable-resource-acquisition-transitions.md),
+import the next Application revision with unchanged existing Resource identities
+and the additional Reference Resources. Each new Resource may select its own
+Provider alias. Existing Resources retain their exact Provider instance, revision,
+implementation, acquisition mode, credential references and original evidence.
+
+Use the same authenticated RPC with `ExpectedGeneration` and include only the new
+Reference Resources in `Acquisitions`:
+
+```csharp
+request.Reference = nextRevision;
+request.Precondition = PlanningPrecondition.ExpectedGeneration;
+request.ExpectedGeneration = appliedGeneration;
+// The service member above is new. Do not resubmit existing imported Resources.
+var change = await client.CreateChangeSetAsync(request, cancellationToken: token);
+```
+
+The server derives the retained acquisition set from that exact fully Applied
+baseline, then validates and freezes the combined target coverage. Plan, Check
+and Commit retain the expected-generation CAS. Original imported state is
+reverified before consequential execution and atomic group acceptance; missing
+capability, drift or revoked authority prevents completion. Configuration for the
+new generation becomes available only after reused and newly observed Resources
+complete together. Retry/restart uses original receipts without reimporting or
+substituting credentials. Changed, removed or renamed existing Resources and
+caller-supplied retained acquisition replacements receive typed refusals. This
+path does not admit new Import Resources, initial mixed Providers or Workloads;
+those separate slices remain governed by ADR-064.
+
 The limit is 256 members, 128 characters per payload format, 65,536 characters per
 input JSON, 65,536 UTF-8 bytes per sharing payload, and 1 MiB for the encoded durable
 set. The existing 1 MiB receive limit also applies. Typed adapter schema, complete

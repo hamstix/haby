@@ -12,7 +12,8 @@ namespace Haby.Persistence.PostgreSql;
 /// <summary>Provider-neutral, all-or-nothing catalog acceptance after adapter verification.
 /// No Provider/network calls or material comparison API. An uncertain response only triggers a reread.</summary>
 public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<ManifestCatalogDbContext> contexts,
-    IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec> codecs, Func<DurableActionRegistry> registryFactory)
+    IEnumerable<IExternalOperationOutputContract> contracts, IEnumerable<IProviderConfigurationCodec> codecs, Func<DurableActionRegistry> registryFactory,
+    IEnumerable<IDurableResourceReuseVerifier> reuseVerifiers)
     : IResourceObservationAcceptance
 {
     public async ValueTask<ResourceObservationReceipt?> FindAsync(DurableOperationKey operation, CancellationToken cancellationToken)
@@ -35,6 +36,11 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
         var privateCopies = new List<byte[]>();
         try
         {
+            var replay = await ExistingAsync(acceptance, cancellationToken);
+            if (replay is not null) return replay;
+            using var verification = await PostgreSqlReuseVerificationScopes.VerifyAsync(contexts, contracts, codecs, reuseVerifiers,
+                () => new DurableActionAdmission(registryFactory()), first.DeploymentId, first.Generation, cancellationToken);
+            if (verification.Status != ResourceReuseValidationStatus.Confirmed) return new(ResourceObservationAcceptanceStatus.InputUnavailable);
             await using var db = await contexts.CreateDbContextAsync(cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var deployment = Guid.Parse(first.DeploymentId.ToString());
@@ -49,12 +55,17 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
             var registry = registryFactory();
             var group = graph.ObservationGroups.SingleOrDefault(x => x.Operations.Contains(first.OperationId));
-            if (group is null || graph.Baseline is not null || graph.ReusedResources.Count != 0 || graph.RetainedResources.Count != 0 ||
+            if (group is null ||
                 DurableOperationGraphCodec.Fingerprint(inputs, graph) != source.Fingerprint ||
                 !group.Operations.ToHashSet().SetEquals(acceptance.Operations.Select(x => x.Key.OperationId)) ||
                 group.Operations.Count != acceptance.Operations.Count ||
                 acceptance.Operations.Any(x => x.Key.DeploymentId != first.DeploymentId || x.Key.Generation != first.Generation) ||
                 !new DurableActionAdmission(registry).Supports(graph)) return new(ResourceObservationAcceptanceStatus.InputUnavailable);
+            if (graph.Baseline is not null && (group.Mode != ResourceAcquisitionMode.Reference ||
+                inputs.Providers.Declaration.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||
+                !await ResourceContinuity.ValidateAsync(db, deployment, graph, cancellationToken) ||
+                !await ResourceProviderDispatch.ValidateCreationAsync(db, inputs, graph, codecs, new DurableActionAdmission(registry), cancellationToken)))
+                return new(ResourceObservationAcceptanceStatus.InputUnavailable);
             groupId = group.Id;
             var members = graph.Nodes.Where(x => group.Operations.Contains(x.Id)).ToArray();
             if (group.Mode == ResourceAcquisitionMode.Reference && members.Any(x => registry.Find(x.Action) is not IReadOnlyResourceObservationHandler))
@@ -165,8 +176,13 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
             {
                 var pending = new DurableAggregateCompletion.PendingResult(result.Key, result.AttemptId, result.Output);
                 var metadata = await DurableAggregateCompletion.InspectPublicationAsync(db, pending, contracts, codecs, cancellationToken);
-                if (metadata?.Candidate is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, cancellationToken) ||
-                    !await DurableOperationTransitions.ConfirmAsync(db, result.Key, result.AttemptId, at, false, cancellationToken)) return new(ResourceObservationAcceptanceStatus.InputUnavailable);
+                if (metadata?.Candidate is null || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(db, metadata, cancellationToken))
+                    return new(ResourceObservationAcceptanceStatus.InputUnavailable);
+            }
+            if (!await DurableOperationTransitions.ConfirmObservationGroupAsync(db, acceptance.Operations, at, cancellationToken, verification))
+                return new(ResourceObservationAcceptanceStatus.InputUnavailable);
+            foreach (var result in acceptance.Operations)
+            {
                 db.OperationOutputs.Add(new()
                 {
                     DeploymentId = deployment,
@@ -212,6 +228,28 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
             { return new(ResourceObservationAcceptanceStatus.StorageUnavailable); }
         }
         finally { foreach (var bytes in privateCopies) CryptographicOperations.ZeroMemory(bytes); }
+    }
+
+    private async Task<ResourceObservationAcceptanceResult?> ExistingAsync(ResourceObservationAcceptance acceptance, CancellationToken token)
+    {
+        var first = acceptance.Operations[0].Key;
+        var deployment = Guid.Parse(first.DeploymentId.ToString());
+        await using var db = await contexts.CreateDbContextAsync(token);
+        var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == first.Generation.Value, token);
+        if (source is null) return null;
+        var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        if (!new DurableActionAdmission(registryFactory()).Supports(graph)) return new(ResourceObservationAcceptanceStatus.InputUnavailable);
+        var group = graph.ObservationGroups.SingleOrDefault(x => x.Operations.Contains(first.OperationId));
+        if (group is null) return null;
+        var prior = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == source.Generation && x.Group == group.Id, token);
+        if (prior is null) return null;
+        var resources = graph.Nodes.Where(x => group.Operations.Contains(x.Id)).Select(x => x.ResourceId.Value).Distinct().ToArray();
+        var associations = await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && x.SourceGeneration == source.Generation && resources.Contains(x.Resource)).ToArrayAsync(token);
+        var document = JsonSerializer.Serialize(Document(acceptance, group, associations), ImportReceiptJsonContext.Default.ImportReceiptDocument);
+        // Only an exact historical replay skips current-state verification. A changed
+        // request still passes the ordinary ownership/evidence checks and typed refusals.
+        return prior.Document == document && await ResourceObservationReceiptIntegrity.ReadAsync(db, first, token) is not null
+            ? new(ResourceObservationAcceptanceStatus.Existing) : null;
     }
 
     private static async Task<bool> ConfirmCredentialAsync(ManifestCatalogDbContext db, ImportedCredentialConfirmation credential,

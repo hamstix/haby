@@ -180,6 +180,8 @@ public sealed class DurableActionRegistry
 }
 
 /// <summary>The same pure admission rule is used by durable Plan, Check and atomic Commit.</summary>
+public sealed record DurableResourceProviderContext(ProviderAdapterKey Provider, PreparedProviderConfiguration Configuration);
+
 public sealed class DurableActionAdmission(DurableActionRegistry registry)
 {
     private static DurableActionAdmissionKey AdmissionKey(ResourceTypeId type, ProviderAdapterKey provider, DurablePlanningInputs inputs, ManifestLocalId resource) =>
@@ -211,10 +213,10 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         { Mode = inputs?.Acquisitions.Resource(r.Key).Mode ?? ResourceAcquisitionMode.Provision }) is not null);
 
     internal DurablePlanStatus PlanningSupportStatus(NormalizedManifestSpec spec, ProviderAdapterKey provider,
-        DurablePlanningInputs inputs, IReadOnlySet<ManifestLocalId>? existingResources = null)
+        DurablePlanningInputs inputs, IReadOnlySet<ManifestLocalId>? existingResources = null, IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
     {
         foreach (var resource in spec.Resources.Where(x => existingResources?.Contains(x.Key) != true))
-            if (registry.Find(AdmissionKey(resource.Value.Type, provider, inputs, resource.Key)) is null)
+            if (registry.Find(AdmissionKey(resource.Value.Type, exact?.GetValueOrDefault(resource.Key)?.Provider ?? provider, inputs, resource.Key)) is null)
                 return UnsupportedMode(inputs.Acquisitions.Resource(resource.Key).Mode);
         return DurablePlanStatus.Planned;
     }
@@ -226,21 +228,31 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
     };
 
     public DurablePlanStatus Admit(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration? configuration = null, IReadOnlySet<ManifestLocalId>? existingResources = null)
+        PreparedProviderConfiguration? configuration = null, IReadOnlySet<ManifestLocalId>? existingResources = null,
+        IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
     {
         if (!SupportsPilotShape(spec)) return DurablePlanStatus.UnsupportedShape;
         inputs.Validate();
         var completeInputs = spec.Resources.Keys.ToHashSet().SetEquals(inputs.Providers.Entries.Keys.OfType<ProviderInput.Resource>().Select(x => x.Id)) &&
             inputs.Providers.Entries.Keys.All(x => x is ProviderInput.Resource);
-        var pilot = inputs.Providers.RequireUniformResourceProvider();
-        if (SingleAlias(spec) != pilot.Alias || provider.ImplementationId != pilot.Implementation.Value)
+        if (exact is null)
+        {
+            var pilot = inputs.Providers.RequireUniformResourceProvider();
+            if (SingleAlias(spec) != pilot.Alias || provider.ImplementationId != pilot.Implementation.Value)
+                return DurablePlanStatus.ProviderRevisionUnavailable;
+        }
+        else if (!spec.Resources.Keys.ToHashSet().SetEquals(exact.Keys) || spec.Resources.Any(r =>
+            inputs.Providers.Resource(r.Key).Alias != r.Value.ProviderRef ||
+            exact[r.Key].Provider.ImplementationId != inputs.Providers.Resource(r.Key).Implementation.Value))
             return DurablePlanStatus.ProviderRevisionUnavailable;
         foreach (var resource in spec.Resources.Where(r => existingResources?.Contains(r.Key) != true))
         {
-            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs, resource.Key));
+            var selected = exact?.GetValueOrDefault(resource.Key);
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, selected?.Provider ?? provider, inputs, resource.Key));
+            var prepared = selected?.Configuration ?? configuration;
             if (handler is null) return UnsupportedMode(inputs.Acquisitions.Resource(resource.Key).Mode);
-            var valid = handler is IDurableResourcePlanComposer composer && configuration is not null
-                ? composer.Validate(spec, resource.Key, inputs, configuration)
+            var valid = handler is IDurableResourcePlanComposer composer && prepared is not null
+                ? composer.Validate(spec, resource.Key, inputs, prepared)
                 : spec.Resources.Count == 1 && SupportsConfigurationComponents(spec) && handler.Validate(resource.Key, resource.Value, inputs);
             if (!valid) return DurablePlanStatus.UnsupportedShape;
             if (!completeInputs) return DurablePlanStatus.PlanInputUnavailable;
@@ -253,50 +265,51 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         return completeInputs ? DurablePlanStatus.Planned : DurablePlanStatus.PlanInputUnavailable;
     }
     public IReadOnlyList<DurableOperationNode> DescribeProducers(NormalizedManifestSpec spec, ProviderAdapterKey provider,
-        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, IReadOnlySet<ManifestLocalId>? existingResources = null)
+        DurablePlanningInputs inputs, PreparedProviderConfiguration configuration, IReadOnlySet<ManifestLocalId>? existingResources = null,
+        IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
     {
-        if (Admit(spec, provider, inputs, configuration, existingResources) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
+        if (Admit(spec, provider, inputs, configuration, existingResources, exact) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
         return spec.Resources.Where(r => existingResources?.Contains(r.Key) != true).SelectMany(r =>
         {
-            var handler = registry.Find(AdmissionKey(r.Value.Type, provider, inputs, r.Key))!;
-            return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
+            var handler = registry.Find(AdmissionKey(r.Value.Type, exact?.GetValueOrDefault(r.Key)?.Provider ?? provider, inputs, r.Key))!;
+            return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, exact?.GetValueOrDefault(r.Key)?.Configuration ?? configuration)
                 : handler.Plan(r.Key, r.Value, inputs);
         }).ToArray();
     }
 
     public DurableOperationGraph Plan(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration? configuration = null)
+        PreparedProviderConfiguration? configuration = null, IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
     {
-        if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned)
+        if (Admit(spec, provider, inputs, configuration, exact: exact) != DurablePlanStatus.Planned)
             throw new InvalidDataException("Planning support unavailable.");
         var nodes = new List<DurableOperationNode>();
         foreach (var resource in spec.Resources.OrderBy(r => r.Key.Value, StringComparer.Ordinal))
         {
-            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs, resource.Key))!;
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, exact?.GetValueOrDefault(resource.Key)?.Provider ?? provider, inputs, resource.Key))!;
             nodes.AddRange(handler is IDurableResourcePlanComposer composer && configuration is not null
-                ? composer.Plan(spec, resource.Key, inputs, configuration)
+                ? composer.Plan(spec, resource.Key, inputs, exact?.GetValueOrDefault(resource.Key)?.Configuration ?? configuration)
                 : handler.Plan(resource.Key, resource.Value, inputs));
         }
         var graph = new DurableOperationGraph(nodes.Select(n => registry.FreezeEvidence(n, inputs))) { Import = inputs.Import, Acquisitions = inputs.Acquisitions };
         graph.ValidateReferences(inputs);
-        if (!ValidateGraph(spec, provider, inputs, configuration, graph))
+        if (!ValidateGraph(spec, provider, inputs, configuration, graph, exact))
             throw new InvalidDataException("Graph ownership or contracts are inconsistent.");
         return graph;
     }
     public bool ValidateGraph(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration? configuration, DurableOperationGraph graph)
+        PreparedProviderConfiguration? configuration, DurableOperationGraph graph, IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
     {
-        if (Admit(spec, provider, inputs, configuration) != DurablePlanStatus.Planned) return false;
+        if (Admit(spec, provider, inputs, configuration, exact: exact) != DurablePlanStatus.Planned) return false;
         graph.ValidateReferences(inputs);
         foreach (var node in graph.Nodes)
             if (!spec.Resources.TryGetValue(node.ResourceId, out var declared) ||
-                node.Action.Admission != AdmissionKey(declared.Type, provider, inputs, node.ResourceId)) return false;
+                node.Action.Admission != AdmissionKey(declared.Type, exact?.GetValueOrDefault(node.ResourceId)?.Provider ?? provider, inputs, node.ResourceId)) return false;
         foreach (var resource in spec.Resources)
         {
-            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs, resource.Key))!;
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, exact?.GetValueOrDefault(resource.Key)?.Provider ?? provider, inputs, resource.Key))!;
             if (handler is IDurableResourcePlanComposer composer && configuration is not null)
             {
-                if (!composer.ValidateGraph(spec, resource.Key, inputs, configuration, graph)) return false;
+                if (!composer.ValidateGraph(spec, resource.Key, inputs, exact?.GetValueOrDefault(resource.Key)?.Configuration ?? configuration, graph)) return false;
             }
             else if (!graph.Nodes.Any(n => n.ResourceId == resource.Key) ||
                 graph.Nodes.Where(n => n.ResourceId == resource.Key).Any(n => registry.Find(n.Action)?.Supports(n) != true ||
@@ -305,25 +318,25 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         return true;
     }
     public DurableOperationGraph PlanUpdate(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration configuration, IReadOnlyList<ResourceReuse> reused, ResourceReuseBaseline baseline, IReadOnlyList<ResourceReuse>? retained = null)
+        PreparedProviderConfiguration configuration, IReadOnlyList<ResourceReuse> reused, ResourceReuseBaseline baseline, IReadOnlyList<ResourceReuse>? retained = null, IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
     {
-        if (Admit(spec, provider, inputs, configuration, reused.Select(x => x.Resource).ToHashSet()) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
+        if (Admit(spec, provider, inputs, configuration, reused.Select(x => x.Resource).ToHashSet(), exact) != DurablePlanStatus.Planned) throw new InvalidDataException("Planning support unavailable.");
         var nodes = spec.Resources.Where(r => !reused.Any(x => x.Resource == r.Key)).SelectMany(r =>
         {
-            var handler = registry.Find(AdmissionKey(r.Value.Type, provider, inputs, r.Key))!;
-            return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, configuration)
+            var handler = registry.Find(AdmissionKey(r.Value.Type, exact?.GetValueOrDefault(r.Key)?.Provider ?? provider, inputs, r.Key))!;
+            return handler is IDurableResourcePlanComposer composer ? composer.Plan(spec, r.Key, inputs, exact?.GetValueOrDefault(r.Key)?.Configuration ?? configuration)
                 : handler.Plan(r.Key, r.Value, inputs);
         });
         var graph = new DurableOperationGraph(nodes.Select(n => registry.FreezeEvidence(n, inputs)), reused, baseline, retained) { Acquisitions = inputs.Acquisitions };
         graph.ValidateReferences(inputs);
         if (!spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(reused.Select(r => r.Resource))) ||
             graph.Nodes.Any(n => !spec.Resources.TryGetValue(n.ResourceId, out var declared) ||
-                n.Action.Admission != AdmissionKey(declared.Type, provider, inputs, n.ResourceId)))
+                n.Action.Admission != AdmissionKey(declared.Type, exact?.GetValueOrDefault(n.ResourceId)?.Provider ?? provider, inputs, n.ResourceId)))
             throw new InvalidDataException("Graph Resource inventory is inconsistent.");
         foreach (var resource in spec.Resources.Where(r => !reused.Any(x => x.Resource == r.Key)))
         {
-            var handler = registry.Find(AdmissionKey(resource.Value.Type, provider, inputs, resource.Key))!;
-            if (handler is IDurableResourcePlanComposer composer && !composer.ValidateGraph(spec, resource.Key, inputs, configuration, graph))
+            var handler = registry.Find(AdmissionKey(resource.Value.Type, exact?.GetValueOrDefault(resource.Key)?.Provider ?? provider, inputs, resource.Key))!;
+            if (handler is IDurableResourcePlanComposer composer && !composer.ValidateGraph(spec, resource.Key, inputs, exact?.GetValueOrDefault(resource.Key)?.Configuration ?? configuration, graph))
                 throw new InvalidDataException("Graph ownership or contracts are inconsistent.");
             if (handler is not IDurableResourcePlanComposer && graph.Nodes.Where(n => n.ResourceId == resource.Key).Any(n =>
                 registry.Find(n.Action)?.Supports(n) != true || n.OutputReferences.Any(o => o.OutputContract != GeneratedCredentialContracts.OutputContract)))
@@ -359,12 +372,12 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
     // Validate original creation nodes against their own frozen declaration, including
     // a source generation that itself reused peers. No baseline traversal is needed.
     public bool ValidateCreationGraph(NormalizedManifestSpec spec, ProviderAdapterKey provider, DurablePlanningInputs inputs,
-        PreparedProviderConfiguration configuration, DurableOperationGraph graph)
+        PreparedProviderConfiguration configuration, DurableOperationGraph graph, IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
     {
         if (!spec.Resources.Keys.ToHashSet().SetEquals(graph.Nodes.Select(n => n.ResourceId).Concat(graph.ReusedResources.Select(r => r.Resource)))) return false;
         var expected = graph.Baseline is { } baseline
-            ? PlanUpdate(spec, provider, inputs, configuration, graph.ReusedResources, baseline, graph.RetainedResources)
-            : Plan(spec, provider, inputs, configuration);
+            ? PlanUpdate(spec, provider, inputs, configuration, graph.ReusedResources, baseline, graph.RetainedResources, exact)
+            : Plan(spec, provider, inputs, configuration, exact);
         return expected.Equals(graph);
     }
 

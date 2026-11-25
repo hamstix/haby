@@ -135,7 +135,7 @@ internal static class ReferenceAdapter
 
     private sealed class Handler(IDurableOperationJournal journal, IExternalOperationOutputs outputs, IResourceObservationAcceptance acceptance,
         IProviderConfigurationStore configurations, ISharedCredentialSystemAccess system) :
-        IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IReadOnlyResourceObservationHandler, IDurableResourceReusePolicy
+        IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IReadOnlyResourceObservationHandler, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
     {
         public DurableActionExecutionKey Key => Action;
         public bool RequiresExternalOutput => true;
@@ -160,6 +160,10 @@ internal static class ReferenceAdapter
             inputs.Acquisitions.Resource(resource).Mode == ResourceAcquisitionMode.Reference && accepted.Resources.TryGetValue(resource, out var old) &&
             target.Resources.TryGetValue(resource, out var current) && old.Type == current.Type && old.ProviderRef == current.ProviderRef &&
             old.DeletionPolicy == current.DeletionPolicy && old.Properties.Equals(current.Properties);
+        public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
+            new ResourceDelta(accepted, target).Entries.Any(x => x.Resource == resource && x.Kind == ResourceDeltaKind.Added) &&
+            inputs.Acquisitions.Resource(resource).Mode == ResourceAcquisitionMode.Reference && Validate(target, resource, inputs, configuration);
         public async ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation, CancellationToken token)
         {
             var own = await outputs.FindAcceptedAsync(operation.Key, token);

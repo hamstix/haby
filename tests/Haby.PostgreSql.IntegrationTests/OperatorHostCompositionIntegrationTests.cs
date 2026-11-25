@@ -141,7 +141,7 @@ public sealed partial class OperatorHostIntegrationTests
         }
     }
 
-    private sealed class CompositionProcess : IAsyncDisposable
+    internal sealed class CompositionProcess : IAsyncDisposable
     {
         private readonly Process _process;
         private readonly Task<string> _error;

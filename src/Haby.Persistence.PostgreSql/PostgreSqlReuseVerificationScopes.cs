@@ -144,7 +144,7 @@ public sealed class PostgreSqlReuseVerificationScopes
                 var node = originalGraph.Nodes.First(x => x.ResourceId == reuse.Resource);
                 var key = new DurableOperationKey(ApplicationDeploymentId.Parse(deployment.ToString()), DeploymentGeneration.Create(source.Generation), node.Id);
                 var receipt = await ResourceObservationReceiptIntegrity.ReadAsync(db, key, token);
-                var receiptRow = await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment && x.Generation == source.Generation, token);
+                var receiptRow = receipt is null ? null : await db.ResourceObservationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == receipt.Id, token);
                 if (receipt is null || receiptRow is null) return null;
                 fields.AddRange([receipt.Id.ToString(), receiptRow.Fingerprint]);
                 originals.Add(new(new(originalInputs, originalGraph, node, originalInputs.Configuration!.Manifest.Spec), receipt));

@@ -138,11 +138,11 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
                 }
                 if (!await planner.CodecAvailableAsync(context, exactRevision, cancellationToken)) return new DurableCommitResult.PlanInputUnavailable();
             }
-            // Existing executable pilot admits only one exact Resource context. The loop above
-            // checks the complete set; this restriction is capability admission, not storage.
+            // Keep the existing call shape; admission and graph verification below dispatch
+            // every Resource through its complete declaration-keyed exact context.
             if (!(internalEffects && inputs.Configuration!.Manifest.Spec.Resources.Count == 0))
             {
-                var pilot = (internalEffects ? InternalResourceStage.Project(inputs) : inputs).Providers.RequireUniformResourceProvider();
+                var pilot = (internalEffects ? InternalResourceStage.Project(inputs) : inputs).Providers.Entries.Values.First(x => x.Input is ProviderInput.Resource);
                 var instance = Guid.Parse(pilot.Instance.ToString());
                 revision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x =>
                     x.ProviderInstanceId == instance && x.RevisionNumber == pilot.Configuration.Value &&
@@ -191,8 +191,6 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         if (!emptyStage)
         {
             if (!DurableActionAdmission.SupportsPilotShape(spec)) return new DurableCommitResult.UnsupportedShape();
-            if (DurableActionAdmission.SingleAlias(spec) != resourceInputs.Providers.RequireUniformResourceProvider().Alias)
-                return new DurableCommitResult.PlanStale();
             var admitted = await planner.AdmitAsync(context, spec, revision!, resourceInputs, cancellationToken);
             if (admitted == DurablePlanStatus.UnsupportedShape) return new DurableCommitResult.UnsupportedShape();
             if (admitted != DurablePlanStatus.Planned) return new DurableCommitResult.PlanInputUnavailable();
