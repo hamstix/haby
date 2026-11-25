@@ -34,6 +34,8 @@ function Get-HabyFocusedPostgreSqlSelection([object[]]$Cases, [string]$TestCase,
         $wanted = @($selection.cases)
         $selected = @($Cases | Where-Object { $row = $_; @($wanted | Where-Object { $_.method -ceq $row.method -and $_.case -ceq $row.case }).Count -eq 1 })
         Assert-HabyInventory $wanted $selected
+        $suites = @($selected.suite | Sort-Object -Unique)
+        if ($suites.Count -ne 1) { throw 'Mixed-suite targeted union requires the full BOTH-suite entrypoint.' }
         $methods = @($selected.method | Sort-Object -Unique)
         # A method filter executes every theory row: partial theory selection is forbidden.
         Assert-HabyInventory $selected @($Cases | Where-Object { $_.method -cin $methods })

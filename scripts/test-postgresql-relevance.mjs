@@ -32,6 +32,7 @@ function fixture(action) {
   put('tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json',JSON.stringify(plan));
   for(const file of cliLeaves) put(file,'Call("before");');
   put('tests/Haby.PostgreSql.IntegrationTests/Import.cs','public sealed partial class PostgreSqlPairImportTests { public void Test() {} }');
+  put('tests/Haby.PostgreSql.IntegrationTests/OwnedInfrastructureTests.cs','public sealed class OwnedInfrastructureTests { public void Control() {} }');
   run('add','.');run('commit','-m','base');const before=run('rev-parse','HEAD');
   action({root,run,put,before,commit:()=>{run('add','.');run('commit','-m','change');return run('rev-parse','HEAD');}});
  } finally {rmSync(root,{recursive:true,force:true});}
@@ -53,4 +54,14 @@ test('profile parser, shared context, sibling command, helper, rename and new na
 test('test-only actual partial class selects all theory cases while abstract helper edit is full',()=>{
  fixture(({root,put,before,commit})=>{put('tests/Haby.PostgreSql.IntegrationTests/Import.cs','public sealed partial class PostgreSqlPairImportTests { public void Test2() {} }');const result=select(root,before,commit());assert.equal(result.scope,'targeted');assert.equal(result.cases.length,selectedRows(plan,[],['PostgreSqlPairImportTests']).length);});
  fixture(({root,put,before,commit})=>{put('tests/Haby.PostgreSql.IntegrationTests/Import.cs','public abstract partial class ApplicationLoginScenario {}');assert.equal(select(root,before,commit()).scope,'full');});
+});
+
+test('infrastructure class plus fixed functional smoke deterministically selects FULL before runtime',()=>{
+ fixture(({root,put,before,commit})=>{
+  put('tests/Haby.PostgreSql.IntegrationTests/OwnedInfrastructureTests.cs','public sealed class OwnedInfrastructureTests { public void ChangedControl() {} }');
+  const result=select(root,before,commit());
+  assert.equal(result.scope,'full');
+  assert(result.reasons.includes('mixed-suite-targeted-fallback'));
+  assert.deepEqual(result.cases,[]);
+ });
 });

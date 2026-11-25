@@ -14,6 +14,9 @@ try {
     Refuses { Get-HabyFocusedPostgreSqlSelection $rows '' '' $path }
     @{version=1;scope='targeted';cases=@($smoke + $smoke[0])} | ConvertTo-Json -Depth 7 | Set-Content $path
     Refuses { Get-HabyFocusedPostgreSqlSelection $rows '' '' $path }
+    $infrastructure = @($rows | Where-Object suite -CEQ 'infrastructure-qualification')
+    @{version=1;scope='targeted';cases=@($smoke + $infrastructure)} | ConvertTo-Json -Depth 7 | Set-Content $path
+    Refuses { Get-HabyFocusedPostgreSqlSelection $rows '' '' $path }
     $theory = @($rows | Group-Object method | Where-Object Count -GT 1)[0].Group
     @{version=1;scope='targeted';cases=@($smoke + $theory[0])} | ConvertTo-Json -Depth 7 | Set-Content $path
     Refuses { Get-HabyFocusedPostgreSqlSelection $rows '' '' $path }

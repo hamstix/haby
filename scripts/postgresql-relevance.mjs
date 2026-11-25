@@ -84,7 +84,12 @@ export function select(root, before, after) {
   }
   if (classes.size === 0) { full = true; reasons.push('no-proven-relevant-class'); }
   const all = plan.entries.filter(row => row.gate === 'postgresql-integration');
-  const rows = full ? all : selectedRows(plan, [], [...classes]);
+  let rows = full ? all : selectedRows(plan, [], [...classes]);
+  // One targeted invocation intentionally has one suite. Infrastructure plus
+  // fixed functional smoke uses the existing BOTH-suite full entrypoint.
+  if (!full && new Set(rows.map(row => row.suite)).size !== 1) {
+    full = true; reasons.push('mixed-suite-targeted-fallback'); rows = all;
+  }
   return { version: 1, scope: full ? 'full' : 'targeted', before, source: after, tree,
     reasons: [...new Set(reasons)], smoke, classes: [...classes].sort(), cases: full ? [] : rows.map(({method,case: testcase,suite}) => ({method,case:testcase,suite})) };
 }

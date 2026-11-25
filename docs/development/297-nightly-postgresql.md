@@ -68,7 +68,10 @@ classes join current discovery automatically. No runtime speedup is promised.
 
 Test-only changes select the actual sealed class including all partial/theory
 rows plus smoke only when no ambiguous/shared/base/helper declaration is edited.
-New classes/renames/helper/unknown paths conservatively use full. Migrations,
+New classes/renames/helper/unknown paths conservatively use full. A targeted
+union crossing suites (for example infrastructure test changes plus fixed
+functional smoke) deterministically uses the existing full BOTH-suite route;
+manual mixed-suite targeted records are refused before runtime. Migrations,
 transactions, locks, secrets and shared persistence remain full. Narrowing more
 production files is an incremental reviewed change, not a new platform prerequisite.
 
