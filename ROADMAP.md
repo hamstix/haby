@@ -185,6 +185,27 @@ the separate naming and shared-system evidence without claiming P3 rollout.
 
 ## P3 - Workload lifecycle
 
+### Accepted incremental Resource adoption sequence
+
+[ADR-064](docs/adr/0064-composable-resource-acquisition-transitions.md) extends the
+existing transition planner rather than adding Provider-combination exceptions.
+Immediately after #292, deliver these required sequential slices:
+
+- [ ] [A / #303](https://github.com/hamstix/haby/issues/303): common Resource delta, per-Resource Provider resolution and unchanged
+  imported reuse plus new Reference Resources in an Applied configuration-only Application.
+- [ ] [B / #304](https://github.com/hamstix/haby/issues/304): add ImportUseAndRetain through typed protected credential intake to the
+  Applied mixed state, preserving existing provenance, credentials and authority.
+- [ ] [C / #305](https://github.com/hamstix/haby/issues/305): initial ImportUseAndRetain + Reference composition without a preliminary
+  PostgreSQL-only revision, using the same public pipeline and group completion.
+
+[Code and independent-review tasks](docs/development/resource-transition-composition.md)
+define acceptance. A alone is not completion. No general UPDATE, existing Provider/
+credential replacement, removal or Workloads are added by this sequence. Reference
+retirement is separately deferred to #301 and does not block #292 or this sequence.
+Production additional Providers remain downstream. Acceptance is not implementation.
+This explicit order supersedes earlier conflicting adoption queue descriptions.
+
+
 Status: in progress. Internal durable initial Deployment CREATE, runtime configuration
 and exact readiness are implemented; authenticated operator Plan/Check/Commit admits
 the two supported initial shapes. Bounded public submission is delivered by
