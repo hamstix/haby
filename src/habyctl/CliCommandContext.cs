@@ -12,7 +12,9 @@ internal sealed partial class CliCommandContext(
     TextWriter error,
     CliConfigurationService configuration,
     Func<(string? File, string? Context)> options,
-    Func<bool> jsonOutput, ISecretTerminal secretTerminal)
+    Func<bool> jsonOutput, ISecretTerminal secretTerminal,
+    ICliContextResolver? contextResolver = null, ICliConfigurationAdapter? configAdapter = null,
+    Func<CliInvocationContext>? invocationContext = null, Func<string>? commandPrefix = null)
 {
     internal int PrintEnvironment(string command, EnvironmentReply reply) =>
         jsonOutput() ? jsonPresenter.PrintEnvironment(command, reply) : presenter.PrintEnvironment(command, reply);
@@ -39,7 +41,7 @@ internal sealed partial class CliCommandContext(
             return jsonOutput() ? jsonPresenter.PrintSubmission(reply) : presenter.PrintSubmission(reply);
         }, token);
         if (!received && exit == CliApplication.TransportError)
-            error.WriteLine($"Submission response unavailable; cancellation or connection loss does not prove rollback. Inspect: habyctl deployment generation get {request.DeploymentId} {request.Generation}.");
+            error.WriteLine($"Submission response unavailable; cancellation or connection loss does not prove rollback. Inspect: {commandPrefix?.Invoke() ?? "habyctl"} deployment generation get {request.DeploymentId} {request.Generation}.");
         return exit;
     }
 
@@ -53,7 +55,7 @@ internal sealed partial class CliCommandContext(
             return jsonOutput() ? jsonPresenter.PrintGeneration(reply) : presenter.PrintGeneration(reply);
         }, token);
         if (exit == CliApplication.TransportError && !responseReceived)
-            error.WriteLine($"Execution response unavailable; cancellation or connection loss does not prove rollback. Inspect: habyctl deployment generation get {request.DeploymentId} {request.Generation}. Do not automatically repeat execution.");
+            error.WriteLine($"Execution response unavailable; cancellation or connection loss does not prove rollback. Inspect: {commandPrefix?.Invoke() ?? "habyctl"} deployment generation get {request.DeploymentId} {request.Generation}. Do not automatically repeat execution.");
         return exit;
     }
 
@@ -99,32 +101,18 @@ internal sealed partial class CliCommandContext(
         Uri address;
         string environmentId = "";
         string? credential = null;
+        var skipTls = false;
         try
         {
             var selected = options();
-            var config = await configuration.LoadAsync(selected.File, cancellationToken);
-            var contextName = selected.Context ?? config.CurrentContext;
-            string? endpoint;
-            var allowHttp = false;
-            if (contextName is not null)
-            {
-                if (!config.Contexts.TryGetValue(contextName, out var context) ||
-                    !config.Instances.TryGetValue(context.Instance, out var instance))
-                    throw new InvalidDataException("Invalid CLI configuration.");
-                endpoint = instance.Endpoint;
-                allowHttp = instance.AllowInsecureHttp;
-                credential = await CliOperatorCredential.ResolveAsync(instance, cancellationToken);
-                environmentId = context.EnvironmentId;
-            }
-            else
-            {
-                if (requireContext)
-                {
-                    error.WriteLine("Durable planning requires a selected context with an Environment ID.");
-                    return CliApplication.UsageError;
-                }
-                endpoint = endpointSource.GetAddress();
-            }
+            var resolved = await (contextResolver ?? new DefaultCliContextResolver(configuration, endpointSource))
+                .ResolveAsync(new(selected.File, selected.Context), cancellationToken);
+            var endpoint = resolved.Endpoint.AbsoluteUri;
+            var allowHttp = resolved.AllowInsecureHttp;
+            environmentId = resolved.Environment;
+            if (requireContext && string.IsNullOrWhiteSpace(environmentId))
+            { error.WriteLine("Durable planning requires a selected context with an Environment ID."); return CliApplication.UsageError; }
+            skipTls = resolved.SkipTlsCertificateValidation;
             var selectedAddress = CliApplication.ParseEndpoint(endpoint, allowHttp);
             if (selectedAddress is null)
             {
@@ -132,22 +120,29 @@ internal sealed partial class CliCommandContext(
                 return CliApplication.UsageError;
             }
             address = selectedAddress;
+            cancellationToken.ThrowIfCancellationRequested();
+            credential = resolved.Credentials is null ? null : await resolved.Credentials.GetCredentialAsync(cancellationToken);
+            if (credential is not null && !CliOperatorCredential.Valid(credential)) throw new InvalidDataException();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             error.WriteLine("Operation canceled.");
             return CliApplication.TransportError;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (InvalidRegistryEndpointException)
+        { error.WriteLine("Select an HTTPS registry endpoint, loopback HTTP or an explicitly isolated HTTP instance."); return CliApplication.UsageError; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or FormatException or NotSupportedException)
         {
             error.WriteLine("Invalid CLI configuration.");
             return CliApplication.UsageError;
         }
+        catch (Exception exception)
+        { error.WriteLine(CliApplication.SafeError(exception)); return CliApplication.TransportError; }
 
         try
         {
             using var client = clientFactory.Create(address,
-                CliApplication.SkipTlsCertificateValidation(endpointSource.GetSkipTlsValidation()), credential);
+                skipTls, credential);
             return await action(client, environmentId, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -169,6 +164,17 @@ internal sealed partial class CliCommandContext(
         try
         {
             var selected = options();
+            if (configAdapter is not null)
+            {
+                var selection = new CliContextSelection(selected.File, selected.Context);
+                if (currentOnly)
+                {
+                    var selectedCurrent = await configAdapter.GetCurrentContextAsync(selection, cancellationToken);
+                    if (jsonOutput()) jsonPresenter.PrintCurrentContext(selectedCurrent); else output.WriteLine(selectedCurrent ?? "(none)");
+                }
+                else await configAdapter.WriteSafeViewAsync(selection, invocationContext!(), cancellationToken);
+                return CliApplication.Success;
+            }
             var config = await configuration.LoadAsync(selected.File, cancellationToken);
             var current = selected.Context ?? config.CurrentContext;
             if (current is not null && !config.Contexts.ContainsKey(current))
@@ -199,10 +205,12 @@ internal sealed partial class CliCommandContext(
             error.WriteLine("Operation canceled.");
             return CliApplication.TransportError;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or FormatException or NotSupportedException)
         {
             error.WriteLine("Invalid CLI configuration.");
             return CliApplication.UsageError;
         }
+        catch (Exception exception)
+        { error.WriteLine(CliApplication.SafeError(exception)); return CliApplication.TransportError; }
     }
 }

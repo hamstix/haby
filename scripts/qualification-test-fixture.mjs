@@ -12,7 +12,7 @@ export function qualificationFixture(identity) {
   const report = (key, name, prefix, suite) => {
     const row = member(name, suite);
     put(key, prefix + 'gate.json', { source: identity.merge, status: 'complete', gate: name, cases: 1, dirty: false,
-      requiredAot: key !== 'fast', nativeSha256: 'a'.repeat(64), runtimeConsumerSha256: 'b'.repeat(64) });
+      requiredAot: key !== 'fast', nativeSha256: 'a'.repeat(64), runtimeConsumerSha256: 'b'.repeat(64), cliCompositionSha256: 'c'.repeat(64) });
     put(key, prefix + 'cases.json', [{ ...row, outcome: 'Passed' }]);
     put(key, prefix + 'counts.json', { total: 1, passed: 1, failed: 0, skipped: 0 });
     put(key, prefix + 'failure-evidence.json', { failedCases: 0 });
@@ -21,7 +21,7 @@ export function qualificationFixture(identity) {
   report('fast', 'validate', '', 'fast');
   report('windows', 'Native AOT (win-x64)', 'safe/', 'published-native');
   report('linux', 'Native AOT (linux-x64)', 'safe/', 'published-native');
-  for (const [key, rid] of [['windows', 'win-x64'], ['linux', 'linux-x64']]) put(key, 'compiler.json', { source: identity.merge, rid, packs: [{}, {}] });
+  for (const [key, rid] of [['windows', 'win-x64'], ['linux', 'linux-x64']]) put(key, 'compiler.json', { source: identity.merge, rid, packs: [{}, {}], cliCompositionCompiler: { compiler: 'Microsoft.DotNet.ILCompiler/10.0.14', runtimeCompiler: `runtime.${rid}.Microsoft.DotNet.ILCompiler/10.0.14` } });
   const owned = { limit: 4, active: 0, cleanupFailed: 0, readyActive: 0, hostGroupsActive: 0, startupAttempts: 1, cleaned: 1,
     catalogDatabasesCreated: 1, catalogDatabasesDropped: 1, peakReservedServers: 1, peakReadyServers: 1, hostGroupLimit: 2, peakHostGroups: 1 };
   const pgRows = [];

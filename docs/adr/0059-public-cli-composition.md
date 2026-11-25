@@ -143,3 +143,10 @@ CLI workstream. The complete downstream request is not done after extraction alo
 Private product commands, endpoints, packages and legacy compatibility remain outside
 upstream scope. This does not introduce a general Provider SDK or server contract
 changes. Accepted architecture is distinct from implementation and release evidence.
+
+## Bounded implementation #292
+
+The public surface, adapter ownership, configuration capabilities and external
+Native AOT sample are described in the [composition guide](../development/292-public-cli-composition.md).
+The implementation keeps shell completion separate. Candidate source and local
+focused evidence do not establish exact-SHA merge, installed Final or release evidence.
