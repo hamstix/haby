@@ -61,4 +61,3 @@ export function qualificationFixture(identity) {
   }
   return { identity, plan, artifacts, names, put };
 }
-
