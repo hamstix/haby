@@ -23,6 +23,7 @@ internal static class ProviderAccessCases
         var configuration = new KubernetesProviderConfiguration(endpoint, ca, accessToken, null, null);
         var codec = new KubernetesProviderConfigurationCodec();
         var binding = new KubernetesBinding(environment.ToString(), ProviderInstanceId.New().ToString(), 1, KubernetesProviderConfigurationCodec.Implementation);
+        var context = new ProviderPreflightContext(environment, ProviderInstanceId.Parse(binding.Provider), ProviderConfigurationRevisionNumber.Create(1));
         ValueTask<KernelClient> Fixture(EnvironmentRecordId scope, KubernetesProviderConfiguration c, CancellationToken ct)
         {
             if (scope != environment) throw new InvalidOperationException("Qualification scope mismatch.");
@@ -34,29 +35,29 @@ internal static class ProviderAccessCases
             var subject = await client.Client.AuthenticationV1.CreateSelfSubjectReviewAsync(new V1SelfSubjectReview(), cancellationToken: token);
             Check(subject.Status?.UserInfo?.Username == expectedUsername && subject.Status.UserInfo.Uid == expectedUid, "P01-exact-bearer-identity");
         }
-        Check((await handler.CheckTypedAsync(environment, configuration, token)).IsReady, "P02-bearer-access-only-fixture-TLS");
+        Check((await handler.CheckTypedAsync(context, configuration, token)).IsReady, "P02-bearer-access-only-fixture-TLS");
         var mutual = configuration with { BearerToken = null, ClientCertificate = cert, ClientPrivateKey = key };
         using (var client = await Fixture(environment, mutual, token))
         {
             var subject = await client.Client.AuthenticationV1.CreateSelfSubjectReviewAsync(new V1SelfSubjectReview(), cancellationToken: token);
             Check(subject.Status?.UserInfo?.Username == "system:admin", "P03-exact-mtls-identity");
         }
-        Check((await handler.CheckTypedAsync(environment, mutual, token)).IsReady, "P04-mtls-access-only-fixture-TLS");
-        Check((await handler.CheckTypedAsync(environment, configuration with { BearerToken = invalid }, token)).Outcome == ProviderPreflightOutcome.AuthenticationFailed, "P05-invalid-bearer");
-        Check((await handler.CheckTypedAsync(environment, configuration with { ServerCaPem = null, Tls = new(KubernetesTlsMode.System, KubernetesRevocationMode.Online) }, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P06-untrusted-server");
+        Check((await handler.CheckTypedAsync(context, mutual, token)).IsReady, "P04-mtls-access-only-fixture-TLS");
+        Check((await handler.CheckTypedAsync(context, configuration with { BearerToken = invalid }, token)).Outcome == ProviderPreflightOutcome.AuthenticationFailed, "P05-invalid-bearer");
+        Check((await handler.CheckTypedAsync(context, configuration with { ServerCaPem = null, Tls = new(KubernetesTlsMode.System, KubernetesRevocationMode.Online) }, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P06-untrusted-server");
         using var rsa = RSA.Create(2048);
         var wrongKey = secrets.Add(Encoding.UTF8.GetBytes(rsa.ExportPkcs8PrivateKeyPem()));
-        Check((await handler.CheckTypedAsync(environment, mutual with { ClientPrivateKey = wrongKey }, token)).Outcome == ProviderPreflightOutcome.ConfigurationUnavailable, "P07-mismatched-client-key");
+        Check((await handler.CheckTypedAsync(context, mutual with { ClientPrivateKey = wrongKey }, token)).Outcome == ProviderPreflightOutcome.ConfigurationUnavailable, "P07-mismatched-client-key");
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
-        Check((await handler.CheckTypedAsync(environment, configuration with { Endpoint = new Uri($"https://127.0.0.1:{port}") }, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P08-unavailable-endpoint");
+        Check((await handler.CheckTypedAsync(context, configuration with { Endpoint = new Uri($"https://127.0.0.1:{port}") }, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P08-unavailable-endpoint");
         using var canceled = new CancellationTokenSource(); canceled.Cancel();
-        try { await handler.CheckTypedAsync(environment, configuration, canceled.Token); throw new InvalidOperationException("Cancellation ignored."); }
+        try { await handler.CheckTypedAsync(context, configuration, canceled.Token); throw new InvalidOperationException("Cancellation ignored."); }
         catch (OperationCanceledException) { Check(true, "P09-caller-cancellation"); }
         // k3s fixture certificates have no revocation service. Production must refuse them;
         // fixture positive access does not establish production Online revocation success.
         var production = new KubernetesPreflightHandler(codec, secrets);
-        Check((await production.CheckTypedAsync(environment, configuration, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P10-production-revocation-fails-closed");
+        Check((await production.CheckTypedAsync(context, configuration, token)).Outcome == ProviderPreflightOutcome.ServerUnavailable, "P10-production-revocation-fails-closed");
     }
     private static void Check(bool value, string id)
     {

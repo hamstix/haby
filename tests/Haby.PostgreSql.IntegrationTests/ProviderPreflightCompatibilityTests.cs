@@ -186,7 +186,7 @@ internal sealed class QueuePreflight(IProviderConfigurationCodec[] readers) : IP
 {
     public IReadOnlyList<IProviderConfigurationCodec> Readers => readers;
     public IReadOnlyList<ProviderAdapterKey> Keys => readers.Select(x => new ProviderAdapterKey(x.ProviderKindId, x.ShapeId, "queue.impl/v1")).Distinct().ToArray();
-    public ValueTask<ProviderPreflightResult> CheckAsync(EnvironmentRecordId environment, object configuration, CancellationToken token)
+    public ValueTask<ProviderPreflightResult> CheckAsync(ProviderPreflightContext context, object configuration, CancellationToken token)
     {
         Assert.IsAssignableFrom<IQueueSettings>(configuration);
         Assert.Equal("cluster", ((IQueueSettings)configuration).Queue);

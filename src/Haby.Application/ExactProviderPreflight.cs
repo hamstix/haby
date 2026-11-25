@@ -2,6 +2,10 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
+/// <summary>Engine-selected persisted identity, not an authorization credential.</summary>
+public sealed record ProviderPreflightContext(EnvironmentRecordId Environment, ProviderInstanceId Provider,
+    ProviderConfigurationRevisionNumber Revision);
+
 /// <summary>Exact persisted envelope decoded with its registered format/version reader.</summary>
 public sealed record LoadedProviderRevision(ProviderAdapterKey Key, IProviderConfigurationCodec Codec, object Configuration);
 
@@ -19,7 +23,7 @@ public interface IProviderPreflightHandler
     IReadOnlyList<ProviderAdapterKey> Keys { get; }
     /// <summary>Explicit compatible readers. Each decodes a known persisted format into a type this handler accepts.</summary>
     IReadOnlyList<IProviderConfigurationCodec> Readers { get; }
-    ValueTask<ProviderPreflightResult> CheckAsync(EnvironmentRecordId environment, object configuration, CancellationToken cancellationToken);
+    ValueTask<ProviderPreflightResult> CheckAsync(ProviderPreflightContext context, object configuration, CancellationToken cancellationToken);
 }
 
 public abstract class ProviderPreflightHandler<TConfiguration>(params ProviderConfigurationCodec<TConfiguration>[] readers)
@@ -27,11 +31,11 @@ public abstract class ProviderPreflightHandler<TConfiguration>(params ProviderCo
 {
     public IReadOnlyList<IProviderConfigurationCodec> Readers { get; } = Array.AsReadOnly<IProviderConfigurationCodec>(readers.ToArray());
     public abstract IReadOnlyList<ProviderAdapterKey> Keys { get; }
-    public abstract ValueTask<ProviderPreflightResult> CheckTypedAsync(EnvironmentRecordId environment,
+    public abstract ValueTask<ProviderPreflightResult> CheckTypedAsync(ProviderPreflightContext context,
         TConfiguration configuration, CancellationToken cancellationToken);
-    public ValueTask<ProviderPreflightResult> CheckAsync(EnvironmentRecordId environment, object configuration,
+    public ValueTask<ProviderPreflightResult> CheckAsync(ProviderPreflightContext context, object configuration,
         CancellationToken cancellationToken) => configuration is TConfiguration typed
-        ? CheckTypedAsync(environment, typed, cancellationToken)
+        ? CheckTypedAsync(context, typed, cancellationToken)
         : ValueTask.FromResult(new ProviderPreflightResult(ProviderPreflightOutcome.ConfigurationUnavailable));
 }
 
@@ -83,7 +87,7 @@ public sealed class ExactProviderRevisionPreflight(IProviderPreflightRevisionRea
             var revision = await reader.ReadAsync(environment, target, deadline.Token);
             if (revision is null) return new(ProviderPreflightOutcome.RevisionUnavailable);
             if (revision.Key != key || !handler.Readers.Any(reader => ReferenceEquals(reader, revision.Codec))) return new(ProviderPreflightOutcome.ConfigurationUnavailable);
-            var result = await handler.CheckAsync(environment, revision.Configuration, deadline.Token);
+            var result = await handler.CheckAsync(new(environment, target.InstanceId, target.RevisionNumber), revision.Configuration, deadline.Token);
             cancellationToken.ThrowIfCancellationRequested();
             return deadline.IsCancellationRequested ? new(ProviderPreflightOutcome.DeadlineExceeded) : result;
         }

@@ -76,7 +76,7 @@ public sealed class TlsTransportTests
         var configuration = Configuration(endpoint.Address, null, new(KubernetesTlsMode.Insecure, null));
         var handler = new KubernetesPreflightHandler(new(), new FixtureSecrets());
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var result = await handler.CheckTypedAsync(EnvironmentRecordId.New(), configuration, timeout.Token);
+        var result = await handler.CheckTypedAsync(new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), configuration, timeout.Token);
         Assert.Equal(expected, result.Outcome); Assert.True(result.ServerCertificateValidationDisabled);
         Assert.Null(result.ConnectionDiagnostic);
         Assert.Equal(1, endpoint.Requests); Assert.True(endpoint.Authenticated);
@@ -95,7 +95,7 @@ public sealed class TlsTransportTests
         var configuration = Configuration(source.Address, insecure ? null : ca.ExportCertificatePem(), policy);
         var handler = new KubernetesPreflightHandler(new(), new FixtureSecrets());
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        Assert.False((await handler.CheckTypedAsync(EnvironmentRecordId.New(), configuration, timeout.Token)).IsReady);
+        Assert.False((await handler.CheckTypedAsync(new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), configuration, timeout.Token)).IsReady);
         Assert.Equal(1, source.Requests); Assert.True(source.Authenticated); Assert.Equal(0, target.Requests);
     }
 

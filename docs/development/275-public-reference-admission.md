@@ -38,6 +38,46 @@ metadata and a closed typed Reference adapter. Its external observation is
 explicitly synthetic. It is not a friend assembly and does not grant production
 readiness to a service integration.
 
+### Exact preflight identity
+
+Implement `ProviderPreflightHandler<TConfiguration>.CheckTypedAsync` with a
+`ProviderPreflightContext` argument. The engine supplies its selected persisted
+Environment, Provider instance and configuration revision after exact key, codec
+and reload validation. Read `context.Environment` where an existing adapter only
+needs Environment ownership. Do not derive these identities from configuration
+properties or resolve an alias again inside the handler.
+
+A declared shared SystemAccess slot can resolve its pinned reference through the
+ordinary `ISharedCredentialSystemAccess` registration:
+
+```csharp
+public override async ValueTask<ProviderPreflightResult> CheckTypedAsync(
+    ProviderPreflightContext context, Configuration configuration,
+    CancellationToken cancellationToken)
+{
+    using var material = await system.ResolveAsync(new SharedCredentialScope(
+        context.Environment, context.Provider, context.Revision, "system-access",
+        SharedCredentialUse.SystemAccess, configuration.SystemAccessCredential),
+        65536, cancellationToken);
+    return new(material is null
+        ? ProviderPreflightOutcome.SecretUnavailable
+        : ProviderPreflightOutcome.Ready);
+}
+```
+
+The example only demonstrates credential resolution; a real adapter still checks
+its external service. Declare the same slot as `SystemAccess` in
+`IProviderDeclarationAdapter.SharedCredentialSlots`. The context carries trusted
+engine-selected identity, not an authorization credential or a plugin sandbox.
+The resolver independently requires the complete matching persisted use binding
+and checks revocation; SystemAccess never implies ApplicationDelivery authority.
+Alias changes cannot retarget an invocation already selected by the engine.
+
+This replaces the Environment-only handler callback under ADR-033. Downstream
+handlers must update their override and rebuild; there is no legacy overload.
+Persisted models, RPC contracts and credential authority are unchanged, so this
+callback change requires no catalog migration or reset.
+
 ## Operator intake
 
 Create Environment and protected named SharedApplicationCredential versions, then

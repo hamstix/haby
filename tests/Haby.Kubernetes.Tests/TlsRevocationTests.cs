@@ -31,7 +31,7 @@ public sealed class TlsRevocationTests
         var configuration = new KubernetesProviderConfiguration(endpoint.Address, ca.ExportCertificatePem(),
             new(SecretId.New(), SecretVersionId.New()), null, null, new(KubernetesTlsMode.CustomCa, KubernetesRevocationMode.Online));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var online = await handler.CheckTypedAsync(EnvironmentRecordId.New(), configuration, timeout.Token);
+        var online = await handler.CheckTypedAsync(new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), configuration, timeout.Token);
         if (revoked)
         {
             Assert.False(online.IsReady);
@@ -42,7 +42,7 @@ public sealed class TlsRevocationTests
         Assert.True(crl.Requests > 0);
         var requests = crl.Requests;
         crl.Available = false;
-        var offline = await handler.CheckTypedAsync(EnvironmentRecordId.New(), configuration with
+        var offline = await handler.CheckTypedAsync(new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), configuration with
         { Tls = new(KubernetesTlsMode.CustomCa, KubernetesRevocationMode.Offline) }, timeout.Token);
         Assert.Equal(requests, crl.Requests);
         if (revoked)
@@ -55,7 +55,7 @@ public sealed class TlsRevocationTests
         else if (!offline.IsReady) Assert.Equal(ProviderConnectionDiagnostic.TlsRevocationUnavailable, offline.ConnectionDiagnostic);
         // Linux/OpenSSL need not retain the Windows URL cache across separate chain instances.
         // In either case a missing cached answer is not converted to a successful NoCheck result.
-        var uncheckedResult = await handler.CheckTypedAsync(EnvironmentRecordId.New(), configuration with
+        var uncheckedResult = await handler.CheckTypedAsync(new(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1)), configuration with
         { Tls = new(KubernetesTlsMode.CustomCa, KubernetesRevocationMode.NoCheck) }, timeout.Token);
         Assert.True(uncheckedResult.IsReady); Assert.Equal(requests, crl.Requests);
     }

@@ -295,7 +295,7 @@ internal static class DurableActionCases
                         exact.ClientCertificate, exact.ClientPrivateKey);
                     return KubernetesClientFactory.CreateFixture(connection, store, [], ct);
                 });
-                return handler.CheckTypedAsync(environment, configuration, cancellationToken);
+                return handler.CheckTypedAsync(new(environment, target.InstanceId, target.RevisionNumber), configuration, cancellationToken);
             }
             async Task<(DurableDeploymentPlanningTests.InternalScenario Scenario, DurableOperationKey Key, Counter Counter)> RuntimeAccepted(
                 bool initial = true, string? targetNamespace = null,
