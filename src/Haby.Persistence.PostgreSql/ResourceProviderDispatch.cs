@@ -6,6 +6,26 @@ namespace Haby.Persistence.PostgreSql;
 
 internal static class ResourceProviderDispatch
 {
+    // Capability refusal precedes codec decoding: a codec may itself require that capability.
+    internal static async Task<IReadOnlyDictionary<ManifestLocalId, ProviderAdapterKey>> CaptureKeysAsync(
+        ManifestCatalogDbContext db, DurablePlanningInputs inputs, CancellationToken token)
+    {
+        var result = new Dictionary<ManifestLocalId, ProviderAdapterKey>();
+        foreach (var resource in inputs.Providers.Declaration.Spec.Resources.Keys)
+        {
+            var pin = inputs.Providers.Resource(resource);
+            var id = Guid.Parse(pin.Instance.ToString());
+            var environment = Guid.Parse(inputs.Environment.ToString());
+            var key = await (from instance in db.ProviderInstances.AsNoTracking()
+                             join revision in db.ProviderConfigurationRevisions.AsNoTracking() on instance.Id equals revision.ProviderInstanceId
+                             where instance.Id == id && instance.EnvironmentRecordId == environment && revision.EnvironmentRecordId == environment &&
+                                 revision.RevisionNumber == pin.Configuration.Value && revision.IsSealed && revision.ImplementationId == pin.Implementation.Value
+                             select new ProviderAdapterKey(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId)).SingleOrDefaultAsync(token);
+            result.Add(resource, key ?? throw new InvalidDataException("Exact Resource Provider is unavailable."));
+        }
+        return result;
+    }
+
     internal static async Task<IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>> CaptureAsync(
         ManifestCatalogDbContext db, DurablePlanningInputs inputs, IEnumerable<IProviderConfigurationCodec> codecs, CancellationToken token)
     {

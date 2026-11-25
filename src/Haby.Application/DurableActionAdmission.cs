@@ -213,10 +213,10 @@ public sealed class DurableActionAdmission(DurableActionRegistry registry)
         { Mode = inputs?.Acquisitions.Resource(r.Key).Mode ?? ResourceAcquisitionMode.Provision }) is not null);
 
     internal DurablePlanStatus PlanningSupportStatus(NormalizedManifestSpec spec, ProviderAdapterKey provider,
-        DurablePlanningInputs inputs, IReadOnlySet<ManifestLocalId>? existingResources = null, IReadOnlyDictionary<ManifestLocalId, DurableResourceProviderContext>? exact = null)
+        DurablePlanningInputs inputs, IReadOnlySet<ManifestLocalId>? existingResources = null, IReadOnlyDictionary<ManifestLocalId, ProviderAdapterKey>? exact = null)
     {
         foreach (var resource in spec.Resources.Where(x => existingResources?.Contains(x.Key) != true))
-            if (registry.Find(AdmissionKey(resource.Value.Type, exact?.GetValueOrDefault(resource.Key)?.Provider ?? provider, inputs, resource.Key)) is null)
+            if (registry.Find(AdmissionKey(resource.Value.Type, exact?.GetValueOrDefault(resource.Key) ?? provider, inputs, resource.Key)) is null)
                 return UnsupportedMode(inputs.Acquisitions.Resource(resource.Key).Mode);
         return DurablePlanStatus.Planned;
     }
