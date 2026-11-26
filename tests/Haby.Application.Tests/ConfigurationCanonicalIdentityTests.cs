@@ -64,4 +64,3 @@ public sealed class ConfigurationCanonicalIdentityTests
         ["pins"] = "9c2af1b59c5190890ee60c51c5c4474df9f4504c3a848f630447a6d24c29b065",
     };
 }
-
