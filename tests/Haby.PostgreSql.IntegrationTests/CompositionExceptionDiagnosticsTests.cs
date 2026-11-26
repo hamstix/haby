@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Haby.TestDiagnostics;
 using Microsoft.Extensions.Logging;
@@ -16,6 +18,10 @@ public sealed partial class HostFailureDiagnosticsTests
     public async Task Composition_exception_sentinel_captures_only_bounded_stage_type_frames_and_preserves_primary_failure()
     {
         const string secret = "SECRET-MATERIAL /private/credential C:\\private\\subject";
+        var retainedDirectory = Environment.GetEnvironmentVariable("HABY_TEST_TIMING_DIRECTORY");
+        var retainedName = "composition-" + Guid.NewGuid().ToString("N");
+        var retainedIdentity = retainedDirectory is null ? null : Path.Combine(retainedDirectory, retainedName + ".identity.json");
+        var retainedExceptions = retainedDirectory is null ? null : Path.Combine(retainedDirectory, retainedName + ".exceptions.jsonl");
         var identity = new CompositionDiagnosticIdentity(new('a', 40), new('b', 64), new('c', 64), new('d', 64), new('e', 40), new('f', 64));
         var lines = new List<string>();
         var stage = CompositionDiagnosticStage.DiagnosticSentinel;
@@ -46,6 +52,36 @@ public sealed partial class HostFailureDiagnosticsTests
             var recorded = File.ReadAllText(output);
             Assert.Equal(CompositionDiagnosticStage.DiagnosticSentinel, JsonSerializer.Deserialize(recorded, CompositionDiagnosticJson.Default.CompositionExceptionRecord)!.Stage);
             Assert.DoesNotContain("SECRET-", recorded); Assert.DoesNotContain(secret, recorded);
+            if (retainedDirectory is not null)
+            {
+                var binary = Environment.GetEnvironmentVariable("HABY_COMPOSITION_SAMPLE_PATH");
+                Assert.True(Path.IsPathFullyQualified(binary!) && File.Exists(binary), "Published composition bytes are required for retained sentinel identity.");
+                var directory = Path.GetDirectoryName(binary)!;
+                var testAssembly = typeof(HostFailureDiagnosticsTests).Assembly.Location;
+                string Hash(string file) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).ToLowerInvariant();
+                string Source(string file)
+                {
+                    var value = FileVersionInfo.GetVersionInfo(file).ProductVersion?.Split('+').Last();
+                    return value?.Length == 40 && value.All(char.IsAsciiHexDigit) ? value.ToLowerInvariant() : "unknown";
+                }
+                var actualIdentity = new CompositionDiagnosticIdentity(Source(binary!), Hash(binary!), Hash(Path.Combine(directory, "Haby.Persistence.PostgreSql.dll")),
+                    Hash(Path.Combine(directory, "Haby.Application.dll")), Source(testAssembly), Hash(testAssembly));
+                Assert.Matches("^[a-f0-9]{40}$", actualIdentity.Source);
+                Assert.Equal(actualIdentity.Source, actualIdentity.TestSource);
+                Directory.CreateDirectory(retainedDirectory);
+                File.WriteAllText(retainedIdentity!, JsonSerializer.Serialize(actualIdentity, CompositionDiagnosticJson.Default.CompositionDiagnosticIdentity));
+                using var retainedRecorder = new CompositionExceptionDiagnostics(actualIdentity, () => CompositionDiagnosticStage.DiagnosticSentinel,
+                    line => File.AppendAllText(retainedExceptions!, line + Environment.NewLine));
+                retainedRecorder.CreateLogger(secret).Log(LogLevel.Error, new(1), secret, primary, (_, _) => throw new InvalidOperationException(secret));
+                Assert.True(File.Exists(retainedIdentity), "Explicit sentinel identity was not retained in the timing directory.");
+                Assert.True(File.Exists(retainedExceptions), "Explicit sanitized sentinel exception was not retained in the timing directory.");
+                var savedIdentity = JsonSerializer.Deserialize(File.ReadAllText(retainedIdentity!), CompositionDiagnosticJson.Default.CompositionDiagnosticIdentity)!;
+                var savedText = Assert.Single(File.ReadAllLines(retainedExceptions!));
+                var savedRecord = JsonSerializer.Deserialize(savedText, CompositionDiagnosticJson.Default.CompositionExceptionRecord)!;
+                Assert.Equal(actualIdentity, savedIdentity); Assert.Equal(savedIdentity, savedRecord.Identity);
+                Assert.Equal(CompositionDiagnosticStage.DiagnosticSentinel, savedRecord.Stage);
+                Assert.DoesNotContain("SECRET-", savedText); Assert.DoesNotContain(secret, savedText);
+            }
         }
         finally { Directory.Delete(root, true); }
         stage = (CompositionDiagnosticStage)999;
