@@ -28,6 +28,10 @@ public sealed partial class PostgreSqlPairImportTests
     [InlineData("success")]
     [InlineData("partial")]
     [InlineData("correction")]
+    [InlineData("omit-group")]
+    [InlineData("omit-member")]
+    [InlineData("omit-reference")]
+    [InlineData("extra-retained")]
     public async Task Public_mixed_baseline_adds_two_protected_Import_groups_atomically_and_preserves_authority(string scenario)
     {
         var binary = Environment.GetEnvironmentVariable("HABY_COMPOSITION_SAMPLE_PATH");
@@ -134,7 +138,18 @@ public sealed partial class PostgreSqlPairImportTests
                     Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = committed.DeploymentId, Generation = committed.Generation })).Status);
                     Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
                     var retainedGeneration = committed.Generation; retainedApplied = retainedGeneration;
+                    var replayScenario = scenario is "omit-group" or "omit-member" or "omit-reference" or "extra-retained";
                     envelope["applicationVersion"] = "v3";
+                    if (replayScenario)
+                    {
+                        Assert.Equal(ProviderStatus.Created, (await client.ApplyProviderAsync(new() { Declaration = ByteString.CopyFromUtf8("""
+                            {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"sample-next","environment":"pilot"},"spec":{
+                             "revision":1,"providerKind":"sample.service/v1","configurationContract":"sample.service.configuration/v1","implementationId":"sample.service.impl/v1",
+                             "properties":{"Endpoint":"https://service.example.invalid/"},"secretRefs":{"system":{"secretName":"shared","version":1},"application":{"secretName":"shared","version":1}}}}
+                            """) })).Status);
+                        await client.SetProviderAliasAsync(new() { Environment = "pilot", Alias = "sample.next", ExpectedAbsent = true, Target = new() { Name = "sample-next", Revision = 1 } });
+                        envelope["manifest"]!["spec"]!["resources"]!["new-service"] = JsonNode.Parse("""{"type":"sample.reference/v1","providerRef":"sample.next","properties":{}}"""u8);
+                    }
                     foreach (var resource in new[] { "archive", "audit" })
                     {
                         envelope["manifest"]!["spec"]!["resources"]![resource] = JsonNode.Parse("""{"type":"sample.import/v1","providerRef":"sample.primary","properties":{}}"""u8);
@@ -186,6 +201,9 @@ public sealed partial class PostgreSqlPairImportTests
                         for (var index = 0; index < ids.Length; index++)
                             foreach (var resource in index == 0 ? new[] { "archive", "archive-proof" } : new[] { "audit", "audit-proof" })
                                 request.Acquisitions.Resources.Add(new ResourceAcquisitionMember { Resource = resource, Mode = AcquisitionMode.ImportUseAndRetain, ImportRequestId = ids[index] });
+                        if (replayScenario)
+                            request.Acquisitions.Resources.Add(new ResourceAcquisitionMember { Resource = "new-service", Mode = AcquisitionMode.Reference,
+                                Input = new() { Format = "sample.reference-input/v1", Json = "{\"Identity\":\"sample-service\"}" } });
                         return request;
                     }
                     int changesBefore;
@@ -204,6 +222,20 @@ public sealed partial class PostgreSqlPairImportTests
                     var newChange = await client.CreateChangeSetAsync(Request(originals));
                     Assert.Equal(PlanningStatus.Created, newChange.Status);
                     Assert.Equal(newChange.ChangeSet.ChangeSetId, (await client.CreateChangeSetAsync(Request(originals))).ChangeSet.ChangeSetId);
+                    if (replayScenario)
+                    {
+                        var altered = Request(originals);
+                        foreach (var member in altered.Acquisitions.Resources.ToArray())
+                            if (scenario == "omit-group" && member.Resource is "audit" or "audit-proof" ||
+                                scenario == "omit-member" && member.Resource == "audit-proof" ||
+                                scenario == "omit-reference" && member.Resource == "new-service")
+                                altered.Acquisitions.Resources.Remove(member);
+                        if (scenario == "extra-retained") altered.Acquisitions.Resources.Add(changeRequest.Acquisitions.Resources.Single().Clone());
+                        Assert.NotEqual(PlanningStatus.Created, (await client.CreateChangeSetAsync(altered)).Status);
+                        Assert.Equal(newChange.ChangeSet.ChangeSetId, (await client.CreateChangeSetAsync(Request(originals))).ChangeSet.ChangeSetId);
+                        await child.SendAsync("stop"); await child.ExpectAsync("composition-stopped"); await child.RequireExitAsync(0);
+                        break;
+                    }
                     if (scenario == "correction")
                     {
                         var candidates = new[] { new[] { await Stage("archive", "synthetic-import-material", originals[0]), await Stage("audit", "synthetic-import-material", originals[1]) },
@@ -233,7 +265,11 @@ public sealed partial class PostgreSqlPairImportTests
                         Assert.All(audits, x => Assert.Equal(committed.Generation, x.Generation));
                         foreach (var audit in audits) Assert.True(await acceptedCorrection.ProtectedCredentialOwners.AsNoTracking().AnyAsync(x => x.Request == audit.SuccessorRequest && x.Stage == audit.SuccessorStage));
                     }
-                    else committed = await Confirm(newChange.ChangeSet.ChangeSetId);
+                    else
+                    {
+                        committed = await Confirm(newChange.ChangeSet.ChangeSetId);
+                        Assert.Equal(newChange.ChangeSet.ChangeSetId, (await client.CreateChangeSetAsync(Request(originals))).ChangeSet.ChangeSetId);
+                    }
                     Assert.NotEqual(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
                     var outcome = await client.ExecuteGenerationAsync(new() { DeploymentId = committed.DeploymentId, Generation = committed.Generation });
                     string progress;

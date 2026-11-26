@@ -94,7 +94,10 @@ members must omit `input` and `sharing_request`; the server resolves their exact
 prepared inputs and protected references and validates complete new/combined coverage.
 Missing, extra, duplicate, foreign-owner, wrong-revision or conflicting request
 membership is refused before linkage. Exact creation replay returns the original
-ChangeSet. Plan/Check/Commit revalidate the complete bound request set and current
+ChangeSet only for the complete original NEW-only envelope, derived from its pinned
+baseline and target rather than caller-supplied membership. Omitting an entire group
+or new Reference, omitting a coupled member, or resubmitting a retained Resource is
+refused. This comparison remains stable after Commit. Plan/Check/Commit revalidate the complete bound request set and current
 baseline. Execute verifies each coupled group atomically; completed independent
 groups remain durable, while the new generation cannot be delivered until all groups
 and reused Resources are confirmed. Original Resource authority and credentials remain

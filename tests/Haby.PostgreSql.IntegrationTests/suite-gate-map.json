@@ -5,7 +5,7 @@
   "nativePerPlatform": 116,
   "regularFullRetainsQualification": false,
   "nightlyAndReleaseRetainFullQualification": true,
-  "currentPostgresql": 1403,
+  "currentPostgresql": 1407,
   "currentFast": 2171,
   "currentKubernetesApiObjects": 29,
   "currentKubernetesDurableActions": 36,
@@ -15,6 +15,11 @@
   "supersededFor257": [{"method":"Haby.Kubernetes.Tests.ConfiguredDeploymentTests.Configured_update_and_superseded_format_refuse_but_absent_configuration_has_no_runtime_fields","case":"fde60248bd607ce4472526778ef63be8dbc29b8abf7b4db8a8f55f6e130d933f","suite":"fast","gate":"validate","trigger":"every-change","addedFor223":true}],
   "supersededFor275Adr026": [{"method":"Haby.PostgreSql.IntegrationTests.SharedCredentialAuthorityTests.Immutable_database_guards_refuse_late_issuance_mutation_and_unrevocation","case":"04681af98c4f92ffddbfeada9e20ad5323e132bc70bf1e615b88a25cc2986c73","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true}],
   "entries": [
+    {"method":"Haby.PostgreSql.IntegrationTests.PostgreSqlPairImportTests.Public_mixed_baseline_adds_two_protected_Import_groups_atomically_and_preserves_authority","case":"adab20dda8f4d89ed24b49f3b4e55a4c0495403cc6f315f8b43cb9dfb80c5afb","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor304":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.PostgreSqlPairImportTests.Public_mixed_baseline_adds_two_protected_Import_groups_atomically_and_preserves_authority","case":"2a97ec7acb93fbb8f69afb2ef43866ba52ecb715167ef3f1a06855eafd68da12","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor304":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.PostgreSqlPairImportTests.Public_mixed_baseline_adds_two_protected_Import_groups_atomically_and_preserves_authority","case":"cfd0852f8550b3d917c85604e40d919bacb7dc789d540c5278e8a9ccee450838","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor304":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.PostgreSqlPairImportTests.Public_mixed_baseline_adds_two_protected_Import_groups_atomically_and_preserves_authority","case":"84eeb1b79e62da1be4250c7227da4828a961a11ebf7b814dfa863757aa6f3f85","suite":"functional","gate":"postgresql-integration","trigger":"relevant-merge-nightly-full-release","addedFor304":true},
+
     {"method":"Haby.Application.Tests.CreatePreparedOperatorImportTests.Protected_preparation_can_bind_one_new_group_without_resubmitting_retained_resources","case":"671d6f05264d7353ceca531d025145dc61e728fa2f5eb45839b16f3fa044069d","suite":"fast","gate":"validate","trigger":"every-change","addedFor304":true},
     {"method":"Haby.Application.Tests.CreatePreparedOperatorImportTests.Protected_staging_freezes_binding_before_material_without_accepting_a_ChangeSet","case":"b74556c1e02f39f99aab37da9a3881f633a9a531e982db7ba24510cf9a8841d2","suite":"fast","gate":"validate","trigger":"every-change","addedFor304":true},
     {"method":"Haby.Application.Tests.CreatePreparedOperatorImportTests.Missing_or_wrong_import_slot_cannot_read_catalog_or_material","case":"1345c7630251b9298decc6907d08bd76be60ee9f0a588a01f05bcaea83bd01c4","suite":"fast","gate":"validate","trigger":"every-change","addedFor304":true},
