@@ -382,6 +382,8 @@ jobs:
             .artifacts/postgresql-measurement/safe/functional/resources.json
             .artifacts/postgresql-measurement/safe/functional/setup.csv
             .artifacts/postgresql-measurement/safe/functional/host-diagnostics.csv
+            .artifacts/postgresql-measurement/safe/functional/composition-*.identity.json
+            .artifacts/postgresql-measurement/safe/functional/composition-*.exceptions.jsonl
             .artifacts/postgresql-measurement/safe/functional/protected-reflection-diagnostics.csv
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/cases.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/counts.json
