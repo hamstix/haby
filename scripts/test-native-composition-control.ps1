@@ -86,6 +86,57 @@ try {
             finally { Pop-Location }
         }
     }
+    # Resolve the actual always-upload path block against owned files, not a copied allowlist.
+    $upload = [regex]::Match($workflow, '(?ms)^      - name: Publish allowlisted PostgreSQL timing and case inventory\r?\n(?<body>.*?)(?=^      - name:|\z)').Groups['body'].Value
+    if (-not $upload.Contains('        if: always()') -or -not $upload.Contains('        uses: actions/upload-artifact@v4')) { throw 'PostgreSQL evidence upload control changed.' }
+    $pathBlock = [regex]::Match($upload, '(?m)^          path: \|\r?\n(?<paths>(?:^            [^\r\n]+\r?\n)+)').Groups['paths'].Value
+    $paths = @($pathBlock -split '\r?\n' | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() })
+    function Select-UploadFiles([string]$Fixture, [string[]]$Patterns) {
+        @($Patterns | ForEach-Object {
+            Get-ChildItem -Path (Join-Path $Fixture $_) -File -ErrorAction SilentlyContinue | ForEach-Object {
+                [IO.Path]::GetRelativePath($Fixture, $_.FullName).Replace('\', '/')
+            }
+        } | Sort-Object -Unique)
+    }
+    $prefix = '.artifacts/postgresql-measurement/safe/functional/'
+    $id = '00000000000000000000000000000001'
+    $identityName = "${prefix}composition-$id.identity.json"
+    $exceptionName = "${prefix}composition-$id.exceptions.jsonl"
+    $legacy = @('.artifacts/postgresql-measurement/safe/counts.json', "${prefix}cases.json")
+    $present = Join-Path $root 'retention-present'
+    $identity = @{ Source = ('a' * 40); SampleSha256 = ('b' * 64); PersistenceSha256 = ('c' * 64); ApplicationSha256 = ('d' * 64); TestSource = ('a' * 40); TestSha256 = ('e' * 64) }
+    $exception = @{ Identity = $identity; Stage = 3; Type = 'System.InvalidOperationException'; Frames = @('Haby.TestDiagnostics.CompositionExceptionDiagnostics.Record') }
+    $fixtures = @{ $identityName = ($identity | ConvertTo-Json -Compress); $exceptionName = ($exception | ConvertTo-Json -Depth 4 -Compress) }
+    foreach ($name in $legacy) { $fixtures[$name] = '{}' }
+    $excluded = @('.artifacts/postgresql-measurement/private/raw-stderr.log',
+        ".artifacts/postgresql-measurement/private/composition-$id.identity.json",
+        "${prefix}nested/composition-$id.exceptions.jsonl", "${prefix}composition-$id.raw-stderr.log",
+        "${prefix}composition-$id.identity.json.private", "${prefix}not-composition-$id.identity.json",
+        ".artifacts/postgresql-measurement/safe/infrastructure-qualification/composition-$id.exceptions.jsonl")
+    foreach ($name in $excluded) { $fixtures[$name] = 'protected-control-fixture-marker' }
+    foreach ($name in $fixtures.Keys) {
+        $file = Join-Path $present $name; New-Item -ItemType Directory -Force (Split-Path $file -Parent) | Out-Null
+        Set-Content -LiteralPath $file -Value $fixtures[$name] -Encoding utf8NoBOM
+    }
+    $selected = @(Select-UploadFiles $present $paths)
+    if (Compare-Object -CaseSensitive @($legacy + $identityName + $exceptionName) $selected) { throw 'Real upload block did not retain exactly the bounded composition evidence and legacy files.' }
+    foreach ($name in $selected) {
+        if ((Get-Content -LiteralPath (Join-Path $present $name) -Raw).Contains('protected-control-fixture-marker')) { throw 'Excluded protected fixture content entered the upload selection.' }
+    }
+    $approved = @("${prefix}composition-*.identity.json", "${prefix}composition-*.exceptions.jsonl")
+    if (Compare-Object -CaseSensitive $approved @($paths | Where-Object { $_.Contains('*') })) { throw 'Upload wildcard scope is not exactly the two approved functional evidence patterns.' }
+    foreach ($name in @($identityName, $exceptionName)) {
+        if ([IO.Path]::GetFileName($name) -cnotmatch '^composition-[a-f0-9]{32}\.(identity\.json|exceptions\.jsonl)$') { throw 'Fixture diagnostic file name is unsafe.' }
+        $text = Get-Content -LiteralPath (Join-Path $present $name) -Raw
+        if ($text.Length -gt 10000 -or $text -match 'Message|ToString|raw-stderr|private|credential') { throw 'Fixture evidence content exceeded the safe contract.' }
+    }
+    $record = Get-Content -LiteralPath (Join-Path $present $exceptionName) -Raw | ConvertFrom-Json
+    if ($record.Frames.Count -gt 24 -or $record.Type.Length -gt 256 -or @($record.Frames | Where-Object { $_.Length -gt 256 -or $_ -match '[/\\:]' }).Count) { throw 'Fixture type/frame bounds are unsafe.' }
+    $passed++; Write-Host 'PASS actual upload block includes bounded identity/sentinel files and excludes private, raw and nested decoys'
+    $absent = Join-Path $root 'retention-absent'
+    foreach ($name in $legacy) { $file = Join-Path $absent $name; New-Item -ItemType Directory -Force (Split-Path $file -Parent) | Out-Null; Set-Content -LiteralPath $file '{}' }
+    if (Compare-Object -CaseSensitive $legacy @(Select-UploadFiles $absent $paths)) { throw 'Legacy absent-evidence artifact selection changed.' }
+    $passed++; Write-Host 'PASS legacy absence preserves the original artifact selection'
 } finally {
     $target = [IO.Path]::GetFullPath($root); $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     if (-not $target.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -or -not ([IO.Path]::GetFileName($target)).StartsWith('haby-292-control-', [StringComparison]::Ordinal)) { throw 'Unsafe fixture cleanup target.' }
