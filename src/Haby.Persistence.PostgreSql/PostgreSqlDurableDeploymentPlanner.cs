@@ -212,9 +212,11 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
         if (!emptyStage)
         {
-            // Initial mixed acquisition remains outside this slice; additive transitions resolve every declaration key.
-            if (DurableActionAdmission.SingleAlias(spec) is null && (baseline is null ||
-                !ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()).Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference)))
+            // Every Resource keeps its exact Provider; initial observation composition uses the same capability admission.
+            var acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException());
+            if (DurableActionAdmission.SingleAlias(spec) is null && (baseline is null
+                ? !SupportsInitialObservationComposition(spec, acquisitions)
+                : !acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference)))
                 return new(DurablePlanStatus.UnsupportedShape);
             var capturedProviders = await CaptureResourceProvidersAsync(context, revision.Declaration, environmentId, cancellationToken);
             if (capturedProviders.Status != DurablePlanStatus.Planned) return new(capturedProviders.Status);
@@ -445,8 +447,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(item => item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return (DurablePlanStatus.ChangeSetStale, null);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
-        if (DurableActionAdmission.SingleAlias(manifest.Declaration.Spec) is null && (baseline is null ||
-            !ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()).Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference)))
+        var acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException());
+        if (DurableActionAdmission.SingleAlias(manifest.Declaration.Spec) is null && (baseline is null
+            ? !SupportsInitialObservationComposition(manifest.Declaration.Spec, acquisitions)
+            : !acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference)))
             return (DurablePlanStatus.UnsupportedShape, null);
         var capturedProviders = await CaptureResourceProvidersAsync(context, manifest.Declaration, environmentId, cancellationToken);
         if (capturedProviders.Status != DurablePlanStatus.Planned) return (capturedProviders.Status, null);
@@ -569,10 +573,9 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
                 (await ReuseGraphAsync(context, owner, spec, revision, inputs, token))?.Equals(new DurableOperationGraph(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources)
                 { Import = graph.Import, Acquisitions = graph.Acquisitions, ObservationGroups = graph.ObservationGroups }) == true;
         }
-        var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(r => r.Id == revision.ProviderInstanceId, token);
-        return instance is not null && admission.ValidateGraph(spec,
-            new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs,
-            PreparedConfiguration(instance.ProviderKindId, revision), graph);
+        var exact = await ResourceProviderDispatch.CaptureAsync(context, inputs, _codecs, token);
+        var representative = exact.Values.First();
+        return admission.ValidateGraph(spec, representative.Provider, inputs, representative.Configuration, graph, exact);
     }
 
     internal static bool Matches(DurableChangeSetRow change, ApplicationDeploymentRow? actual) =>

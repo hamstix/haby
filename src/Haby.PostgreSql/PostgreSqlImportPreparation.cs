@@ -53,7 +53,7 @@ public sealed class PostgreSqlImportPreparer(IProviderAliasResolver aliases, Pos
         NormalizedManifestSpec spec, CancellationToken token)
     {
         if (DecodeNames(request.Input) is not { } names) return new(ResourceImportPreparationStatus.InvalidInput);
-        if (spec.Resources.Count != 2 || spec.Components.Values.Any(x => x.Workloads.Count > 0))
+        if ((spec.Resources.Count != 2 && request.CredentialSlot != CredentialSlot.Name) || spec.Components.Values.Any(x => x.Workloads.Count > 0))
             return new(ResourceImportPreparationStatus.ImportNotSupported);
         var databases = spec.Resources.Where(x => x.Value.Type == PostgreSqlDatabaseContract.Id).ToArray();
         var logins = spec.Resources.Where(x => x.Value.Type == PostgreSqlApplicationLoginContract.Id).ToArray();

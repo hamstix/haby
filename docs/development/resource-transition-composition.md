@@ -107,7 +107,7 @@ refused. This comparison remains stable after Commit. Plan/Check/Commit revalida
 baseline. Execute verifies each coupled group atomically; completed independent
 groups remain durable, while the new generation cannot be delivered until all groups
 and reused Resources are confirmed. Original Resource authority and credentials remain
-unchanged. Initial mixed admission is still C, and Workloads/UPDATE/removal are excluded.
+unchanged. Initial mixed admission uses the same protected groups and is described below. Workloads/UPDATE/removal remain excluded.
 
 A pre-Commit staged correction names the predecessor request and explicit expected
 absence of its committed attempt using `ResourceImportCorrection`. Creating/staging
@@ -143,6 +143,46 @@ Execute and combined authorized delivery. Exercise failure of either group,
 completed-group retry without repeated acquisition, restart, missing capability and
 no partially available generation. Preserve original credentials, data and authority.
 Document the initial and successive adoption commands without catalog resets.
+
+### Initial mixed operator sequence
+
+Import the complete first ManifestRevision with all Resources and configuration-only
+Components. Apply each exact Provider revision and alias, then call
+`StageResourceImport` with `credential_slot: "application-password"` and separate
+credential material. For PostgreSQL, `haby.postgresql.import-names/v1` prepares its
+complete database/login pair even when another Provider supplies other Resources.
+The adapter still requires exactly one matching coupled pair and performs read-only
+identity/permission preparation; staging never confirms or accepts desired state.
+The legacy `CreateResourceImportChangeSet` continues to require complete whole-target
+Import coverage and cannot omit the new Reference Resource.
+
+Call `CreateChangeSet` once with expected absence and a complete acquisition set:
+
+```json
+{"environment_id":"pilot","reference":{"application_record_id":"<application UUID>","revision_number":1},
+ "precondition":"PLANNING_PRECONDITION_EXPECTED_ABSENCE",
+ "acquisitions":{"resources":[
+   {"resource":"db","mode":"ACQUISITION_MODE_IMPORT_USE_AND_RETAIN","import_request_id":"<protected request UUID>"},
+   {"resource":"app-login","mode":"ACQUISITION_MODE_IMPORT_USE_AND_RETAIN","import_request_id":"<same protected request UUID>"},
+   {"resource":"service","mode":"ACQUISITION_MODE_REFERENCE","input":{"format":"sample.reference-input/v1","json":"{\"Identity\":\"sample-service\"}"}}]}}
+```
+
+The sample Reference is a closed synthetic read-only verification adapter, not a
+production integration. Continue through `CreatePlan`, `CheckPlan`,
+`CommitDesiredState` and `ExecuteGeneration`. Only the complete generation permits
+`MaterializeApplicationConfiguration`, `CreateConfigurationAccess` and authorized
+configuration delivery. A completed group retains its own receipt and outputs when
+another group fails; restart/replay never reacquires that completed group or turns
+partial configuration into available output. Revoked authority remains refused;
+this path does not repair or replace credentials to force recovery.
+
+For a successive revision, use the current Applied expected generation. Declare
+only NEW Resources through the earlier additive sequence; unchanged Resources keep
+server-derived original acquisition authority and credentials. A configuration-only
+revision with no new Resources needs no new protected intake. Keep exact Provider
+revisions and coupled membership; no catalog reset or preliminary PostgreSQL-only
+revision is required. Missing capability, incomplete or foreign request coverage,
+Workloads and excluded mutation shapes fail before new desired-state acceptance.
 
 ## Independent review instructions for each slice
 

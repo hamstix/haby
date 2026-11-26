@@ -77,14 +77,15 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                     acquisitions = new(original.Acquisitions!.Resources.Concat(acquisitions.Resources));
                 }
             }
-            if (hasNewImport && (workloads || precondition is DeploymentPrecondition.ExpectedAbsence))
+            if (hasNewImport && workloads)
                 return new(DurableChangeSetCreateStatus.ImportNotSupported);
             if (references && workloads && precondition is DeploymentPrecondition.ExpectedAbsence)
                 return new(DurableChangeSetCreateStatus.ReferenceNotSupported);
             acquisitions.Validate(accepted.Declaration.Spec);
             if (accepted.Declaration.Spec.Resources.Count > 0)
             {
-                if (precondition is DeploymentPrecondition.ExpectedAbsence && DurableActionAdmission.SingleAlias(accepted.Declaration.Spec) is null)
+                if (precondition is DeploymentPrecondition.ExpectedAbsence && DurableActionAdmission.SingleAlias(accepted.Declaration.Spec) is null &&
+                    !SupportsInitialObservationComposition(accepted.Declaration.Spec, acquisitions))
                     return new(DurableChangeSetCreateStatus.UnsupportedShape);
                 var captured = await CaptureResourceProvidersAsync(db, accepted.Declaration, environment, token);
                 if (captured.Status != DurablePlanStatus.Planned) return new(captured.Status == DurablePlanStatus.AliasNotResolved
@@ -123,6 +124,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         await transaction.CommitAsync(token);
         return new(DurableChangeSetCreateStatus.Created, change);
     }
+
+    private static bool SupportsInitialObservationComposition(NormalizedManifestSpec spec, ResourceAcquisitionIntent acquisitions) =>
+        !spec.Components.Values.Any(x => x.Workloads.Count > 0) && acquisitions.Resources.Count > 0 &&
+        acquisitions.Resources.All(x => x.Mode is ResourceAcquisitionMode.ImportUseAndRetain or ResourceAcquisitionMode.Reference);
 
     private static async Task<ResourceAcquisitionIntent?> OriginalNewDeclarationsAsync(ManifestCatalogDbContext db,
         DurableChangeSetRow saved, CancellationToken token)

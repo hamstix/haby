@@ -26,7 +26,7 @@ public sealed partial class PostgreSqlImportVerifier(IProviderConfigurationStore
         NpgsqlConnectionStringBuilder? admin = null, application = null;
         try
         {
-            var input = PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs);
+            var input = PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs, accepted.Node.ResourceId);
             if (input is null || PostgreSqlImportContracts.Decode(accepted.Node) != input) return new(PostgreSqlImportVerificationStatus.InputUnavailable);
             var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
                 accepted.Provider.Instance, accepted.Provider.Configuration, token))?.Configuration;
