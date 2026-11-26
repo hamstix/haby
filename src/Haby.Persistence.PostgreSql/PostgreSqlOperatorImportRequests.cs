@@ -43,19 +43,23 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImport
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var transaction = await db.Database.BeginTransactionAsync(token);
             await ImportMutationGate.LockAsync(db, Guid.Parse(binding.Environment.ToString()), Guid.Parse(binding.Revision.ApplicationRecordId.ToString()), token);
+            var previous = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == binding.RequestId, token);
+            if (previous is not null && !SameImportRequest(previous, binding))
+                return await ReadBoundRequestAsync(db, previous, binding, token);
+            if (previous is null)
+            {
+                var resources = binding.Input.Resources.Select(x => x.Resource.Value).ToArray();
+                if (binding.Correction is null && await db.CurrentResourceManagement.AsNoTracking().AnyAsync(x =>
+                    x.Environment == Guid.Parse(binding.Environment.ToString()) && x.Application == Guid.Parse(binding.Revision.ApplicationRecordId.ToString()) && resources.Contains(x.Resource), token))
+                    return new(OperatorImportRequestStatus.Conflict);
+                if (binding.Correction is not null && !await ImportCorrectionRules.EligibleAsync(db, binding, token))
+                    return new(OperatorImportRequestStatus.Conflict);
+            }
             // Legacy complete-intent validation must precede replay acknowledgement and every durable bind/stage.
             var validation = await ValidateChangeSetInputAsync(db, binding.Environment, binding.Revision.ApplicationRecordId,
                 binding.Revision, binding.Input, true, token, importGroup: importGroup);
             if (validation is { } refused) return new(ImportRequestStatus(refused));
-            var previous = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == binding.RequestId, token);
             if (previous is not null) return await ReadBoundRequestAsync(db, previous, binding, token);
-            var resources = binding.Input.Resources.Select(x => x.Resource.Value).ToArray();
-            if (binding.Correction is null && await db.CurrentResourceManagement.AsNoTracking().AnyAsync(x =>
-                x.Environment == Guid.Parse(binding.Environment.ToString()) && x.Application == Guid.Parse(binding.Revision.ApplicationRecordId.ToString()) && resources.Contains(x.Resource), token))
-                return new(OperatorImportRequestStatus.Conflict);
-            if (binding.Correction is not null && !await ImportCorrectionRules.EligibleAsync(db, binding, token))
-                return new(OperatorImportRequestStatus.Conflict);
-
             var application = Guid.Parse(binding.Revision.ApplicationRecordId.ToString());
             var revision = await db.Revisions.AsNoTracking().Where(x => x.ApplicationRecordId == application &&
                 x.LocalRevisionNumber == binding.Revision.RevisionNumber.Value).Select(x => x.Id).SingleAsync(token);
