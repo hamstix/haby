@@ -31,18 +31,17 @@ public sealed partial class ManifestOperatorService
         ResourceAcquisitionIntent? acquisitions = null;
         if (request.Acquisitions is not null)
         {
-            if (request.Acquisitions.Resources.Any(x => x.Mode == AcquisitionMode.ImportUseAndRetain))
-                return Result(PlanningStatus.ImportNotSupported);
             try
             {
                 acquisitions = new(request.Acquisitions.Resources.Select(x => new ResourceAcquisitionRequest(
                     ManifestLocalId.Create(x.Resource), x.Mode switch
                     {
                         AcquisitionMode.Provision => ResourceAcquisitionMode.Provision,
+                        AcquisitionMode.ImportUseAndRetain when x.Input is null && x.SharingRequest is null && Guid.TryParse(x.ImportRequestId, out var requestId) && requestId != Guid.Empty => ResourceAcquisitionMode.ImportUseAndRetain,
                         AcquisitionMode.Reference => ResourceAcquisitionMode.Reference,
                         _ => throw new ArgumentException("Invalid acquisition mode.")
                     }, Payload(x.Input))
-                { SharingRequest = Payload(x.SharingRequest) }));
+                { SharingRequest = Payload(x.SharingRequest), ImportRequestId = x.ImportRequestId.Length == 0 ? null : Guid.TryParse(x.ImportRequestId, out var importId) && importId != Guid.Empty ? importId : throw new ArgumentException("Invalid protected import request.") }));
                 _ = ResourceAcquisitionIntentCodec.Encode(acquisitions);
             }
             catch (Exception error) when (error is ArgumentException or InvalidDataException)

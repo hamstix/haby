@@ -72,10 +72,45 @@ public sealed class CreatePreparedOperatorImportTests
         Assert.Equal(new[] { "lookup" }, f.Calls);
     }
 
+    [Fact]
+    public async Task Protected_preparation_can_bind_one_new_group_without_resubmitting_retained_resources()
+    {
+        var f = await Fixture.Create(true);
+        var result = await new PrepareResourceImport(f.Query, [f.Adapter]).ExecuteAsync(f.Request, default);
+        Assert.Equal(ResourceImportPreparationStatus.Prepared, result.Status);
+        Assert.Equal(f.Binding, result.Binding);
+        Assert.Equal(new[] { "revision", "prepare" }, f.Calls);
+    }
+
+    [Fact]
+    public async Task Protected_staging_freezes_binding_before_material_without_accepting_a_ChangeSet()
+    {
+        var f = await Fixture.Create(true);
+        using var material = new SecretMaterial("private"u8.ToArray());
+        var request = f.Request with { CredentialSlot = "application-password" };
+        Assert.Equal(OperatorImportRequestStatus.Pending, (await f.Service.ExecuteAsync(request, null, material, "operator", default, stageOnly: true)).Status);
+        Assert.Equal(new[] { "lookup", "revision", "prepare", "bind", "stage" }, f.Calls);
+        f.Calls.Clear(); f.Query.Unavailable = true; f.Adapter.Unavailable = true;
+        Assert.Equal(OperatorImportRequestStatus.Pending, (await f.Service.ExecuteAsync(request, null, material, "operator", default, stageOnly: true)).Status);
+        Assert.Equal(new[] { "lookup", "bind", "stage" }, f.Calls);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("provider-administrator")]
+    public async Task Missing_or_wrong_import_slot_cannot_read_catalog_or_material(string? slot)
+    {
+        var f = await Fixture.Create(true);
+        using var material = new SecretMaterial("private"u8.ToArray()); material.Dispose();
+        Assert.Equal(OperatorImportRequestStatus.ImportNotSupported,
+            (await f.Service.ExecuteAsync(f.Request with { CredentialSlot = slot }, null, material, "operator", default, stageOnly: true)).Status);
+        Assert.Empty(f.Calls);
+    }
+
     private sealed record Fixture(CreatePreparedOperatorImport Service, ResourceImportPreparationRequest Request,
         OperatorImportRequestBinding Binding, List<string> Calls, Store Store, Query Query, Adapter Adapter)
     {
-        internal static async Task<Fixture> Create()
+        internal static async Task<Fixture> Create(bool retained = false)
         {
             var revisions = new InMemoryManifestImportStore();
             var imported = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(revisions,
@@ -84,6 +119,17 @@ public sealed class CreatePreparedOperatorImportTests
                   "spec":{"resources":{"db":{"type":"sample.resource/v1","providerRef":"main","properties":{}},
                   "login":{"type":"sample.resource/v1","providerRef":"main","properties":{}}}}}}
                 """u8.ToArray(), "operator"));
+            if (retained)
+            {
+                var next = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await new ImportApplicationManifest(revisions,
+                    new([new(ResourceTypeId.Create("sample.resource/v1"), "{}")], [], [], []), TimeProvider.System).ExecuteAsync("""
+                    {"applicationVersion":"2","manifest":{"apiVersion":"haby.dev/v1alpha1","kind":"Application","metadata":{"id":"sample"},
+                      "spec":{"resources":{"db":{"type":"sample.resource/v1","providerRef":"main","properties":{}},
+                      "login":{"type":"sample.resource/v1","providerRef":"main","properties":{}},
+                      "retained":{"type":"sample.resource/v1","providerRef":"main","properties":{}}}}}}
+                    """u8.ToArray(), "operator"));
+                imported = next;
+            }
             var calls = new List<string>();
             var request = new ResourceImportPreparationRequest(Guid.NewGuid(), EnvironmentRecordId.New(), imported.ManifestRevisionRef, new("fixture.names/v1", "{}"));
             var binding = new OperatorImportRequestBinding(request.RequestId, request.Environment, request.Revision, ManifestLocalId.Create("login"),
@@ -103,6 +149,7 @@ public sealed class CreatePreparedOperatorImportTests
     {
         internal bool Unavailable;
         public string InputFormat => "fixture.names/v1";
+        public ImportCredentialSlot CredentialSlot => new("application-password", SecretPurpose.ApplicationLogin);
         public bool MatchesPreparedRequest(ResourceImportPreparationRequest request, OperatorImportRequestBinding saved) => request.Input.Json == "{}" && saved.Input == binding.Input;
         public ValueTask<ResourceImportPreparationResult> PrepareAsync(ResourceImportPreparationRequest request, NormalizedManifestSpec spec, CancellationToken token)
         { if (Unavailable) throw new IOException("Provider is unavailable."); calls.Add("prepare"); return ValueTask.FromResult(new ResourceImportPreparationResult(ResourceImportPreparationStatus.Prepared, binding)); }

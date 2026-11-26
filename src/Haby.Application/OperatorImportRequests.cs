@@ -74,7 +74,7 @@ public sealed class OperatorImportRequests(IOperatorImportRequestStore requests,
     IProtectedApplicationCredentialCandidateIntake? candidates = null)
 {
     public async ValueTask<OperatorImportRequestResult> CreateAsync(OperatorImportRequestBinding binding,
-        SecretMaterial material, string actor, CancellationToken token)
+        SecretMaterial material, string actor, CancellationToken token, bool stageOnly = false)
     {
         token.ThrowIfCancellationRequested();
         try { ArgumentNullException.ThrowIfNull(binding); binding.Validate(); }
@@ -97,7 +97,7 @@ public sealed class OperatorImportRequests(IOperatorImportRequestStore requests,
             }, bound.Request);
         if (staged.Reference is null) return new(OperatorImportRequestStatus.StorageUnavailable, bound.Request);
         token.ThrowIfCancellationRequested();
-        return await requests.CompleteAsync(binding, staged.Reference, actor, token);
+        return stageOnly ? bound : await requests.CompleteAsync(binding, staged.Reference, actor, token);
     }
 
     public ValueTask<OperatorImportRequestResult> GetAsync(Guid requestId, CancellationToken token) =>

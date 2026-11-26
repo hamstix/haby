@@ -40,7 +40,24 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
     public IReadOnlyList<ResourceReuse> RetainedResources { get; }
     public ResourceReuseBaseline? Baseline { get; }
     private ResourceImportIntent? import;
-    public ResourceAcquisitionIntent Acquisitions { get; init; }
+    private ResourceAcquisitionIntent acquisitions = null!;
+    public ResourceAcquisitionIntent Acquisitions
+    {
+        get => acquisitions;
+        init
+        {
+            acquisitions = value;
+            if (Nodes.Any(x => x.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain && value.Resources.SingleOrDefault(r => r.Resource == x.ResourceId)?.ImportRequestId is not null))
+            {
+                var groups = Nodes.Where(x => x.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                    .GroupBy(x => value.Resource(x.ResourceId).ImportRequestId)
+                    .Select(g => new ResourceObservationGroup(g.Key is { } request ? "import." + request.ToString("N") : "import",
+                        ResourceAcquisitionMode.ImportUseAndRetain, g.Select(x => x.Id).ToArray()));
+                ObservationGroups = groups.Concat(Nodes.Where(x => x.Action.Admission.Mode == ResourceAcquisitionMode.Reference).GroupBy(x => x.ResourceId)
+                    .Select(g => new ResourceObservationGroup("reference." + g.Key.Value, ResourceAcquisitionMode.Reference, g.Select(x => x.Id).ToArray()))).ToArray();
+            }
+        }
+    }
     public ResourceImportIntent? Import
     {
         get => import;
@@ -66,6 +83,13 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
         {
             if (group.Id is not { Length: > 0 and <= 128 } || group.Operations.Count == 0 || group.Mode is not (ResourceAcquisitionMode.ImportUseAndRetain or ResourceAcquisitionMode.Reference))
                 throw new InvalidDataException("Invalid observation group.");
+            if (group.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+            {
+                var requests = group.Operations.Select(id => Acquisitions.Resource(Nodes.Single(n => n.Id == id).ResourceId).ImportRequestId).Distinct().ToArray();
+                if (requests.Length != 1 || !group.Operations.ToHashSet().SetEquals(Nodes.Where(n => n.Action.Admission.Mode == ResourceAcquisitionMode.ImportUseAndRetain &&
+                    Acquisitions.Resource(n.ResourceId).ImportRequestId == requests[0]).Select(n => n.Id)))
+                    throw new InvalidDataException("Import group does not match its exact protected request.");
+            }
             foreach (var id in group.Operations)
             {
                 var node = Nodes.Single(x => x.Id == id);

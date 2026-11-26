@@ -61,7 +61,8 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
                 group.Operations.Count != acceptance.Operations.Count ||
                 acceptance.Operations.Any(x => x.Key.DeploymentId != first.DeploymentId || x.Key.Generation != first.Generation) ||
                 !new DurableActionAdmission(registry).Supports(graph)) return new(ResourceObservationAcceptanceStatus.InputUnavailable);
-            if (graph.Baseline is not null && (group.Mode != ResourceAcquisitionMode.Reference ||
+            if (graph.Baseline is not null && (group.Mode != ResourceAcquisitionMode.Reference &&
+                (group.Mode != ResourceAcquisitionMode.ImportUseAndRetain || graph.Nodes.Where(x => group.Operations.Contains(x.Id)).Any(x => inputs.Acquisitions.Resource(x.ResourceId).ImportRequestId is null)) ||
                 inputs.Providers.Declaration.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||
                 !await ResourceContinuity.ValidateAsync(db, deployment, graph, cancellationToken) ||
                 !await ResourceProviderDispatch.ValidateCreationAsync(db, inputs, graph, codecs, new DurableActionAdmission(registry), cancellationToken)))
@@ -91,8 +92,9 @@ public sealed class PostgreSqlResourceObservationAcceptance(IDbContextFactory<Ma
                 ? ResourceObservationAcceptanceStatus.Existing : ResourceObservationAcceptanceStatus.Conflict);
             if (!await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == deployment && x.DesiredGeneration == source.Generation, cancellationToken))
                 return new(ResourceObservationAcceptanceStatus.Conflict);
-            if (group.Mode == ResourceAcquisitionMode.ImportUseAndRetain && inputs.Import is { } import &&
-                !await ImportAdmissionAuthority.OwnsInputsAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId, import, cancellationToken))
+            if (group.Mode == ResourceAcquisitionMode.ImportUseAndRetain &&
+                !await ImportAdmissionAuthority.OwnsInputsAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId,
+                    new(inputs.Acquisitions.Resources.Where(x => x.Mode == ResourceAcquisitionMode.ImportUseAndRetain).Select(x => new ResourceImportRequest(x.Resource, x.Input!, x.Credential))), cancellationToken))
                 return new(ResourceObservationAcceptanceStatus.Conflict);
             var expectedCredentials = inputs.Acquisitions.Resources.Where(x => resources.Contains(x.Resource) && x.Credential is not null).ToArray();
             if (acceptance.Credentials.Count != expectedCredentials.Length || acceptance.Credentials.Any(x =>

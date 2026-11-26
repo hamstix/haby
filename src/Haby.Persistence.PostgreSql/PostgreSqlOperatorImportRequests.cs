@@ -36,12 +36,17 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImport
         {
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var transaction = await db.Database.BeginTransactionAsync(token);
+            await ImportMutationGate.LockAsync(db, Guid.Parse(binding.Environment.ToString()), Guid.Parse(binding.Revision.ApplicationRecordId.ToString()), token);
             var previous = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == binding.RequestId, token);
             if (previous is not null) return await ReadBoundRequestAsync(db, previous, binding, token);
+            var resources = binding.Input.Resources.Select(x => x.Resource.Value).ToArray();
+            if (binding.Correction is null && await db.CurrentResourceManagement.AsNoTracking().AnyAsync(x =>
+                x.Environment == Guid.Parse(binding.Environment.ToString()) && x.Application == Guid.Parse(binding.Revision.ApplicationRecordId.ToString()) && resources.Contains(x.Resource), token))
+                return new(OperatorImportRequestStatus.Conflict);
             if (binding.Correction is not null && !await ImportCorrectionRules.EligibleAsync(db, binding, token))
                 return new(OperatorImportRequestStatus.Conflict);
             var validation = await ValidateChangeSetInputAsync(db, binding.Environment, binding.Revision.ApplicationRecordId,
-                binding.Revision, binding.Input, true, token);
+                binding.Revision, binding.Input, true, token, importGroup: true);
             if (validation is { } refused) return new(ImportRequestStatus(refused));
             var application = Guid.Parse(binding.Revision.ApplicationRecordId.ToString());
             var revision = await db.Revisions.AsNoTracking().Where(x => x.ApplicationRecordId == application &&
@@ -198,9 +203,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImport
         if (expectedCredential is not null && expectedCredential != reference) return new(OperatorImportRequestStatus.Conflict);
         var change = await db.DurableChangeSets.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.ChangeSet, token);
         if (change is null || change.EnvironmentRecordId != row.Environment || change.ApplicationRecordId != row.Application ||
-            change.RevisionNumber != row.Revision || change.ExpectedAbsence != (binding.Correction?.Generation is null) || change.ExpectedGeneration != binding.Correction?.Generation?.Value ||
+            change.RevisionNumber != row.Revision || change.ImportIntentJson is not null && (change.ExpectedAbsence != (binding.Correction?.Generation is null) || change.ExpectedGeneration != binding.Correction?.Generation?.Value) ||
             change.ActorId != row.CompletedBy || change.CreatedAt != row.CompletedAt ||
-            change.ImportIntentJson != ResourceImportIntentCodec.Encode(binding.Attach(reference)))
+            !(change.ImportIntentJson == ResourceImportIntentCodec.Encode(binding.Attach(reference)) ||
+                GenericImportIntake.Matches(change, row, reference)))
             throw new InvalidDataException("Import request ChangeSet is unavailable.");
         return await ImportRequestResultAsync(db, row, OperatorImportRequestStatus.Created, token);
     }

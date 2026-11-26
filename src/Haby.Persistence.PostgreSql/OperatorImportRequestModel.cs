@@ -42,7 +42,7 @@ public sealed partial class ManifestCatalogDbContext
             e.HasOne<ManifestRevisionRow>().WithMany().HasForeignKey(x => x.ManifestRevision).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<DurableChangeSetRow>().WithMany().HasForeignKey(x => x.ChangeSet).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<ProtectedApplicationCredentialRow>().WithMany().HasForeignKey(x => x.StagedCredential).OnDelete(DeleteBehavior.Restrict);
-            e.HasIndex(x => x.ChangeSet).IsUnique();
+            e.HasIndex(x => x.ChangeSet);
             e.HasIndex(x => x.StagedCredential).IsUnique();
         });
     }

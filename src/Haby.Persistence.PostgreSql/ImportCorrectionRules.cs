@@ -34,7 +34,16 @@ internal static class ImportCorrectionRules
             x.EnvironmentRecordId == environment && x.ApplicationRecordId == application, token);
         var commit = previous.ChangeSet is { } change
             ? await db.ChangeSetCommits.AsNoTracking().SingleOrDefaultAsync(x => x.ChangeSetId == change, token) : null;
-        if (target.Deployment is null) return target.Generation is null && deployment is null && commit is null && managed.Length == 0;
+        if (target.Deployment is null)
+        {
+            if (target.Generation is not null || commit is not null) return false;
+            if (deployment is null) return managed.Length == 0;
+            // Pre-Commit correction of a new group cannot replace any already managed Resource.
+            return deployment.AppliedGeneration == deployment.DesiredGeneration &&
+                binding.Input.Resources.All(x => managed.All(m => m.Resource != x.Resource.Value)) &&
+                (previous.ChangeSet is null || await db.DurableChangeSets.AsNoTracking().AnyAsync(x => x.Id == previous.ChangeSet &&
+                    x.ImportIntentJson == null && !x.ExpectedAbsence && x.ExpectedGeneration == deployment.AppliedGeneration, token));
+        }
         var expectedDeployment = Guid.Parse(target.Deployment.ToString());
         if (deployment is null || commit is null || target.Generation is null || deployment.Id != expectedDeployment ||
             deployment.DesiredGeneration != target.Generation.Value || deployment.AppliedGeneration is not null ||

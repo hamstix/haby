@@ -88,6 +88,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
             row.ApplicationRecordId == change.ApplicationRecordId, cancellationToken);
         if (!PostgreSqlDurableDeploymentPlanner.Matches(change, actual))
             return new DurableCommitResult.ChangeSetStale(actual is null ? null : DeploymentGeneration.Create(actual.DesiredGeneration));
+        if (change.ImportIntentJson is null && !await GenericImportIntake.ValidateAsync(context, change, cancellationToken))
+            return new DurableCommitResult.PlanInputUnavailable();
         var correction = change.ImportIntentJson is null ? null : await ImportAdmissionAuthority.CorrectionAsync(context, change.Id, cancellationToken);
         if (change.ImportIntentJson is not null && !await ImportAdmissionAuthority.CanPlanAsync(context, change, correction, cancellationToken))
             return new DurableCommitResult.PlanInputUnavailable();
@@ -326,6 +328,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         }
         await context.SaveChangesAsync(cancellationToken);
         if (correction is not null && !await ImportCorrectionCommit.ApplyAsync(context, correction, commit, managementRows, cancellationToken))
+            return new DurableCommitResult.PlanInputUnavailable();
+        if (change.ImportIntentJson is null && !await GenericImportIntake.AcceptCorrectionsAsync(context, change, commit, cancellationToken))
             return new DurableCommitResult.PlanInputUnavailable();
         cancellationToken.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
