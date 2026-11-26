@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace Haby.TestDiagnostics;
 
 // Linked only into the verification executable and its tests. Never serializes an Exception.
-internal enum CompositionDiagnosticStage { Inactive, InitialProtectedImportBaselineCheckPlan, AdditiveCheckPlan, DiagnosticSentinel }
+internal enum CompositionDiagnosticStage { Inactive, InitialProtectedImportBaselineCheckPlan, AdditiveCheckPlan, DiagnosticSentinel, InitialMixedMaterialization }
 internal sealed record CompositionDiagnosticIdentity(string Source, string SampleSha256, string PersistenceSha256,
     string ApplicationSha256, string TestSource, string TestSha256);
 internal sealed record CompositionExceptionRecord(CompositionDiagnosticIdentity Identity, CompositionDiagnosticStage Stage, string Type, string[] Frames);
@@ -48,7 +48,7 @@ internal sealed class CompositionExceptionDiagnostics(CompositionDiagnosticIdent
             try
             {
                 var current = stage();
-                if (current is not (CompositionDiagnosticStage.InitialProtectedImportBaselineCheckPlan or CompositionDiagnosticStage.AdditiveCheckPlan or CompositionDiagnosticStage.DiagnosticSentinel)) return;
+                if (current is not (CompositionDiagnosticStage.InitialProtectedImportBaselineCheckPlan or CompositionDiagnosticStage.AdditiveCheckPlan or CompositionDiagnosticStage.DiagnosticSentinel or CompositionDiagnosticStage.InitialMixedMaterialization)) return;
                 for (var error = exception; error is not null && _records < MaxRecords; error = error.InnerException)
                 {
                     // Stack metadata only: no file names, arguments, messages, state or Exception.ToString().

@@ -86,6 +86,10 @@ public sealed partial class HostFailureDiagnosticsTests
         finally { Directory.Delete(root, true); }
         stage = (CompositionDiagnosticStage)999;
         diagnostic.Record(primary); Assert.Single(lines);
+        stage = CompositionDiagnosticStage.InitialMixedMaterialization;
+        diagnostic.Record(primary);
+        Assert.Equal(CompositionDiagnosticStage.InitialMixedMaterialization,
+            JsonSerializer.Deserialize(lines.Last(), CompositionDiagnosticJson.Default.CompositionExceptionRecord)!.Stage);
         stage = CompositionDiagnosticStage.InitialProtectedImportBaselineCheckPlan;
         for (var i = 0; i < 100; i++) diagnostic.Record(primary);
         Assert.Equal(CompositionExceptionDiagnostics.MaxRecords, lines.Count);

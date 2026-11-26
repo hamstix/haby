@@ -148,7 +148,8 @@ public sealed partial class PostgreSqlPairImportTests
                     var incompleteReplay = changeRequest.Clone();
                     incompleteReplay.Acquisitions.Resources.RemoveAt(incompleteReplay.Acquisitions.Resources.Count - 1);
                     Assert.Equal(PlanningStatus.InvalidRequest, (await client.CreateChangeSetAsync(incompleteReplay)).Status);
-                    Assert.NotEqual(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
+                    Assert.NotEqual(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await child.AtDiagnosticStageAsync(CompositionDiagnosticStage.InitialMixedMaterialization,
+                            async () => await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" }))).Status);
                     if (scenario == "import-failure") await Sql(Control(), $"ALTER ROLE \"{pair.Login}\" NOLOGIN");
                     if (scenario == "reference-failure")
                     {
@@ -169,7 +170,8 @@ public sealed partial class PostgreSqlPairImportTests
                     if (scenario is "import-failure" or "reference-failure")
                     {
                         Assert.NotEqual(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = committed.DeploymentId, Generation = committed.Generation })).Status);
-                        Assert.NotEqual(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
+                        Assert.NotEqual(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await child.AtDiagnosticStageAsync(CompositionDiagnosticStage.InitialMixedMaterialization,
+                            async () => await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" }))).Status);
                         Assert.NotEqual(ConfigurationAccessStatus.Created, (await client.CreateConfigurationAccessAsync(new() { Selector = new() { Environment = "pilot", ApplicationId = "transition-consumer", ComponentId = "worker", DocumentId = "settings" } })).Status);
                         await using (var refused = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options))
                         {
@@ -184,7 +186,8 @@ public sealed partial class PostgreSqlPairImportTests
                         continue;
                     }
                     Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = committed.DeploymentId, Generation = committed.Generation })).Status);
-                    Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
+                    Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await child.AtDiagnosticStageAsync(CompositionDiagnosticStage.InitialMixedMaterialization,
+                            async () => await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" }))).Status);
                     await using (var confirmed = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options))
                     {
                         var owned = await confirmed.ResourceManagement.AsNoTracking().OrderBy(x => x.Resource).ToArrayAsync();
@@ -221,7 +224,8 @@ public sealed partial class PostgreSqlPairImportTests
                         Assert.Equal(PlanningStatus.Created, reuse.Status);
                         committed = await Confirm(reuse.ChangeSet.ChangeSetId);
                         Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = committed.DeploymentId, Generation = committed.Generation })).Status);
-                        Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
+                        Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await child.AtDiagnosticStageAsync(CompositionDiagnosticStage.InitialMixedMaterialization,
+                            async () => await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" }))).Status);
                         await using var reused = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options);
                         Assert.Equal(receipts, await reused.ResourceObservationReceipts.AsNoTracking().Select(x => x.Id).ToArrayAsync());
                         Assert.Equal(authority, await reused.ResourceManagement.AsNoTracking().OrderBy(x => x.Resource).Select(x => new AdditiveImportAuthority(x.Id, x.Origin, x.Authority, x.SourceGeneration)).ToArrayAsync());
