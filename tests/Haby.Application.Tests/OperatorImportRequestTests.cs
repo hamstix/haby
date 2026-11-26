@@ -51,6 +51,11 @@ public sealed class OperatorImportRequestTests
         service = new(store, new Intake(calls, binding) { AfterStage = canceled.Cancel });
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.CreateAsync(binding, material, "operator", canceled.Token).AsTask());
         Assert.Equal(new[] { "bind", "stage" }, calls);
+        calls.Clear();
+        service = new(store, new Intake(calls, binding));
+        Assert.Equal(OperatorImportRequestStatus.ImportNotSupported,
+            (await service.CreateAsync(binding, material, "operator", default, stageOnly: true)).Status);
+        Assert.Empty(calls);
     }
 
     private static OperatorImportRequestBinding Binding() => new(Guid.NewGuid(), EnvironmentRecordId.New(),

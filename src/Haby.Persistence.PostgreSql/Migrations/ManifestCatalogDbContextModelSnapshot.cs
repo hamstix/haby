@@ -1317,8 +1317,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasKey("PreviousRequest");
 
-                    b.HasIndex("ChangeSet")
-                        .IsUnique();
+                    b.HasIndex("ChangeSet");
 
                     b.HasIndex("PreviousStage");
 
@@ -1759,8 +1758,7 @@ namespace Haby.Persistence.PostgreSql.Migrations
 
                     b.HasIndex("Application");
 
-                    b.HasIndex("ChangeSet")
-                        .IsUnique();
+                    b.HasIndex("ChangeSet");
 
                     b.HasIndex("Environment");
 

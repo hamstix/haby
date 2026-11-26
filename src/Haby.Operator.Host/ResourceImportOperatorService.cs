@@ -10,7 +10,13 @@ namespace Haby.Operator.Host;
 
 public sealed partial class ManifestOperatorService
 {
-    public override async Task<ResourceImportRequestReply> CreateResourceImportChangeSet(CreateResourceImportChangeSetRequest request, ServerCallContext context)
+    public override Task<ResourceImportRequestReply> StageResourceImport(CreateResourceImportChangeSetRequest request, ServerCallContext context) =>
+        ImportAsync(request, context, true);
+
+    public override Task<ResourceImportRequestReply> CreateResourceImportChangeSet(CreateResourceImportChangeSetRequest request, ServerCallContext context) =>
+        ImportAsync(request, context, false);
+
+    private async Task<ResourceImportRequestReply> ImportAsync(CreateResourceImportChangeSetRequest request, ServerCallContext context, bool stageOnly)
     {
         context.CancellationToken.ThrowIfCancellationRequested();
         if (!Guid.TryParse(request.RequestId, out var id) || id == Guid.Empty)
@@ -23,7 +29,8 @@ public sealed partial class ManifestOperatorService
                 return ImportReply(id, new(OperatorImportRequestStatus.InvalidInput));
             preparation = new(id, EnvironmentRecordId.Parse(request.EnvironmentRecordId),
                 ManifestRevisionRef.Create(ApplicationRecordId.Parse(request.Reference.ApplicationRecordId), ManifestRevisionNumber.Create(request.Reference.RevisionNumber)),
-                new(request.InputFormat, new UTF8Encoding(false, true).GetString(request.InputJson.Span)));
+                new(request.InputFormat, new UTF8Encoding(false, true).GetString(request.InputJson.Span)))
+            { CredentialSlot = stageOnly ? request.CredentialSlot : null };
             correction = ReadCorrection(request.Correction, id);
         }
         catch (Exception error) when (error is ArgumentException or DecoderFallbackException)
@@ -35,7 +42,7 @@ public sealed partial class ManifestOperatorService
         try
         {
             using var material = new SecretMaterial(bytes);
-            return ImportReply(id, await importCreation.ExecuteAsync(preparation, correction, material, Actor, context.CancellationToken));
+            return ImportReply(id, await importCreation.ExecuteAsync(preparation, correction, material, Actor, context.CancellationToken, stageOnly));
         }
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }

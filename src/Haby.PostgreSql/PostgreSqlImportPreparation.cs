@@ -19,6 +19,7 @@ public sealed class PostgreSqlImportPreparer(IProviderAliasResolver aliases, Pos
     public const string NamesFormat = "haby.postgresql.import-names/v1";
     internal const string PreparedFormat = "haby.postgresql.prepared-existing-pair/v1";
     public string InputFormat => NamesFormat;
+    public ImportCredentialSlot CredentialSlot => new("application-password", SecretPurpose.ApplicationLogin);
     public static DurableActionPayload Encode(PostgreSqlImportNames names) => new(NamesFormat,
         JsonSerializer.Serialize(names, PostgreSqlImportPreparationJsonContext.Default.PostgreSqlImportNames));
 

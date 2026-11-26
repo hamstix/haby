@@ -62,7 +62,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
 
     private async Task<DurableChangeSetCreateStatus?> ValidateChangeSetInputAsync(ManifestCatalogDbContext context,
         EnvironmentRecordId environment, ApplicationRecordId application, ManifestRevisionRef revision,
-        ResourceImportIntent? intent, bool localRevision, CancellationToken token)
+        ResourceImportIntent? intent, bool localRevision, CancellationToken token, bool importGroup = false)
     {
         var environmentId = Guid.Parse(environment.ToString());
         var applicationId = Guid.Parse(application.ToString());
@@ -80,7 +80,15 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
                     row.ApplicationRecordId == applicationId && row.LocalRevisionNumber == revision.RevisionNumber.Value, token))
                 : await revisions.FindAsync(revision, token);
             if (accepted is null) return DurableChangeSetCreateStatus.RevisionNotFound;
-            try { intent.Validate(accepted.Declaration.Spec); }
+            try
+            {
+                if (importGroup)
+                {
+                    if (intent.Resources.Any(x => !accepted.Declaration.Spec.Resources.ContainsKey(x.Resource)))
+                        throw new InvalidDataException("Import group Resource is outside its target revision.");
+                }
+                else intent.Validate(accepted.Declaration.Spec);
+            }
             catch (InvalidDataException) { return DurableChangeSetCreateStatus.ImportNotSupported; }
         }
         return null;
@@ -161,6 +169,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             item.EnvironmentRecordId == row.EnvironmentRecordId &&
             item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken);
         if (!Matches(row, baseline))
+            return new(DurablePlanStatus.ChangeSetStale);
+        if (row.ImportIntentJson is null && !await GenericImportIntake.ValidateAsync(context, row, cancellationToken))
             return new(DurablePlanStatus.ChangeSetStale);
         var correction = row.ImportIntentJson is null ? null : await ImportAdmissionAuthority.CorrectionAsync(context, row.Id, cancellationToken);
         if (row.ImportIntentJson is not null && !await ImportAdmissionAuthority.CanPlanAsync(context, row, correction, cancellationToken))
@@ -416,6 +426,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             item.ApplicationRecordId == row.ApplicationRecordId, cancellationToken);
         if (!Matches(row, baseline))
             return (DurablePlanStatus.ChangeSetStale, null);
+        if (row.ImportIntentJson is null && !await GenericImportIntake.ValidateAsync(context, row, cancellationToken))
+            return (DurablePlanStatus.ChangeSetStale, null);
         var correction = row.ImportIntentJson is null ? null : await ImportAdmissionAuthority.CorrectionAsync(context, row.Id, cancellationToken);
         if (row.ImportIntentJson is not null && !await ImportAdmissionAuthority.CanPlanAsync(context, row, correction, cancellationToken))
             return (DurablePlanStatus.ChangeSetStale, null);
@@ -584,7 +596,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (newReference || DurableActionAdmission.SingleAlias(target) is null)
         {
             if (delta.Entries.Any(x => x.Kind is ResourceDeltaKind.Changed or ResourceDeltaKind.Removed) ||
-                delta.Entries.Where(x => x.Kind == ResourceDeltaKind.Added).Any(x => inputs.Acquisitions.Resource(x.Resource).Mode != ResourceAcquisitionMode.Reference)) return null;
+                delta.Entries.Where(x => x.Kind == ResourceDeltaKind.Added).Any(x => inputs.Acquisitions.Resource(x.Resource).Mode is not (ResourceAcquisitionMode.Reference or ResourceAcquisitionMode.ImportUseAndRetain))) return null;
         }
         var baselineGraph = DurableOperationGraphCodec.Decode(baseline.GraphJson);
         if (baselineGraph.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, owner.Id, baselineGraph, token)) throw new InvalidDataException();

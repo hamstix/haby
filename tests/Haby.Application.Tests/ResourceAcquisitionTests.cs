@@ -76,4 +76,39 @@ public sealed class ResourceAcquisitionTests
         var decoded = DurableOperationGraphCodec.Decode(DurableOperationGraphCodec.Encode(separate));
         Assert.Equal(a.Id, Assert.Single(decoded.Nodes.Single(x => x.Id == b.Id).Dependencies));
     }
+    [Fact]
+    public void Distinct_protected_import_requests_cannot_be_merged_or_split_into_other_acceptance_groups()
+    {
+        var firstRequest = Guid.NewGuid(); var secondRequest = Guid.NewGuid();
+        var a = Node(First, ResourceAcquisitionMode.ImportUseAndRetain, "first-import");
+        var b = Node(Second, ResourceAcquisitionMode.ImportUseAndRetain, "second-import");
+        var intent = new ResourceAcquisitionIntent([new(First, ResourceAcquisitionMode.ImportUseAndRetain, Input) { ImportRequestId = firstRequest },
+            new(Second, ResourceAcquisitionMode.ImportUseAndRetain, Input) { ImportRequestId = secondRequest }]);
+        var graph = new DurableOperationGraph([a, b]) { Acquisitions = intent };
+        Assert.Equal(2, graph.ObservationGroups.Count);
+        Assert.Equal(graph, DurableOperationGraphCodec.Decode(DurableOperationGraphCodec.Encode(graph)));
+        Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Encode(new([a, b])
+        {
+            Acquisitions = intent,
+            ObservationGroups = [new("mixed", ResourceAcquisitionMode.ImportUseAndRetain, [a.Id, b.Id])]
+        }));
+        var coupled = new ResourceAcquisitionIntent(intent.Resources.Select(x => x with { ImportRequestId = firstRequest }));
+        Assert.Throws<InvalidDataException>(() => DurableOperationGraphCodec.Encode(new([a, b])
+        {
+            Acquisitions = coupled,
+            ObservationGroups = [new("first", ResourceAcquisitionMode.ImportUseAndRetain, [a.Id]), new("second", ResourceAcquisitionMode.ImportUseAndRetain, [b.Id])]
+        }));
+    }
+
+    [Fact]
+    public void Opaque_import_request_survives_codec_and_cannot_authorize_other_acquisition_modes()
+    {
+        var request = Guid.NewGuid();
+        var intent = new ResourceAcquisitionIntent([new(First, ResourceAcquisitionMode.ImportUseAndRetain) { ImportRequestId = request }]);
+        Assert.Equal(intent, ResourceAcquisitionIntentCodec.Decode(ResourceAcquisitionIntentCodec.Encode(intent)));
+        Assert.Throws<ArgumentException>(() => new ResourceAcquisitionIntent([new(First, ResourceAcquisitionMode.Reference, Input) { ImportRequestId = request }]));
+        Assert.Throws<ArgumentException>(() => new ResourceAcquisitionIntent([new(First, ResourceAcquisitionMode.ImportUseAndRetain) { ImportRequestId = Guid.Empty }]));
+        Assert.DoesNotContain("ImportRequestId", ResourceAcquisitionIntentCodec.Encode(Intent()), StringComparison.Ordinal);
+    }
+
 }

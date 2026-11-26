@@ -23,7 +23,7 @@ public sealed partial class ManifestCatalogDbContext
             e.Property(x => x.Reason).HasColumnName("reason").HasMaxLength(32);
             e.Property(x => x.AcceptedAt).HasColumnName("accepted_at");
             e.HasIndex(x => x.SuccessorRequest).IsUnique();
-            e.HasIndex(x => x.ChangeSet).IsUnique();
+            e.HasIndex(x => x.ChangeSet);
             e.HasOne<OperatorImportRequestRow>().WithMany().HasForeignKey(x => x.PreviousRequest).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<OperatorImportRequestRow>().WithMany().HasForeignKey(x => x.SuccessorRequest).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<ProtectedApplicationCredentialRow>().WithMany().HasForeignKey(x => x.PreviousStage).OnDelete(DeleteBehavior.Restrict);

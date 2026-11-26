@@ -7,7 +7,9 @@ internal static class ImportAdmissionAuthority
 {
     internal static async Task<OperatorImportRequestBinding?> CorrectionAsync(ManifestCatalogDbContext db, Guid change, CancellationToken token)
     {
-        var request = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.ChangeSet == change, token);
+        var requests = await db.OperatorImportRequestRecords.AsNoTracking().Where(x => x.ChangeSet == change).Take(2).ToArrayAsync(token);
+        if (requests.Length > 1) return null;
+        var request = requests.SingleOrDefault();
         return request?.PreviousRequest is null ? null : PostgreSqlDurableDeploymentPlanner.StoredImportBinding(request);
     }
 
@@ -15,6 +17,7 @@ internal static class ImportAdmissionAuthority
         OperatorImportRequestBinding? correction, CancellationToken token)
     {
         var intent = ResourceImportIntentCodec.Decode(change.ImportIntentJson);
+        if (intent is not null && await db.OperatorImportRequestRecords.AsNoTracking().CountAsync(x => x.ChangeSet == change.Id, token) > 1) return false;
         if (intent is null) return correction is null;
         if (correction is not null)
         {
@@ -69,7 +72,12 @@ internal static class ImportAdmissionAuthority
             foreach (var managed in await db.ResourceManagement.AsNoTracking().Where(x => x.Deployment == deployment && x.SourceGeneration == generation).ToArrayAsync(token))
                 if (!ResourceContinuity.HasAcquisitionAuthority(managed, inputs) || !await ResourceObservationReceiptIntegrity.IsActiveAsync(db, managed.Id, token)) return false;
         }
-        if (intent is null) return true;
+        if (intent is null)
+        {
+            var imported = inputs.Acquisitions.Resources.Where(x => x.Mode == ResourceAcquisitionMode.ImportUseAndRetain).ToArray();
+            return imported.Length == 0 || await OwnsInputsAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId,
+                new(imported.Select(x => new ResourceImportRequest(x.Resource, x.Input!, x.Credential))), token);
+        }
         if (source.InternalEffects) return false;
         await ImportMutationGate.LockAsync(db, source.EnvironmentRecordId, source.ApplicationRecordId, token);
         source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);

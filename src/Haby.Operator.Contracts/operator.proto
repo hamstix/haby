@@ -53,6 +53,7 @@ service ManifestOperator {
   rpc PreviewDatabase(PreviewDatabaseRequest) returns (PreviewDatabaseReply);
   rpc CreateChangeSet(CreateChangeSetRequest) returns (PlanningReply);
   // Names are prepared on the server. This never accepts client-supplied OID attestations.
+  rpc StageResourceImport(CreateResourceImportChangeSetRequest) returns (ResourceImportRequestReply);
   rpc CreateResourceImportChangeSet(CreateResourceImportChangeSetRequest) returns (ResourceImportRequestReply);
   rpc GetResourceImportRequest(ResourceImportRequestKey) returns (ResourceImportRequestReply);
   rpc GetChangeSet(ChangeSetRequest) returns (PlanningReply);
@@ -329,6 +330,8 @@ message ResourceAcquisitionMember {
   AcquisitionMode mode = 2;
   AcquisitionPayload input = 3;
   AcquisitionPayload sharing_request = 4;
+  // Opaque protected intake request; Import accepts no caller-selected prepared payload or SecretRef.
+  string import_request_id = 5;
 }
 message ResourceAcquisitionSet { repeated ResourceAcquisitionMember resources = 1; }
 message ChangeSetRequest { string change_set_id = 1; }
@@ -446,6 +449,8 @@ message CreateResourceImportChangeSetRequest {
   bytes input_json = 5;
   bytes credential_material = 6;
   ResourceImportCorrection correction = 7;
+  // Required by StageResourceImport; exact adapter-declared application credential slot.
+  string credential_slot = 8;
 }
 message ResourceImportRequestKey { string request_id = 1; }
 enum ResourceImportRequestStatus {

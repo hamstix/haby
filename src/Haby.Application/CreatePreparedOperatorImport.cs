@@ -13,13 +13,13 @@ public sealed class CreatePreparedOperatorImport(PrepareResourceImport preparati
     OperatorImportRequests requests)
 {
     public async ValueTask<OperatorImportRequestResult> ExecuteAsync(ResourceImportPreparationRequest request,
-        OperatorImportCorrectionTarget? correction, SecretMaterial material, string actor, CancellationToken token)
+        OperatorImportCorrectionTarget? correction, SecretMaterial material, string actor, CancellationToken token, bool stageOnly = false)
     {
         token.ThrowIfCancellationRequested();
         if (!PrepareResourceImport.Valid(request)) return new(OperatorImportRequestStatus.InvalidInput);
         try { correction?.Validate(request.RequestId); }
         catch (ArgumentException) { return new(OperatorImportRequestStatus.InvalidInput); }
-        if (!preparation.Supports(request.Input.Format)) return new(OperatorImportRequestStatus.ImportNotSupported);
+        if (stageOnly && request.CredentialSlot is null || !preparation.SupportsSlot(request.Input.Format, request.CredentialSlot) || !preparation.Supports(request.Input.Format)) return new(OperatorImportRequestStatus.ImportNotSupported);
         var saved = await bindings.FindBindingAsync(request.RequestId, token);
         OperatorImportRequestBinding binding;
         if (saved.Status == OperatorImportRequestStatus.NotFound)
@@ -46,6 +46,6 @@ public sealed class CreatePreparedOperatorImport(PrepareResourceImport preparati
         }
         else return new(saved.Status);
         if (binding.Correction != correction || !preparation.Matches(request, binding)) return new(OperatorImportRequestStatus.Conflict);
-        return await requests.CreateAsync(binding, material, actor, token);
+        return await requests.CreateAsync(binding, material, actor, token, stageOnly);
     }
 }

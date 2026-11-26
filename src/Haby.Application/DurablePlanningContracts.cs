@@ -64,9 +64,9 @@ public enum DurablePlanCurrentStatus
 
 public interface IDurableDeploymentPlanner
 {
-    /// <summary>Explicit Provision/Reference intake. Initial sets cover every Resource; additive
-    /// Reference transitions supply new Resources only and retain server-derived baseline inputs.
-    /// Protected Import has its own intake.</summary>
+    /// <summary>Explicit acquisition intake. Additive transitions declare only new Resources and retain
+    /// server-derived baseline inputs. Import declarations reference separately protected requests,
+    /// never caller-selected prepared inputs or credential references.</summary>
     ValueTask<DurableChangeSetCreateResult> CreateAcquisitionChangeSetAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
         ResourceAcquisitionIntent acquisitions, string actor, CancellationToken token) =>

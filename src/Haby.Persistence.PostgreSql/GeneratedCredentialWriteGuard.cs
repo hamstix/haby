@@ -14,6 +14,8 @@ public sealed partial class ManifestCatalogDbContext
         // The synchronous branch performs synchronous queries and never waits on asynchronous I/O.
         ValidateGeneratedWritesAsync(false, default).GetAwaiter().GetResult();
         var result = base.SaveChanges(acceptAllChangesOnSuccess);
+        _authorizedSupersessions.Clear();
+        _supersessionTransaction = null;
         identityTransaction?.Commit();
         return result;
     }
@@ -28,6 +30,8 @@ public sealed partial class ManifestCatalogDbContext
         ValidateInternalActionWrites();
         await ValidateGeneratedWritesAsync(true, cancellationToken);
         var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        _authorizedSupersessions.Clear();
+        _supersessionTransaction = null;
         if (identityTransaction is not null) await identityTransaction.CommitAsync(cancellationToken);
         return result;
     }

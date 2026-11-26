@@ -6,7 +6,7 @@ namespace Haby.Persistence.PostgreSql;
 public sealed partial class ManifestCatalogDbContext
 {
     private readonly HashSet<(Guid Transaction, Guid Environment, Guid Application)> _importGates = [];
-    private ImportSupersessionRow? _authorizedSupersession;
+    private readonly HashSet<ImportSupersessionRow> _authorizedSupersessions = [];
     private Guid? _supersessionTransaction;
 
     internal void RecordImportGate(Guid transaction, Guid environment, Guid application) => _importGates.Add((transaction, environment, application));
@@ -15,9 +15,9 @@ public sealed partial class ManifestCatalogDbContext
 
     internal void AuthorizeImportSupersession(ImportSupersessionRow row, Guid environment, Guid application)
     {
-        if (_authorizedSupersession is not null || !HoldsImportGate(environment, application))
+        if (!HoldsImportGate(environment, application) || _supersessionTransaction is { } transaction && Database.CurrentTransaction?.TransactionId != transaction)
             throw new InvalidOperationException("Import supersession needs its owning gated transaction.");
-        _authorizedSupersession = row;
+        if (!_authorizedSupersessions.Add(row)) throw new InvalidOperationException("Duplicate import supersession authorization.");
         _supersessionTransaction = Database.CurrentTransaction!.TransactionId;
     }
 
@@ -28,9 +28,17 @@ public sealed partial class ManifestCatalogDbContext
             ChangeTracker.Entries<ResourceManagementHeadRow>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Import history is immutable and current authority requires guarded compare-and-swap.");
         var audits = ChangeTracker.Entries<ImportSupersessionRow>().Where(x => x.State == EntityState.Added).Select(x => x.Entity).ToArray();
+        if (!_authorizedSupersessions.SetEquals(audits)) throw new InvalidOperationException("Import supersession authorization membership differs.");
+        foreach (var change in audits.Select(x => x.ChangeSet).Distinct())
+        {
+            var expectedQuery = OperatorImportRequestRecords.AsNoTracking().Where(x => x.ChangeSet == change && x.PreviousRequest != null).Select(x => x.Id);
+            var expected = asynchronous ? await expectedQuery.ToArrayAsync(token) : expectedQuery.ToArray();
+            if (!expected.ToHashSet().SetEquals(audits.Where(x => x.ChangeSet == change).Select(x => x.SuccessorRequest)))
+                throw new InvalidOperationException("Import supersession requires the complete accepted request set.");
+        }
         foreach (var audit in audits)
         {
-            if (!ReferenceEquals(audit, _authorizedSupersession) || Database.CurrentTransaction?.TransactionId != _supersessionTransaction)
+            if (!_authorizedSupersessions.Contains(audit) || Database.CurrentTransaction?.TransactionId != _supersessionTransaction)
                 throw new InvalidOperationException("Import supersession has no owning acceptance scope.");
             var requestQuery = OperatorImportRequestRecords.AsNoTracking().Where(x => x.Id == audit.SuccessorRequest);
             var request = asynchronous ? await requestQuery.SingleOrDefaultAsync(token) : requestQuery.SingleOrDefault();
@@ -41,6 +49,17 @@ public sealed partial class ManifestCatalogDbContext
                 commit.DeploymentId != audit.Deployment || commit.Generation != audit.Generation || commit.ActorId != audit.Actor ||
                 commit.CommittedAt != audit.AcceptedAt || !HoldsImportGate(request.Environment, request.Application))
                 throw new InvalidOperationException("Import supersession audit does not match the accepted request and commit.");
+            var predecessorQuery = OperatorImportRequestRecords.AsNoTracking().Where(x => x.Id == audit.PreviousRequest);
+            var predecessor = asynchronous ? await predecessorQuery.SingleOrDefaultAsync(token) : predecessorQuery.SingleOrDefault();
+            if (predecessor is null || predecessor.Environment != request.Environment || predecessor.Application != request.Application ||
+                predecessor.CredentialResource != request.CredentialResource)
+                throw new InvalidOperationException("Import supersession owner differs.");
+            var ownerQuery = ProtectedCredentialOwners.AsNoTracking().Where(x => x.Environment == request.Environment && x.Application == request.Application &&
+                x.Resource == request.CredentialResource && x.Stage == audit.SuccessorStage && x.Request == request.Id);
+            var addedOwner = ChangeTracker.Entries<ProtectedCredentialOwnerRow>().Any(x => x.State == EntityState.Added && x.Entity.Environment == request.Environment &&
+                x.Entity.Application == request.Application && x.Entity.Resource == request.CredentialResource && x.Entity.Stage == audit.SuccessorStage && x.Entity.Request == request.Id);
+            if (!addedOwner && !(asynchronous ? await ownerQuery.AnyAsync(token) : ownerQuery.Any()))
+                throw new InvalidOperationException("Import supersession has no exact credential owner transfer.");
         }
         foreach (var owner in ChangeTracker.Entries<ProtectedCredentialOwnerRow>().Where(x => x.State == EntityState.Added).Select(x => x.Entity))
         {

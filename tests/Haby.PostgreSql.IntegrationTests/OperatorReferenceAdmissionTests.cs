@@ -231,7 +231,7 @@ public sealed partial class OperatorHostIntegrationTests
     private static async Task InvalidReferenceRequests(ManifestOperator.ManifestOperatorClient client, string connection, RevisionReference revision)
     {
         var before = await ReferenceSnapshot(connection);
-        foreach (var fault in new[] { "missing-mode", "unknown-mode", "import", "missing-resource", "duplicate", "empty", "schema", "format", "member-bound", "encoded-aggregate-bound", "aggregate-bound" })
+        foreach (var fault in new[] { "missing-mode", "unknown-mode", "import", "unbound-import", "missing-resource", "duplicate", "empty", "schema", "format", "member-bound", "encoded-aggregate-bound", "aggregate-bound" })
         {
             var request = ReferenceChange(revision);
             var member = request.Acquisitions.Resources[0];
@@ -240,6 +240,9 @@ public sealed partial class OperatorHostIntegrationTests
                 case "missing-mode": member.Mode = AcquisitionMode.Unspecified; break;
                 case "unknown-mode": member.Mode = (AcquisitionMode)99; break;
                 case "import": member.Mode = AcquisitionMode.ImportUseAndRetain; break;
+                case "unbound-import":
+                    member.Mode = AcquisitionMode.ImportUseAndRetain; member.Input = null; member.SharingRequest = null;
+                    member.ImportRequestId = Guid.NewGuid().ToString(); break;
                 case "missing-resource": request.Acquisitions.Resources.RemoveAt(0); break;
                 case "duplicate": request.Acquisitions.Resources.Add(member.Clone()); break;
                 case "empty": request.Acquisitions.Resources.Clear(); break;
@@ -257,7 +260,7 @@ public sealed partial class OperatorHostIntegrationTests
             }
             if (fault == "aggregate-bound")
                 Assert.Equal(StatusCode.ResourceExhausted, (await Assert.ThrowsAsync<RpcException>(async () => await client.CreateChangeSetAsync(request))).StatusCode);
-            else Assert.Equal(fault == "import" ? PlanningStatus.ImportNotSupported : PlanningStatus.InvalidRequest, (await client.CreateChangeSetAsync(request)).Status);
+            else Assert.Equal(fault == "unbound-import" ? PlanningStatus.ImportNotSupported : PlanningStatus.InvalidRequest, (await client.CreateChangeSetAsync(request)).Status);
             Assert.Equal(before, await ReferenceSnapshot(connection));
         }
         var stock = await client.ImportAsync(new()
@@ -299,6 +302,7 @@ public sealed partial class OperatorHostIntegrationTests
     {
         await using var db = ReferenceReadContext(connection);
         return string.Join(':', await db.DurableChangeSets.CountAsync(), await db.DurableOperationAttempts.CountAsync(),
-            await db.OperationOutputs.CountAsync(), await db.ResourceManagement.CountAsync(), await db.GeneratedCredentialSlots.CountAsync());
+            await db.OperationOutputs.CountAsync(), await db.ResourceManagement.CountAsync(), await db.GeneratedCredentialSlots.CountAsync(),
+            await db.OperatorImportRequestRecords.CountAsync(), await db.ProtectedApplicationCredentials.CountAsync(), await db.ProtectedCredentialOwners.CountAsync());
     }
 }

@@ -10,7 +10,12 @@ public enum ResourceImportPreparationStatus
 }
 
 public sealed record ResourceImportPreparationRequest(Guid RequestId, EnvironmentRecordId Environment,
-    ManifestRevisionRef Revision, DurableActionPayload Input);
+    ManifestRevisionRef Revision, DurableActionPayload Input)
+{
+    public string? CredentialSlot { get; init; }
+}
+
+public sealed record ImportCredentialSlot(string Name, SecretPurpose Purpose);
 
 public sealed record ResourceImportPreparationResult(ResourceImportPreparationStatus Status,
     OperatorImportRequestBinding? Binding = null);
@@ -19,6 +24,7 @@ public sealed record ResourceImportPreparationResult(ResourceImportPreparationSt
 public interface IResourceImportPreparer
 {
     string InputFormat { get; }
+    ImportCredentialSlot? CredentialSlot => null;
     // Pure replay comparison against a trusted durable binding, never a client attestation.
     bool MatchesPreparedRequest(ResourceImportPreparationRequest request, OperatorImportRequestBinding binding) => false;
     ValueTask<ResourceImportPreparationResult> PrepareAsync(ResourceImportPreparationRequest request,
@@ -36,6 +42,9 @@ public sealed class PrepareResourceImport(IManifestRevisionQuery revisions, IEnu
         !string.IsNullOrWhiteSpace(request.Input.Format) && request.Input.Format.Length <= 128 && request.Input.Json is not null &&
         Encoding.UTF8.GetByteCount(request.Input.Json) <= 65536;
 
+    internal bool SupportsSlot(string format, string? slot) => slot is null ||
+        _preparers.TryGetValue(format, out var adapter) && adapter.CredentialSlot is { Purpose: SecretPurpose.ApplicationLogin } declared && declared.Name == slot;
+
     internal bool Supports(string format) => _preparers.ContainsKey(format);
     internal bool Matches(ResourceImportPreparationRequest request, OperatorImportRequestBinding binding) =>
         binding.RequestId == request.RequestId && binding.Environment == request.Environment && binding.Revision == request.Revision &&
@@ -46,7 +55,7 @@ public sealed class PrepareResourceImport(IManifestRevisionQuery revisions, IEnu
         token.ThrowIfCancellationRequested();
         if (!Valid(request))
             return new(ResourceImportPreparationStatus.InvalidInput);
-        if (!_preparers.TryGetValue(request.Input.Format, out var preparer)) return new(ResourceImportPreparationStatus.ImportNotSupported);
+        if (!SupportsSlot(request.Input.Format, request.CredentialSlot) || !_preparers.TryGetValue(request.Input.Format, out var preparer)) return new(ResourceImportPreparationStatus.ImportNotSupported);
         var revision = await revisions.FindAsync(request.Revision, token);
         if (revision is null) return new(ResourceImportPreparationStatus.RevisionNotFound);
         var result = await preparer.PrepareAsync(request, revision.Declaration.Spec, token);
@@ -55,7 +64,8 @@ public sealed class PrepareResourceImport(IManifestRevisionQuery revisions, IEnu
         {
             var binding = result.Binding ?? throw new InvalidDataException("Prepared binding is unavailable.");
             binding.Validate();
-            binding.Input.Validate(revision.Declaration.Spec);
+            if (binding.Input.Resources.Any(x => !revision.Declaration.Spec.Resources.ContainsKey(x.Resource)))
+                throw new InvalidDataException("Prepared import group is outside the target declaration.");
             if (binding.RequestId != request.RequestId || binding.Environment != request.Environment || binding.Revision != request.Revision)
                 return new(ResourceImportPreparationStatus.ImportNotSupported);
             return result;

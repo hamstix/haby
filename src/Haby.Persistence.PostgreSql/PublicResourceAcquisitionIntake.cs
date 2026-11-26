@@ -15,12 +15,31 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             string.IsNullOrWhiteSpace(actor) || actor.Length > 256 || actor.Any(char.IsControl)) return new(DurableChangeSetCreateStatus.InvalidInput);
         if (precondition is not (DeploymentPrecondition.ExpectedAbsence or DeploymentPrecondition.ExpectedGeneration))
             return new(DurableChangeSetCreateStatus.ExpectedGenerationUnsupported);
-        if (acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.ImportUseAndRetain))
-            return new(DurableChangeSetCreateStatus.ImportNotSupported);
         await using var db = await contexts.CreateDbContextAsync(token);
         var invalid = await ValidateChangeSetInputAsync(db, environment, application, revision, null, false, token);
         if (invalid is { } status) return new(status);
         await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var hasNewImport = acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.ImportUseAndRetain);
+        if (hasNewImport)
+        {
+            await ImportMutationGate.LockAsync(db, Guid.Parse(environment.ToString()), Guid.Parse(application.ToString()), token);
+            var ids = acquisitions.Resources.Where(x => x.ImportRequestId is not null).Select(x => x.ImportRequestId!.Value).Distinct().ToArray();
+            var bound = await db.OperatorImportRequestRecords.AsNoTracking().Where(x => ids.Contains(x.Id)).ToArrayAsync(token);
+            var linked = bound.Where(x => x.ChangeSet is not null).Select(x => x.ChangeSet!.Value).Distinct().ToArray();
+            if (linked.Length > 0)
+            {
+                if (linked.Length != 1 || bound.Length != ids.Length || bound.Any(x => x.ChangeSet != linked[0])) return new(DurableChangeSetCreateStatus.InvalidInput);
+                var saved = await db.DurableChangeSets.AsNoTracking().SingleAsync(x => x.Id == linked[0], token);
+                var original = ToChangeSet(saved);
+                var declarations = await OriginalNewDeclarationsAsync(db, saved, token);
+                return saved.EnvironmentRecordId == Guid.Parse(environment.ToString()) && saved.ApplicationRecordId == Guid.Parse(application.ToString()) &&
+                    saved.RevisionNumber == revision.RevisionNumber.Value && original.Member.Precondition == precondition && declarations is not null && declarations.Equals(acquisitions) &&
+                    await GenericImportIntake.ValidateAsync(db, saved, token) ? new(DurableChangeSetCreateStatus.Created, original) : new(DurableChangeSetCreateStatus.InvalidInput);
+            }
+            if (await GenericImportIntake.ResolveAsync(db, environment, revision, acquisitions, token) is not { } resolved)
+                return new(DurableChangeSetCreateStatus.ImportNotSupported);
+            acquisitions = resolved;
+        }
         var accepted = PostgreSqlManifestImportStore.Rehydrate(await db.Revisions.AsNoTracking().SingleAsync(x =>
             x.ApplicationRecordId == Guid.Parse(application.ToString()) && x.LocalRevisionNumber == revision.RevisionNumber.Value, token));
         try
@@ -30,7 +49,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             var app = Guid.Parse(application.ToString());
             var references = acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference);
             var workloads = accepted.Declaration.Spec.Components.Values.Any(x => x.Workloads.Count > 0);
-            if (references && precondition is DeploymentPrecondition.ExpectedGeneration expected)
+            if ((references || hasNewImport) && precondition is DeploymentPrecondition.ExpectedGeneration expected)
             {
                 var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x =>
                     x.EnvironmentRecordId == env && x.ApplicationRecordId == app, token);
@@ -53,11 +72,13 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                     var added = delta.Entries.Where(x => x.Kind == ResourceDeltaKind.Added).Select(x => x.Resource).ToHashSet();
                     if (acquisitions.Resources.Any(x => original.Providers.Declaration.Spec.Resources.ContainsKey(x.Resource)))
                         return new(DurableChangeSetCreateStatus.ReferenceNotSupported);
-                    if (!added.SetEquals(acquisitions.Resources.Select(x => x.Resource)) || acquisitions.Resources.Any(x => x.Mode != ResourceAcquisitionMode.Reference))
+                    if (!added.SetEquals(acquisitions.Resources.Select(x => x.Resource)) || acquisitions.Resources.Any(x => x.Mode is not (ResourceAcquisitionMode.Reference or ResourceAcquisitionMode.ImportUseAndRetain)))
                         return new(DurableChangeSetCreateStatus.InvalidInput);
-                    acquisitions = new(original.Acquisitions.Resources.Concat(acquisitions.Resources));
+                    acquisitions = new(original.Acquisitions!.Resources.Concat(acquisitions.Resources));
                 }
             }
+            if (hasNewImport && (workloads || precondition is DeploymentPrecondition.ExpectedAbsence))
+                return new(DurableChangeSetCreateStatus.ImportNotSupported);
             if (references && workloads && precondition is DeploymentPrecondition.ExpectedAbsence)
                 return new(DurableChangeSetCreateStatus.ReferenceNotSupported);
             acquisitions.Validate(accepted.Declaration.Spec);
@@ -79,6 +100,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                 if (admitted != DurablePlanStatus.Planned) return new(admitted switch
                 {
                     DurablePlanStatus.ReferenceNotSupported => DurableChangeSetCreateStatus.ReferenceNotSupported,
+                    DurablePlanStatus.ImportNotSupported => DurableChangeSetCreateStatus.ImportNotSupported,
                     DurablePlanStatus.ProviderCapabilityMismatch => DurableChangeSetCreateStatus.ProviderCapabilityMismatch,
                     DurablePlanStatus.ProviderRevisionUnavailable => DurableChangeSetCreateStatus.ProviderRevisionUnavailable,
                     _ => DurableChangeSetCreateStatus.InvalidInput
@@ -96,8 +118,44 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         catch (Exception error) when (error is ArgumentException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException)
         { return new(DurableChangeSetCreateStatus.InvalidInput); }
         var change = await AddChangeSetAsync(db, environment, application, revision, precondition, null, actor, token, acquisitions);
+        if (hasNewImport && !await GenericImportIntake.LinkAsync(db, change, token)) return new(DurableChangeSetCreateStatus.InvalidInput);
         await db.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
         return new(DurableChangeSetCreateStatus.Created, change);
+    }
+
+    private static async Task<ResourceAcquisitionIntent?> OriginalNewDeclarationsAsync(ManifestCatalogDbContext db,
+        DurableChangeSetRow saved, CancellationToken token)
+    {
+        try
+        {
+            var target = PostgreSqlManifestImportStore.Rehydrate(await db.Revisions.AsNoTracking().SingleAsync(x =>
+                x.ApplicationRecordId == saved.ApplicationRecordId && x.LocalRevisionNumber == saved.RevisionNumber, token)).Declaration.Spec;
+            var acquired = ResourceAcquisitionIntentCodec.Decode(saved.AcquisitionIntentJson!);
+            acquired.Validate(target);
+            var added = target.Resources.Keys.ToHashSet();
+            if (!saved.ExpectedAbsence)
+            {
+                var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x =>
+                    x.EnvironmentRecordId == saved.EnvironmentRecordId && x.ApplicationRecordId == saved.ApplicationRecordId, token);
+                var baseline = owner is null ? null : await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x =>
+                    x.DeploymentId == owner.Id && x.Generation == saved.ExpectedGeneration, token);
+                if (baseline is null) return null;
+                // The original pinned generation remains authoritative even after this ChangeSet is committed.
+                var delta = new ResourceDelta(baseline.Inputs().Providers.Declaration.Spec, target);
+                if (delta.Entries.Any(x => x.Kind is ResourceDeltaKind.Changed or ResourceDeltaKind.Removed)) return null;
+                added = delta.Entries.Where(x => x.Kind == ResourceDeltaKind.Added).Select(x => x.Resource).ToHashSet();
+            }
+            var declarations = acquired.Resources.Where(x => added.Contains(x.Resource)).Select(x =>
+                x.Mode == ResourceAcquisitionMode.ImportUseAndRetain ? x with { Input = null, Credential = null } : x).ToArray();
+            var expectedRequests = declarations.Where(x => x.Mode == ResourceAcquisitionMode.ImportUseAndRetain)
+                .Select(x => x.ImportRequestId).ToArray();
+            if (expectedRequests.Any(x => x is null)) return null;
+            var linkedRequests = await db.OperatorImportRequestRecords.AsNoTracking().Where(x => x.ChangeSet == saved.Id)
+                .Select(x => x.Id).ToArrayAsync(token);
+            return expectedRequests.Select(x => x!.Value).ToHashSet().SetEquals(linkedRequests) ? new(declarations) : null;
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException)
+        { return null; }
     }
 }

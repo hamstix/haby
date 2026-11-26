@@ -54,6 +54,82 @@ exact retry/conflict, partial-group failure, correction race and restart. Confir
 no external CREATE/repair or credential substitution and no premature delivery.
 Synthetic provider tests must not seed accepted credentials/associations directly.
 
+### Protected additive Import operator contract
+
+Use `StageResourceImport` before `CreateChangeSet`. Staging uses the existing
+`CreateResourceImportChangeSetRequest` envelope with an exact request UUID,
+Environment record UUID, target revision, adapter-owned names input, declared
+`credential_slot` and separate `credential_material`. A slot declares the existing
+Resource-owned `ApplicationLogin` purpose. The adapter prepares the complete coupled
+new group and its designated credential owner; callers cannot select an arbitrary
+Environment secret. A `Pending` reply is private staging only, with no desired-state
+acceptance, confirmed credential, Resource association or configuration delivery.
+Repeated staging compares the exact request binding and exact material bytes.
+
+For example, the closed verification adapter accepts `sample.import-names/v1`:
+
+```json
+{"Resource":"archive","Identity":"sample-service","Companion":"archive-proof"}
+```
+
+It declares `application-password`; this synthetic adapter performs read-only
+verification and is not a production external service integration. The optional
+companion demonstrates a coupled all-member acceptance group. The protected material
+is sent separately, never included in the names JSON or acquisition declarations.
+
+Create the new ChangeSet with the current Applied expected generation and one
+acquisition declaration for every NEW Resource, including every coupled member:
+
+```json
+{"environment_id":"pilot","reference":{"application_record_id":"<application UUID>","revision_number":3},
+ "precondition":"PLANNING_PRECONDITION_EXPECTED_GENERATION","expected_generation":2,
+ "acquisitions":{"resources":[
+   {"resource":"archive","mode":"ACQUISITION_MODE_IMPORT_USE_AND_RETAIN","import_request_id":"<protected request UUID>"},
+   {"resource":"archive-proof","mode":"ACQUISITION_MODE_IMPORT_USE_AND_RETAIN","import_request_id":"<same protected request UUID>"}]}}
+```
+
+The explicit group intake uses `BindGroupAsync`; a store without that capability
+fails closed before binding or private staging. Legacy whole-import creation continues
+to require complete target coverage before any durable request or candidate is staged.
+Malformed Import envelopes (for example Reference input with no protected request UUID)
+return `InvalidRequest`; a well-formed but unbound protected request remains refused.
+
+Other new groups use distinct protected requests in that same ChangeSet. Existing
+Resources have no new acquisition declarations and never resubmit passwords. Import
+members must omit `input` and `sharing_request`; the server resolves their exact
+prepared inputs and protected references and validates complete new/combined coverage.
+Missing, extra, duplicate, foreign-owner, wrong-revision or conflicting request
+membership is refused before linkage. Exact creation replay returns the original
+ChangeSet only for the complete original NEW-only envelope, derived from its pinned
+baseline and target rather than caller-supplied membership. Omitting an entire group
+or new Reference, omitting a coupled member, or resubmitting a retained Resource is
+refused. This comparison remains stable after Commit. Plan/Check/Commit revalidate the complete bound request set and current
+baseline. Execute verifies each coupled group atomically; completed independent
+groups remain durable, while the new generation cannot be delivered until all groups
+and reused Resources are confirmed. Original Resource authority and credentials remain
+unchanged. Initial mixed admission is still C, and Workloads/UPDATE/removal are excluded.
+
+A pre-Commit staged correction names the predecessor request and explicit expected
+absence of its committed attempt using `ResourceImportCorrection`. Creating/staging
+or planning the successor does not transfer credential ownership. Accepting its
+ChangeSet transfers all eligible new-group credential owners and records each exact
+supersession inside the existing Commit/CAS transaction. One invalid group or a losing
+concurrent successor rolls back the entire acceptance. A committed attempt uses durable
+retry; this path does not replace already confirmed inputs or retained Resources.
+
+### Catalog cardinality
+
+`ComposableProtectedImportRequests` changes only the two ChangeSet indexes on
+`operator_resource_import_requests` and `resource_import_supersessions` from unique
+to nonunique. It preserves all rows, request/staged-credential/successor uniqueness,
+foreign keys, checks and exact owner constraints. Several independent protected
+requests and correction audits can therefore belong to one accepted ChangeSet. There
+are no new tables, Provider-specific columns, triggers, procedures or automatic resets.
+Each audit requires its own transaction-bound authorization and complete membership;
+legacy whole-target import correction refuses ambiguous multi-request linkage.
+Downgrade recreates the original unique indexes. If new cardinality is present,
+downgrade fails transactionally instead of deduplicating or discarding history.
+
 ## C: initial mixed Application
 
 Depends on B. Enable the same public transition path with expected absence and a
