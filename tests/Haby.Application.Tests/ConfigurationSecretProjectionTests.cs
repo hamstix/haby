@@ -131,7 +131,7 @@ public sealed class ConfigurationSecretProjectionTests
             var serilog = parsed.RootElement.GetProperty("Serilog"u8);
             var jsonNode = firstJson ? serilog.GetProperty("WriteTo"u8)[0].GetProperty("Args"u8).GetProperty("password"u8)
                 : serilog.GetProperty("Literal"u8);
-            Assert.Equal(root switch { "123" => "123e0", "[1,2]" => "[1e0,2e0]", _ => root }, jsonNode.GetRawText());
+            Assert.Equal(root, jsonNode.GetRawText());
         }
         ports.Material = Encoding.UTF8.GetBytes("\"" + new string('x', 65_534) + "\"");
         using (var exactMaximum = await delivery.ExecuteAsync("credential", metadata.Id, default))

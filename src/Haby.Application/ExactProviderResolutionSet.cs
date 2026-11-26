@@ -48,7 +48,7 @@ public sealed class ExactProviderResolutionSet : IEquatable<ExactProviderResolut
         {
             if (payload.Contract is null || payload.Value is null) throw new ArgumentException("Invalid exact adapter input.", nameof(resolutions));
             ConfigurationDocumentCodec.ValidateTree(payload.Value);
-            if (!ConfigurationJson.Serialize(payload.Value).IsSuccess) throw new ArgumentException("Exact adapter inputs must be non-secret.", nameof(resolutions));
+            if (!ConfigurationJson.SerializeCanonical(payload.Value).IsSuccess) throw new ArgumentException("Exact adapter inputs must be non-secret.", nameof(resolutions));
         }
         Declaration = manifest;
         Environment = environment;

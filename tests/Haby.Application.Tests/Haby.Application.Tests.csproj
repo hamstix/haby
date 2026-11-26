@@ -4,6 +4,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <Compile Include="..\DurableInputSamples.cs" Link="DurableInputSamples.cs" />
     <Compile Include="..\PlacementSamples.cs" Link="PlacementSamples.cs" />
     <Compile Include="..\ConfigurationRenderingSamples.cs" Link="ConfigurationRenderingSamples.cs" />
@@ -25,6 +26,7 @@
     <Compile Include="..\TestPaths.cs" Link="TestPaths.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="TestAssets\int32-json\*.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\schemas\provider.v1alpha1.json" Link="TestAssets\schemas\provider.v1alpha1.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

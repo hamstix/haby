@@ -18,9 +18,9 @@ public sealed partial class ManifestOperatorService
             ConfigurationRevision = x.Configuration.Value,
             ImplementationId = x.Implementation.Value,
             NamingContract = x.Naming?.Contract.Value ?? "",
-            NamingJson = x.Naming is { } naming ? ConfigurationJson.Serialize(naming.Value).Json ?? throw new InvalidDataException() : "",
+            NamingJson = x.Naming is { } naming ? ConfigurationJson.SerializeCanonical(naming.Value).Json ?? throw new InvalidDataException() : "",
             PlacementContract = x.Placement?.Contract.Value ?? "",
-            PlacementJson = x.Placement is { } placement ? ConfigurationJson.Serialize(placement.Value).Json ?? throw new InvalidDataException() : ""
+            PlacementJson = x.Placement is { } placement ? ConfigurationJson.SerializeCanonical(placement.Value).Json ?? throw new InvalidDataException() : ""
         }).OrderBy(x => x.Kind, StringComparer.Ordinal).ThenBy(x => x.ResourceId, StringComparer.Ordinal)
             .ThenBy(x => x.ComponentId, StringComparer.Ordinal).ThenBy(x => x.WorkloadId, StringComparer.Ordinal);
 }

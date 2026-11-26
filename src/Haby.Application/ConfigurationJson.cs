@@ -33,12 +33,17 @@ public static class ConfigurationJson
     public const string Profile = "haby.configuration-json/v1";
     public const string RedactedMarker = "***REDACTED***";
 
-    public static ConfigurationJsonResult Serialize(ConfigurationValue value)
+    public static ConfigurationJsonResult Serialize(ConfigurationValue value) => SerializeCore(value, canonical: false);
+
+    /// <summary>Stable canonical numeric spelling for persisted inputs and identity bytes, not consumer delivery.</summary>
+    public static ConfigurationJsonResult SerializeCanonical(ConfigurationValue value) => SerializeCore(value, canonical: true);
+
+    private static ConfigurationJsonResult SerializeCore(ConfigurationValue value, bool canonical)
     {
         ArgumentNullException.ThrowIfNull(value);
         if (Confidential(value)) return new(null);
         using var stream = new MemoryStream();
-        using (var writer = Writer(stream)) Write(writer, value, "", null);
+        using (var writer = Writer(stream)) Write(writer, value, "", null, canonical: canonical);
         return new(Encoding.UTF8.GetString(stream.ToArray()));
     }
 
@@ -119,7 +124,7 @@ public static class ConfigurationJson
             {
                 case ConfigurationNull: Charge(4); break;
                 case ConfigurationBoolean b: Charge(b.Value ? 4 : 5); break;
-                case ConfigurationNumber n: Charge(n.CanonicalText.Length); break;
+                case ConfigurationNumber n: Charge(ExternalNumber(n).Length); break;
                 case ConfigurationString s: Text(s.Value); break;
                 case ConfigurationDeferredValue or ConfigurationProjectedSecret when allowUnresolved: break;
                 case ConfigurationObject o:
@@ -135,6 +140,24 @@ public static class ConfigurationJson
         }
     }
 
+    // Domain coefficients have no trailing zeros, so a negative exponent is non-integral.
+    // Reject by digit count before expanding; at most ten digits plus a sign are allocated.
+    private static string ExternalNumber(ConfigurationNumber number)
+    {
+        var canonical = number.CanonicalText;
+        var separator = canonical.IndexOf('e');
+        var coefficient = canonical.AsSpan(0, separator);
+        if (coefficient.SequenceEqual("0")) return "0";
+        var negative = coefficient[0] == '-';
+        var digits = coefficient.Length - (negative ? 1 : 0);
+        if (digits > 10 || !int.TryParse(canonical.AsSpan(separator + 1), System.Globalization.NumberStyles.AllowLeadingSign,
+            System.Globalization.CultureInfo.InvariantCulture, out var exponent) || exponent < 0 || exponent > 10 - digits)
+            return canonical;
+        var expanded = string.Concat(coefficient, new string('0', exponent));
+        return int.TryParse(expanded, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out _)
+            ? expanded : canonical;
+    }
+
     private static Utf8JsonWriter Writer(Stream stream) => new(stream, new JsonWriterOptions { Encoder = JavaScriptEncoder.Default, MaxDepth = 512 });
     private static bool Confidential(ConfigurationValue value) => value switch
     {
@@ -144,7 +167,7 @@ public static class ConfigurationJson
         _ => false
     };
     private static void Write(Utf8JsonWriter writer, ConfigurationValue value, string path, List<string>? redacted,
-        CancellationToken token = default)
+        CancellationToken token = default, bool canonical = false)
     {
         token.ThrowIfCancellationRequested();
         switch (value)
@@ -152,11 +175,11 @@ public static class ConfigurationJson
             case ConfigurationNull: writer.WriteNullValue(); break;
             case ConfigurationBoolean boolean: writer.WriteBooleanValue(boolean.Value); break;
             case ConfigurationString text: writer.WriteStringValue(text.Value); break;
-            case ConfigurationNumber number: writer.WriteRawValue(number.CanonicalText); break;
+            case ConfigurationNumber number: writer.WriteRawValue(canonical ? number.CanonicalText : ExternalNumber(number)); break;
             case ConfigurationArray array:
                 writer.WriteStartArray();
                 for (var i = 0; i < array.Items.Count; i++)
-                    Write(writer, array.Items[i], path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), redacted, token);
+                    Write(writer, array.Items[i], path + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), redacted, token, canonical);
                 writer.WriteEndArray();
                 break;
             case ConfigurationObject obj:
@@ -164,7 +187,7 @@ public static class ConfigurationJson
                 foreach (var (key, child) in obj.Members.OrderBy(x => x.Key, StringComparer.Ordinal))
                 {
                     writer.WritePropertyName(key);
-                    Write(writer, child, path + "/" + ConfigurationComposer.Escape(key), redacted, token);
+                    Write(writer, child, path + "/" + ConfigurationComposer.Escape(key), redacted, token, canonical);
                 }
                 writer.WriteEndObject();
                 break;

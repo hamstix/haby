@@ -168,7 +168,7 @@ internal static class ConfigurationPlanningSnapshotCodec
             w.WriteEndArray(); w.WriteEndObject();
         }
         w.WriteEndArray();
-        void Value(string name, ConfigurationValue value) { w.WritePropertyName(name); Canonical(w, ConfigurationJson.Serialize(value).Json ?? throw new InvalidDataException()); }
+        void Value(string name, ConfigurationValue value) { w.WritePropertyName(name); Canonical(w, ConfigurationJson.SerializeCanonical(value).Json ?? throw new InvalidDataException()); }
         void Origin(ConfigurationLayoutOrigin o)
         {
             w.WriteString("source"u8, o.Source.Value); w.WriteString("profile"u8, o.Profile?.ProfileId.Value);

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using System.Text.Json.Nodes;
 using Grpc.Net.Client;
 using Haby.Application;
@@ -25,7 +26,7 @@ public sealed partial class ApplicationConfigurationTests
         var scenario = await Prepare(full: true, render: true, renderingProfile: profile.ToJsonString(), configureManifest: manifest =>
         {
             foreach (var name in new[] { "api", "worker" })
-                manifest["manifest"]!["spec"]!["components"]![name]!["documents"] = JsonNode.Parse("""{"settings":{"fileName":"appsettings.json","format":"json","template":{}}}"""u8);
+                manifest["manifest"]!["spec"]!["components"]![name]!["documents"] = JsonNode.Parse("""{"settings":{"fileName":"appsettings.json","format":"json","template":{"Count":-1,"Expanded":1e9,"Min":-2147483648}}}"""u8);
             var binding = manifest["manifest"]!["spec"]!["components"]!["api"]!["bindings"]!["storage"]!.AsObject();
             binding["options"]!["sslMode"] = "disable";
             if (!slotAndDirect) binding.Remove("configurationSlot");
@@ -61,6 +62,12 @@ public sealed partial class ApplicationConfigurationTests
         {
             var reply = await runtime.DeliverAsync(new() { RevisionId = document.Artifact.RevisionId }, Bearer(grant.Credential));
             using var json = JsonDocument.Parse(reply.Json.Memory);
+            Assert.Equal(-1, json.RootElement.GetProperty("Count"u8).GetInt32());
+            using var bytes = new MemoryStream(reply.Json.ToByteArray());
+            var configuration = new ConfigurationBuilder().AddJsonStream(bytes).Build();
+            Assert.Equal(-1, configuration.GetValue<int>("Count"));
+            Assert.Equal(int.MinValue, configuration.GetValue<int>("Min"));
+            Assert.Equal(1000000000, configuration.GetValue<int>("Expanded"));
             var first = slotAndDirect ? json.RootElement.GetProperty("PostgreSQL"u8).GetProperty("DefaultConnection"u8).GetProperty("ConnectionString"u8) : json.RootElement.GetProperty("First"u8);
             var second = json.RootElement.GetProperty("Second"u8);
             Assert.True(first.GetString() == second.GetString(), "Repeated projections must receive the same complete connection string.");
