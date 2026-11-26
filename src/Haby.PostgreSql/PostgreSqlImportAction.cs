@@ -31,14 +31,17 @@ public sealed class PostgreSqlImportAction(ResourceTypeId type, IDurableOperatio
     public async ValueTask<DurableExecutionResult> ExecuteAsync(DurableOperation operation, CancellationToken cancellationToken)
     {
         var accepted = await outputs.FindAcceptedAsync(operation.Key, cancellationToken);
-        if (accepted is null || PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs) is not { } input ||
-            PostgreSqlImportContracts.Decode(accepted.Node) != input || accepted.Graph.Nodes.Count != 2 ||
-            accepted.Graph.Nodes.Any(x => PostgreSqlImportContracts.Decode(x) != input))
+        if (accepted is null || PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs, accepted.Node.ResourceId) is not { } input ||
+            PostgreSqlImportContracts.Decode(accepted.Node) != input)
             return new(DurableExecutionOutcome.InputUnavailable, operation);
         if (await acceptance.FindAsync(operation.Key, cancellationToken) is not null) return await Observed(DurableExecutionOutcome.Succeeded, operation.Key);
+        var group = accepted.Graph.ObservationGroups.SingleOrDefault(x => x.Operations.Contains(accepted.Node.Id));
+        var members = group is null ? [] : accepted.Graph.Nodes.Where(x => group.Operations.Contains(x.Id)).ToArray();
+        if (group?.Mode != ResourceAcquisitionMode.ImportUseAndRetain || members.Length != 2 || members.Any(x => PostgreSqlImportContracts.Decode(x) != input))
+            return new(DurableExecutionOutcome.InputUnavailable, operation);
         var attempts = new Dictionary<OperationId, Guid>();
         var markers = 0;
-        foreach (var node in accepted.Graph.Nodes)
+        foreach (var node in members)
         {
             var key = operation.Key with { OperationId = node.Id };
             var current = await journal.FindAsync(key, cancellationToken);
@@ -77,7 +80,7 @@ public sealed class PostgreSqlImportAction(ResourceTypeId type, IDurableOperatio
         var configuration = (await providers.FindRevisionAsync<PostgreSqlProviderConfiguration>(accepted.Inputs.Environment,
             accepted.Provider.Instance, accepted.Provider.Configuration, cancellationToken))?.Configuration;
         if (configuration is null) return await Observed(DurableExecutionOutcome.InputUnavailable, operation.Key);
-        var confirmations = accepted.Graph.Nodes.Select(node => new ObservationOperationConfirmation(operation.Key with { OperationId = node.Id }, attempts[node.Id],
+        var confirmations = members.Select(node => new ObservationOperationConfirmation(operation.Key with { OperationId = node.Id }, attempts[node.Id],
             node.Action == PostgreSqlImportContracts.Database
                 ? PostgreSqlDatabaseOutputContract.Encode(new(input.Pair.DatabaseName, input.Pair.DatabaseOid, input.Pair.PublicSchemaOid))
                 : PostgreSqlApplicationConnectionContract.Encode(new(configuration.Host, configuration.Port, input.Pair.DatabaseName, input.Pair.Schema,

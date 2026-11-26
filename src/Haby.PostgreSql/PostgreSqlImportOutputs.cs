@@ -16,7 +16,7 @@ public sealed class PostgreSqlImportOutputContract(ResourceTypeId type, PostgreS
 
     public bool ValidateObservationEvidence(AcceptedOperation accepted, DurableActionPayload evidence) =>
         PostgreSqlImportContracts.Decode(accepted.Node) is { } input &&
-        PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs) == input &&
+        PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs, accepted.Node.ResourceId) == input &&
         PostgreSqlImportObservation.Decode(evidence) is { } observed &&
         PostgreSqlImportObservation.Verify(input.Pair, observed) == PostgreSqlImportVerificationStatus.Confirmed;
 
@@ -35,7 +35,7 @@ public sealed class PostgreSqlImportOutputContract(ResourceTypeId type, PostgreS
         IReadOnlyCollection<ProviderResourceReservation> reservations)
     {
         if (!Validate(accepted.Node, output) || PostgreSqlImportContracts.Decode(accepted.Node) is not { } input ||
-            PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs) != input ||
+            PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs, accepted.Node.ResourceId) != input ||
             configuration.ProviderKindId != PostgreSqlProviderConfigurationCodec.Kind || configuration.ShapeId != PostgreSqlProviderConfigurationCodec.Shape ||
             configuration.ImplementationId != Producer.Admission.ImplementationId.Value) return false;
         var configured = codec.DecodeTyped(configuration.PayloadJson);
@@ -48,7 +48,7 @@ public sealed class PostgreSqlImportOutputContract(ResourceTypeId type, PostgreS
         ExternalOperationOutput output, CancellationToken cancellationToken)
     {
         if (!Validate(accepted.Node, output) || PostgreSqlImportContracts.Decode(accepted.Node) is not { } input ||
-            PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs) != input) return false;
+            PostgreSqlImportAdmission.Prepare(accepted.Spec, accepted.Inputs, accepted.Node.ResourceId) != input) return false;
         return await credentials.FindAsync(new(accepted.Inputs.Environment, accepted.Inputs.Revision.ApplicationRecordId,
             ManifestLocalId.Create(input.Pair.LoginResource)), PostgreSqlImportContracts.Reference(input), cancellationToken) is
         { Provenance: ApplicationCredentialProvenance.Imported };

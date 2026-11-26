@@ -68,13 +68,25 @@ public sealed class PostgreSqlImportAdmission(ResourceTypeId type) : IDurableAct
     public IReadOnlyList<DurableOperationNode> Plan(ManifestLocalId resourceId, NormalizedResource resource, DurablePlanningInputs inputs) =>
         throw new InvalidDataException("Complete pair composition is required.");
 
-    internal static PostgreSqlImportActionInput? Prepare(NormalizedManifestSpec spec, DurablePlanningInputs inputs)
+    internal static PostgreSqlImportActionInput? Prepare(NormalizedManifestSpec spec, DurablePlanningInputs inputs, ManifestLocalId? resource = null)
     {
-        if (inputs.Import?.Resources is not { Count: 2 } requests || spec.Resources.Count != 2) return null;
+        IReadOnlyList<ResourceImportRequest> requests;
+        if (inputs.Import is { } legacy)
+        {
+            if (legacy.Resources.Count != 2 || spec.Resources.Count != 2) return null;
+            requests = legacy.Resources;
+        }
+        else
+        {
+            if (resource is null || inputs.Acquisitions.Resource(resource).ImportRequestId is not { } request) return null;
+            var members = inputs.Acquisitions.Resources.Where(x => x.ImportRequestId == request).ToArray();
+            if (members.Length != 2 || members.Any(x => x.Mode != ResourceAcquisitionMode.ImportUseAndRetain || x.Input is null)) return null;
+            requests = members.Select(x => new ResourceImportRequest(x.Resource, x.Input!, x.Credential)).ToArray();
+        }
         var pair = PostgreSqlImportContracts.Decode(requests[0].Input);
         if (pair is null || requests.Any(x => PostgreSqlImportContracts.Decode(x.Input) != pair)) return null;
         var database = ManifestLocalId.Create(pair.DatabaseResource); var login = ManifestLocalId.Create(pair.LoginResource);
-        if (!Shape(spec, database, login) || !spec.Resources.Keys.ToHashSet().SetEquals(requests.Select(x => x.Resource)) ||
+        if (!Shape(spec, database, login) || !new[] { database, login }.ToHashSet().SetEquals(requests.Select(x => x.Resource)) ||
             requests.Any(x => !PostgreSqlImportPreparer.Matches(x.Input, inputs, x.Resource)) ||
             PostgreSqlApplicationLoginContract.Parse(spec.Resources[login].Properties)?.Schema != pair.Schema ||
             requests.Single(x => x.Resource == database).Credential is not null || requests.Single(x => x.Resource == login).Credential is not { } credential) return null;
@@ -82,19 +94,19 @@ public sealed class PostgreSqlImportAdmission(ResourceTypeId type) : IDurableAct
     }
 
     private static bool Shape(NormalizedManifestSpec spec, ManifestLocalId database, ManifestLocalId login) =>
-        spec.Resources.Count == 2 && spec.Resources.TryGetValue(database, out var db) && db.Type == PostgreSqlDatabaseContract.Id &&
+        spec.Resources.TryGetValue(database, out var db) && db.Type == PostgreSqlDatabaseContract.Id &&
         PostgreSqlDatabaseCreateValidation.Name(db) is not null && spec.Resources.TryGetValue(login, out var role) &&
         role.Type == PostgreSqlApplicationLoginContract.Id && PostgreSqlApplicationLoginContract.Parse(role.Properties) is { } properties &&
         properties.DatabaseRef == database.Value && db.ProviderRef == role.ProviderRef;
 
     public bool Validate(NormalizedManifestSpec spec, ManifestLocalId resource, DurablePlanningInputs inputs,
         PreparedProviderConfiguration configuration) => spec.Resources.TryGetValue(resource, out var value) && value.Type == type &&
-        configuration.ProviderKindId == PostgreSqlProviderConfigurationCodec.Kind && Prepare(spec, inputs) is not null;
+        configuration.ProviderKindId == PostgreSqlProviderConfigurationCodec.Kind && Prepare(spec, inputs, resource) is not null;
 
     public IReadOnlyList<DurableOperationNode> Plan(NormalizedManifestSpec spec, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration)
     {
-        var input = Prepare(spec, inputs) ?? throw new InvalidDataException("Unsupported existing pair import.");
+        var input = Prepare(spec, inputs, resource) ?? throw new InvalidDataException("Unsupported existing pair import.");
         var provider = inputs.Providers.Resource(resource);
         return [new(OperationId.Create(resource.Value + (type == PostgreSqlDatabaseContract.Id ? "-import" : "-access")), resource, Key,
             new(provider.Environment, provider.Instance, provider.Configuration, provider.Implementation.Value) { Naming = provider.ResourceNaming() },
@@ -118,8 +130,12 @@ public sealed class PostgreSqlImportAdmission(ResourceTypeId type) : IDurableAct
 
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        accepted.Resources.Count == 2 && accepted.Resources.All(x => target.Resources.TryGetValue(x.Key, out var value) &&
-            x.Value.Type == value.Type && x.Value.ProviderRef == value.ProviderRef && x.Value.DeletionPolicy == value.DeletionPolicy && x.Value.Properties.Equals(value.Properties));
+        inputs.Acquisitions.Resources.SingleOrDefault(x => x.Resource == resource)?.Input is { } payload &&
+        PostgreSqlImportContracts.Decode(payload) is { } pair &&
+        (resource.Value == pair.DatabaseResource || resource.Value == pair.LoginResource) &&
+        new[] { ManifestLocalId.Create(pair.DatabaseResource), ManifestLocalId.Create(pair.LoginResource) }.All(id =>
+            accepted.Resources.TryGetValue(id, out var original) && target.Resources.TryGetValue(id, out var value) &&
+            original.Type == value.Type && original.ProviderRef == value.ProviderRef && original.DeletionPolicy == value.DeletionPolicy && original.Properties.Equals(value.Properties));
 
     public bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => original.Resources.Count == 2 && target.Resources.Count == 0 &&

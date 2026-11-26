@@ -191,9 +191,9 @@ the separate naming and shared-system evidence without claiming P3 rollout.
 existing transition planner rather than adding Provider-combination exceptions.
 Immediately after #292, deliver these required sequential slices:
 
-- [ ] [A / #303](https://github.com/hamstix/haby/issues/303): common Resource delta, per-Resource Provider resolution and unchanged
+- [x] [A / #303](https://github.com/hamstix/haby/issues/303): common Resource delta, per-Resource Provider resolution and unchanged
   imported reuse plus new Reference Resources in an Applied configuration-only Application.
-- [ ] [B / #304](https://github.com/hamstix/haby/issues/304): add ImportUseAndRetain through typed protected credential intake to the
+- [x] [B / #304](https://github.com/hamstix/haby/issues/304): add ImportUseAndRetain through typed protected credential intake to the
   Applied mixed state, preserving existing provenance, credentials and authority.
 - [ ] [C / #305](https://github.com/hamstix/haby/issues/305): initial ImportUseAndRetain + Reference composition without a preliminary
   PostgreSQL-only revision, using the same public pipeline and group completion.
