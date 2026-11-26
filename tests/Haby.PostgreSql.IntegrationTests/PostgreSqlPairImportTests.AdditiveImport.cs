@@ -21,6 +21,9 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class PostgreSqlPairImportTests
 {
+    private sealed record AdditiveImportAuthority(Guid Id, ResourceOrigin Origin, ResourceLifecycleAuthority Authority, long SourceGeneration);
+    private sealed record AdditiveImportCredential(Guid Id, Guid Secret, Guid Version, Guid? ConfirmedReceipt);
+
     [Theory]
     [InlineData("success")]
     [InlineData("partial")]
@@ -47,6 +50,7 @@ public sealed partial class PostgreSqlPairImportTests
             credential = (await File.ReadAllTextAsync(Path.Combine(root, "operator.token"))).TrimEnd();
             DurableCommitSummary? committed = null;
             ConfigurationAccessReply? grant = null;
+            long retainedApplied = 0;
             for (var startup = 0; startup < 2; startup++)
             {
                 var port = OperatorHostCompositionTests.AvailablePort();
@@ -89,9 +93,13 @@ public sealed partial class PostgreSqlPairImportTests
                     Assert.Equal(ImportStatus.Created, accepted.Status);
                     var baseline = await Confirm(accepted.Request.ChangeSetId);
                     Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = baseline.DeploymentId, Generation = baseline.Generation })).Status);
-                    await using var baselineRead = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options);
-                    var authority = await baselineRead.ResourceManagement.AsNoTracking().OrderBy(x => x.Resource).Select(x => new { x.Id, x.Origin, x.Authority, x.SourceGeneration }).ToArrayAsync();
-                    var originalCredentials = await baselineRead.ProtectedApplicationCredentials.AsNoTracking().Select(x => new { x.Id, x.Secret, x.Version, x.ConfirmedReceipt }).ToArrayAsync();
+                    AdditiveImportAuthority[] authority;
+                    AdditiveImportCredential[] originalCredentials;
+                    await using (var baselineRead = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options))
+                    {
+                        authority = await baselineRead.ResourceManagement.AsNoTracking().OrderBy(x => x.Resource).Select(x => new AdditiveImportAuthority(x.Id, x.Origin, x.Authority, x.SourceGeneration)).ToArrayAsync();
+                        originalCredentials = await baselineRead.ProtectedApplicationCredentials.AsNoTracking().Select(x => new AdditiveImportCredential(x.Id, x.Secret, x.Version, x.ConfirmedReceipt)).ToArrayAsync();
+                    }
                     Assert.Equal(ProviderStatus.Created, (await client.ApplyProviderAsync(new() { Declaration = ByteString.CopyFromUtf8("""
                         {"apiVersion":"haby.dev/v1alpha1","kind":"Provider","metadata":{"name":"sample","environment":"pilot"},"spec":{
                          "revision":1,"providerKind":"sample.service/v1","configurationContract":"sample.service.configuration/v1","implementationId":"sample.service.impl/v1",
@@ -125,7 +133,7 @@ public sealed partial class PostgreSqlPairImportTests
                     Assert.NotEqual(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
                     Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = committed.DeploymentId, Generation = committed.Generation })).Status);
                     Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
-                    var retainedGeneration = committed.Generation;
+                    var retainedGeneration = committed.Generation; retainedApplied = retainedGeneration;
                     envelope["applicationVersion"] = "v3";
                     foreach (var resource in new[] { "archive", "audit" })
                     {
@@ -154,6 +162,8 @@ public sealed partial class PostgreSqlPairImportTests
                         var staged = await client.StageResourceImportAsync(stageRequest);
                         Assert.Equal(ImportStatus.Pending, staged.Status);
                         Assert.Equal(ImportStatus.Pending, (await client.StageResourceImportAsync(stageRequest)).Status);
+                        var changedMaterial = stageRequest.Clone(); changedMaterial.CredentialMaterial = ByteString.CopyFromUtf8("different-material");
+                        Assert.Equal(ImportStatus.Conflict, (await client.StageResourceImportAsync(changedMaterial)).Status);
                         var wrongOwner = stageRequest.Clone(); wrongOwner.EnvironmentRecordId = Haby.Domain.EnvironmentRecordId.New().ToString();
                         Assert.Equal(ImportStatus.Conflict, (await client.StageResourceImportAsync(wrongOwner)).Status);
                         var wrongSlot = stageRequest.Clone(); wrongSlot.CredentialSlot = "provider-administrator";
@@ -238,15 +248,16 @@ public sealed partial class PostgreSqlPairImportTests
                         Assert.Equal(retainedGeneration, (await partial.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
                         Assert.True(2 == await partial.ProtectedApplicationCredentials.AsNoTracking().CountAsync(x => x.ConfirmedReceipt != null), progress);
                         Assert.Equal(2, await partial.OperationOutputs.AsNoTracking().CountAsync(x => x.Generation == committed.Generation));
-                        return;
+                        await child.SendAsync("stop"); await child.ExpectAsync("composition-stopped"); await child.RequireExitAsync(0);
+                        continue;
                     }
                     Assert.True(outcome.Status == GenerationExecutionStatus.Succeeded, outcome.Status + " " + progress);
                     Assert.Equal(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
                     grant = await client.CreateConfigurationAccessAsync(new() { Selector = new() { Environment = "pilot", ApplicationId = "transition-consumer", ComponentId = "worker", DocumentId = "settings" } });
                     Assert.Equal(ConfigurationAccessStatus.Created, grant.Status);
                     await using var verify = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options);
-                    Assert.Equal(authority, await verify.ResourceManagement.AsNoTracking().Where(x => x.Resource != "service" && x.Resource != "archive" && x.Resource != "audit" && x.Resource != "archive-proof" && x.Resource != "audit-proof").OrderBy(x => x.Resource).Select(x => new { x.Id, x.Origin, x.Authority, x.SourceGeneration }).ToArrayAsync());
-                    Assert.Equal(originalCredentials, await verify.ProtectedApplicationCredentials.AsNoTracking().Where(x => x.Resource != "archive" && x.Resource != "audit").Select(x => new { x.Id, x.Secret, x.Version, x.ConfirmedReceipt }).ToArrayAsync());
+                    Assert.Equal(authority, await verify.ResourceManagement.AsNoTracking().Where(x => x.Resource != "service" && x.Resource != "archive" && x.Resource != "audit" && x.Resource != "archive-proof" && x.Resource != "audit-proof").OrderBy(x => x.Resource).Select(x => new AdditiveImportAuthority(x.Id, x.Origin, x.Authority, x.SourceGeneration)).ToArrayAsync());
+                    Assert.Equal(originalCredentials, await verify.ProtectedApplicationCredentials.AsNoTracking().Where(x => x.Resource != "archive" && x.Resource != "audit").Select(x => new AdditiveImportCredential(x.Id, x.Secret, x.Version, x.ConfirmedReceipt)).ToArrayAsync());
                     async Task Secret(string name, string purpose, string material) => Assert.Equal(SecretStatus.Created, (await client.CreateSecretAsync(new() { Environment = "pilot", Name = name, Purpose = purpose, RequestId = Guid.NewGuid().ToString(), Material = ByteString.CopyFromUtf8(material) })).Status);
                     async Task<DurableCommitSummary> Confirm(string change)
                     {
@@ -256,6 +267,23 @@ public sealed partial class PostgreSqlPairImportTests
                             async () => await client.CheckPlanAsync(new() { PlanId = plan.Plan.PlanId }))).Status);
                         var commit = await client.CommitDesiredStateAsync(new() { ChangeSetId = change, PlanId = plan.Plan.PlanId }); Assert.Equal(CommitStatus.Committed, commit.Status); return commit.Commit;
                     }
+                }
+                if (scenario == "partial")
+                {
+                    string completedAttempts;
+                    await using (var beforeRetry = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options))
+                        completedAttempts = JsonSerializer.Serialize(await beforeRetry.DurableOperations.AsNoTracking().Where(x => x.Generation == committed!.Generation && x.OperationId.StartsWith("archive"))
+                            .OrderBy(x => x.OperationId).Select(x => new { x.OperationId, x.CurrentAttemptId, x.AttemptNumber }).ToArrayAsync());
+                    Assert.NotEqual(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = committed!.DeploymentId, Generation = committed.Generation })).Status);
+                    Assert.NotEqual(Haby.Operator.Contracts.ConfigurationApplicationStatus.Succeeded, (await client.MaterializeApplicationConfigurationAsync(new() { Environment = "pilot", ApplicationId = "transition-consumer" })).Status);
+                    await using var afterRetry = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options);
+                    Assert.Equal(completedAttempts, JsonSerializer.Serialize(await afterRetry.DurableOperations.AsNoTracking().Where(x => x.Generation == committed.Generation && x.OperationId.StartsWith("archive"))
+                        .OrderBy(x => x.OperationId).Select(x => new { x.OperationId, x.CurrentAttemptId, x.AttemptNumber }).ToArrayAsync()));
+                    Assert.Equal(2, await afterRetry.OperationOutputs.AsNoTracking().CountAsync(x => x.Generation == committed.Generation));
+                    Assert.Equal(2, await afterRetry.ProtectedApplicationCredentials.AsNoTracking().CountAsync(x => x.ConfirmedReceipt != null));
+                    Assert.Equal(retainedApplied, (await afterRetry.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+                    await child.SendAsync("stop"); await child.ExpectAsync("composition-stopped"); await child.RequireExitAsync(0);
+                    continue;
                 }
                 Assert.Equal(GenerationExecutionStatus.Succeeded, (await client.ExecuteGenerationAsync(new() { DeploymentId = committed!.DeploymentId, Generation = committed.Generation })).Status);
                 var delivery = new ConfigurationDelivery.ConfigurationDeliveryClient(channel);
@@ -269,12 +297,17 @@ public sealed partial class PostgreSqlPairImportTests
                 await child.SendAsync("stop"); await child.ExpectAsync("composition-stopped"); await child.RequireExitAsync(0);
                 if (startup == 1 && scenario == "success")
                 {
-                    await using var migration = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options);
-                    var beforeRows = await migration.OperatorImportRequestRecords.AsNoTracking().CountAsync();
-                    var failure = await Assert.ThrowsAsync<PostgresException>(() => migration.GetService<IMigrator>().MigrateAsync("20261123233005_SharedReferenceConfigurationDelivery"));
-                    Assert.Equal(PostgresErrorCodes.UniqueViolation, failure.SqlState);
-                    Assert.Equal(beforeRows, await migration.OperatorImportRequestRecords.AsNoTracking().CountAsync());
-                    Assert.Contains("20261126050307_ComposableProtectedImportRequests", await migration.Database.GetAppliedMigrationsAsync());
+                    int beforeRows;
+                    await using (var beforeMigration = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options))
+                        beforeRows = await beforeMigration.OperatorImportRequestRecords.AsNoTracking().CountAsync();
+                    await using (var migration = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options))
+                    {
+                        var failure = await Assert.ThrowsAsync<PostgresException>(() => migration.GetService<IMigrator>().MigrateAsync("20261123233005_SharedReferenceConfigurationDelivery"));
+                        Assert.Equal(PostgresErrorCodes.UniqueViolation, failure.SqlState);
+                    }
+                    await using var afterMigration = new ManifestCatalogDbContext(new DbContextOptionsBuilder<ManifestCatalogDbContext>().UseNpgsql(catalog).Options);
+                    Assert.Equal(beforeRows, await afterMigration.OperatorImportRequestRecords.AsNoTracking().CountAsync());
+                    Assert.Contains("20261126050307_ComposableProtectedImportRequests", await afterMigration.Database.GetAppliedMigrationsAsync());
                 }
             }
             Assert.True(before == await Snapshot(pair), "Transition mutated existing PostgreSQL state.");
