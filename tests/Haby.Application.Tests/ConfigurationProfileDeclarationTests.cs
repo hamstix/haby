@@ -58,7 +58,7 @@ public sealed class ConfigurationProfileDeclarationTests
         Assert.Equal(expected, value.GetRawText());
         Assert.Equal(number, Haby.Domain.ConfigurationNumber.Parse(value.GetRawText()));
         Assert.Equal(canonical, number.CanonicalText); Assert.Equal(hash, number.GetHashCode());
-        Assert.Equal(canonical, ConfigurationJson.Serialize(number).Json);
+        Assert.Equal(canonical, ConfigurationJson.SerializeCanonical(number).Json);
     }
 
     [Fact]

@@ -30,7 +30,7 @@ public static class ExactProviderResolutionSetCodec
     {
         if (input is null) return null;
         ConfigurationDocumentCodec.ValidateTree(input.Value);
-        return new(input.Contract.Value, ConfigurationJson.Serialize(input.Value).Json ?? throw new InvalidDataException("Provider input must be non-secret."));
+        return new(input.Contract.Value, ConfigurationJson.SerializeCanonical(input.Value).Json ?? throw new InvalidDataException("Provider input must be non-secret."));
     }
 
     public static ExactProviderResolutionSet Decode(string json, NormalizedApplicationManifest manifest, EnvironmentRecordId environment)

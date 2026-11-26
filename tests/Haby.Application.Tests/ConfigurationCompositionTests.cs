@@ -213,7 +213,7 @@ public sealed class ConfigurationCompositionTests
         Assert.True(result.IsSuccess);
         using var document = JsonDocument.Parse(result.Json!);
         Assert.Equal(number, ConfigurationValueMapper.FromValidatedJson(document.RootElement));
-        if (number.Equals(ConfigurationNumber.Parse("0"))) Assert.Equal("0e0", result.Json);
+        if (number.Equals(ConfigurationNumber.Parse("0"))) Assert.Equal("0", result.Json);
     }
 
     [Fact]

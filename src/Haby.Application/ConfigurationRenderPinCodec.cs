@@ -32,7 +32,7 @@ internal static class ConfigurationRenderPinCodec
         }
         w.WriteEndArray();
         void Value(string name, ConfigurationObject value)
-        { w.WritePropertyName(name); w.WriteRawValue(ConfigurationJson.Serialize(value).Json ?? throw new InvalidDataException()); }
+        { w.WritePropertyName(name); w.WriteRawValue(ConfigurationJson.SerializeCanonical(value).Json ?? throw new InvalidDataException()); }
     }
     internal static IReadOnlyList<ConfigurationRenderPin> Read(JsonElement root) => root.EnumerateArray().Select(p =>
         new ConfigurationRenderPin(ManifestLocalId.Create(p.GetProperty("component"u8).GetString()!), p.GetProperty("request"u8).GetInt32(),

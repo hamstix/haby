@@ -57,7 +57,7 @@ public static class ConfigurationProfileDeclaration
 
     private static JsonElement Ordinary(ConfigurationValue value)
     {
-        using var json = JsonDocument.Parse(ConfigurationJson.Serialize(value).Json
+        using var json = JsonDocument.Parse(ConfigurationJson.SerializeCanonical(value).Json
             ?? throw new InvalidDataException("Unsupported Profile value."));
         return json.RootElement.Clone();
     }

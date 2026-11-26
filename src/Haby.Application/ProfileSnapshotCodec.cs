@@ -122,7 +122,7 @@ internal static partial class ProfileSnapshotCodec
 
     private static InvalidDataException Corrupt() => new("Stored Profile snapshot is invalid or unsupported.");
     private static JsonNode? Value(ConfigurationValue value) =>
-        JsonNode.Parse(ConfigurationJson.Serialize(value).Json ?? throw Corrupt(), documentOptions: new() { MaxDepth = 128 });
+        JsonNode.Parse(ConfigurationJson.SerializeCanonical(value).Json ?? throw Corrupt(), documentOptions: new() { MaxDepth = 128 });
 
     private static ConfigurationValue Ordinary(JsonElement value)
     {

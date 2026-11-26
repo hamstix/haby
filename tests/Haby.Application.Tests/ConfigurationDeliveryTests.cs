@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -379,6 +380,34 @@ public sealed partial class ConfigurationDeliveryTests
         h.Store.Cancel = false; h.Adapter.Cancel = true;
         // Pure formatter exceptions are deliberately bounded refusals, including adapter cancellation exceptions.
         using var refused = await h.Run(); Assert.Equal(ConfigurationDeliveryStatus.InputUnavailable, refused.Status);
+        Assert.Throws<ObjectDisposedException>(() => h.Store.LastMaterial!.CopyBytes());
+    }
+
+    [Fact]
+    public async Task Authorized_JSON_secret_numbers_use_external_spelling_and_preview_redacts_the_whole_projection()
+    {
+        var h = await Prepare(configurationSecret: true);
+        h.Store.ConfigurationBytes = "{\"Count\":-1,\"Limit\":2147483647,\"Expanded\":1e9}"u8.ToArray();
+        var original = h.Store.Artifact.Revision;
+        var members = Assert.IsType<ConfigurationObject>(original.Tree).Members.Append(
+            KeyValuePair.Create<string, ConfigurationValue>("Count", ConfigurationNumber.Parse("-1")));
+        h.Store.Artifact = h.Store.Artifact with { Revision = original with { Tree = new ConfigurationObject(members) } };
+        var preview = ConfigurationJson.Preview(h.Store.Artifact.Revision.Tree);
+        using (var json = JsonDocument.Parse(preview.Json)) Assert.Equal(-1, json.RootElement.GetProperty("document"u8).GetProperty("Count"u8).GetInt32());
+        Assert.Contains("/Logging/WriteTo/0/Args/password", preview.RedactedPaths);
+        Assert.DoesNotContain("2147483647", preview.Json);
+        h.Store.Allowed = false;
+        using (var denied = await h.Run()) Assert.Equal(ConfigurationDeliveryStatus.Denied, denied.Status);
+        Assert.Equal(0, h.Store.Resolutions);
+        h.Store.Allowed = true;
+        using var delivered = await h.Run();
+        Assert.Equal(ConfigurationDeliveryStatus.Delivered, delivered.Status);
+        using var stream = new MemoryStream(delivered.Json.ToArray());
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddJsonStream(stream).Build();
+        Assert.Equal(-1, configuration.GetValue<int>("Count"));
+        Assert.Equal(-1, configuration.GetValue<int>("Logging:WriteTo:0:Args:password:Count"));
+        Assert.Equal(int.MaxValue, configuration.GetValue<int>("Logging:WriteTo:0:Args:password:Limit"));
+        Assert.Equal(1000000000, configuration.GetValue<int>("Logging:WriteTo:0:Args:password:Expanded"));
         Assert.Throws<ObjectDisposedException>(() => h.Store.LastMaterial!.CopyBytes());
     }
 }
