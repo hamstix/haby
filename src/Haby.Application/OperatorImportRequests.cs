@@ -58,6 +58,9 @@ public sealed record OperatorImportRequestResult(OperatorImportRequestStatus Sta
 public interface IOperatorImportRequestStore
 {
     ValueTask<OperatorImportRequestResult> BindAsync(OperatorImportRequestBinding binding, string actor, CancellationToken token);
+    /// <summary>Explicit protected group intake; implementations without subset support refuse before staging.</summary>
+    ValueTask<OperatorImportRequestResult> BindGroupAsync(OperatorImportRequestBinding binding, string actor, CancellationToken token) =>
+        ValueTask.FromResult(new OperatorImportRequestResult(OperatorImportRequestStatus.ImportNotSupported));
     ValueTask<OperatorImportRequestResult> CompleteAsync(OperatorImportRequestBinding binding,
         ProtectedCredentialReference credential, string actor, CancellationToken token);
     ValueTask<OperatorImportRequestResult> GetAsync(Guid requestId, CancellationToken token);
@@ -81,7 +84,7 @@ public sealed class OperatorImportRequests(IOperatorImportRequestStore requests,
         catch (Exception error) when (error is ArgumentException or InvalidDataException)
         { return new(OperatorImportRequestStatus.InvalidInput); }
         if (binding.Correction is not null && candidates is null) return new(OperatorImportRequestStatus.ImportNotSupported);
-        var bound = await requests.BindAsync(binding, actor, token);
+        var bound = stageOnly ? await requests.BindGroupAsync(binding, actor, token) : await requests.BindAsync(binding, actor, token);
         if (bound.Status is not (OperatorImportRequestStatus.Pending or OperatorImportRequestStatus.Created or OperatorImportRequestStatus.Existing))
             return bound;
         // Even a linked request must verify the exact-byte replay before acknowledging Create again.

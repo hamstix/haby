@@ -196,11 +196,18 @@ public sealed class OperatorImportRequestPersistenceTests(CatalogServerFixture f
         var connection = await CreateDatabaseAsync("operator_binding_race_");
         var first = await Arrange(connection);
         var second = first with { CredentialResource = ManifestLocalId.Create("db") };
-        var barrier = new BindingBarrier(first.RequestId);
-        await using (var services = Services(connection, barrier))
+        await using (var services = Services(connection))
         {
             var store = services.GetRequiredService<IOperatorImportRequestStore>();
-            var results = await Task.WhenAll(store.BindAsync(first, "first", default).AsTask(), store.BindAsync(second, "second", default).AsTask());
+            var arrived = 0;
+            var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            async Task<OperatorImportRequestResult> Bind(OperatorImportRequestBinding binding, string actor)
+            {
+                if (Interlocked.Increment(ref arrived) == 2) ready.TrySetResult();
+                await ready.Task;
+                return await store.BindAsync(binding, actor, default);
+            }
+            var results = await Task.WhenAll(Bind(first, "first"), Bind(second, "second"));
             Assert.Single(results, x => x.Status == OperatorImportRequestStatus.Pending);
             Assert.Single(results, x => x.Status == OperatorImportRequestStatus.Conflict);
         }
@@ -372,22 +379,6 @@ public sealed class OperatorImportRequestPersistenceTests(CatalogServerFixture f
     {
         public ManifestCatalogDbContext CreateDbContext() => new(new DbContextOptionsBuilder<ManifestCatalogDbContext>()
             .UseNpgsql(connection).AddInterceptors(interceptors).Options);
-    }
-
-    private sealed class BindingBarrier(Guid request) : SaveChangesInterceptor
-    {
-        private int _arrived;
-        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
-            InterceptionResult<int> result, CancellationToken cancellationToken = default)
-        {
-            if (eventData.Context!.ChangeTracker.Entries<OperatorImportRequestRow>().Any(x => x.Entity.Id == request && x.State == EntityState.Added))
-            {
-                if (Interlocked.Increment(ref _arrived) == 2) _ready.TrySetResult();
-                await _ready.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
-            }
-            return result;
-        }
     }
 
     private sealed class LinkCommitFault(Guid request, bool afterCommit) : DbTransactionInterceptor

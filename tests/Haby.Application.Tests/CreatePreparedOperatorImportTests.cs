@@ -162,6 +162,7 @@ public sealed class CreatePreparedOperatorImportTests
         { calls.Add("lookup"); return ValueTask.FromResult(new OperatorImportBindingResult(Status == OperatorImportRequestStatus.StorageUnavailable ? Status : Saved is null ? OperatorImportRequestStatus.NotFound : Status, Saved)); }
         public ValueTask<OperatorImportRequestResult> BindAsync(OperatorImportRequestBinding binding, string actor, CancellationToken token)
         { calls.Add("bind"); Saved = binding; return ValueTask.FromResult(new OperatorImportRequestResult(Status)); }
+        public ValueTask<OperatorImportRequestResult> BindGroupAsync(OperatorImportRequestBinding binding, string actor, CancellationToken token) => BindAsync(binding, actor, token);
         public ValueTask<OperatorImportRequestResult> CompleteAsync(OperatorImportRequestBinding binding, ProtectedCredentialReference credential, string actor, CancellationToken token)
         { calls.Add("link"); return ValueTask.FromResult(new OperatorImportRequestResult(OperatorImportRequestStatus.Created)); }
         public ValueTask<OperatorImportRequestResult> GetAsync(Guid requestId, CancellationToken token) => throw new NotSupportedException();

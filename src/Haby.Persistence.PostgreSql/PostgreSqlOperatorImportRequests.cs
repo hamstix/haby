@@ -25,8 +25,14 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImport
         { return new(OperatorImportRequestStatus.StorageUnavailable); }
     }
 
-    async ValueTask<OperatorImportRequestResult> IOperatorImportRequestStore.BindAsync(OperatorImportRequestBinding binding,
-        string actor, CancellationToken token)
+    ValueTask<OperatorImportRequestResult> IOperatorImportRequestStore.BindAsync(OperatorImportRequestBinding binding,
+        string actor, CancellationToken token) => BindImportRequestAsync(binding, actor, token, false);
+
+    ValueTask<OperatorImportRequestResult> IOperatorImportRequestStore.BindGroupAsync(OperatorImportRequestBinding binding,
+        string actor, CancellationToken token) => BindImportRequestAsync(binding, actor, token, true);
+
+    private async ValueTask<OperatorImportRequestResult> BindImportRequestAsync(OperatorImportRequestBinding binding,
+        string actor, CancellationToken token, bool importGroup)
     {
         try { binding.Validate(); ValidateActor(actor); }
         catch (Exception error) when (error is ArgumentException or InvalidDataException)
@@ -37,6 +43,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImport
             await using var db = await contexts.CreateDbContextAsync(token);
             await using var transaction = await db.Database.BeginTransactionAsync(token);
             await ImportMutationGate.LockAsync(db, Guid.Parse(binding.Environment.ToString()), Guid.Parse(binding.Revision.ApplicationRecordId.ToString()), token);
+            // Legacy complete-intent validation must precede replay acknowledgement and every durable bind/stage.
+            var validation = await ValidateChangeSetInputAsync(db, binding.Environment, binding.Revision.ApplicationRecordId,
+                binding.Revision, binding.Input, true, token, importGroup: importGroup);
+            if (validation is { } refused) return new(ImportRequestStatus(refused));
             var previous = await db.OperatorImportRequestRecords.AsNoTracking().SingleOrDefaultAsync(x => x.Id == binding.RequestId, token);
             if (previous is not null) return await ReadBoundRequestAsync(db, previous, binding, token);
             var resources = binding.Input.Resources.Select(x => x.Resource.Value).ToArray();
@@ -45,9 +55,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner : IOperatorImport
                 return new(OperatorImportRequestStatus.Conflict);
             if (binding.Correction is not null && !await ImportCorrectionRules.EligibleAsync(db, binding, token))
                 return new(OperatorImportRequestStatus.Conflict);
-            var validation = await ValidateChangeSetInputAsync(db, binding.Environment, binding.Revision.ApplicationRecordId,
-                binding.Revision, binding.Input, true, token, importGroup: true);
-            if (validation is { } refused) return new(ImportRequestStatus(refused));
+
             var application = Guid.Parse(binding.Revision.ApplicationRecordId.ToString());
             var revision = await db.Revisions.AsNoTracking().Where(x => x.ApplicationRecordId == application &&
                 x.LocalRevisionNumber == binding.Revision.RevisionNumber.Value).Select(x => x.Id).SingleAsync(token);

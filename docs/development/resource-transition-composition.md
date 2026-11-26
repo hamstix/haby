@@ -88,6 +88,12 @@ acquisition declaration for every NEW Resource, including every coupled member:
    {"resource":"archive-proof","mode":"ACQUISITION_MODE_IMPORT_USE_AND_RETAIN","import_request_id":"<same protected request UUID>"}]}}
 ```
 
+The explicit group intake uses `BindGroupAsync`; a store without that capability
+fails closed before binding or private staging. Legacy whole-import creation continues
+to require complete target coverage before any durable request or candidate is staged.
+Malformed Import envelopes (for example Reference input with no protected request UUID)
+return `InvalidRequest`; a well-formed but unbound protected request remains refused.
+
 Other new groups use distinct protected requests in that same ChangeSet. Existing
 Resources have no new acquisition declarations and never resubmit passwords. Import
 members must omit `input` and `sharing_request`; the server resolves their exact

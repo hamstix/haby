@@ -224,6 +224,7 @@ public sealed partial class PostgreSqlPairImportTests
         Assert.Equal(previous.Binding.RequestId, (await check.ProtectedCredentialOwners.AsNoTracking()
             .SingleAsync(x => x.Application == Guid.Parse(previous.Binding.Revision.ApplicationRecordId.ToString()))).Request);
         Assert.False(await check.OperatorImportRequestRecords.AsNoTracking().AnyAsync(x => x.Id == binding.RequestId));
+        Assert.False(await check.ProtectedApplicationCredentials.AsNoTracking().AnyAsync(x => x.Request == binding.RequestId));
         Assert.False(await check.ImportSupersessions.AsNoTracking().AnyAsync(x => x.PreviousRequest == previous.Binding.RequestId));
     }
 
