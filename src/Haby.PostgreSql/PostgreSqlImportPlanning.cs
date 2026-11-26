@@ -118,7 +118,7 @@ public sealed class PostgreSqlImportAdmission(ResourceTypeId type) : IDurableAct
 
     public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
         DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) =>
-        accepted.Resources.Count == 2 && target.Resources.Count == 2 && accepted.Resources.All(x => target.Resources.TryGetValue(x.Key, out var value) &&
+        accepted.Resources.Count == 2 && accepted.Resources.All(x => target.Resources.TryGetValue(x.Key, out var value) &&
             x.Value.Type == value.Type && x.Value.ProviderRef == value.ProviderRef && x.Value.DeletionPolicy == value.DeletionPolicy && x.Value.Properties.Equals(value.Properties));
 
     public bool CanRetain(NormalizedManifestSpec original, NormalizedManifestSpec target, ManifestLocalId resource,

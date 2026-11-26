@@ -30,6 +30,8 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
     {
         public int Observations;
         public int HandlerCalls;
+        public int ReuseChecks;
+        public bool ReuseDrift;
         public bool SecondMemberDependsOnImport;
         public CancellationTokenSource? CancelBeforeAcceptance;
     }
@@ -68,7 +70,21 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
                         ? new ObservationOnlyEvidence(mode) : mode == ResourceAcquisitionMode.Reference && !sharingCapability
                             ? new ReferenceOnlyEvidence(mode) : new Evidence(mode, sharingContract, sharingAvailable));
         }
+        services.AddSingleton<IDurableResourceReuseVerifier>(new CapabilityReuseVerifier(ResourceAcquisitionMode.ImportUseAndRetain, boundary));
+        services.AddSingleton<IDurableResourceReuseVerifier>(new CapabilityReuseVerifier(ResourceAcquisitionMode.Reference, boundary));
         return services.BuildServiceProvider();
+    }
+    private sealed class CapabilityReuseVerifier(ResourceAcquisitionMode mode, Boundary boundary) : IDurableResourceReuseVerifier
+    {
+        public DurableActionAdmissionKey Key => ResourceReferenceKernelTests.Key(mode).Admission;
+        public ValueTask<ResourceReuseValidationStatus> VerifyAsync(AcceptedOperation original, ResourceObservationReceipt receipt, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref boundary.ReuseChecks);
+            if (boundary.ReuseDrift) return ValueTask.FromResult(ResourceReuseValidationStatus.Conflict);
+            return ValueTask.FromResult(new Evidence(mode).ValidateObservationEvidence(original, receipt.Evidence)
+                ? ResourceReuseValidationStatus.Confirmed : ResourceReuseValidationStatus.InputUnavailable);
+        }
     }
     private static async Task<Prepared> PrepareAsync(string connection, Boundary boundary, string application = "reference-app",
         Prepared? scope = null, bool mixed = true, string identity = "shared-service", ResourceAcquisitionMode singleMode = ResourceAcquisitionMode.Reference, string? sharingClass = null, bool secondReference = false, bool newProvider = false, string? components = null)
@@ -471,8 +487,13 @@ public sealed partial class ResourceReferenceKernelTests(CatalogServerFixture fi
         }
     }
     private sealed class Handler(ResourceAcquisitionMode mode, IDurableOperationJournal journal, IExternalOperationOutputs outputs,
-        IResourceObservationAcceptance acceptance, IProviderConfigurationStore configurations, Boundary boundary) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IReadOnlyResourceObservationHandler
+        IResourceObservationAcceptance acceptance, IProviderConfigurationStore configurations, Boundary boundary) : IDurableActionAdmissionHandler, IDurableResourcePlanComposer, IReadOnlyResourceObservationHandler, IDurableResourceReusePolicy, IDurableResourceAdditionPolicy
     {
+        public bool CanReuse(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => new ResourceDelta(accepted, target).Entries.Any(x => x.Resource == resource && x.Kind == ResourceDeltaKind.Unchanged);
+        public bool CanAdd(NormalizedManifestSpec accepted, NormalizedManifestSpec target, ManifestLocalId resource,
+            DurablePlanningInputs inputs, PreparedProviderConfiguration configuration) => mode == ResourceAcquisitionMode.Reference &&
+            new ResourceDelta(accepted, target).Entries.Any(x => x.Resource == resource && x.Kind == ResourceDeltaKind.Added);
         public DurableActionExecutionKey Key => ResourceReferenceKernelTests.Key(mode);
         public bool RequiresExternalOutput => true;
         public ExternalOperationOutputIdentity OutputIdentity => Output;

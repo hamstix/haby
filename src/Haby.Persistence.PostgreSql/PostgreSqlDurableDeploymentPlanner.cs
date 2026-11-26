@@ -92,6 +92,19 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
     {
         var accepted = PostgreSqlManifestImportStore.Rehydrate(await context.Revisions.AsNoTracking().SingleAsync(x =>
             x.ApplicationRecordId == Guid.Parse(application.ToString()) && x.LocalRevisionNumber == revision.RevisionNumber.Value, token));
+        if (acquisitions is null && intent is null && precondition is DeploymentPrecondition.ExpectedGeneration expected)
+        {
+            var environmentId = Guid.Parse(environment.ToString());
+            var applicationId = Guid.Parse(application.ToString());
+            var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.EnvironmentRecordId == environmentId && x.ApplicationRecordId == applicationId, token);
+            var previous = owner is null ? null : await context.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == owner.Id && x.Generation == expected.Generation.Value, token);
+            if (previous is not null)
+            {
+                var retained = previous.Inputs().Acquisitions.Resources.Where(x => accepted.Declaration.Spec.Resources.ContainsKey(x.Resource)).ToArray();
+                acquisitions = new(retained.Concat(accepted.Declaration.Spec.Resources.Keys.Where(x => !retained.Any(r => r.Resource == x))
+                    .Select(x => new ResourceAcquisitionRequest(x, ResourceAcquisitionMode.Provision))));
+            }
+        }
         acquisitions ??= intent is null ? ResourceAcquisitionIntent.Provision(accepted.Declaration.Spec.Resources.Keys) : ResourceAcquisitionIntent.Import(intent);
         acquisitions.Validate(accepted.Declaration.Spec);
         var id = DeploymentChangeSetId.New();
@@ -189,22 +202,14 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
         if (!emptyStage)
         {
-            var alias = DurableActionAdmission.SingleAlias(spec);
-            if (alias is null) return new(DurablePlanStatus.UnsupportedShape);
-            await PostgreSqlResourceNamingStore.LockAsync(context, row.EnvironmentRecordId, alias.Value, true, cancellationToken);
-            var resolved = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
-            if (resolved is null) return new(DurablePlanStatus.AliasNotResolved);
-            if (resolved.Alias != alias) return new(DurablePlanStatus.PlanInputUnavailable);
-            revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
-                item.ProviderInstanceId == Guid.Parse(resolved.Binding.InstanceId.ToString()) &&
-                item.RevisionNumber == resolved.Binding.RevisionNumber.Value &&
-                item.EnvironmentRecordId == row.EnvironmentRecordId && item.IsSealed, cancellationToken);
-            if (revisionRow is null || revisionRow.ImplementationId != resolved.ImplementationId)
-                return new(DurablePlanStatus.ProviderRevisionUnavailable);
-            ResourceNamingSnapshot naming;
-            try { naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot; }
-            catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
-            resourceProviders = revision.Declaration.Spec.Resources.Select(r => new ExactProviderResolution(new ProviderInput.Resource(r.Key), environmentId, alias, resolved.Binding.InstanceId, resolved.Binding.RevisionNumber, ProviderImplementationId.Create(resolved.ImplementationId), ResourceNamingCodec.Exact(naming))).ToArray();
+            // Initial mixed acquisition remains outside this slice; additive transitions resolve every declaration key.
+            if (DurableActionAdmission.SingleAlias(spec) is null && (baseline is null ||
+                !ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()).Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference)))
+                return new(DurablePlanStatus.UnsupportedShape);
+            var capturedProviders = await CaptureResourceProvidersAsync(context, revision.Declaration, environmentId, cancellationToken);
+            if (capturedProviders.Status != DurablePlanStatus.Planned) return new(capturedProviders.Status);
+            revisionRow = capturedProviders.Revision;
+            resourceProviders = capturedProviders.Resources;
         }
         ExactProviderResolutionSet providers;
         try
@@ -248,7 +253,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         resourceInputs = internalEffects ? InternalResourceStage.Project(inputs) : inputs;
         if (inputs.Acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference) &&
             !(internalEffects && baseline is not null) &&
-            (baseline is not null || internalEffects)) return new(DurablePlanStatus.ReferenceNotSupported);
+            internalEffects) return new(DurablePlanStatus.ReferenceNotSupported);
         var resourceSpec = internalEffects ? resourceInputs.Providers.Declaration.Spec : spec;
         DurableOperationGraph graph;
         try
@@ -375,8 +380,11 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (result.Inputs != plan.Inputs || DurableOperationGraphCodec.Fingerprint(result.Inputs, plan.Graph) != plan.Fingerprint)
             return DurablePlanCurrentStatus.PlanStale;
         await using var context = await contexts.CreateDbContextAsync(cancellationToken);
+        var exactResource = plan.Inputs.Providers.Entries.Values.First(x => x.Input is ProviderInput.Resource);
+        var exactInstance = Guid.Parse(exactResource.Instance.ToString());
+        var exactRevision = exactResource.Configuration.Value;
         var revisionRow = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(r =>
-            r.ProviderInstanceId == Guid.Parse(plan.Inputs.Providers.RequireUniformResourceProvider().Instance.ToString()) && r.RevisionNumber == plan.Inputs.Providers.RequireUniformResourceProvider().Configuration.Value,
+            r.ProviderInstanceId == exactInstance && r.RevisionNumber == exactRevision,
             cancellationToken);
         var manifest = await revisions.FindAsync(plan.Inputs.Revision, cancellationToken);
         try
@@ -422,25 +430,17 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (manifest is null) return (DurablePlanStatus.RevisionNotFound, null);
         if (!DurableActionAdmission.SupportsPilotShape(manifest.Declaration.Spec))
             return (DurablePlanStatus.UnsupportedShape, null);
-        var alias = DurableActionAdmission.SingleAlias(manifest.Declaration.Spec);
-        if (alias is null) return (DurablePlanStatus.UnsupportedShape, null);
-        var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.Id == row.EnvironmentRecordId, cancellationToken);
+        var environment = await context.Environments.AsNoTracking().SingleOrDefaultAsync(item => item.Id == row.EnvironmentRecordId, cancellationToken);
         if (environment is null) return (DurablePlanStatus.ChangeSetStale, null);
         var environmentId = EnvironmentRecordId.Parse(row.EnvironmentRecordId.ToString());
-        await PostgreSqlResourceNamingStore.LockAsync(context, row.EnvironmentRecordId, alias.Value, true, cancellationToken);
-        var resolution = await aliases.ResolveAsync(environmentId, alias, cancellationToken);
-        if (resolution is null) return (DurablePlanStatus.AliasNotResolved, null);
-        if (resolution.Alias != alias) return (DurablePlanStatus.PlanInputUnavailable, null);
-        var providerRevision = await context.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.ProviderInstanceId == Guid.Parse(resolution.Binding.InstanceId.ToString()) &&
-            item.RevisionNumber == resolution.Binding.RevisionNumber.Value &&
-            item.EnvironmentRecordId == row.EnvironmentRecordId && item.IsSealed, cancellationToken);
-        if (providerRevision is null || providerRevision.ImplementationId != resolution.ImplementationId)
-            return (DurablePlanStatus.ProviderRevisionUnavailable, null);
-        var naming = (await PostgreSqlResourceNamingStore.CaptureAsync(context, row.EnvironmentRecordId, alias.Value, cancellationToken)).Snapshot;
+        if (DurableActionAdmission.SingleAlias(manifest.Declaration.Spec) is null && (baseline is null ||
+            !ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()).Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference)))
+            return (DurablePlanStatus.UnsupportedShape, null);
+        var capturedProviders = await CaptureResourceProvidersAsync(context, manifest.Declaration, environmentId, cancellationToken);
+        if (capturedProviders.Status != DurablePlanStatus.Planned) return (capturedProviders.Status, null);
+        var providerRevision = capturedProviders.Revision!;
         var inputs = new DurablePlanningInputs(environmentId, EnvironmentId.Create(environment.EnvironmentId), revision,
-            CaptureProviders(manifest.Declaration, environmentId, alias, resolution.Binding.InstanceId, resolution.Binding.RevisionNumber, resolution.ImplementationId, naming))
+            new(manifest.Declaration, environmentId, capturedProviders.Resources))
         { Import = ResourceImportIntentCodec.Decode(row.ImportIntentJson), Acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()) };
         var frozen = plan.Inputs.Configuration ?? throw new InvalidDataException();
         if (!manifest.Declaration.Equals(frozen.Manifest)) return (DurablePlanStatus.PlanInputUnavailable, null);
@@ -466,27 +466,18 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs,
         CancellationToken cancellationToken)
     {
-        if (!revision.IsSealed || revision.EnvironmentRecordId != Guid.Parse(inputs.Environment.ToString()) ||
-            revision.ProviderInstanceId != Guid.Parse(inputs.Providers.RequireUniformResourceProvider().Instance.ToString()) ||
-            revision.RevisionNumber != inputs.Providers.RequireUniformResourceProvider().Configuration.Value || revision.ImplementationId != inputs.Providers.RequireUniformResourceProvider().Implementation.Value)
-            return DurablePlanStatus.ProviderRevisionUnavailable;
-        var instance = await context.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(row =>
-            row.Id == revision.ProviderInstanceId && row.EnvironmentRecordId == revision.EnvironmentRecordId,
-            cancellationToken);
-        if (instance is null) return DurablePlanStatus.ProviderRevisionUnavailable;
-        DurablePlanStatus result;
         try
         {
-            var provider = new ProviderAdapterKey(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId);
+            var keys = await ResourceProviderDispatch.CaptureKeysAsync(context, inputs, cancellationToken);
             var imported = (await ImportedProducersAsync(context, inputs, cancellationToken)).Select(x => x.ResourceId).ToHashSet();
-            var support = admission.PlanningSupportStatus(spec, provider, inputs, imported);
+            var support = admission.PlanningSupportStatus(spec, keys.Values.First(), inputs, imported, keys);
             if (support != DurablePlanStatus.Planned) return support;
-            if (!await CodecAvailableAsync(context, revision, cancellationToken)) return DurablePlanStatus.ProviderRevisionUnavailable;
-            result = admission.Admit(spec, provider, inputs, PreparedConfiguration(instance.ProviderKindId, revision), imported);
+            var exact = await ResourceProviderDispatch.CaptureAsync(context, inputs, _codecs, cancellationToken);
+            var representative = exact.Values.First();
+            return admission.Admit(spec, representative.Provider, inputs, representative.Configuration, imported, exact);
         }
-        catch (Exception e) when (e is ArgumentException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException)
+        catch (Exception error) when (error is ArgumentException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException)
         { return DurablePlanStatus.ProviderRevisionUnavailable; }
-        return result;
     }
 
     internal async Task<bool> CodecAvailableAsync(ManifestCatalogDbContext context,
@@ -543,11 +534,6 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         { Graph = graph };
     }
 
-    private static ExactProviderResolutionSet CaptureProviders(NormalizedApplicationManifest declaration, EnvironmentRecordId environment,
-        ProviderAlias alias, ProviderInstanceId instance, ProviderConfigurationRevisionNumber configuration, string implementation, ResourceNamingSnapshot naming) =>
-        new(declaration, environment, declaration.Spec.Resources.Select(r => new ExactProviderResolution(new ProviderInput.Resource(r.Key),
-            environment, alias, instance, configuration, ProviderImplementationId.Create(implementation), ResourceNamingCodec.Exact(naming))));
-
     private PreparedProviderConfiguration PreparedConfiguration(string kind, ProviderConfigurationRevisionRow revision)
     {
         var matches = _codecs.Where(c => c.ProviderKindId == kind && c.ShapeId == revision.ConfigurationShapeId &&
@@ -590,11 +576,16 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             baseline.ApplicationRecordId != owner.ApplicationRecordId) throw new InvalidDataException();
         if (!await HasAppliedBaselineProofAsync(db, owner.Id, baseline.Generation, token)) throw new InvalidDataException();
         var baselineInputs = baseline.InternalEffects ? InternalResourceStage.Project(baseline.Inputs()) : ResourceContinuity.Inputs(baseline);
-        var baselineProvider = baselineInputs.Providers.RequireUniformResourceProvider();
-        var targetProvider = inputs.Providers.RequireUniformResourceProvider();
-        if (Guid.Parse(baselineProvider.Instance.ToString()) != provider.ProviderInstanceId || baselineProvider.Configuration.Value != provider.RevisionNumber ||
-            baselineProvider.Implementation != targetProvider.Implementation) return null;
+        var exact = await ResourceProviderDispatch.CaptureAsync(db, inputs, _codecs, token);
+        var representative = exact.Values.First();
         var accepted = baselineInputs.Configuration!;
+        var delta = new ResourceDelta(accepted.Manifest.Spec, target);
+        var newReference = delta.Entries.Any(x => x.Kind == ResourceDeltaKind.Added && inputs.Acquisitions.Resource(x.Resource).Mode == ResourceAcquisitionMode.Reference);
+        if (newReference || DurableActionAdmission.SingleAlias(target) is null)
+        {
+            if (delta.Entries.Any(x => x.Kind is ResourceDeltaKind.Changed or ResourceDeltaKind.Removed) ||
+                delta.Entries.Where(x => x.Kind == ResourceDeltaKind.Added).Any(x => inputs.Acquisitions.Resource(x.Resource).Mode != ResourceAcquisitionMode.Reference)) return null;
+        }
         var baselineGraph = DurableOperationGraphCodec.Decode(baseline.GraphJson);
         if (baselineGraph.Baseline is not null && !await ResourceContinuity.ValidateAsync(db, owner.Id, baselineGraph, token)) throw new InvalidDataException();
         // Component/Binding membership belongs to the target configuration, not
@@ -604,9 +595,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         // The same immutable revision may accept different exact configuration inputs.
         // Commit compares the full captured configuration to preserve exact-input no-ops;
         // revision equality never bypasses Provider, management or original-evidence checks.
-        var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider.ProviderInstanceId, token);
-        var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
-        var configuration = PreparedConfiguration(instance.ProviderKindId, provider);
+
         var managedResources = await db.CurrentResourceManagement.AsNoTracking().Where(x => x.Environment == owner.EnvironmentRecordId &&
             x.Application == owner.ApplicationRecordId).ToArrayAsync(token);
         var expected = accepted.Manifest.Spec.Resources.Keys.Select(x => x.Value)
@@ -622,18 +611,24 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
                 ?? throw new InvalidDataException();
             var originalInputs = ResourceContinuity.Inputs(source);
             var originalProvider = originalInputs.Providers.Resource(resource);
-            if (Guid.Parse(originalProvider.Instance.ToString()) != provider.ProviderInstanceId || originalProvider.Configuration.Value != provider.RevisionNumber ||
-                originalProvider.Implementation != targetProvider.Implementation) throw new InvalidDataException();
+            var targetProvider = target.Resources.ContainsKey(resource) ? inputs.Providers.Resource(resource) : originalProvider;
+            if (target.Resources.ContainsKey(resource) && inputs.Acquisitions.Resource(resource) != originalInputs.Acquisitions.Resource(resource)) return null;
+            if (originalProvider.Instance != targetProvider.Instance || originalProvider.Configuration != targetProvider.Configuration ||
+                originalProvider.Implementation != targetProvider.Implementation || originalProvider.Alias != targetProvider.Alias) return null;
+            var sourceContexts = await ResourceProviderDispatch.CaptureAsync(db, originalInputs, _codecs, token);
+            var adapter = sourceContexts[resource].Provider;
+            var configuration = sourceContexts[resource].Configuration;
             var evidence = await ResourceContinuity.EvidenceAsync(db, managed, token) ?? throw new InvalidDataException();
             var original = DurableOperationGraphCodec.Decode(source.GraphJson);
             // Missing registrations cannot turn a lost mandatory terminal output into
             // an action that supposedly never required confirmed evidence.
             if (!admission.Supports(original)) throw new InvalidDataException();
-            if (!admission.ValidateCreationGraph(originalInputs.Configuration!.Manifest.Spec, adapter, originalInputs, configuration, original)) throw new InvalidDataException();
+            if (!admission.ValidateCreationGraph(originalInputs.Configuration!.Manifest.Spec, adapter, originalInputs, configuration, original, sourceContexts)) throw new InvalidDataException();
             var proposedOriginal = originalInputs with
             {
                 Providers = new(originalInputs.Providers.Declaration, originalInputs.Environment,
-                originalInputs.Providers.Entries.Values.Select(x => x with { Naming = targetProvider.Naming }))
+                originalInputs.Providers.Entries.Values.Select(x => x.Alias == originalProvider.Alias && x.Instance == originalProvider.Instance &&
+                    x.Configuration == originalProvider.Configuration && x.Implementation == originalProvider.Implementation ? x with { Naming = targetProvider.Naming } : x))
             };
             if (!admission.SameResourceNames(originalInputs.Configuration!.Manifest.Spec, resource, adapter, originalInputs, proposedOriginal, configuration)) return null;
             if (target.Resources.ContainsKey(resource))
@@ -655,9 +650,9 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             }
         }
         foreach (var added in target.Resources.Keys.Where(k => !expected.Contains(k.Value)))
-            if (!admission.CanAddResource(accepted.Manifest.Spec, target, added, adapter, inputs, configuration)) return null;
-        var result = admission.PlanUpdate(target, adapter, inputs, configuration, reuse,
-            new(ApplicationDeploymentId.Parse(owner.Id.ToString()), baseline.Generation, baseline.Fingerprint), retained);
+            if (!admission.CanAddResource(accepted.Manifest.Spec, target, added, exact[added].Provider, inputs, exact[added].Configuration)) return null;
+        var result = admission.PlanUpdate(target, representative.Provider, inputs, representative.Configuration, reuse,
+            new(ApplicationDeploymentId.Parse(owner.Id.ToString()), baseline.Generation, baseline.Fingerprint), retained, exact);
         if (!await ResourceContinuity.ValidateOutputsAsync(db, owner.Id, result, outputContracts ?? [], _codecs, admission, inputs, token)) throw new InvalidDataException();
         return result;
     }
@@ -695,19 +690,20 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
     private async Task<IReadOnlyList<DurableOperationNode>> DescribeProducersAsync(ManifestCatalogDbContext context,
         NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs, CancellationToken token)
     {
-        var instance = await context.ProviderInstances.AsNoTracking().SingleAsync(r => r.Id == revision.ProviderInstanceId, token);
+        var exact = await ResourceProviderDispatch.CaptureAsync(context, inputs, _codecs, token);
+        var representative = exact.Values.First();
         var imported = await ImportedProducersAsync(context, inputs, token);
-        return admission.DescribeProducers(spec, new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId),
-            inputs, PreparedConfiguration(instance.ProviderKindId, revision), imported.Select(x => x.ResourceId).ToHashSet()).Concat(imported).ToArray();
+        return admission.DescribeProducers(spec, representative.Provider, inputs, representative.Configuration,
+            imported.Select(x => x.ResourceId).ToHashSet(), exact).Concat(imported).ToArray();
     }
 
     internal async Task<DurableOperationGraph> PlanGraphAsync(ManifestCatalogDbContext context,
         NormalizedManifestSpec spec, ProviderConfigurationRevisionRow revision, DurablePlanningInputs inputs,
         CancellationToken cancellationToken)
     {
-        var instance = await context.ProviderInstances.AsNoTracking().SingleAsync(row => row.Id == revision.ProviderInstanceId, cancellationToken);
-        return admission.Plan(spec, new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs,
-            PreparedConfiguration(instance.ProviderKindId, revision));
+        var exact = await ResourceProviderDispatch.CaptureAsync(context, inputs, _codecs, cancellationToken);
+        var representative = exact.Values.First();
+        return admission.Plan(spec, representative.Provider, inputs, representative.Configuration, exact);
     }
 
     internal static void ValidateActor(string actorId)

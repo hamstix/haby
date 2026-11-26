@@ -226,20 +226,7 @@ internal static partial class DurableAggregateCompletion
             graph = new(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources)
             { Import = graph.Import, Acquisitions = graph.Acquisitions, ObservationGroups = graph.ObservationGroups };
         }
-        var pin = inputs.Providers.RequireUniformResourceProvider();
-        var id = Guid.Parse(pin.Instance.ToString());
-        var instance = await db.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.EnvironmentRecordId == source.EnvironmentRecordId, token);
-        var revision = await db.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.ProviderInstanceId == id &&
-            x.EnvironmentRecordId == source.EnvironmentRecordId && x.RevisionNumber == pin.Configuration.Value && x.IsSealed, token);
-        if (instance is null || revision is null || revision.ImplementationId != pin.Implementation.Value) return false;
-        var matches = codecs.Where(x => x.ProviderKindId == instance.ProviderKindId && x.ShapeId == revision.ConfigurationShapeId && x.PayloadFormatVersion == revision.PayloadFormatVersion).ToArray();
-        if (matches is not [var codec]) return false;
-        PreparedProviderConfiguration prepared;
-        try { prepared = codec.Encode(codec.Decode(revision.PayloadJson)); }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.Text.Json.JsonException) { return false; }
-        return prepared.PayloadJson == revision.PayloadJson && prepared.ImplementationId == pin.Implementation.Value &&
-            admission.ValidateCreationGraph(inputs.Configuration!.Manifest.Spec,
-                new(instance.ProviderKindId, revision.ConfigurationShapeId, revision.ImplementationId), inputs, prepared, graph);
+        return await ResourceProviderDispatch.ValidateCreationAsync(db, inputs, graph, codecs, admission, token);
     }
     internal static async Task<bool> CheckCredentialMetadataAsync(ManifestCatalogDbContext db, ReadinessMetadata metadata, CancellationToken token)
     {

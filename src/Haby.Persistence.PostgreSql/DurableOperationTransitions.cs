@@ -76,6 +76,33 @@ internal static class DurableOperationTransitions
     {
         if (!await PostgreSqlReuseVerificationScopes.BeforeAsync(db, Guid.Parse(key.DeploymentId.ToString()), key.Generation.Value,
             key.OperationId, PostgreSqlReuseVerificationScopes.Transition.Completion, token, attempt, verification)) return false;
+        return await ConfirmCoreAsync(db, key, attempt, at, observation, token, verification);
+    }
+
+    // The complete immutable group is verified before any member changes. The aggregate
+    // lock and owning transaction retain that proof through every atomic member transition.
+    internal static async Task<bool> ConfirmObservationGroupAsync(ManifestCatalogDbContext db,
+        IReadOnlyList<ObservationOperationConfirmation> members, DateTimeOffset at, CancellationToken token,
+        ResourceReuseValidationResult verification)
+    {
+        if (members.Count == 0 || db.Database.CurrentTransaction is null) return false;
+        var first = members[0].Key;
+        if (members.Any(x => x.Key.DeploymentId != first.DeploymentId || x.Key.Generation != first.Generation)) return false;
+        var deployment = Guid.Parse(first.DeploymentId.ToString());
+        var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == first.Generation.Value, token);
+        if (source is null) return false;
+        var group = DurableOperationGraphCodec.Decode(source.GraphJson).ObservationGroups.SingleOrDefault(x => x.Operations.Contains(first.OperationId));
+        if (group is null || group.Operations.Count != members.Count || !group.Operations.ToHashSet().SetEquals(members.Select(x => x.Key.OperationId)) ||
+            !await PostgreSqlReuseVerificationScopes.BeforeAsync(db, deployment, first.Generation.Value, null,
+                PostgreSqlReuseVerificationScopes.Transition.Aggregate, token, verification: verification)) return false;
+        foreach (var member in members)
+            if (!await ConfirmCoreAsync(db, member.Key, member.AttemptId, at, false, token)) return false;
+        return true;
+    }
+
+    private static async Task<bool> ConfirmCoreAsync(ManifestCatalogDbContext db, DurableOperationKey key, Guid attempt,
+        DateTimeOffset at, bool observation, CancellationToken token, ResourceReuseValidationResult? verification = null)
+    {
         var expected = observation ? nameof(DurableOperationState.NeedsAttention) : nameof(DurableOperationState.Dispatching);
         var outcome = observation ? nameof(DurableAttemptOutcome.Uncertain) : null;
         var row = await Operation(db, key).AsNoTracking().SingleOrDefaultAsync(token);

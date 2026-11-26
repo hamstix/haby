@@ -54,21 +54,9 @@ internal static class ResourceContinuity
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
             var inputs = Inputs(source);
-            var sourceProvider = inputs.Providers.RequireUniformResourceProvider();
-            var providerId = Guid.Parse(sourceProvider.Instance.ToString());
-            var provider = await db.ProviderConfigurationRevisions.AsNoTracking().SingleOrDefaultAsync(x => x.ProviderInstanceId == providerId &&
-                x.RevisionNumber == sourceProvider.Configuration.Value && x.EnvironmentRecordId == source.EnvironmentRecordId && x.IsSealed, token);
-            var instance = await db.ProviderInstances.AsNoTracking().SingleOrDefaultAsync(x => x.Id == providerId && x.EnvironmentRecordId == source.EnvironmentRecordId, token);
-            if (provider is null || instance is null || provider.ImplementationId != sourceProvider.Implementation.Value) return false;
-            var matches = codecs.Where(x => x.ProviderKindId == instance.ProviderKindId && x.ShapeId == provider.ConfigurationShapeId && x.PayloadFormatVersion == provider.PayloadFormatVersion).ToArray();
-            if (matches.Length != 1) return false;
-            PreparedProviderConfiguration configuration;
-            try { configuration = matches[0].Encode(matches[0].Decode(provider.PayloadJson)); }
-            catch (Exception e) when (e is ArgumentException or InvalidOperationException or JsonException) { return false; }
-            if (configuration.PayloadJson != provider.PayloadJson || configuration.ImplementationId != sourceProvider.Implementation.Value) return false;
+            var contexts = await ResourceProviderDispatch.CaptureAsync(db, inputs, codecs, token);
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
-            var adapter = new ProviderAdapterKey(instance.ProviderKindId, provider.ConfigurationShapeId, provider.ImplementationId);
-            if (!admission.Supports(graph) || !admission.ValidateCreationGraph(inputs.Configuration!.Manifest.Spec, adapter, inputs, configuration, graph)) return false;
+            if (!admission.Supports(graph) || !await ResourceProviderDispatch.ValidateCreationAsync(db, inputs, graph, codecs, admission, token)) return false;
             foreach (var requirement in reuse.ReusedResources.Where(x => x.SourceGeneration == generation))
             {
                 var management = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == requirement.ManagementId, token);
@@ -79,10 +67,12 @@ internal static class ResourceContinuity
                     if (!target.Configuration!.Manifest.Spec.Resources.TryGetValue(requirement.Resource, out var b) ||
                         a.Type != b.Type || a.ProviderRef != b.ProviderRef || a.DeletionPolicy != b.DeletionPolicy || !a.Properties.Equals(b.Properties)) return false;
                 }
-                if (!admission.CanReuseResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration, inputs)) return false;
+                var context = contexts[requirement.Resource];
+                if (!admission.CanReuseResource(inputs.Configuration!.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, context.Provider, target, context.Configuration, inputs)) return false;
             }
             foreach (var requirement in reuse.RetainedResources.Where(x => x.SourceGeneration == generation))
-                if (!admission.CanRetainResource(inputs.Configuration.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, adapter, target, configuration, inputs)) return false;
+                if (!admission.CanRetainResource(inputs.Configuration!.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource,
+                    contexts[requirement.Resource].Provider, target, contexts[requirement.Resource].Configuration, inputs)) return false;
             var all = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation).ToArrayAsync(token);
             var references = all.Select(x => new ConfirmedOperationOutput(OperationId.Create(x.OperationId), new(x.Contract, x.Key, x.Payload))).ToArray();
             foreach (var node in graph.Nodes)
@@ -95,7 +85,7 @@ internal static class ResourceContinuity
                     if (receipt is null || validator is not IResourceObservationOutputContract observation || !observation.ValidateObservationEvidence(
                         new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), receipt.Evidence)) return false;
                     if (validateMaterial)
-                        foreach (var request in inputs.Import!.Resources.Where(x => x.Credential is not null))
+                        foreach (var request in inputs.Acquisitions.Resources.Where(x => x.Credential is not null))
                             if (!await PostgreSqlApplicationCredentialReader.ConfirmImportedAsync(db, new(inputs.Environment,
                                 inputs.Revision.ApplicationRecordId, request.Resource), request.Credential!.Reference, token)) return false;
                 }
@@ -116,7 +106,7 @@ internal static class ResourceContinuity
                     var value = new ExternalOperationOutput(output.Contract, output.Key, output.Payload);
                     if (validators.Length != 1 || !validators[0].Validate(node, value) ||
                         !validators[0].ValidateReuse(new(ApplicationDeploymentId.Parse(deployment.ToString()), DeploymentGeneration.Create(generation), node.Id),
-                            new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), value, references, configuration, reservations)) return false;
+                            new(inputs, graph, node, inputs.Configuration!.Manifest.Spec), value, references, contexts[node.ResourceId].Configuration, reservations)) return false;
                 }
             }
         }
@@ -183,7 +173,7 @@ internal static class ResourceContinuity
             x.DeploymentId == deployment && x.Generation == baseline.Generation, token);
         if (previous?.Fingerprint != baseline.Fingerprint) return false;
         var accepted = previous.InternalEffects ? InternalResourceStage.Project(Inputs(previous)) : Inputs(previous);
-        var previousProvider = accepted.Providers.RequireUniformResourceProvider();
+
         var previousGraph = DurableOperationGraphCodec.Decode(previous.GraphJson);
         var inventory = accepted.Configuration!.Manifest.Spec.Resources.Keys.Concat(previousGraph.RetainedResources.Select(x => x.Resource)).ToHashSet();
         var requirements = graph.ReusedResources.Concat(graph.RetainedResources).ToArray();
@@ -201,6 +191,7 @@ internal static class ResourceContinuity
             var original = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == reuse.SourceGeneration, token);
             var originalInputs = Inputs(original);
             var originalProvider = originalInputs.Providers.Resource(reuse.Resource);
+            var previousProvider = accepted.Providers.Declaration.Spec.Resources.ContainsKey(reuse.Resource) ? accepted.Providers.Resource(reuse.Resource) : originalProvider;
             if (originalProvider.Instance != previousProvider.Instance || originalProvider.Configuration != previousProvider.Configuration ||
                 originalProvider.Implementation != previousProvider.Implementation) return false;
         }
