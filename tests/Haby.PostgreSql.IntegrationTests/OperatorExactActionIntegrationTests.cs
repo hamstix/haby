@@ -54,7 +54,8 @@ public sealed partial class OperatorHostIntegrationTests
         await using (var missing = OperatorHostApplication.Build(Arguments(scenario.Connection, scenario.CertificatePath), services =>
         {
             services.RemoveAll<IDurableActionHandler>().RemoveAll<IDurableActionAdmissionHandler>();
-            services.RemoveAll<IProviderConfigurationCodec>().RemoveAll<IProviderDeclarationAdapter>().RemoveAll<IProviderPreflightHandler>();
+            services.RemoveAll<IProviderConfigurationCodec>().RemoveAll<IProviderDeclarationAdapter>().RemoveAll<IProviderPreflightHandler>()
+                .RemoveAll<IProviderConnectionProbe>();
             services.AddSingleton<IPostgreSqlDatabaseCreateTarget>(noCalls);
         }))
         {

@@ -10,7 +10,7 @@ public sealed partial class ManifestOperatorService(ManifestContractCatalog cata
     IManifestRevisionQuery revisions, PreviewImportedDatabase preview,
     IDurableDeploymentPlanner planner, IOperatorDeploymentAdmission deploymentAdmission, DescribeWorkloadPlan workloadDescriptions, DescribeDurablePlan descriptions, IEnvironmentQuery environments, IDurableDesiredStateCommitter committer,
     IDurableOperationExecutor executor, DurableGenerationRunner generationRunner, IOperatorWorkloadSubmission workloadSubmission, IOperatorRolloutObservation rolloutObservation, OperationRecoveryAdapter recovery, EnvironmentAdministration environmentAdministration, SecretAdministration secretAdministration,
-    ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess,
+    ProviderAdministration providerAdministration, ProviderAccessAdministration providerAccess, ProviderConnectionStatus providerConnections,
     ISharedCredentialAdministration sharedCredentials,
     ProfileAssignmentAdministration assignments, ImportConfigurationProfile profileImporter, IConfigurationProfileRevisionQuery profileRevisions,
     IConfigurationDocumentStore configurationDocuments, IConfigurationAccessStore configurationAccess,

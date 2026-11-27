@@ -34,6 +34,7 @@ service ManifestOperator {
   rpc GetProfileRevision(ProfileRevisionRequest) returns (ProfileReply);
   rpc ListProfiles(ListProfilesRequest) returns (ListProfilesReply);
   rpc ListProfileRevisions(ListProfileRevisionsRequest) returns (ListProfileRevisionsReply);
+  rpc GetProviderConnectionStatus (ProviderConnectionStatusRequest) returns (ProviderConnectionStatusReply);
   rpc CheckProvider (CheckProviderRequest) returns (ProviderAccessReply);
   rpc GetProviderAlias (GetProviderAliasRequest) returns (ProviderAccessReply);
   rpc SetProviderAlias (SetProviderAliasRequest) returns (ProviderAccessReply);
@@ -1312,4 +1313,47 @@ message SharedCredentialDependencyMetadata {
 message SharedCredentialReply {
   string status = 1;
   repeated SharedCredentialBindingMetadata bindings = 2;
+}
+
+// Login-only observations; never preflight authorization or persisted health.
+message ProviderConnectionStatusRequest { string environment = 1; optional string name = 2; }
+enum ProviderConnectionStatusCode {
+  PROVIDER_CONNECTION_STATUS_CODE_UNSPECIFIED = 0;
+  PROVIDER_CONNECTION_STATUS_CODE_OBSERVED = 1;
+  PROVIDER_CONNECTION_STATUS_CODE_INVALID_REQUEST = 2;
+  PROVIDER_CONNECTION_STATUS_CODE_ENVIRONMENT_NOT_FOUND = 3;
+  PROVIDER_CONNECTION_STATUS_CODE_NOT_FOUND = 4;
+  PROVIDER_CONNECTION_STATUS_CODE_TOO_MANY_PROVIDERS = 5;
+  PROVIDER_CONNECTION_STATUS_CODE_STORAGE_UNAVAILABLE = 6;
+  PROVIDER_CONNECTION_STATUS_CODE_DEADLINE_EXCEEDED = 7;
+  PROVIDER_CONNECTION_STATUS_CODE_CAPACITY_UNAVAILABLE = 8;
+}
+enum ProviderConnectionOutcomeCode {
+  PROVIDER_CONNECTION_OUTCOME_CODE_UNSPECIFIED = 0;
+  PROVIDER_CONNECTION_OUTCOME_CODE_CONNECTED = 1;
+  PROVIDER_CONNECTION_OUTCOME_CODE_NOT_SELECTED = 2;
+  PROVIDER_CONNECTION_OUTCOME_CODE_UNSUPPORTED = 3;
+  PROVIDER_CONNECTION_OUTCOME_CODE_HANDLER_UNAVAILABLE = 4;
+  PROVIDER_CONNECTION_OUTCOME_CODE_REVISION_UNAVAILABLE = 5;
+  PROVIDER_CONNECTION_OUTCOME_CODE_CONFIGURATION_UNAVAILABLE = 6;
+  PROVIDER_CONNECTION_OUTCOME_CODE_SECRET_UNAVAILABLE = 7;
+  PROVIDER_CONNECTION_OUTCOME_CODE_AUTHENTICATION_FAILED = 8;
+  PROVIDER_CONNECTION_OUTCOME_CODE_AUTHENTICATION_UNAVAILABLE = 9;
+  PROVIDER_CONNECTION_OUTCOME_CODE_CONNECTION_UNAVAILABLE = 10;
+  PROVIDER_CONNECTION_OUTCOME_CODE_TLS_FAILED = 11;
+  PROVIDER_CONNECTION_OUTCOME_CODE_DEADLINE_EXCEEDED = 12;
+}
+message ProviderConnectionObservation {
+  string instance_id = 1;
+  optional string name = 2;
+  optional string alias = 3;
+  optional int64 revision = 4;
+  string observed_at = 5;
+  ProviderConnectionOutcomeCode outcome = 6;
+  optional ProviderConnectionDiagnosticCode diagnostic = 7;
+  bool server_certificate_validation_disabled = 8;
+}
+message ProviderConnectionStatusReply {
+  ProviderConnectionStatusCode status = 1;
+  repeated ProviderConnectionObservation items = 2;
 }
