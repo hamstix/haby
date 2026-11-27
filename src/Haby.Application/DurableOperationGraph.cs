@@ -99,6 +99,9 @@ public sealed class DurableOperationGraph : IEquatable<DurableOperationGraph>
             }
         }
     }
+    internal CorrectiveInventory? Correction { get; private init; }
+    internal DurableOperationGraph WithCorrection(CorrectiveInventory inventory) =>
+        new(Nodes, ReusedResources, Baseline, RetainedResources) { Import = Import, Acquisitions = Acquisitions, ObservationGroups = ObservationGroups, Correction = inventory };
     internal InitialRetirementInventory? Retirement { get; private init; }
     internal WorkloadUpdateInventory? WorkloadUpdate { get; private init; }
     internal DurableOperationGraph WithWorkloadUpdate(WorkloadUpdateInventory inventory) =>
@@ -228,7 +231,7 @@ public static class DurableOperationGraphCodec
         graph.ReusedResources.Count == 0 ? null : graph.ReusedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, r.Reintroduced)).ToArray(),
         graph.Baseline is { } b ? new BaselineDocument(b.Deployment.ToString(), b.Generation, b.Fingerprint) : null,
         graph.RetainedResources.Count == 0 ? null : graph.RetainedResources.Select(r => new ReuseDocument(r.Resource.Value, r.ManagementId, r.SourceGeneration, r.EvidenceFingerprint, false)).ToArray(), graph.Retirement?.Document, graph.WorkloadUpdate?.Document, ResourceImportIntentCodec.Encode(graph.Import), ResourceAcquisitionIntentCodec.Encode(graph.Acquisitions),
-        graph.ObservationGroups.Select(g => new ObservationGroupDocument(g.Id, (int)g.Mode, g.Operations.Select(x => x.Value).ToArray())).ToArray()), GraphJsonContext.Default.GraphDocument);
+        graph.ObservationGroups.Select(g => new ObservationGroupDocument(g.Id, (int)g.Mode, g.Operations.Select(x => x.Value).ToArray())).ToArray(), graph.Correction?.Document), GraphJsonContext.Default.GraphDocument);
     }
 
     public static DurableOperationGraph Decode(string json)
@@ -237,7 +240,7 @@ public static class DurableOperationGraphCodec
         {
             if (Encoding.UTF8.GetByteCount(json) > 2097152) throw new InvalidDataException("Operation graph exceeds bound.");
             var document = JsonSerializer.Deserialize(json, GraphJsonContext.Default.GraphDocument);
-            if (document is null || document.Version != 8 || document.Nodes is null || document.Retirement is not null && document.WorkloadUpdate is not null)
+            if (document is null || document.Version != 8 || document.Nodes is null || new object?[] { document.Retirement, document.WorkloadUpdate, document.Correction }.Count(x => x is not null) > 1)
                 throw new InvalidDataException("Unsupported operation graph format.");
             var graph = new DurableOperationGraph(document.Nodes.Select(n => new DurableOperationNode(OperationId.Create(n.Id),
                 ManifestLocalId.Create(n.Resource), new(new(ResourceTypeId.Create(n.ResourceContract),
@@ -264,7 +267,8 @@ public static class DurableOperationGraphCodec
                     Array.AsReadOnly(g.Operations.Select(OperationId.Create).ToArray()))).ToArray())
             };
             graph.ValidateObservationGroups();
-            return document.WorkloadUpdate is { } update ? graph.WithWorkloadUpdate(new(update)) :
+            return document.Correction is { } correction ? graph.WithCorrection(new(correction)) :
+                document.WorkloadUpdate is { } update ? graph.WithWorkloadUpdate(new(update)) :
                 document.Retirement is { } retirement ? graph.WithRetirement(new(retirement)) : graph;
         }
         catch (Exception e) when (e is JsonException or ArgumentException or NullReferenceException or FormatException)
@@ -291,7 +295,8 @@ internal sealed record GraphDocument(int Version, NodeDocument[] Nodes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReuseDocument[]? Retained = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InitialRetirementDocument? Retirement = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WorkloadUpdateDocument? WorkloadUpdate = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Import = null, string Acquisitions = "", ObservationGroupDocument[] Groups = null!);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Import = null, string Acquisitions = "", ObservationGroupDocument[] Groups = null!,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CorrectiveDocument? Correction = null);
 internal sealed record ReuseDocument(string Resource, Guid Management, long Generation, string Evidence,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Reintroduced = false);
 internal sealed record BaselineDocument(string Deployment, long Generation, string Fingerprint);

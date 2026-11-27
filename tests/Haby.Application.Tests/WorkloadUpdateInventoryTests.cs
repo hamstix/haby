@@ -52,4 +52,27 @@ public sealed class WorkloadUpdateInventoryTests
         };
         Assert.Throws<InvalidDataException>(() => new WorkloadUpdateInventory(document));
     }
+    [Fact]
+    public void Corrective_inventory_cannot_promote_unconfirmed_members_or_mutate_saved_authority()
+    {
+        var deployment = Guid.CreateVersion7(); var checkpoint = Guid.CreateVersion7(); var fingerprint = "v6:" + new string('A', 64);
+        var proof = ResourcesReadyCheckpointCodec.Encode(new(checkpoint, deployment, 1, fingerprint, DateTimeOffset.UtcNow, []));
+        var member = new CorrectiveMember("api", "main", "NeverConfirmedInitialCreate", null, null, null, null, null, null, null,
+            new("registry.example/app:bad", "registry.example/app:fixed"), ["settings"]);
+        var document = new CorrectiveDocument(1, deployment, 1, null, Guid.CreateVersion7(), Guid.CreateVersion7(), fingerprint,
+            checkpoint, proof, [member], [], [], [], [], []);
+        var inventory = new CorrectiveInventory(document);
+        var graph = new DurableOperationGraph([], baseline: new(ApplicationDeploymentId.Parse(deployment.ToString()), 1, fingerprint)).WithCorrection(inventory);
+        var encoded = DurableOperationGraphCodec.Encode(graph);
+        member.Documents[0] = "changed"; inventory.Document.Members[0].Documents[0] = "changed-again";
+        var read = DurableOperationGraphCodec.Decode(encoded);
+        Assert.Null(read.WorkloadUpdate); Assert.Null(read.Retirement);
+        Assert.Equal("settings", Assert.Single(read.Correction!.Document.Members).Documents[0]);
+        Assert.Equal(inventory.Fingerprint, read.Correction.Fingerprint);
+        Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { Members = [member with { State = "ConfirmedOwned" }] }));
+        Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { Members = [member with { Confirmation = new("foreign-uid", "registry.example/app:bad") }] }));
+        Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { ExpectedDesired = 2 }));
+        Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { LastApplied = 1 }));
+    }
+
 }

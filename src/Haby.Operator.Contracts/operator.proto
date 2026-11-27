@@ -53,6 +53,7 @@ service ManifestOperator {
   rpc GetRevision(GetRevisionRequest) returns (GetRevisionReply);
   rpc PreviewDatabase(PreviewDatabaseRequest) returns (PreviewDatabaseReply);
   rpc CreateChangeSet(CreateChangeSetRequest) returns (PlanningReply);
+  rpc CreateCorrectiveChangeSet(CreateCorrectiveChangeSetRequest) returns (PlanningReply);
   // Names are prepared on the server. This never accepts client-supplied OID attestations.
   rpc StageResourceImport(CreateResourceImportChangeSetRequest) returns (ResourceImportRequestReply);
   rpc CreateResourceImportChangeSet(CreateResourceImportChangeSetRequest) returns (ResourceImportRequestReply);
@@ -310,6 +311,35 @@ enum PlanningPrecondition {
   PLANNING_PRECONDITION_EXPECTED_ABSENCE = 1;
   PLANNING_PRECONDITION_EXPECTED_GENERATION = 2;
 }
+// Explicit planning intent only; accepting Commit remains unavailable until runtime activation.
+message CreateCorrectiveChangeSetRequest {
+  string environment_id = 1;
+  RevisionReference reference = 2;
+  string deployment_id = 3;
+  int64 expected_incomplete_desired_generation = 4;
+  // UUID request identity. An immutable retry returns the original ChangeSet, never new authority.
+  string request_id = 5;
+}
+message CorrectiveIntentSummary { string deployment_id = 1; int64 expected_incomplete_desired_generation = 2; }
+enum CorrectiveMemberState {
+  CORRECTIVE_MEMBER_STATE_UNSPECIFIED = 0;
+  CORRECTIVE_MEMBER_STATE_CONFIRMED_OWNED = 1;
+  CORRECTIVE_MEMBER_STATE_NEVER_CONFIRMED_INITIAL_CREATE = 2;
+}
+message CorrectiveMemberReview {
+  string component_id = 1; string workload_id = 2; CorrectiveMemberState state = 3;
+  optional string managed_identity = 4; optional int64 origin_generation = 5;
+  optional string operation_id = 6; optional string attempt_id = 7;
+  string previous_image = 8; string target_image = 9; repeated string documents = 10; optional string confirmed_object_identity = 11; optional string confirmed_image = 12;
+}
+message CorrectivePublicationReview { string permission_id = 1; string binding_id = 2; string revision_id = 3; bool revoked = 4; }
+message CorrectivePlanReview {
+  string deployment_id = 1; int64 expected_incomplete_desired_generation = 2; optional int64 last_applied_generation = 3;
+  string original_plan_id = 4; string original_change_set_id = 5; string resources_ready_checkpoint_id = 6;
+  string resources_ready_fingerprint = 7; repeated CorrectiveMemberReview members = 8;
+  repeated CorrectivePublicationReview inherited_publications = 9;
+  int32 confirmed_object_count = 10; int32 preparation_count = 11; string inventory_fingerprint = 12;
+}
 message CreateChangeSetRequest {
   // Logical lowercase kebab-case EnvironmentId, unique in this registry, never a UUID.
   string environment_id = 1;
@@ -345,6 +375,7 @@ message DurableChangeSetSummary {
   string created_at_utc = 5;
   string technical_actor_id = 6;
   optional int64 expected_generation = 7;
+  CorrectiveIntentSummary correction = 8;
 }
 message PlannedOperationSummary {
   optional string target_name = 5;
@@ -381,6 +412,7 @@ message DurablePlanSummary {
   repeated ReusedResourceSummary retained_resources = 19;
   repeated FrozenProviderInput provider_inputs = 21;
   WorkloadReview workload_description = 22;
+  CorrectivePlanReview correction = 23;
 }
 message ReusedResourceSummary {
   string resource_id = 1;

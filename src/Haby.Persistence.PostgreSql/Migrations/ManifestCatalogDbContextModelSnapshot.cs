@@ -689,6 +689,10 @@ namespace Haby.Persistence.PostgreSql.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("application_record_id");
 
+                    b.Property<string>("CorrectiveIntentJson")
+                        .HasColumnType("text")
+                        .HasColumnName("corrective_intent_json");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");

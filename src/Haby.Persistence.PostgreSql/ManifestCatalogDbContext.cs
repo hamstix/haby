@@ -297,6 +297,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
             entity.Property(row => row.ApplicationRecordId).HasColumnName("application_record_id");
             entity.Property(row => row.RevisionNumber).HasColumnName("revision_number");
             entity.Property(row => row.ImportIntentJson).HasColumnName("import_intent_json");
+            entity.Property(row => row.CorrectiveIntentJson).HasColumnName("corrective_intent_json");
             entity.Property(row => row.AcquisitionIntentJson).HasColumnName("acquisition_intent_json");
             entity.Property(row => row.ExpectedAbsence).HasColumnName("expected_absence");
             entity.Property(row => row.ExpectedGeneration).HasColumnName("expected_generation");
@@ -550,6 +551,7 @@ public sealed partial class ManifestCatalogDbContext(DbContextOptions<ManifestCa
 
 internal sealed class DurableChangeSetRow
 {
+    public string? CorrectiveIntentJson { get; set; }
     public string? ImportIntentJson { get; set; }
     public string? AcquisitionIntentJson { get; set; }
     public Guid Id { get; set; }

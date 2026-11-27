@@ -87,6 +87,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         await using var db = await contexts.CreateDbContextAsync(token);
         var row = await db.DurablePlans.AsNoTracking().SingleOrDefaultAsync(x => x.Id == Guid.Parse(id.ToString()), token);
         if (row is null) return DurablePlanCurrentStatus.PlanNotFound;
+        if (DurableOperationGraphCodec.Decode(row.GraphJson).Correction is not null)
+            return await CheckCorrectivePlanAsync(db, row, handlers, token);
         if (!row.InternalEffects) return await CheckPlanAsync(id, token);
         await using var transaction = await db.Database.BeginTransactionAsync(token);
         if (clock.GetUtcNow() >= row.ExpiresAt) return DurablePlanCurrentStatus.Expired;

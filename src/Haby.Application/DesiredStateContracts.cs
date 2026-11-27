@@ -38,6 +38,7 @@ public abstract record DeploymentPrecondition
 public sealed record DeploymentChangeSet(DeploymentChangeSetId Id, EnvironmentRecordId EnvironmentRecordId,
     DeploymentChangeSetMember Member, DateTimeOffset CreatedAt, string ActorId)
 {
+    public CorrectiveChangeSetIntent? Correction { get; init; }
     public ResourceImportIntent? Import { get; init; }
     public ResourceAcquisitionIntent? Acquisitions { get; init; }
 }

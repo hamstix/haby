@@ -96,7 +96,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
 
     private async Task<DeploymentChangeSet> AddChangeSetAsync(ManifestCatalogDbContext context, EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
-        ResourceImportIntent? intent, string actorId, CancellationToken token, ResourceAcquisitionIntent? acquisitions = null)
+        ResourceImportIntent? intent, string actorId, CancellationToken token, ResourceAcquisitionIntent? acquisitions = null, CorrectiveChangeSetIntent? correction = null, Guid? requestId = null)
     {
         var accepted = PostgreSqlManifestImportStore.Rehydrate(await context.Revisions.AsNoTracking().SingleAsync(x =>
             x.ApplicationRecordId == Guid.Parse(application.ToString()) && x.LocalRevisionNumber == revision.RevisionNumber.Value, token));
@@ -115,11 +115,12 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         }
         acquisitions ??= intent is null ? ResourceAcquisitionIntent.Provision(accepted.Declaration.Spec.Resources.Keys) : ResourceAcquisitionIntent.Import(intent);
         acquisitions.Validate(accepted.Declaration.Spec);
-        var id = DeploymentChangeSetId.New();
+        var id = requestId is { } request ? DeploymentChangeSetId.Parse(request.ToString()) : DeploymentChangeSetId.New();
         var createdAt = clock.GetUtcNow();
         context.DurableChangeSets.Add(new DurableChangeSetRow
         {
             Id = Guid.Parse(id.ToString()),
+            CorrectiveIntentJson = CorrectiveIntentCodec.Encode(correction),
             ImportIntentJson = ResourceImportIntentCodec.Encode(intent),
             AcquisitionIntentJson = ResourceAcquisitionIntentCodec.Encode(acquisitions),
             EnvironmentRecordId = Guid.Parse(environment.ToString()),
@@ -132,7 +133,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         });
         return new DeploymentChangeSet(id, environment,
             new DeploymentChangeSetMember(application, revision, precondition), createdAt, actorId)
-        { Import = intent, Acquisitions = acquisitions };
+        { Correction = correction, Import = intent, Acquisitions = acquisitions };
     }
 
     public ValueTask<DurablePlanResult> CreatePlanAsync(DeploymentChangeSetId changeSetId,
@@ -176,6 +177,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (row.ImportIntentJson is not null && !await ImportAdmissionAuthority.CanPlanAsync(context, row, correction, cancellationToken))
             return new(DurablePlanStatus.ChangeSetStale);
         if (correction is not null) baseline = null;
+        if (row.CorrectiveIntentJson is not null)
+            return await CreateCorrectivePlanAsync(context, transaction, row, baseline, actorId, handlers ?? [], cancellationToken);
         if (baseline is not null && baseline.AppliedGeneration != baseline.DesiredGeneration)
             return new(DurablePlanStatus.PlanInputUnavailable);
         if (baseline is not null && !await HasAppliedBaselineProofAsync(context, baseline.Id, baseline.DesiredGeneration, cancellationToken))
@@ -381,6 +384,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         try { plan = await FindPlanAsync(id, cancellationToken); }
         catch (InvalidDataException) { return DurablePlanCurrentStatus.PlanInputUnavailable; }
         if (plan is null) return DurablePlanCurrentStatus.PlanNotFound;
+        if (plan.Graph.Correction is not null) return DurablePlanCurrentStatus.PlanInputUnavailable;
         if (clock.GetUtcNow() >= plan.ExpiresAt) return DurablePlanCurrentStatus.Expired;
         if (plan.ClosedAt is not null) return DurablePlanCurrentStatus.Closed;
         (DurablePlanStatus Status, DurablePlanningInputs? Inputs) result;
@@ -537,7 +541,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             new DeploymentChangeSetMember(application, revision, row.ExpectedAbsence ? new DeploymentPrecondition.ExpectedAbsence() :
                 new DeploymentPrecondition.ExpectedGeneration(DeploymentGeneration.Create(row.ExpectedGeneration ?? throw new InvalidDataException()))),
             row.CreatedAt, row.ActorId)
-        { Import = ResourceImportIntentCodec.Decode(row.ImportIntentJson), Acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()) };
+        { Correction = CorrectiveIntentCodec.Decode(row.CorrectiveIntentJson), Import = ResourceImportIntentCodec.Decode(row.ImportIntentJson), Acquisitions = ResourceAcquisitionIntentCodec.Decode(row.AcquisitionIntentJson ?? throw new InvalidDataException()) };
     }
 
     private static DurablePlan ToPlan(DurablePlanRow row, DateTimeOffset? closedAt, string? closedByActorId)

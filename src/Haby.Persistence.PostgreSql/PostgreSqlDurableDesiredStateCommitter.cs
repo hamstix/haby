@@ -49,6 +49,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         var change = await context.DurableChangeSets.AsNoTracking()
             .SingleOrDefaultAsync(row => row.Id == changeId, cancellationToken);
         if (change is null) return new DurableCommitResult.ChangeSetNotFound();
+        // Corrective planning cannot enter an accepting path before complete runtime activation.
+        if (change.CorrectiveIntentJson is not null) return new DurableCommitResult.UnsupportedShape();
         var lockKey = $"haby-deployment:{change.EnvironmentRecordId:N}:{change.ApplicationRecordId:N}";
         await context.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", cancellationToken);
