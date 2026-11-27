@@ -16,6 +16,27 @@ namespace Haby.Kubernetes.Tests;
 
 public sealed class TlsTransportTests
 {
+    [Fact]
+    public async Task Connection_status_uses_real_HTTPS_authentication_and_distinguishes_TLS_and_authentication_failures()
+    {
+        using var ca = TlsPolicyTests.Authority(); using var foreign = TlsPolicyTests.Authority(); using var leaf = TlsPolicyTests.Leaf(ca);
+        await using var endpoint = await LocalTlsEndpoint.Start(leaf);
+        var configuration = Configuration(endpoint.Address, ca.ExportCertificatePem(), new(KubernetesTlsMode.CustomCa, KubernetesRevocationMode.NoCheck));
+        var probe = new KubernetesConnectionProbe(new(), new FixtureSecrets());
+        var context = new ProviderConnectionContext(EnvironmentRecordId.New(), ProviderInstanceId.New(), ProviderConfigurationRevisionNumber.Create(1));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Assert.Equal(ProviderConnectionOutcome.Connected, (await probe.ProbeTypedAsync(context, configuration, timeout.Token)).Outcome);
+        Assert.Equal(1, endpoint.Requests); Assert.True(endpoint.Authenticated);
+        var tls = await probe.ProbeTypedAsync(context, configuration with { ServerCaPem = foreign.ExportCertificatePem() }, timeout.Token);
+        Assert.Equal(ProviderConnectionOutcome.TlsFailed, tls.Outcome);
+        Assert.Equal(ProviderConnectionDiagnostic.TlsTrustFailed, tls.Diagnostic);
+        Assert.Equal(1, endpoint.Requests);
+        await using var denied = await LocalTlsEndpoint.Start(leaf, 401);
+        Assert.Equal(ProviderConnectionOutcome.AuthenticationFailed, (await probe.ProbeTypedAsync(context,
+            configuration with { Endpoint = denied.Address }, timeout.Token)).Outcome);
+        Assert.Equal(1, denied.Requests);
+    }
+
     [Theory]
     [InlineData("access")]
     [InlineData("execution")]

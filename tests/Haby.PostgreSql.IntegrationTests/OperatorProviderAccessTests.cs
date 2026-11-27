@@ -30,7 +30,8 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
                 .AddSingleton(evidence).AddSingleton<SharedSampleCodec>()
                 .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<SharedSampleCodec>())
                 .AddSingleton<IProviderDeclarationAdapter, SharedSampleAdapter>()
-                .AddSingleton<IProviderPreflightHandler, SharedSamplePreflight>());
+                .AddSingleton<IProviderPreflightHandler, SharedSamplePreflight>()
+                .AddSingleton<IProviderConnectionProbe, SharedSampleConnectionProbe>());
         await host.Services.GetRequiredService<ManifestCatalogMigrationInitializer>().MigrateAsync();
         await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
         using var channel = GrpcChannel.ForAddress(host.Urls.Single());
@@ -52,9 +53,13 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
             evidence.BeforeResolve = null;
             Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(Set(1, 2))).Status);
         };
-        Assert.Equal(ProviderPreflightStatus.Ready, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
+        var observed = await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot", Name = "sample" });
+        Assert.Equal(ProviderConnectionStatusCode.Observed, observed.Status);
+        Assert.Equal(ProviderConnectionOutcomeCode.Connected, Assert.Single(observed.Items).Outcome);
+        Assert.Equal(1, observed.Items[0].Revision);
         Assert.Equal(expected, evidence.Context);
         Assert.Equal(2, (await client.GetProviderAliasAsync(new() { Environment = "pilot", Alias = "sample.primary" })).Binding.Revision);
+        Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(Set(2, 1))).Status);
         var scope = evidence.Scope!;
         foreach (var wrong in new Func<SharedCredentialScope, SharedCredentialScope>[]
         {
@@ -65,12 +70,12 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         })
         {
             evidence.ChangeScope = wrong;
-            Assert.Equal(ProviderPreflightStatus.SecretUnavailable, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
+            Assert.Equal(ProviderConnectionOutcomeCode.SecretUnavailable, Assert.Single((await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot", Name = "sample" })).Items).Outcome);
         }
         evidence.ChangeScope = null;
         Assert.Equal(SharedCredentialRevocationOutcome.Revoked,
             await host.Services.GetRequiredService<ISharedCredentialAdministration>().RevokeAsync(scope, "revoker", default));
-        Assert.Equal(ProviderPreflightStatus.SecretUnavailable, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
+        Assert.Equal(ProviderConnectionOutcomeCode.SecretUnavailable, Assert.Single((await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot", Name = "sample" })).Items).Outcome);
         await host.StopAsync();
     }
 
@@ -108,6 +113,24 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         public bool Equivalent(object previous, object candidate) => _inner.Equivalent(previous, candidate);
         public bool SameEndpoint(object previous, object candidate) => _inner.SameEndpoint(previous, candidate);
     }
+    private sealed class SharedSampleConnectionProbe(SharedSampleCodec codec, ISharedCredentialSystemAccess system,
+        SharedPreflightEvidence evidence) : ProviderConnectionProbe<CredentialSampleConfiguration>(codec)
+    {
+        public override IReadOnlyList<ProviderAdapterKey> Keys { get; } =
+            [new("credential-sample/v1", "credential-sample.configuration/v1", "credential-sample.impl/v1")];
+        public override async ValueTask<ProviderConnectionResult> ProbeTypedAsync(ProviderConnectionContext context,
+            CredentialSampleConfiguration configuration, CancellationToken token)
+        {
+            if (evidence.BeforeResolve is { } before) await before();
+            evidence.Context = new(context.Environment, context.Provider, context.Revision);
+            var scope = new SharedCredentialScope(context.Environment, context.Provider, context.Revision, "credential",
+                SharedCredentialUse.SystemAccess, new(SecretId.Parse(configuration.SecretId), SecretVersionId.Parse(configuration.SecretVersionId)));
+            evidence.Scope = scope;
+            using var material = await system.ResolveAsync(evidence.ChangeScope?.Invoke(scope) ?? scope, 100, token);
+            return new(material is null ? ProviderConnectionOutcome.SecretUnavailable : ProviderConnectionOutcome.Connected);
+        }
+    }
+
     private sealed class SharedSamplePreflight(SharedSampleCodec codec, ISharedCredentialSystemAccess system,
         SharedPreflightEvidence evidence) : ProviderPreflightHandler<CredentialSampleConfiguration>(codec)
     {
@@ -153,6 +176,9 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
             sampleId = (await client.GetProviderAsync(new() { Environment = "pilot", Name = "sample" })).Provider.InstanceId;
             var before = await Snapshot(connection);
             Assert.Equal(ProviderPreflightStatus.Ready, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "pg-main", Revision = 1 })).Preflight);
+            Assert.Equal(ProviderConnectionOutcomeCode.NotSelected, Assert.Single((await client.GetProviderConnectionStatusAsync(
+                new() { Environment = "pilot", Name = "pg-main" })).Items).Outcome);
+            Assert.Equal(ProviderConnectionStatusCode.NotFound, (await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot", Name = "missing" })).Status);
             Assert.Equal(ProviderPreflightStatus.Ready, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
             Assert.Equal(before, await Snapshot(connection));
             foreach (var request in new[] {
@@ -193,6 +219,16 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
                 Expected = new() { InstanceId = sampleId, Revision = current.Revision }
             };
             Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(switchInstance)).Status);
+            var statusBefore = await Snapshot(connection);
+            var pgStatus = await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot", Name = "pg-main" });
+            Assert.Equal(ProviderConnectionOutcomeCode.Connected, Assert.Single(pgStatus.Items).Outcome);
+            Assert.Equal(1, pgStatus.Items[0].Revision);
+            Assert.Equal(statusBefore, await Snapshot(connection));
+            var allStatus = await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot" });
+            Assert.Contains(allStatus.Items, x => x.Name == "pg-main" && x.Outcome == ProviderConnectionOutcomeCode.Connected);
+            Assert.Contains(allStatus.Items, x => x.Name == "sample" && x.Outcome == ProviderConnectionOutcomeCode.NotSelected);
+
+
             await ExerciseNative(host.Urls.Single(), pg.Provider.InstanceId);
             Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(new()
             { Environment = "pilot", Alias = "sample.saved", Target = Target("sample", 2), ExpectedAbsent = true })).Status);
@@ -261,6 +297,16 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         {
             var reply = await client.CheckProviderAsync(new() { Environment = "pilot", Name = test.Item1, Revision = test.Item2 });
             Assert.Equal(test.Item3, reply.Preflight);
+            var exact = (await client.GetProviderAsync(new() { Environment = "pilot", Name = test.Item1, Revision = test.Item2 })).Provider;
+            var status = await host.Services.GetRequiredService<ExactProviderConnectionProbe>().ProbeAsync(new(
+                EnvironmentRecordId.Parse(exact.EnvironmentRecordId), ProviderInstanceId.Parse(exact.InstanceId), ProviderConfigurationRevisionNumber.Create(test.Item2)), default);
+            Assert.Equal(test.Item3 switch
+            {
+                ProviderPreflightStatus.AuthenticationFailed => ProviderConnectionOutcome.AuthenticationFailed,
+                ProviderPreflightStatus.ServerUnavailable => ProviderConnectionOutcome.ConnectionUnavailable,
+                _ => ProviderConnectionOutcome.Connected
+            }, status.Outcome); // A LOGIN without CREATEDB is connected, never management-ready.
+
             Assert.Equal(test.Item3 == ProviderPreflightStatus.Ready ? ProviderAccessStatus.Ready : ProviderAccessStatus.PreflightFailed, reply.Status);
             Assert.DoesNotContain(admin.Password!, reply.ToString());
             Assert.DoesNotContain(password, reply.ToString());
@@ -405,6 +451,7 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
             foreach (var format in new[] { "text", "json" })
                 foreach (var command in new[] {
                     new[] { "provider", "check", "pg-main", "--revision", "1", "--environment", "pilot" },
+                    new[] { "provider", "status", "pg-main", "--environment", "pilot" },
                     new[] { "provider", "alias", "get", "sample.primary", "--environment", "pilot" },
                     new[] { "provider", "alias", "set", "sample.primary", "--provider", "pg-main", "--revision", "1", "--expected-provider", "pg-main", "--expected-revision", "1", "--environment", "pilot" } })
                 {
@@ -419,7 +466,7 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
                     Assert.Equal(0, process.ExitCode);
                     Assert.Empty(await stderr);
                     var text = await stdout;
-                    if (command[1] == "alias") Assert.Contains(instance, text);
+                    if (command[1] is "alias" or "status") Assert.Contains(instance, text);
                     Assert.DoesNotContain("Password", text);
                     if (format == "json") { using var json = JsonDocument.Parse(text); Assert.Equal(1, json.RootElement.GetProperty("formatVersion"u8).GetInt32()); }
                 }

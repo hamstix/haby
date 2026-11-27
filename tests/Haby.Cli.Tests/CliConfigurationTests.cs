@@ -83,6 +83,7 @@ public sealed class CliConfigurationTests
         public Task<ProfileAssignmentReply> ApplyProfileAssignmentAsync(ApplyProfileAssignmentRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProfileReply> GetProfileRevisionAsync(ProfileRevisionRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
 
+        public Task<ProviderConnectionStatusReply> GetProviderConnectionStatusAsync(ProviderConnectionStatusRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProviderAccessReply> GetProviderAliasAsync(GetProviderAliasRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProviderAccessReply> SetProviderAliasAsync(SetProviderAliasRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();

@@ -291,6 +291,18 @@ public static class OperatorHostApplication
         builder.Services.AddSingleton<IProviderRevisionPreflight, ExactProviderRevisionPreflight>();
         builder.Services.AddPostgreSqlProviderAliasStore();
         builder.Services.AddSingleton<ProviderAccessAdministration>();
+        builder.Services.AddSingleton<IProviderConnectionSelectionQuery, PostgreSqlProviderConnectionSelectionQuery>();
+        builder.Services.AddSingleton<IProviderConnectionProbe, PostgreSqlConnectionProbe>();
+        builder.Services.AddSingleton<IProviderConnectionProbe, KubernetesConnectionProbe>();
+        builder.Services.AddSingleton<ProviderConnectionProbeRegistry>();
+        builder.Services.AddSingleton<ExactProviderConnectionProbe>();
+        builder.Services.AddSingleton(new ProviderConnectionStatusOptions
+        {
+            MaximumProviders = builder.Configuration.GetValue<int?>("Haby:ProviderStatus:MaximumProviders") ?? 128,
+            ProbeTimeout = builder.Configuration.GetValue<TimeSpan?>("Haby:ProviderStatus:ProbeTimeout") ?? TimeSpan.FromSeconds(10),
+            RequestTimeout = builder.Configuration.GetValue<TimeSpan?>("Haby:ProviderStatus:RequestTimeout") ?? TimeSpan.FromSeconds(30)
+        });
+        builder.Services.AddSingleton<ProviderConnectionStatus>();
         builder.Services.AddSingleton<IProviderIdentityQuery, PostgreSqlProviderIdentityQuery>();
         builder.Services.AddSingleton(_ => certificateOwner);
         configureServices?.Invoke(builder.Services, builder.Configuration);
@@ -300,6 +312,7 @@ public static class OperatorHostApplication
         _ = app.Services.GetRequiredService<ProviderDeclarationRegistry>();
         _ = app.Services.GetRequiredService<IProviderConfigurationStore>();
         _ = app.Services.GetRequiredService<ProviderPreflightRegistry>();
+        _ = app.Services.GetRequiredService<ProviderConnectionProbeRegistry>();
         _ = app.Services.GetRequiredService<DurableActionRegistry>();
         HostCatalogComposition.Validate(app.Services);
         app.UseRouting();

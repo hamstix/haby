@@ -42,6 +42,15 @@ internal static class ProviderCommands
                 { Environment = env, Name = parse.GetRequiredValue(revisionName), Revision = parse.GetValue(number) }, ct)), token));
         revisions.Subcommands.Add(revisionGet);
         group.Subcommands.Add(revisions);
+        var statusName = new Argument<string?>("name") { Arity = ArgumentArity.ZeroOrOne };
+        var status = new Command("status", "Observe bounded connectivity, configured TLS and SYSTEM authentication only.") { statusName };
+        status.SetAction((parse, token) => context.ExecuteSecretAsync(parse.GetValue(environment), async (client, env, ct) =>
+        {
+            var request = new ProviderConnectionStatusRequest { Environment = env };
+            if (parse.GetValue(statusName) is { } selectedName) request.Name = selectedName;
+            return context.PrintProviderConnections(await client.GetProviderConnectionStatusAsync(request, ct));
+        }, token));
+        group.Subcommands.Add(status);
         var checkName = new Argument<string>("name");
         var checkRevision = new Option<long>("--revision") { Required = true };
         var check = new Command("check", "Check one exact saved revision without external mutations.") { checkName, checkRevision };

@@ -8,6 +8,26 @@ namespace Haby.Cli.Tests;
 
 public sealed class CliCommandTests
 {
+    [Theory]
+    [InlineData(false, "text")]
+    [InlineData(true, "json")]
+    public async Task Provider_status_resolves_all_or_one_only_through_the_API_and_preserves_failure_exit(bool one, string format)
+    {
+        var factory = new FakeFactory(); using var output = new StringWriter(); using var error = new StringWriter();
+        var cli = new CliApplication(new Endpoint("http://localhost"), factory, output, error, configEnvironment: new MissingConfig());
+        var arguments = new List<string> { "provider", "status" };
+        if (one) arguments.Add("primary");
+        arguments.AddRange(["--environment", "staging", "-o", format]);
+        Assert.Equal(1, await cli.RunAsync(arguments.ToArray()));
+        Assert.Equal("staging", factory.Client.ConnectionRequest!.Environment);
+        Assert.Equal(one, factory.Client.ConnectionRequest.HasName);
+        if (one) Assert.Equal("primary", factory.Client.ConnectionRequest.Name);
+        Assert.Contains("authenticationFailed", output.ToString());
+        Assert.Contains("019a2b70-1234-7123-8123-123456789abc", output.ToString());
+        Assert.Empty(error.ToString());
+        if (format == "json") { using var json = JsonDocument.Parse(output.ToString()); Assert.Equal("provider status", json.RootElement.GetProperty("command").GetString()); }
+    }
+
     [Fact]
     public async Task Import_correction_cannot_ignore_committed_flags_when_expected_uncommitted_is_selected()
     {
@@ -100,6 +120,22 @@ public sealed class CliCommandTests
         public Task<ProfileAssignmentReply> ApplyProfileAssignmentAsync(ApplyProfileAssignmentRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProfileReply> GetProfileRevisionAsync(ProfileRevisionRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
 
+        public ProviderConnectionStatusRequest? ConnectionRequest;
+        public Task<ProviderConnectionStatusReply> GetProviderConnectionStatusAsync(ProviderConnectionStatusRequest request, CancellationToken cancellationToken)
+        {
+            ConnectionRequest = request;
+            var reply = new ProviderConnectionStatusReply { Status = ProviderConnectionStatusCode.Observed };
+            reply.Items.Add(new ProviderConnectionObservation
+            {
+                InstanceId = "019a2b70-1234-7123-8123-123456789abc",
+                Name = "primary",
+                Alias = "selected",
+                Revision = 7,
+                ObservedAt = DateTimeOffset.UtcNow.ToString("O"),
+                Outcome = ProviderConnectionOutcomeCode.AuthenticationFailed
+            });
+            return Task.FromResult(reply);
+        }
         public Task<ProviderAccessReply> CheckProviderAsync(CheckProviderRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProviderAccessReply> GetProviderAliasAsync(GetProviderAliasRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ProviderAccessReply> SetProviderAliasAsync(SetProviderAliasRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
