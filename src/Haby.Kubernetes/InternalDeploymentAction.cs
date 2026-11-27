@@ -9,10 +9,24 @@ namespace Haby.Kubernetes;
 /// <summary>Internal exact CREATE or bounded same-identity UPDATE adapter. The UPDATE
 /// registration requires catalog-verified original inputs and generation authority.</summary>
 internal sealed class InternalDeploymentAction(ISecretStore secrets,
-    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null, bool update = false, Action<DeploymentRecipientDiagnostic>? recipientDiagnostic = null) : IInternalActionHandler, IInternalReadinessHandler, IInternalWorkloadUpdatePlanner, IInternalRecipientObserver
+    Func<KubernetesConnection, DeploymentKernel>? fixtureKernel = null, bool update = false, Action<DeploymentRecipientDiagnostic>? recipientDiagnostic = null) : IInternalActionHandler, IInternalReadinessHandler, IInternalWorkloadUpdatePlanner, IInternalRecipientObserver, IInternalWorkloadCorrectionPlanner
 {
     public DurableActionPayload CaptureUpdate(InternalActionContext previous, DurablePlanningInputs target, string targetVersion, string intent, string receipt) =>
         DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(previous, target, targetVersion, intent, receipt));
+    public CorrectiveConfirmedObject CaptureConfirmedObject(InternalActionContext previous, string intent, string receipt)
+    {
+        var captured = DeploymentImageUpdate.Capture(previous, previous.Inputs, previous.ApplicationVersion, intent, receipt);
+        return new(captured.Uid, captured.PreviousImage);
+    }
+    public CorrectiveImageDelta CaptureCorrection(DurablePlanningInputs previous, string previousVersion,
+        DurablePlanningInputs target, string targetVersion, ProviderInput.Workload subject)
+    {
+        if (!WorkloadUpdateInputs.Same(previous, target)) throw new InvalidDataException("Nonimage corrective delta refused.");
+        var old = Resolve(previous, previousVersion, subject);
+        var next = Resolve(target, targetVersion, subject);
+        DeploymentIntents.ValidatePreparation(next);
+        return new(old.ImageReference, next.ImageReference);
+    }
     internal const string Create = "haby.kubernetes.deployment-create/v1";
     internal const string Update = "haby.kubernetes.deployment-update/v1";
     public bool UpdatesObject => update;

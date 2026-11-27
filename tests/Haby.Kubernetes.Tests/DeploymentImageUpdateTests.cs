@@ -119,6 +119,19 @@ public sealed class DeploymentImageUpdateTests
         Assert.False(WorkloadUpdateInputs.Same(context.Inputs, target));
     }
 
+    [Fact]
+    public void Corrective_image_capture_compares_exact_inputs_without_inventing_a_member_receipt()
+    {
+        var context = InternalDeploymentPlacementTests.Contexts(false)[0];
+        var target = Target(context, root => Properties(root)["image"]!["members"]!["reference"] = Value("registry.example/app:corrected"));
+        IInternalWorkloadCorrectionPlanner planner = new InternalDeploymentAction(null!);
+        var captured = planner.CaptureCorrection(context.Inputs, context.ApplicationVersion, target, "corrected", (ProviderInput.Workload)context.Subject);
+        Assert.Equal("registry.example/app:v1", captured.PreviousImage);
+        Assert.Equal("registry.example/app:corrected", captured.TargetImage);
+        var changed = Target(context, root => Properties(root)["containerName"] = Value("different"));
+        Assert.Throws<InvalidDataException>(() => planner.CaptureCorrection(context.Inputs, context.ApplicationVersion, changed, "corrected", (ProviderInput.Workload)context.Subject));
+    }
+
     private static JsonObject Value(string text) => new() { ["kind"] = "string", ["value"] = text };
     private static JsonObject Properties(JsonNode root) => root["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["members"]!.AsObject();
     private static DurablePlanningInputs Target(InternalActionContext context, Action<JsonNode> change, bool rebuildProviders = false)

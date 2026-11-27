@@ -46,8 +46,23 @@ public sealed class ProviderConnectionStatusTests
         fixture.Probe.Run = async (_, token) => { await Task.Delay(Timeout.Infinite, token); return new(ProviderConnectionOutcome.Connected); };
         var result = await fixture.Service.ObserveAsync("staging", "selected", default);
         Assert.Equal(ProviderConnectionOutcome.DeadlineExceeded, result.Items[0].Result.Outcome);
-        using var cancellation = new CancellationTokenSource(5);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await fixture.Service.ObserveAsync("staging", "selected", cancellation.Token));
+        var caller = new Fixture();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        caller.Probe.Run = async (_, token) =>
+        {
+            entered.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            return new(ProviderConnectionOutcome.Connected);
+        };
+        using var cancellation = new CancellationTokenSource();
+        var observing = caller.Service.ObserveAsync("staging", "selected", cancellation.Token).AsTask();
+        // These bounds only detect a hung test; cancellation is ordered by probe entry.
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(cancellation.IsCancellationRequested);
+        cancellation.Cancel();
+        var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await observing.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Equal(cancellation.Token, canceled.CancellationToken);
         fixture.Probe.Run = (_, _) => throw new InvalidDataException("password=private");
         result = await fixture.Service.ObserveAsync("staging", "selected", default);
         Assert.Equal(ProviderConnectionOutcome.ConfigurationUnavailable, result.Items[0].Result.Outcome);

@@ -77,6 +77,10 @@ public interface IDurableDeploymentPlanner
         string actorId, CancellationToken cancellationToken) =>
         ValueTask.FromResult(new DurableChangeSetCreateResult(DurableChangeSetCreateStatus.ImportNotSupported));
 
+    ValueTask<DurableChangeSetCreateResult> CreateCorrectiveChangeSetAsync(EnvironmentRecordId environment,
+        ApplicationRecordId application, ManifestRevisionRef revision, CorrectiveChangeSetIntent correction, Guid requestId,
+        string actor, CancellationToken token) => ValueTask.FromResult(new DurableChangeSetCreateResult(DurableChangeSetCreateStatus.UnsupportedShape));
+
     ValueTask<DurableChangeSetCreateResult> CreateChangeSetAsync(EnvironmentRecordId environment,
         ApplicationRecordId application, ManifestRevisionRef revision, DeploymentPrecondition precondition,
         string actorId, CancellationToken cancellationToken);

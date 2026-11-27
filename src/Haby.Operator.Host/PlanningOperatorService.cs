@@ -7,6 +7,40 @@ namespace Haby.Operator.Host;
 
 public sealed partial class ManifestOperatorService
 {
+    public override async Task<PlanningReply> CreateCorrectiveChangeSet(CreateCorrectiveChangeSetRequest request, ServerCallContext context)
+    {
+        context.CancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var key = EnvironmentId.Create(request.EnvironmentId);
+            if (request.Reference is null || !Guid.TryParseExact(request.RequestId, "D", out var requestId) || requestId == Guid.Empty)
+                return Result(PlanningStatus.InvalidRequest);
+            var revision = ManifestRevisionRef.Create(ApplicationRecordId.Parse(request.Reference.ApplicationRecordId), ManifestRevisionNumber.Create(request.Reference.RevisionNumber));
+            var intent = new CorrectiveChangeSetIntent(ApplicationDeploymentId.Parse(request.DeploymentId), DeploymentGeneration.Create(request.ExpectedIncompleteDesiredGeneration));
+            var environment = await environments.FindAsync(key, context.CancellationToken);
+            if (environment is null) return Result(PlanningStatus.EnvironmentNotFound);
+            var created = await planner.CreateCorrectiveChangeSetAsync(environment, revision.ApplicationRecordId, revision, intent, requestId, Actor, context.CancellationToken);
+            var status = created.Status switch
+            {
+                DurableChangeSetCreateStatus.Created => PlanningStatus.Created,
+                DurableChangeSetCreateStatus.EnvironmentNotFound => PlanningStatus.EnvironmentNotFound,
+                DurableChangeSetCreateStatus.RevisionNotFound => PlanningStatus.RevisionNotFound,
+                DurableChangeSetCreateStatus.RevisionNotOwnedByApplication => PlanningStatus.RevisionNotOwnedByApplication,
+                DurableChangeSetCreateStatus.ExpectedGenerationUnsupported => PlanningStatus.UnsupportedPrecondition,
+                DurableChangeSetCreateStatus.UnsupportedShape => PlanningStatus.UnsupportedShape,
+                DurableChangeSetCreateStatus.InvalidInput => PlanningStatus.InvalidRequest,
+                _ => throw new InvalidOperationException("Unknown corrective intake outcome.")
+            };
+            return new()
+            {
+                Status = status,
+                ChangeSet = created.ChangeSet is null ? null : Summary(await planner.FindChangeSetAsync(created.ChangeSet.Id, context.CancellationToken)
+                ?? throw new InvalidOperationException("Committed corrective ChangeSet unavailable."))
+            };
+        }
+        catch (ArgumentException) { return Result(PlanningStatus.InvalidRequest); }
+    }
+
     public override async Task<PlanningReply> CreateChangeSet(CreateChangeSetRequest request, ServerCallContext context)
     {
         context.CancellationToken.ThrowIfCancellationRequested();
@@ -182,6 +216,7 @@ public sealed partial class ManifestOperatorService
             TechnicalActorId = value.ActorId
         };
         if (value.Member.Precondition is DeploymentPrecondition.ExpectedGeneration expected) result.ExpectedGeneration = expected.Generation.Value;
+        if (value.Correction is { } correction) result.Correction = new() { DeploymentId = correction.Deployment.ToString(), ExpectedIncompleteDesiredGeneration = correction.ExpectedIncompleteDesiredGeneration.Value };
         return result;
     }
 
@@ -230,6 +265,48 @@ public sealed partial class ManifestOperatorService
             ExpiresAtUtc = Utc(value.ExpiresAt),
             TechnicalActorId = value.ActorId
         };
+        if (value.Graph.Correction is { } inventory)
+        {
+            var captured = inventory.Document;
+            var review = new CorrectivePlanReview
+            {
+                DeploymentId = captured.Deployment.ToString(),
+                ExpectedIncompleteDesiredGeneration = captured.ExpectedDesired,
+                OriginalPlanId = captured.OriginalPlan.ToString(),
+                OriginalChangeSetId = captured.OriginalChangeSet.ToString(),
+                ResourcesReadyCheckpointId = captured.ResourcesReady.ToString(),
+                ResourcesReadyFingerprint = ResourcesReadyCheckpointCodec.Hash(captured.ResourceProof),
+                ConfirmedObjectCount = captured.Objects.Length,
+                PreparationCount = captured.Preparations.Length,
+                InventoryFingerprint = inventory.Fingerprint
+            };
+            if (captured.LastApplied is { } applied) review.LastAppliedGeneration = applied;
+            foreach (var member in captured.Members)
+            {
+                var item = new CorrectiveMemberReview
+                {
+                    ComponentId = member.Component,
+                    WorkloadId = member.Workload,
+                    State = member.State switch
+                    {
+                        "ConfirmedOwned" => CorrectiveMemberState.ConfirmedOwned,
+                        "NeverConfirmedInitialCreate" => CorrectiveMemberState.NeverConfirmedInitialCreate,
+                        _ => throw new InvalidDataException("Unknown corrective member state.")
+                    },
+                    PreviousImage = member.Image.PreviousImage,
+                    TargetImage = member.Image.TargetImage
+                };
+                if (member.ManagedIdentity is { } managed) item.ManagedIdentity = managed.ToString();
+                if (member.OriginGeneration is { } origin) item.OriginGeneration = origin;
+                if (member.Operation is { } operation) item.OperationId = operation;
+                if (member.Attempt is { } attempt) item.AttemptId = attempt.ToString();
+                if (member.Confirmation is { } confirmation) { item.ConfirmedObjectIdentity = confirmation.Identity; item.ConfirmedImage = confirmation.Image; }
+                item.Documents.AddRange(member.Documents); review.Members.Add(item);
+            }
+            review.InheritedPublications.AddRange(captured.Publications.Select(x => new CorrectivePublicationReview
+            { PermissionId = x.Permission.ToString(), BindingId = x.Binding.ToString(), RevisionId = x.Revision.ToString(), Revoked = x.Status == "Revoked" }));
+            result.Correction = review;
+        }
         result.ProviderInputs.AddRange(ProviderInputSummaries(value.Inputs));
         result.Operations.AddRange(OperationSummaries(value.Graph));
         var names = descriptions.Targets(value);
