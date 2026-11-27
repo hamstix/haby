@@ -189,20 +189,20 @@ the separate naming and shared-system evidence without claiming P3 rollout.
 
 [ADR-064](docs/adr/0064-composable-resource-acquisition-transitions.md) extends the
 existing transition planner rather than adding Provider-combination exceptions.
-Immediately after #292, deliver these required sequential slices:
+The required sequence after #292 is delivered by merged PRs #309, #311 and #312:
 
 - [x] [A / #303](https://github.com/hamstix/haby/issues/303): common Resource delta, per-Resource Provider resolution and unchanged
   imported reuse plus new Reference Resources in an Applied configuration-only Application.
 - [x] [B / #304](https://github.com/hamstix/haby/issues/304): add ImportUseAndRetain through typed protected credential intake to the
   Applied mixed state, preserving existing provenance, credentials and authority.
-- [ ] [C / #305](https://github.com/hamstix/haby/issues/305): initial ImportUseAndRetain + Reference composition without a preliminary
+- [x] [C / #305](https://github.com/hamstix/haby/issues/305): initial ImportUseAndRetain + Reference composition without a preliminary
   PostgreSQL-only revision, using the same public pipeline and group completion.
 
 [Code and independent-review tasks](docs/development/resource-transition-composition.md)
 define acceptance. A alone is not completion. No general UPDATE, existing Provider/
 credential replacement, removal or Workloads are added by this sequence. Reference
 retirement is separately deferred to #301 and does not block #292 or this sequence.
-Production additional Providers remain downstream. Acceptance is not implementation.
+Production additional Providers remain downstream. This bounded sequence does not complete P3.
 This explicit order supersedes earlier conflicting adoption queue descriptions.
 
 
@@ -285,31 +285,35 @@ operator, leader election and Kubernetes-only storage mode are separate later
 capabilities, not prerequisites for this milestone.
 
 - [x] Accept [ADR-060](docs/adr/0060-explicit-kubernetes-provider-tls-policy.md): explicit Kubernetes Provider TLS trust/revocation policy, unchanged omitted Online default and an explicit fresh-catalog format-2 transition.
-- [ ] Implement [issue #261](https://github.com/hamstix/haby/issues/261) after merged #259 and test-cycle separation #263, covering every production client/frozen input path and controlled TLS evidence. Then deliver existing Resource import/attachment under ADR-062 and #267 before public CLI composition/NuGet and lower-priority feature work. Successive UPDATE qualification, ADR-052 correction, integrated rehearsal and public operational UPDATE remain required; CLI composition remains after operational UPDATE. TLS policy acceptance is not implementation or P3 completion.
+- [x] Implement explicit Kubernetes Provider TLS policy under [#261 / PR #277](https://github.com/hamstix/haby/pull/277), including production client and frozen-input paths and controlled TLS evidence ([guide](docs/development/261-kubernetes-provider-tls.md)). This delivery does not complete public operational UPDATE, ADR-052 correction or the integrated lifecycle rehearsal. Historical unexplained TLS failures remain separately recorded; completion is not a claim that every historical cause was fixed.
 
 - [x] Accept [ADR-061](docs/adr/0061-focused-development-and-final-qualification.md): focused development; the 2026-11-24 amendment below replaces full merge qualification with targeted checks, nightly regression and full release qualification.
 - [ ] Frozen historical [#263](https://github.com/hamstix/haby/issues/263): preserve its provenance lessons; it is not an execution prerequisite. The accepted #297 amendment below replaces its former full-before-every-merge policy after safe deployment.
 
 ### Accepted P3 execution order
 
-Queue clarification: issue #252 is followed immediately by the accepted docs-only
-CI routing maintenance in #253, then the remaining operational ADR-058 Deployment
-update slices. Public CLI composition follows the completed Deployment update track,
-not before it, under [ADR-059](docs/adr/0059-public-cli-composition.md).
+The earlier #252 -> #253 -> operational UPDATE -> CLI ordering is historical.
+The maintainer explicitly released #292 after deferring Reference removal to #301;
+public CLI composition is now merged. Public operational UPDATE and correction
+remain required separate P3 slices. Provider status #274 follows the completed CLI
+composition; shell completion is separate.
 
-- [ ] Expose public Native AOT command composition and typed context resolution;
-  keep upstream root commands and permit a downstream registry parent.
-- [ ] Add config adapters preserving downstream fields and safe views, configurable
-  paths (upstream sample ~/.haby/config.yaml), and a published external AOT example.
-- [ ] Show contextual help for bare command groups and add explicitly installed
-  Windows/Linux shell completion from the composed command tree.
+- [x] Expose public Native AOT command composition and typed context resolution,
+  retaining upstream root commands and a downstream registry parent: [#292 / PR #302](https://github.com/hamstix/haby/pull/302).
+- [x] Add downstream-preserving config adapters, safe views, configurable paths and
+  a public external AOT example ([composition guide](docs/development/292-public-cli-composition.md)).
+- [x] Show contextual help for bare command groups without resolving configuration,
+  endpoints or credentials ([#292 guide](docs/development/292-public-cli-composition.md)).
+- [ ] Add explicitly installed Windows/Linux shell completion from the composed
+  command tree; #292 does not claim shell completion.
 
-Accepted next priority: after #248, implement bounded ApplicationVersion/image
+Accepted Deployment priority: implement bounded ApplicationVersion/image
 updates under [ADR-058](docs/adr/0058-bounded-deployment-image-updates.md), before
 Service, headless Service and individual Ingress. Those objects remain in P3.
 
-- [ ] Admit and freeze image-only updates from Applied=Desired, with proven Resource
-  reuse and exact prior/target inventory; no runtime UPDATE enabled by planning alone.
+- [x] Admit and freeze bounded image-only updates internally from Applied=Desired,
+  with proven Resource reuse and exact prior/target inventory: [#252 / PR #254](https://github.com/hamstix/haby/pull/254).
+  This planning foundation does not enable public operational UPDATE.
 - [x] Implement internal generation-specific configuration, stable runtime identity
   reuse, exact publication and durable same-UID conditional PATCH under
   [issue #257](docs/development/257-durable-deployment-update-submission.md).
@@ -324,7 +328,8 @@ Service, headless Service and individual Ingress. Those objects remain in P3.
 - [ ] Rehearse the real update/correction lifecycle, stable Resources/credentials,
   configuration coexistence/retirement and restart/lost-response handling.
 
-These are accepted future slices, not delivered capabilities. Changed Profile or
+The internal planning, submission and completion slices above are delivered; public
+operational UPDATE, correction and the integrated rehearsal remain unavailable. Changed Profile or
 Placement inputs are refused by this bounded path. Static delivery grants remain
 independent; load qualification remains post-P4.
 
@@ -332,8 +337,9 @@ Completed user-approved sequencing exception after #237 / PR #238: the narrow
 [#239 trusted public Host composition boundary](docs/development/239-public-host-composition.md)
 was delivered by [PR #240](https://github.com/hamstix/haby/pull/240) before #209 / PR #242. It permits downstream application service
 registration and protected custom gRPC mapping with the existing Host. General
-SDK/NuGet packaging, CLI command composition and Provider/catalog extension stay
-deferred; this exception does not change remaining Workload lifecycle semantics.
+SDK/NuGet packaging remains deferred. Bounded public CLI composition is delivered
+by #292, and additive typed Host catalog composition by #275-E; neither changes
+remaining Workload lifecycle semantics.
 
 **Historical stop-loss (accepted 2026-11-13):** the instruction was to stop new
 qualification attempts for [#191](https://github.com/hamstix/haby/issues/191) and
@@ -366,7 +372,7 @@ Under [ADR-055](docs/adr/0055-p3-implementation-closure-and-coordination.md):
 2. Completed: Kubernetes technical qualification ([PR #180](https://github.com/hamstix/haby/pull/180)).
 3. Completed: Placement persistence and administration ([PR #182](https://github.com/hamstix/haby/pull/182), [PR #184](https://github.com/hamstix/haby/pull/184)).
 4. Completed for the initial shapes: durable exact Provider inputs and stage checkpoints, including Workload-only empty ResourcesReady ([PR #186](https://github.com/hamstix/haby/pull/186), [PR #189](https://github.com/hamstix/haby/pull/189), [PR #203](https://github.com/hamstix/haby/pull/203), [PR #207](https://github.com/hamstix/haby/pull/207)).
-5. Partially completed: bounded conditional Deployment kernel and durable initial CREATE/uncertain observation are implemented; remaining supported fields/companion objects and durable UPDATE are not.
+5. Partially completed: bounded conditional Deployment kernel and durable initial CREATE/uncertain observation are implemented; remaining fields/companion objects and public operational UPDATE are not. Bounded internal UPDATE planning/submission/completion is delivered by #252/#257/#259.
 6. Completed for the bounded initial path: runtime identity/publication/delivery/client and configurable protections; separate mass-start qualification follows P4.
 7. Partially completed: internal submission/exact readiness and operator desired-state admission are delivered. Operator submission is delivered by [PR #230](https://github.com/hamstix/haby/pull/230). Bounded public readiness/expired-attempt renewal and product/CI batch wait are delivered by PR #236; [#237](docs/development/237-initial-retirement-applied.md) adds retirement-aware Applied for the two admitted initial shapes. Complete the remaining supported contract, full workflow resume, image/configuration updates and nonempty retirement through dedicated slices.
 8. Remaining: explicit retirement and removal.
@@ -394,21 +400,26 @@ authorization rules. Contract acceptance never enables an incomplete executor.
 - [x] Complete #275-B explicitly compatible shared associations across Resources/Applications, preserving Import/reservation exclusion and independent authority ([PR #291](https://github.com/hamstix/haby/pull/291)).
 - [x] Deliver #275-C accepted shared-secret authority ([PR #293](https://github.com/hamstix/haby/pull/293)): Environment-owned SharedApplicationCredential, protected named intake, exact SystemAccess/ApplicationDelivery bindings atomically issued with Provider revision, irreversible per-use revocation and durable safe audit.
 - [x] Deliver and qualify #275-D bounded Reference configuration delivery ([PR #294](https://github.com/hamstix/haby/pull/294)) through existing materialization and static/runtime authorization: frozen typed options, no duplicate secret material, whole-response failure and no old-grant revival. See the [accepted credential package](docs/adr/0063-resource-capabilities-rendering-and-provider-status.md#accepted-shared-credential-and-delivery-package-2026-11-23).
-- [ ] Complete Reference retirement authority at safe recipient transition, with explicit operator confirmation for unmanaged consumers; until supported, refuse removal. Production Reference readiness remains separate from test-adapter delivery evidence.
+- [ ] Complete separately deferred [Reference retirement #301](https://github.com/hamstix/haby/issues/301) authority at safe recipient transition, with explicit operator confirmation for unmanaged consumers; until supported, refuse removal. Production Reference readiness remains separate from test-adapter delivery evidence.
 - [ ] Deliver [shared Reference #275](https://github.com/hamstix/haby/issues/275) through #267's common foundation, not a second import framework: exact per-type/mode schema, durable verification/receipt/confirmed outputs/retry/restart, no CREATE fallback and no external lifecycle authority. Sharing across Resources/Applications requires explicit adapter semantics and does not bypass ADR-062 Import conflicts. Removal affects internal association/delivery authorization only.
-- [ ] Preserve renderer defaults < exact Profile binding-rule options < Component Binding options, whole top-level replacement, closed typed validation and Plan-frozen effective values/origins. Reuse typed consumption contracts across supported modes, separate system access from application-deliverable exact SecretRefs and retain independent static Profile/secret projection semantics. Provider endpoint/credential and mandatory TLS are not Binding overrides.
-- [ ] Deliver [Provider status #274](https://github.com/hamstix/haby/issues/274) as a separate operator-admin, API-only endpoint/TLS/SYSTEM-credential login observation. Resolve current alias-bound revision once; unbound Providers report not-configured/not-selected rather than implicit latest. Return bounded safe per-Provider outcomes without management privilege, Resource/dbNum/workload or preflight-receipt claims. Resource/consumer checks may separately verify effective options.
+- [x] Preserve renderer defaults < exact Profile binding-rule options < Component Binding options, whole top-level replacement, closed typed validation and Plan-frozen effective values/origins. Reuse typed consumption contracts across supported modes, separate system access from application-deliverable exact SecretRefs and retain independent static Profile/secret projection semantics. Provider endpoint/credential and mandatory TLS are not Binding overrides.
+- [ ] In progress: deliver [Provider status #274](https://github.com/hamstix/haby/issues/274) as a separate operator-admin, API-only endpoint/TLS/SYSTEM-credential login observation. Resolve current alias-bound revision once; unbound Providers report not-configured/not-selected rather than implicit latest. Return bounded safe per-Provider outcomes without management privilege, Resource/dbNum/workload or preflight-receipt claims. Resource/consumer checks may separately verify effective options.
 
-The shared Reference kernel is delivered; the remaining accepted Reference
-contracts are not yet production capabilities. 275-C and bounded #275-D delivery
-are merged and qualified. #275-E adds [initial downstream public admission](docs/development/275-public-reference-admission.md)
-and additive typed Host catalog composition, without a production Reference
-registration. Reference retirement remains pending. Provider status #274 follows the separately scheduled CLI root grouping
-and public composition/extensions. A private adapter may prepare typed codecs,
-consumer options, renderer and probe, but cannot fabricate durable CREATE or
-bypass shared Reference/application delivery authority. No additional generic SDK,
-runtime plugin loader, Kubernetes adoption or upstream Redis implementation is
-admitted by this decision. Neither #275 nor P3 is complete.
+The #275 A-E implementation is merged, including [initial downstream public
+admission](docs/development/275-public-reference-admission.md) and additive typed
+Host catalog composition in [PR #295](https://github.com/hamstix/haby/pull/295).
+The umbrella remains open pending transparent acceptance reconciliation and the
+architect's conclusion. Reference retirement is explicitly deferred to #301; no
+production upstream Reference Provider is claimed. Provider status #274 remains a
+separate connection/authentication observation, without stronger preflight credit.
+A private adapter cannot fabricate CREATE evidence or bypass application-delivery
+authority. No generic SDK, runtime plugin loader, Kubernetes adoption or upstream
+Redis implementation is admitted by this decision. P3 remains incomplete.
+
+- [x] Deliver Int32-compatible external configuration JSON under [#313 / PR #314](https://github.com/hamstix/haby/pull/314),
+  preserving internal canonical codecs, fingerprint inputs and persisted bytes
+  ([compatibility guide](docs/development/313-int32-configuration-json.md)). This
+  requires no migration or catalog reset and grants no additional delivery authority.
 
 ## P4 - Standard Providers
 
@@ -434,7 +445,7 @@ Build-time trusted composition remains the supported model under ADR-003. Public
 SDK/NuGet packaging and general downstream server extension remain separate later
 work (apart from the narrow #239 Host application-service boundary), informed by
 several real adapters rather than prerequisites for P4. The bounded public CLI
-composition implementation is tracked by [#292](https://github.com/hamstix/haby/issues/292)
+composition implementation is delivered by [#292](https://github.com/hamstix/haby/issues/292)
 and the [composition guide](docs/development/292-public-cli-composition.md); it does
 not implement shell completion or publish a NuGet SDK.
 Dynamic managed DLL loading, runtime provider protocols and WebAssembly execution
@@ -454,17 +465,19 @@ the safe mechanical gate transition is deployed.
   failure triage; unrelated work is not automatically blocked by every failure.
 - [x] Require full exact-candidate qualification before release or updating a real
   installation. A development merge does not declare installation readiness.
-- [ ] Implement [#297](https://github.com/hamstix/haby/issues/297): bounded CI scheduling/selection and distinct merge/release gates;
+- [x] Implement [#297](https://github.com/hamstix/haby/issues/297): bounded CI scheduling/selection and distinct merge/release gates;
   preserve all regression tests, safe reporting and existing execution venues.
-  Update CONTRIBUTING and agent/routing guidance during implementation. Do not
-  mass-rewrite tests to EF InMemory or make another fixture rearchitecture a
-  prerequisite. Frozen #263 is historical context, not an execution dependency.
+  Delivered by [PR #300](https://github.com/hamstix/haby/pull/300), with guidance in
+  the [nightly/merge guide](docs/development/297-nightly-postgresql.md).
+  Frozen #263 remains historical context, not an execution dependency.
 
-Until deployed, current required checks remain effective. No bypass or retroactive
-approval is authorized. Exact remote protection changes require maintainer approval.
-Keep the next functional priority on pre-Commit import correction after #275-E;
-coordinate this CI change without overlapping the same executor or reopening a
-broad infrastructure campaign.
+The Merge/Final/nightly controls are deployed. Merge uses deterministic relevant
+real PostgreSQL coverage plus the fixed smoke set, full shared/sensitive/unknown
+fallback and both Native AOT targets; release/install Final remains full exact-candidate
+qualification. A development merge or ancestor nightly is not installation credit.
+No bypass, retroactive approval or remote protection change is authorized. The
+completed #296 pre-Commit import correction and #297 do not introduce a new
+infrastructure prerequisite for functional P3 work.
 
 ## Post-P4 - Deferred mass-start qualification
 
