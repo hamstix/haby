@@ -35,7 +35,7 @@ internal sealed partial class InternalDurableActions(
             new(accepted.DeploymentId, accepted.Generation, OperationId.Create("effect-" + request)),
             () => AcceptCoreAsync(accepted, subject, action, request, null, token), token);
 
-    // Caller owns the generation gate. Catalog locks/uniqueness remain mandatory.
+    // Caller owns the deployment gate. Catalog locks/uniqueness remain mandatory.
     internal async ValueTask<DurableOperationKey> AcceptCoreAsync(DurableChangeSetCommit accepted, ProviderInput subject,
         string action, string request, string? actor, CancellationToken token)
     {
