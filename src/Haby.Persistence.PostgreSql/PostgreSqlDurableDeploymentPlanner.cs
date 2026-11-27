@@ -207,7 +207,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         }
         if (!internalEffects && !DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
         if (internalEffects && (!spec.Components.Values.Any(x => x.Workloads.Count > 0) ||
-            baseline is null && (!row.ExpectedAbsence || spec.Resources.Count != 0) || baseline is not null && spec.Resources.Count == 0 && !workloadUpdate))
+            baseline is null && !row.ExpectedAbsence || baseline is not null && spec.Resources.Count == 0 && !workloadUpdate))
             return new(DurablePlanStatus.UnsupportedShape);
         var emptyStage = internalEffects && spec.Resources.Count == 0;
         ProviderConfigurationRevisionRow? revisionRow = null;
@@ -285,7 +285,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         }
         catch (NotSupportedException) { return new(DurablePlanStatus.UnsupportedShape); }
         catch (InvalidDataException) { return new(DurablePlanStatus.PlanInputUnavailable); }
-        if (internalEffects && (graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
+        if (internalEffects && !InternalResourceStage.IsInitialCreate(inputs, graph) && (graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
             graph.ReusedResources.Count != spec.Resources.Count)) return new(DurablePlanStatus.UnsupportedShape);
         if (mode == DeploymentAdmissionMode.Operator && internalEffects &&
             !await OperatorWorkloadShapeAsync(context, row, baseline, inputs, graph, cancellationToken))

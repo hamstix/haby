@@ -188,7 +188,8 @@ public sealed class PostgreSqlDurableDesiredStateCommitter(
         catch (InvalidDataException) { return new DurableCommitResult.PlanInputUnavailable(); }
         var resourceInputs = internalEffects ? InternalResourceStage.Project(inputs) : inputs;
         var spec = internalEffects ? resourceInputs.Configuration!.Manifest.Spec : declaration.Spec;
-        if (internalEffects && ((!emptyStage && actual is null) || graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0 ||
+        if (internalEffects && ((!emptyStage && actual is null && !InternalResourceStage.IsInitialCreate(inputs, graph)) ||
+            graph.Nodes.Count != 0 && !InternalResourceStage.IsInitialCreate(inputs, graph) || graph.RetainedResources.Count != 0 ||
             !await planner.ValidateInternalProvidersAsync(context, inputs, cancellationToken) ||
             !await planner.AdmitInternalWorkloadsAsync(context, inputs, manifestRow.ApplicationVersion, handlers ?? [], cancellationToken)))
             return new DurableCommitResult.PlanInputUnavailable();

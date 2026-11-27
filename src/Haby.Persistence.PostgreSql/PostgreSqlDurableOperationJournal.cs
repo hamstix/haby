@@ -82,16 +82,20 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         {
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
             var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == id && x.Generation == generation.Value, cancellationToken);
-            if (source is null || source.InternalEffects) return false;
+            if (source is null) return false;
+            var internalStage = source.InternalEffects;
+            if (internalStage && !InternalResourceStage.IsInitialCreate(source.Inputs(), DurableOperationGraphCodec.Decode(source.GraphJson))) return false;
             if (owner?.AppliedGeneration >= generation.Value)
-                return await DurableAggregateCompletion.ReadAsync(db, source, cancellationToken) is not null;
+                return await DurableAggregateCompletion.ReadAsync(db, source, cancellationToken, internalResourceStage: internalStage, completedRead: true) is not null;
+            if (internalStage) _ = await InternalGenerationAuthority.RequireStageAsync(db, source, cancellationToken);
             using var verification = await PostgreSqlReuseVerificationScopes.VerifyAsync(contexts, outputContracts, codecs ?? [], reuseVerifiers ?? [],
                 () => admission, deployment, generation, cancellationToken);
             if (verification.Status != ResourceReuseValidationStatus.Confirmed) return false;
-            var prepared = await DurableAggregateCompletion.PrepareAsync(db, id, generation.Value, outputContracts, codecs ?? [], cancellationToken, admission);
+            var metadata = await DurableAggregateCompletion.InspectMetadataAsync(db, id, generation.Value, outputContracts, codecs ?? [], cancellationToken, admission, internalResourceStage: internalStage);
+            var prepared = await DurableAggregateCompletion.PrepareAsync(db, metadata, cancellationToken);
             await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
             if (!await DurableAggregateCompletion.TryAdvanceAsync(db, id, generation.Value, cancellationToken,
-                outputContracts, admission, codecs, prepared, verification: verification)) return false;
+                outputContracts, admission, codecs, prepared, internalResourceStage: internalStage, verification: verification)) return false;
             cancellationToken.ThrowIfCancellationRequested();
             await tx.CommitAsync(CancellationToken.None);
             return true;
@@ -106,7 +110,8 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
         await using var transaction = await context.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
         var id = Guid.Parse(deployment.ToString());
         var gen = await context.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(r => r.DeploymentId == id && r.Generation == generation.Value, cancellationToken);
-        if (gen is null || gen.InternalEffects) return null;
+        if (gen is null) return null;
+        if (gen.InternalEffects && !InternalResourceStage.IsInitialCreate(gen.Inputs(), DurableOperationGraphCodec.Decode(gen.GraphJson))) return null;
         _ = gen.Inputs();
         var graph = DurableOperationGraphCodec.Decode(gen.GraphJson);
         var owner = await context.ApplicationDeployments.AsNoTracking().SingleAsync(r => r.Id == id, cancellationToken);
@@ -114,7 +119,7 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
                                   join successor in context.OperatorImportRequestRecords.AsNoTracking() on audit.SuccessorRequest equals successor.Id
                                   where successor.ExpectedDeployment == id && successor.ExpectedGeneration == generation.Value && audit.Deployment == id
                                   select (long?)audit.Generation).SingleOrDefaultAsync(cancellationToken);
-        var checkpoint = await DurableAggregateCompletion.ReadAsync(context, gen, cancellationToken);
+        var checkpoint = await DurableAggregateCompletion.ReadAsync(context, gen, cancellationToken, internalResourceStage: gen.InternalEffects);
         if (owner.AppliedGeneration >= generation.Value && checkpoint is null && supersededBy is null)
             throw new InvalidDataException("Applied generation has no Resource checkpoint.");
         var operations = new List<DurableOperation>();
@@ -334,12 +339,14 @@ public sealed class PostgreSqlDurableOperationJournal(IDbContextFactory<Manifest
                             where operation.DeploymentId == deployment && operation.Generation == generation &&
                                   operation.OperationId == resourceId
                             select new { operation, gen }).SingleOrDefaultAsync(cancellationToken);
-        if (joined is null || joined.gen.InternalEffects) return null;
+        if (joined is null) return null;
+        var graph = DurableOperationGraphCodec.Decode(joined.gen.GraphJson);
+        if (joined.gen.InternalEffects && (!InternalResourceStage.IsInitialCreate(joined.gen.Inputs(), graph) || graph.Nodes.All(n => n.Id != key.OperationId))) return null;
         var row = joined.operation;
         if (joined.gen.Presence != nameof(DesiredPresence.Present))
             throw new InvalidDataException("Stored create operation is inconsistent.");
         var inputs = joined.gen.Inputs();
-        var node = DurableOperationGraphCodec.Decode(joined.gen.GraphJson).Nodes.Single(n => n.Id == key.OperationId);
+        var node = graph.Nodes.Single(n => n.Id == key.OperationId);
         // Historical metadata retains its original provenance; active execution is fenced separately.
         var management = await context.ResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Deployment == deployment &&
             x.Resource == node.ResourceId.Value && x.SourceGeneration == generation, cancellationToken);

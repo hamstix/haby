@@ -25,7 +25,8 @@ internal static partial class DurableAggregateCompletion
         bool advanced;
         try
         {
-            advanced = await TryAdvanceAsync(context, deployment, generation, token, contracts, codecs: codecs, prepared: prepared, verification: verification);
+            var internalStage = await context.DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation).Select(x => x.InternalEffects).SingleAsync(token);
+            advanced = await TryAdvanceAsync(context, deployment, generation, token, contracts, codecs: codecs, prepared: prepared, internalResourceStage: internalStage, verification: verification);
         }
         catch (Exception error) when (error is PostgresException or DbUpdateException { InnerException: PostgresException })
         {

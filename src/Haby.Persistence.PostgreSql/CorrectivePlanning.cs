@@ -256,7 +256,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         {
             var managed = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == resource.ManagementId && x.Deployment == owner.Id, token)
                 ?? throw new InvalidDataException("Original Resource management unavailable.");
-            var evidence = await ResourceContinuity.EvidenceAsync(db, managed, token) ?? throw new InvalidDataException("Original Resource evidence unavailable.");
+            var evidence = await ResourceContinuity.CorrectiveEvidenceAsync(db, managed, proof, token) ?? throw new InvalidDataException("Original Resource evidence unavailable.");
             reuse.Add(new(ManifestLocalId.Create(resource.Resource), resource.ManagementId, resource.SourceGeneration, evidence));
         }
         return (inputs, new DurableOperationGraph([], reuse, new(ApplicationDeploymentId.Parse(owner.Id.ToString()), source.Generation, source.Fingerprint))

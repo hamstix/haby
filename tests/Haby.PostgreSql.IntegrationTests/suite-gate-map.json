@@ -5,7 +5,7 @@
   "nativePerPlatform": 116,
   "regularFullRetainsQualification": false,
   "nightlyAndReleaseRetainFullQualification": true,
-  "currentPostgresql": 1423,
+  "currentPostgresql": 1426,
   "currentFast": 2205,
   "currentKubernetesApiObjects": 29,
   "currentKubernetesDurableActions": 36,
@@ -15,6 +15,9 @@
   "supersededFor257": [{"method":"Haby.Kubernetes.Tests.ConfiguredDeploymentTests.Configured_update_and_superseded_format_refuse_but_absent_configuration_has_no_runtime_fields","case":"fde60248bd607ce4472526778ef63be8dbc29b8abf7b4db8a8f55f6e130d933f","suite":"fast","gate":"validate","trigger":"every-change","addedFor223":true}],
   "supersededFor275Adr026": [{"method":"Haby.PostgreSql.IntegrationTests.SharedCredentialAuthorityTests.Immutable_database_guards_refuse_late_issuance_mutation_and_unrevocation","case":"04681af98c4f92ffddbfeada9e20ad5323e132bc70bf1e615b88a25cc2986c73","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor275":true}],
   "entries": [
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Document_free_initial_resources_and_workloads_keep_stage_provenance_and_complete_retirement","case":"3833a041eae888b189abc1423d86280bb901f250cbad8a46d16c7135cbd70aad","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor319":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_resource_dispatch_uncertainty_blocks_workloads_and_corrective_planning","case":"52b08c433196a86929312af526161342aee04c40c9142990e80d339a9bc1369d","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor319":true},
+    {"method":"Haby.PostgreSql.IntegrationTests.DurableDeploymentPlanningTests.Initial_resources_confirm_without_applied_and_survive_failed_workload_restart_without_replay","case":"9b58ced3c5428b881b5e3c35a7ce8423cb8c20decf1b4731d8b832814d913d64","suite":"functional","gate":"postgresql-integration","trigger":"every-change-full","addedFor319":true},
     {"method":"Haby.Application.Tests.DeploymentSerializationTests.Cancelled_successor_never_enters_or_releases_the_active_deployment_gate","case":"3c4ea5780d710426f712d4cf5c81fffdd916d419b0edd965f1c7c735c9de248a","suite":"fast","gate":"validate","trigger":"every-change","addedFor319":true},
     {"method":"Haby.Application.Tests.DeploymentSerializationTests.Deployment_transition_uses_the_same_gate_and_an_exception_releases_only_its_owner","case":"dcc92cbb1606da3220f926c07a298afc23b1ba89f9754d54e8a1d096e665958e","suite":"fast","gate":"validate","trigger":"every-change","addedFor319":true},
     {"method":"Haby.Application.Tests.DeploymentSerializationTests.Different_generations_of_one_deployment_wait_for_the_current_action_boundary","case":"3eac7e43d25a561e5ddec6daeb5fcad7783635fcf0a15d1381883599fa562377","suite":"fast","gate":"validate","trigger":"every-change","addedFor319":true},
