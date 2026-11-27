@@ -58,6 +58,8 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         Assert.Equal(ProviderConnectionOutcomeCode.Connected, Assert.Single(observed.Items).Outcome);
         Assert.Equal(1, observed.Items[0].Revision);
         Assert.Equal(expected, evidence.Context);
+        Assert.Equal(ProviderPreflightStatus.Ready, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
+        Assert.Equal(expected, evidence.Context);
         Assert.Equal(2, (await client.GetProviderAliasAsync(new() { Environment = "pilot", Alias = "sample.primary" })).Binding.Revision);
         Assert.Equal(ProviderAccessStatus.Changed, (await client.SetProviderAliasAsync(Set(2, 1))).Status);
         var scope = evidence.Scope!;
@@ -71,10 +73,12 @@ public sealed class OperatorProviderAccessTests(PostgreSqlFixture fixture) : ICl
         {
             evidence.ChangeScope = wrong;
             Assert.Equal(ProviderConnectionOutcomeCode.SecretUnavailable, Assert.Single((await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot", Name = "sample" })).Items).Outcome);
+            Assert.Equal(ProviderPreflightStatus.SecretUnavailable, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
         }
         evidence.ChangeScope = null;
         Assert.Equal(SharedCredentialRevocationOutcome.Revoked,
             await host.Services.GetRequiredService<ISharedCredentialAdministration>().RevokeAsync(scope, "revoker", default));
+        Assert.Equal(ProviderPreflightStatus.SecretUnavailable, (await client.CheckProviderAsync(new() { Environment = "pilot", Name = "sample", Revision = 1 })).Preflight);
         Assert.Equal(ProviderConnectionOutcomeCode.SecretUnavailable, Assert.Single((await client.GetProviderConnectionStatusAsync(new() { Environment = "pilot", Name = "sample" })).Items).Outcome);
         await host.StopAsync();
     }
