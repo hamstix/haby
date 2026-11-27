@@ -3,15 +3,24 @@ using Haby.Domain;
 
 namespace Haby.Application;
 
-/// <summary>One singleton gate owner for common dispatch, direct adapter calls and observation.</summary>
+/// <summary>One singleton deployment gate for consequential dispatch and lifecycle calls.</summary>
 public sealed class DurableOperationSerialization
 {
-    private readonly ConcurrentDictionary<(ApplicationDeploymentId, DeploymentGeneration), SemaphoreSlim> gates = new();
-    public async ValueTask<T> RunAsync<T>(DurableOperationKey key, Func<ValueTask<T>> call,
+    private readonly ConcurrentDictionary<ApplicationDeploymentId, SemaphoreSlim> gates = new();
+    public ValueTask<T> RunAsync<T>(DurableOperationKey key, Func<ValueTask<T>> call,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(key);
-        var gate = gates.GetOrAdd((key.DeploymentId, key.Generation), _ => new SemaphoreSlim(1, 1));
+        return RunDeploymentAsync(key.DeploymentId, call, cancellationToken);
+    }
+
+    /// <summary>Runs one deployment transition across all generations; callers must not acquire recursively.</summary>
+    public async ValueTask<T> RunDeploymentAsync<T>(ApplicationDeploymentId deployment, Func<ValueTask<T>> call,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(deployment);
+        ArgumentNullException.ThrowIfNull(call);
+        var gate = gates.GetOrAdd(deployment, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(cancellationToken);
         try { return await call(); }
         finally { gate.Release(); }

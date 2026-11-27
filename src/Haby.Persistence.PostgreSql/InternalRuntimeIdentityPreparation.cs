@@ -18,7 +18,7 @@ internal sealed class InternalRuntimeIdentityPreparation(IDbContextFactory<Manif
         PrepareWithAsync(accepted, (subject, request, ct) => actions.AcceptAsync(accepted, subject, identityAction, request, ct),
             (key, ct) => actions.ExecuteAsync(key, ct), token);
 
-    // Only the server submission owner calls this while holding its generation gate.
+    // Only the server submission owner calls this while holding its deployment gate.
     internal Task<IReadOnlyList<PreparedRuntimeIdentity>> PrepareCoreAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token) =>
         PrepareWithAsync(accepted, (subject, request, ct) => actions.AcceptCoreAsync(accepted, subject, identityAction, request, actor, ct),
             (key, ct) => actions.ExecuteCoreAsync(key, false, ct, actor), token);

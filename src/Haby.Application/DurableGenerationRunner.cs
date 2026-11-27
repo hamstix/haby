@@ -24,7 +24,7 @@ public sealed record DurableGenerationRunResult(DurableGenerationProgress? Progr
     public ResourceReuseValidationStatus? ReuseStatus { get; init; }
 }
 
-/// <summary>Explicit sequential pass; one owner of the generation gate, no recursive locking.</summary>
+/// <summary>Explicit sequential pass; one owner of the deployment gate, no recursive locking.</summary>
 public sealed class DurableGenerationRunner(ExactDurableOperationExecutor executor,
     IDurableOperationJournal journal, DurableOperationSerialization serialization, DurableActionAdmission admission)
 {
