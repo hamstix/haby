@@ -137,6 +137,7 @@ public sealed partial class OperatorHostIntegrationTests
             services.RemoveAll<IProviderDeclarationAdapter>();
             services.RemoveAll<IProviderConfigurationCodec>();
             services.RemoveAll<IProviderPreflightHandler>();
+            services.RemoveAll<IProviderConnectionProbe>();
         }))
         {
             await OperatorTestCredentials.StartWithIssuedOperatorAsync(host);
@@ -144,11 +145,19 @@ public sealed partial class OperatorHostIntegrationTests
             var client = OperatorTestCredentials.Client(channel);
             Assert.Equal(original, (await client.GetProviderAsync(new() { Environment = "pilot", Name = "pg-main", Revision = 1 })).Provider);
             Assert.Single((await client.ListProvidersAsync(new() { Environment = "pilot" })).Items);
+            Assert.Equal(ProviderConnectionOutcomeCode.NotSelected, Assert.Single((await client.GetProviderConnectionStatusAsync(
+                new() { Environment = "pilot", Name = "pg-main" })).Items).Outcome);
+            var status = await host.Services.GetRequiredService<ExactProviderConnectionProbe>().ProbeAsync(new(
+                EnvironmentRecordId.Parse(original.EnvironmentRecordId), ProviderInstanceId.Parse(original.InstanceId),
+                ProviderConfigurationRevisionNumber.Create(1)), default);
+            Assert.Equal(ProviderConnectionOutcome.Unsupported, status.Outcome);
             Assert.Equal(ProviderStatus.UnsupportedConfiguration, (await client.ApplyProviderAsync(new()
             { Declaration = ByteString.CopyFromUtf8(ProviderDeclarationTests.Declaration) })).Status);
             await host.StopAsync();
         }
         Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.Build(args, services =>
             services.AddSingleton<IProviderDeclarationAdapter, PostgreSqlProviderDeclarationAdapter>()));
+        Assert.Throws<InvalidOperationException>(() => OperatorHostApplication.Build(args, services =>
+            services.AddSingleton<IProviderConnectionProbe, Haby.Kubernetes.KubernetesConnectionProbe>()));
     }
 }
