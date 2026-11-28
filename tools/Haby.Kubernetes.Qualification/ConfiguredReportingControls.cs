@@ -44,7 +44,7 @@ internal static class ConfiguredReportingControls
                         line.StartsWith("Q243 configured pod-startup", StringComparison.Ordinal) ? 4 : 1;
                     for (var i = 0; i < count; i++) Console.WriteLine(line);
                 }
-                foreach (Match match in Regex.Matches(source, "\"((?:C|R|A|B|U|X)[0-9]{2}-[a-zA-Z0-9-]+)\""))
+                foreach (Match match in Regex.Matches(source, "\"((?:C|R|A|B|U)[0-9]{2}-[a-zA-Z0-9-]+)\""))
                 {
                     var id = match.Groups[1].Value;
                     if (file == "ConfiguredDeploymentCases") ConfiguredDeploymentCases.Check(true, id);

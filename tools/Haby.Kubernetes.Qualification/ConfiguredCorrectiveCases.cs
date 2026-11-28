@@ -111,7 +111,7 @@ internal static class ConfiguredCorrectiveCases
             (await verify.RuntimeConfigurationPermissions.AsNoTracking().Where(x => x.BindingId == binding.Id).ToArrayAsync(token))
                 .Any(x => RuntimePublicationCodec.Origin(x.OriginPayload).Generation == original.Generation && x.Status != "Revoked"))
             throw new InvalidOperationException("Configured corrective identity, provenance or retirement mismatch.");
-        Console.WriteLine("PASS configured-X01-bad-image-first-install-correction-exact-UID-retirement-Applied");
+        Console.WriteLine("PASS configured-R08-bad-image-first-install-correction-exact-UID-retirement-Applied");
         return receipt;
     }
 }

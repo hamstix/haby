@@ -198,7 +198,10 @@ public sealed partial class DurableDeploymentPlanningTests
             new(new(contexts, preparation, publicActions, scenario.Time)), services.GetRequiredService<DurableOperationSerialization>(),
             new(), initialDeployment.Contract.Action);
         var refused = await publicSubmission.SubmitAsync(accepted.DeploymentId, accepted.Generation, "operator", default);
-        Assert.Equal("unsupported-inventory", refused.Reason);
+        // This fixture deliberately lacks UPDATE support. The activated workflow
+        // refuses at descriptor inspection before any preparation or effect.
+        Assert.Equal("stopped", refused.Outcome); Assert.Equal("Inspection", refused.Stage);
+        Assert.Equal("input-unavailable", refused.Reason); Assert.True(refused.RequiresInspection);
         Assert.Equal(0, initialDeployment.Writes); Assert.Equal(0, identity.Writes);
         await using (var unchanged = await contexts.CreateDbContextAsync())
         {
