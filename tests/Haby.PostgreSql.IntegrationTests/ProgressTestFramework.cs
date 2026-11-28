@@ -35,7 +35,7 @@ internal sealed class ProgressMessageSink(IMessageSink inner, PostgreSqlProgress
                 var id = journal.StartCase(hash);
                 if (id != 0 && !active.TryAdd(test, id)) journal.FinishCase(0);
             }
-            else if (message is ITestFinished finished && active.Remove(finished.Test, out var id)) journal.FinishCase(id);
+            else if (message is ITestFinished finished) journal.FinishCase(active.Remove(finished.Test, out var id) ? id : 0);
             else if (message is ITestAssemblyFinished) journal.AssemblyFinished();
         }
         return inner.OnMessage(message);

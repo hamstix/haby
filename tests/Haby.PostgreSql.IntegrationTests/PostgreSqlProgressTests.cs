@@ -127,6 +127,34 @@ public sealed class PostgreSqlProgressTests
         Assert.False(observer.OnMessage(finish)); Assert.Same(finish, inner.Last);
         Assert.Empty(PostgreSqlProgressJournal.Read(directory.Bytes).ActiveCases);
         Assert.DoesNotContain("protected", Encoding.UTF8.GetString(directory.Bytes)); Assert.Equal(2, inner.Count);
+        var observed = new List<ProgressStatus>();
+        foreach (var alreadyStarted in new[] { false, true })
+        {
+            using var invalid = new OwnedDirectory();
+            var invalidJournal = new PostgreSqlProgressJournal(invalid.Path, Source, Ledger, [hash]);
+            var originalSink = new Sink(alreadyStarted); var invalidObserver = new ProgressMessageSink(originalSink, invalidJournal);
+            if (alreadyStarted)
+            {
+                Assert.True(invalidObserver.OnMessage(start));
+                Assert.True(invalidObserver.OnMessage(finish));
+            }
+            Assert.Equal(alreadyStarted, invalidObserver.OnMessage(finish));
+            Assert.Same(finish, originalSink.Last); Assert.Equal(alreadyStarted ? 3 : 1, originalSink.Count);
+            invalidJournal.AssemblyFinished();
+            observed.Add(PostgreSqlProgressJournal.Read(invalid.Bytes).Status);
+        }
+        Assert.Equal(new[] { ProgressStatus.LifecycleMismatch, ProgressStatus.LifecycleMismatch }, observed);
+        foreach (var fault in new[] { ProgressStatus.UnknownCase, ProgressStatus.Overflow })
+        {
+            using var sticky = new OwnedDirectory();
+            var stickyJournal = new PostgreSqlProgressJournal(sticky.Path, Source, Ledger, fault == ProgressStatus.UnknownCase ? [Hash] : [hash]);
+            if (fault == ProgressStatus.Overflow)
+                for (var i = 0; i < PostgreSqlProgressJournal.ActiveLimit; i++) stickyJournal.StartCase(hash);
+            var originalSink = new Sink(false); var stickyObserver = new ProgressMessageSink(originalSink, stickyJournal);
+            Assert.False(stickyObserver.OnMessage(start)); Assert.False(stickyObserver.OnMessage(finish));
+            Assert.Same(finish, originalSink.Last); Assert.Equal(2, originalSink.Count);
+            Assert.Equal(fault, PostgreSqlProgressJournal.Read(sticky.Bytes).Status);
+        }
     }
     private sealed class Sink(bool result) : LongLivedMarshalByRefObject, IMessageSink
     {
