@@ -112,7 +112,8 @@ internal static partial class InternalGenerationAuthority
         var retirement = graph.Retirement?.Document;
         if (retirement is null && update is null) throw new InvalidDataException("Frozen stage authority required.");
         var priorApplied = readOnly ? retirement?.PriorApplied ?? update?.BaselineGeneration : owner?.AppliedGeneration;
-        var initial = InternalResourceStage.IsEmpty(inputs, graph) && row.Generation == 1 && priorApplied is null &&
+        var initialResources = InternalResourceStage.IsInitialCreate(inputs, graph);
+        var initial = (InternalResourceStage.IsEmpty(inputs, graph) || initialResources) && row.Generation == 1 && priorApplied is null &&
             change is { ExpectedAbsence: true, ExpectedGeneration: null };
         var mixed = graph.Baseline is not null && priorApplied is not null && priorApplied == graph.Baseline.Generation &&
             priorApplied < row.Generation && graph.Nodes.Count == 0 && graph.RetainedResources.Count == 0 &&
@@ -134,7 +135,9 @@ internal static partial class InternalGenerationAuthority
             ?? throw new InvalidDataException("Accepted declaration unavailable.");
         var manifest = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);
         if (!manifest.Equals(inputs.Configuration!.Manifest) || mixed && !await ResourceContinuity.ValidateAsync(db, deployment, graph, token, referenceHistory) ||
-            initial && await db.CurrentResourceManagement.AsNoTracking().AnyAsync(x => x.Environment == row.EnvironmentRecordId && x.Application == row.ApplicationRecordId, token))
+            initial && await db.CurrentResourceManagement.AsNoTracking().AnyAsync(x => x.Environment == row.EnvironmentRecordId && x.Application == row.ApplicationRecordId &&
+                (!initialResources || x.Deployment != row.DeploymentId || x.SourceGeneration != row.Generation ||
+                    !manifest.Spec.Resources.Keys.Select(resource => resource.Value).Contains(x.Resource)), token))
             throw new InvalidDataException("Accepted declaration or original Resource provenance mismatch.");
         var pins = await db.InternalPlanInputs.AsNoTracking().Where(x => x.PlanId == row.PlanId).ToArrayAsync(token);
         if (pins.Length != inputs.Providers.Entries.Count || inputs.Providers.Entries.Values.Any(exact =>
@@ -145,6 +148,7 @@ internal static partial class InternalGenerationAuthority
         // Only explicitly accepted internal actions may coexist with the empty
         // Resource graph. Unattributed journal rows cannot disappear in projection.
         if (initial && await db.DurableOperations.AsNoTracking().AnyAsync(operation => operation.DeploymentId == deployment && operation.Generation == row.Generation &&
+            !graph.Nodes.Select(node => node.Id.Value).Contains(operation.OperationId) &&
             !db.ActionIntents.Any(intent => intent.DeploymentId == deployment && intent.Generation == row.Generation && intent.OperationId == operation.OperationId), token))
             throw new InvalidDataException("Unexpected empty-stage operation.");
         if (initial)

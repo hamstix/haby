@@ -41,7 +41,8 @@ internal static partial class DurableAggregateCompletion
         {
             var root = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
             var owner = await db.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deployment, token);
-            if (root is null || owner is null || root.InternalEffects != (purpose == EvidencePurpose.InternalResourceStage)) return null;
+            if (root is null || owner is null || root.InternalEffects != (purpose == EvidencePurpose.InternalResourceStage) &&
+                !(root.InternalEffects && purpose == EvidencePurpose.Publication && InternalResourceStage.IsInitialCreate(root.Inputs(), DurableOperationGraphCodec.Decode(root.GraphJson)))) return null;
             var target = DurableOperationGraphCodec.Decode(root.GraphJson);
             if (pending is not null && (pending.Key.DeploymentId.ToString() != deployment.ToString() || pending.Key.Generation.Value != generation ||
                 target.Nodes.All(x => x.Id != pending.Key.OperationId))) return null;
@@ -91,7 +92,7 @@ internal static partial class DurableAggregateCompletion
                 if (managed.Where(x => x.SourceGeneration == number).Any(x => !ResourceContinuity.HasAcquisitionAuthority(x, inputs))) return null;
                 var graph = DurableOperationGraphCodec.Decode(row.GraphJson);
                 graph.ValidateReferences(inputs);
-                if (inputs.Configuration is not { } configuration || row.InternalEffects && purpose != EvidencePurpose.InternalResourceStage || !row.InternalEffects && configuration.Manifest.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||
+                if (inputs.Configuration is not { } configuration || row.InternalEffects && purpose != EvidencePurpose.InternalResourceStage && purpose != EvidencePurpose.Publication || !row.InternalEffects && configuration.Manifest.Spec.Components.Values.Any(x => x.Workloads.Count != 0) ||
                     !ResourceReadinessCoverage.IsComplete(configuration.Manifest.Spec.Resources.Keys.Select(x => x.Value),
                         graph.Nodes.Select(x => x.ResourceId.Value), graph.ReusedResources.Select(x => x.Resource.Value)) ||
                     graph.Nodes.Count + graph.ReusedResources.Count == 0 && !(row.InternalEffects && InternalResourceStage.IsEmpty(inputs, graph))) return null;
@@ -279,8 +280,8 @@ internal static partial class DurableAggregateCompletion
     {
         var row = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
         // A validated historical receipt is intentionally independent of today's installation/material.
-        if (row is not null && await ReadAsync(db, row, token) is not null) return null;
-        return await PrepareAsync(db, await InspectMetadataAsync(db, deployment, generation, registrations, codecs, token, admission, pending), token);
+        if (row is not null && await ReadAsync(db, row, token, internalResourceStage: row.InternalEffects) is not null) return null;
+        return await PrepareAsync(db, await InspectMetadataAsync(db, deployment, generation, registrations, codecs, token, admission, pending, internalResourceStage: row?.InternalEffects == true), token);
     }
 
     private static bool MatchesPreparation(ReadinessPreparation prepared, Guid deployment, long generation,

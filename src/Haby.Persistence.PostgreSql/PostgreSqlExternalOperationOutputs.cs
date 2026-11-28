@@ -29,6 +29,13 @@ public sealed partial class PostgreSqlExternalOperationOutputs(IDbContextFactory
             r.ApplicationRecordId == generation.ApplicationRecordId && r.LocalRevisionNumber == generation.RevisionNumber, token);
         var snapshot = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion,
             revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);
+        if (generation.InternalEffects)
+        {
+            _ = await InternalGenerationAuthority.RequireStageReadAsync(context, generation, token);
+            inputs = InternalResourceStage.Project(inputs);
+            graph = InternalResourceStage.Project(graph);
+            return new(inputs, graph, accepted.Value.Node, inputs.Configuration!.Manifest.Spec);
+        }
         return new(inputs, graph, accepted.Value.Node, snapshot.Spec);
     }
 

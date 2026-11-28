@@ -40,7 +40,7 @@ public sealed class PostgreSqlGeneratedCredentialOperations(IDbContextFactory<Ma
             var metadata = await DurableAggregateCompletion.InspectPublicationAsync(context, pending, contracts ?? [], codecs ?? [], cancellationToken);
             if (metadata?.Candidate is not { } candidate || !await DurableAggregateCompletion.CheckCredentialMetadataAsync(context, metadata, cancellationToken)) return false;
             var aggregateMetadata = await DurableAggregateCompletion.InspectMetadataAsync(context, deployment, producer.Generation.Value,
-                contracts ?? [], codecs ?? [], cancellationToken, pending: pending);
+                contracts ?? [], codecs ?? [], cancellationToken, pending: pending, internalResourceStage: accepted.Value.Generation.InternalEffects);
             // Resolve material before the aggregate lock. Inside the transaction recheck
             // exact slot metadata on this connection; never resolve secrets under that lock.
             if (!await reader.ValidMaterialAsync(context, input, output.Reference, cancellationToken)) return false;

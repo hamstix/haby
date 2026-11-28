@@ -126,6 +126,11 @@ internal static partial class DurableAggregateCompletion
         var reservations = rows.Select(x => new ProviderResourceReservation(Haby.Domain.ProviderInstanceId.Parse(x.ProviderInstanceId.ToString()),
             inputs.Environment, inputs.Revision.ApplicationRecordId, Haby.Domain.ManifestLocalId.Create(x.ResourceLocalId), x.Namespace, x.Value)).ToArray();
         var key = new DurableOperationKey(Haby.Domain.ApplicationDeploymentId.Parse(source.DeploymentId.ToString()), Haby.Domain.DeploymentGeneration.Create(source.Generation), node.Id);
+        if (source.InternalEffects)
+        {
+            inputs = InternalResourceStage.Project(inputs);
+            graph = InternalResourceStage.Project(graph);
+        }
         var accepted = new AcceptedOperation(inputs, graph, node, inputs.Configuration!.Manifest.Spec);
         var evidence = new ExternalOperationOutput(output.Contract, output.Key, output.Payload);
         return publication ? validator.ValidatePublicationMetadata(key, accepted, evidence, references, prepared, reservations)

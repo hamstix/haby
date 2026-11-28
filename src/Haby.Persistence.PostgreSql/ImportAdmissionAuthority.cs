@@ -54,6 +54,11 @@ internal static class ImportAdmissionAuthority
     {
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == deployment && x.Generation == generation, token);
         if (source is null) return false;
+        if (source.InternalEffects)
+        {
+            await DurableAggregateCompletion.LockAsync(db, deployment, token);
+            _ = await InternalGenerationAuthority.RequireStageAsync(db, source, token);
+        }
         var inputs = source.Inputs();
         var intent = inputs.Import;
         if (inputs.Acquisitions.Resources.Any(x => x.Mode == ResourceAcquisitionMode.Reference))

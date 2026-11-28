@@ -19,7 +19,7 @@ public sealed partial class DurableDeploymentPlanningTests
     internal sealed record InternalScenario(string Connection, TimeProvider Time, EnvironmentRecordId Environment,
         DurableChangeSetCommit Commit, ManifestRevisionRef Revision);
     internal async Task<InternalScenario> InternalScenarioAsync(Func<ISecretStore, EnvironmentRecordId, Task<KubernetesProviderConfiguration>>? suppliedConfiguration = null, string namespaceName = "test", bool subMicrosecondCommit = false,
-        Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualKubernetesProbe = null, bool twoComponents = false, bool distinctPlacements = false, bool initialOnly = false, bool invalidSecondWorkload = false,
+        Func<ISecretStore, EnvironmentRecordId, ProviderAliasBinding, KubernetesProviderConfiguration, CancellationToken, ValueTask<ProviderPreflightResult>>? actualKubernetesProbe = null, bool twoComponents = false, bool distinctPlacements = false, bool initialOnly = false, bool invalidSecondWorkload = false, bool combinedInitial = false,
         Func<ServiceProvider, EnvironmentRecordId, ManifestRevisionRef, Task<DurableChangeSetCommit>>? acceptGeneration = null,
         Action<JsonNode>? configureManifest = null, string? runtimeConfigurationJson = null, string? resourcesJson = null, Action<JsonNode>? configurePlacement = null)
     {
@@ -40,7 +40,7 @@ public sealed partial class DurableDeploymentPlanningTests
         envelope["manifest"]!["spec"]!["resources"]!["db"]!["properties"]!["name"] = "haby202_" + Guid.NewGuid().ToString("N");
         var importer = new ImportApplicationManifest(services.GetRequiredService<IManifestImportStore>(), catalog, time);
         DurableChangeSetCommit? original = null;
-        if (!initialOnly)
+        if (!initialOnly && !combinedInitial)
         {
             var baseline = Assert.IsType<ImportApplicationManifestResult.Succeeded>(await importer.ExecuteAsync(Encoding.UTF8.GetBytes(envelope.ToJsonString()), "tester"));
             var planner = services.GetRequiredService<IDurableDeploymentPlanner>();

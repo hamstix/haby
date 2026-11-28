@@ -43,7 +43,7 @@ internal static class InitialRetirementAuthority
         var inventory = graph.Retirement?.Document ?? throw new InvalidDataException("Frozen retirement authority required.");
         if (inventory.ObsoleteObjects.Length != 0 || inventory.ObsoletePublications.Length != 0 ||
             inventory.PriorApplied != graph.Baseline?.Generation ||
-            inventory.Shape == "Initial" && (source.Generation != 1 || !InternalResourceStage.IsEmpty(source.Inputs(), graph)) ||
+            inventory.Shape == "Initial" && (source.Generation != 1 || !(InternalResourceStage.IsEmpty(source.Inputs(), graph) || InternalResourceStage.IsInitialCreate(source.Inputs(), graph))) ||
             inventory.Shape == "ResourceBaseline" && source.Generation != inventory.PriorApplied + 1)
             throw new InvalidDataException("Unsupported or nonempty retirement inventory.");
         var expected = inventory.PriorApplied is { } previous ? await HistoryAsync(db, source.DeploymentId, previous, token) : [];
