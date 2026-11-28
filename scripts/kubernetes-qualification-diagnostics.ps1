@@ -430,7 +430,14 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($line.Length -gt 160){return $invalid}
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
-            if($parts[2] -ceq 'cli-tail'){
+            if($parts[2] -ceq 'corrective'){
+                if($Mode -cne 'configured' -or $parts.Count -notin @(5,6) -or
+                    $parts[3] -cnotin @('Setup','Preflight','InitialPlanCommit','ExecuteResource','BadSubmitWait','CorrectivePlanCommit','SubmitWait','Retirement','OidProof')){return $invalid}
+                if($parts.Count -eq 5){if($parts[4] -cnotin @('Complete','Failed')){return $invalid}}
+                elseif($parts[4] -cne 'Rejected' -or $parts[5] -cnotin @('Preflight','InitialPlan','InitialCommit','ResourceProof','BadSubmit','BadWait','CorrectivePlan','CorrectiveCommit','CorrectiveSubmit','RetirementProof','OriginalEffects','CopiedProof')){return $invalid}
+                if($parts[4] -cne 'Complete'){$hasFailure=$true}
+                $records.Add('Diagnostic workload: configured corrective '+($parts[3..($parts.Count-1)] -join ' '))
+            }elseif($parts[2] -ceq 'cli-tail'){
                 if($Mode -cne 'configured' -or $parts.Count -ne 4 -or $parts[3] -cnotin @('Output','Termination')){return $invalid}
                 $hasFailure=$true
                 $records.Add('Diagnostic workload: configured cli-tail '+$parts[3])

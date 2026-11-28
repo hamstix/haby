@@ -52,6 +52,11 @@ internal static class ConfiguredReportingControls
                     else ConfiguredUpdateRetirement.Check(true, id);
                 }
             }
+            using (var corrective = new ConfiguredCorrectiveDiagnostics())
+            {
+                foreach (var phase in Enum.GetValues<ConfiguredCorrectiveDiagnostics.Phase>())
+                { corrective.Enter(phase); corrective.Complete(); }
+            }
             using (var lifetime = new ConfiguredLifecycle())
             {
                 var source = Source("ConfiguredDeploymentCases");
@@ -113,6 +118,9 @@ internal static class ConfiguredReportingControls
         Console.WriteLine("CASE negative"); Console.Write(envelope);
         // Worst-case suffix: first failure after all repetitive success callbacks,
         // failed release/namespace/catalog plus CLI termination/output categories.
+        // Worst-case conservative suffix retains all nine successes plus a rejected failure.
+        using (var corrective = new ConfiguredCorrectiveDiagnostics())
+        { corrective.Enter(ConfiguredCorrectiveDiagnostics.Phase.OidProof); corrective.Reject(ConfiguredCorrectiveDiagnostics.Result.CopiedProof); }
         var negative = new ConfiguredRetirementDiagnostics.Output();
         for (var i = 0; i < 256; i++)
         {
