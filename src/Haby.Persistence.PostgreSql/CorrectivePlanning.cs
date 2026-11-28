@@ -127,7 +127,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             owner.AppliedGeneration >= owner.DesiredGeneration || change.ImportIntentJson is not null || change.ExpectedAbsence || change.ExpectedGeneration != owner.DesiredGeneration)
             throw new InvalidDataException("Exact incomplete desired generation required.");
         // Catalog capture only: this shared lock freezes publication writers, not an executor handoff.
-        // No execution authority is granted here. Activation must add the deployment-wide fence.
+        // No execution authority is granted here. The accepting caller owns the
+        // deployment-wide gate, locked recapture and atomic desired-owner CAS.
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {owner.Id} FOR SHARE", token);
         var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == owner.Id && x.Generation == owner.DesiredGeneration, token);
         source = await InternalGenerationAuthority.RequireStageAsync(db, source, token);

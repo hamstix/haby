@@ -499,7 +499,7 @@ internal static class ConfiguredDeploymentCases
                 string environment;
                 await using (var read = await contexts.CreateDbContextAsync(token))
                     environment = (await read.Environments.AsNoTracking().SingleAsync(token)).EnvironmentId;
-                confirmedDrain.Add(await ConfiguredCorrectiveCases.Run(services, client, environment, configuredEnvelope, image, token));
+                confirmedDrain.Add(await ConfiguredCorrectiveCases.Run(services, client, environment, configuredEnvelope, image, postgres, token));
             });
             await WithHost(() => ConfiguredDeploymentUpdateCases.Run(admin, services, updateBaseline, updateEnvelope, image,
                 identity, deployment, configurationPreparation, requests, async ct =>

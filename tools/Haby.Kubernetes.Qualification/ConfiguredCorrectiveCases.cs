@@ -8,18 +8,64 @@ using Haby.Manifest;
 using Haby.Operator.Contracts;
 using Haby.Persistence.PostgreSql;
 using Haby.PostgreSql;
+using Haby.PostgreSql.IntegrationTests;
+using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 internal static class ConfiguredCorrectiveCases
 {
     internal static async Task<DeploymentReceipt> Run(ServiceProvider services, ManifestOperator.ManifestOperatorClient client,
-        string environment, JsonNode template, string image, CancellationToken token)
+        string environment, JsonNode template, string image, PostgreSqlFixture fixture, CancellationToken token)
     {
         var contexts = services.GetRequiredService<IDbContextFactory<ManifestCatalogDbContext>>();
+        EnvironmentRecordId environmentRecord;
+        await using (var setup = await contexts.CreateDbContextAsync(token))
+            environmentRecord = EnvironmentRecordId.Parse((await setup.Environments.AsNoTracking().SingleAsync(x => x.EnvironmentId == environment, token)).Id.ToString());
+        // The SAME already-owned disposable PostgreSQL server and catalog are used.
+        // This mirrors the existing standard Provision fixture; no new server or mode.
+        var systemRole = "haby319_system_" + Guid.NewGuid().ToString("N");
+        var systemPassword = "haby-test-" + Guid.NewGuid().ToString("N");
+        await using (var administrator = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await administrator.OpenAsync(token);
+            await new NpgsqlCommand($"CREATE ROLE \"{systemRole}\" LOGIN CREATEDB PASSWORD '{systemPassword}'", administrator).ExecuteNonQueryAsync(token);
+        }
+        var secrets = services.GetRequiredService<ISecretStore>();
+        var passwordReference = new SecretRef(SecretId.New(), SecretVersionId.New());
+        var passwordBytes = Encoding.UTF8.GetBytes(systemPassword);
+        try
+        {
+            await secrets.CreateAsync(new(new SecretOwner.Environment(environmentRecord), SecretPurpose.ProviderAdministrator),
+                passwordReference, passwordBytes, token);
+        }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(passwordBytes); }
+        var system = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { Username = systemRole, Password = systemPassword };
+        var providerConfiguration = new PostgreSqlProviderConfiguration(PostgreSqlProviderConfiguration.CurrentShapeVersion,
+            system.Host!, system.Port, system.Database!, system.Username!, passwordReference,
+            PostgreSqlDatabaseCheckpointCapability.ImplementationId, PostgreSqlTransportMode.Disable);
+        var providers = services.GetRequiredService<IProviderConfigurationStore>();
+        var provider = await providers.CreateInstanceAsync(environmentRecord, providerConfiguration, token);
+        var providerRevision = ProviderConfigurationRevisionNumber.Create(1);
+        await providers.AddRevisionAsync(environmentRecord, provider, providerRevision, providerConfiguration, token);
+        var binding = new ProviderAliasBinding(provider, providerRevision);
+        if ((await services.GetRequiredService<IProviderAliasStore>().ChangeAsync(environmentRecord,
+            ProviderAlias.Create("postgresql.corrective"), null, binding, "qualification", token)).Outcome != ProviderAliasChangeOutcome.Changed ||
+            (await services.GetRequiredService<IProviderRevisionPreflight>().CheckAsync(environmentRecord, binding, token)).Outcome != ProviderPreflightOutcome.Ready)
+            throw new InvalidOperationException("Configured standard Provision fixture unavailable.");
+        var databaseName = "haby319_" + Guid.NewGuid().ToString("N");
         var envelope = template.DeepClone();
         envelope["manifest"]!["metadata"]!["id"] = "corrective-" + Guid.NewGuid().ToString("N")[..12];
         envelope["applicationVersion"] = "configured-initial-bad-image";
+        envelope["manifest"]!["spec"]!["resources"] = new JsonObject
+        {
+            ["db"] = new JsonObject
+            {
+                ["type"] = "postgresql.database/v1alpha1",
+                ["providerRef"] = "postgresql.corrective",
+                ["properties"] = new JsonObject { ["name"] = databaseName }
+            }
+        };
         envelope["manifest"]!["spec"]!["components"]!["api"]!["workloads"]!["main"]!["properties"]!["image"]!["reference"] = "registry.invalid/haby/absent:never";
         var importer = new ImportApplicationManifest(services.GetRequiredService<IManifestImportStore>(),
             new ManifestContractCatalog([PostgreSqlDatabaseContract.Definition], [KubernetesContract.Definition], [], []),
@@ -43,6 +89,12 @@ internal static class ConfiguredCorrectiveCases
         if (committed.Status != CommitStatus.Committed) throw new InvalidOperationException("Configured corrective initial acceptance refused.");
         var original = committed.Commit;
         var originalRequest = new GenerationRequest { DeploymentId = original.DeploymentId, Generation = original.Generation };
+        var resourceExecution = await client.ExecuteGenerationAsync(originalRequest, cancellationToken: token);
+        if (resourceExecution.Status != GenerationExecutionStatus.Blocked || resourceExecution.Progress?.ResourcesReady is null ||
+            resourceExecution.Progress.Total == 0 || resourceExecution.Progress.Completed != resourceExecution.Progress.Total ||
+            resourceExecution.Progress.HasAppliedGeneration || resourceExecution.Progress.ResourcesReady.ActiveResources != 1)
+            throw new InvalidOperationException("Actual initial Resource stage did not confirm without Applied.");
+        var originalDatabaseOid = await ReadDatabaseOid();
         if ((await client.SubmitGenerationAsync(originalRequest, cancellationToken: token)).Outcome != "submitted")
             throw new InvalidOperationException("Configured bad-image submission refused.");
         var failed = await client.WaitGenerationAsync(new()
@@ -103,15 +155,37 @@ internal static class ConfiguredCorrectiveCases
         await using var verify = await contexts.CreateDbContextAsync(token);
         var current = await verify.ManagedObjectStates.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == accepted.Commit.Generation, token);
         var receipt = DeploymentIntents.DecodeReceipt(current.Payload);
-        var binding = await verify.RuntimeIdentityBindings.AsNoTracking().SingleAsync(x => x.ManagedWorkloadId == current.ManagedWorkloadId, token);
+        var runtimeBinding = await verify.RuntimeIdentityBindings.AsNoTracking().SingleAsync(x => x.ManagedWorkloadId == current.ManagedWorkloadId, token);
         var source = await verify.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == accepted.Commit.Generation, token);
         if (receipt.Uid != previous.Uid || DurableOperationGraphCodec.Decode(source.GraphJson).Correction!.Document.ResourceProof != resourceProof ||
             await verify.GenerationStageCheckpoints.AnyAsync(x => x.DeploymentId == id && x.Generation == original.Generation && x.Stage == "RetirementCompleted", token) ||
-            await verify.ResourceManagement.AnyAsync(x => x.Deployment == id, token) ||
-            (await verify.RuntimeConfigurationPermissions.AsNoTracking().Where(x => x.BindingId == binding.Id).ToArrayAsync(token))
+            await verify.ResourceManagement.CountAsync(x => x.Deployment == id && x.Resource == "db" && x.SourceGeneration == original.Generation, token) != 1 ||
+            await ReadDatabaseOid() != originalDatabaseOid ||
+            (await verify.RuntimeConfigurationPermissions.AsNoTracking().Where(x => x.BindingId == runtimeBinding.Id).ToArrayAsync(token))
                 .Any(x => RuntimePublicationCodec.Origin(x.OriginPayload).Generation == original.Generation && x.Status != "Revoked"))
             throw new InvalidOperationException("Configured corrective identity, provenance or retirement mismatch.");
-        Console.WriteLine("PASS configured-R08-bad-image-first-install-correction-exact-UID-retirement-Applied");
+        var resourceSource = await verify.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == original.Generation, token);
+        var resourceOperations = DurableOperationGraphCodec.Decode(resourceSource.GraphJson).Nodes.Select(x => x.Id.Value).ToArray();
+        var effects = await verify.DurableOperations.AsNoTracking().Where(x => x.DeploymentId == id && x.Generation == original.Generation && resourceOperations.Contains(x.OperationId)).ToArrayAsync(token);
+        if (resourceOperations.Length == 0 || effects.Length != resourceOperations.Length || effects.Any(x => x.AttemptNumber != 1 || x.State != "Succeeded") ||
+            await verify.DurableOperationAttempts.CountAsync(x => x.DeploymentId == id && x.Generation == original.Generation && resourceOperations.Contains(x.OperationId), token) != resourceOperations.Length ||
+            ResourcesReadyCheckpointCodec.Decode(resourceProof).Resources.Count != 1)
+            throw new InvalidOperationException("Original Resource effect was replayed or lost.");
+        var resourceContracts = await verify.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == id && x.Generation == original.Generation &&
+            resourceOperations.Contains(x.OperationId)).Select(x => x.Contract).Distinct().ToArrayAsync(token);
+        if (resourceContracts.Length == 0 || await verify.OperationOutputs.AnyAsync(x => x.DeploymentId == id && x.Generation == accepted.Commit.Generation && resourceContracts.Contains(x.Contract), token) ||
+            await verify.GenerationStageCheckpoints.AnyAsync(x => x.DeploymentId == id && x.Generation == accepted.Commit.Generation && x.Stage == ResourcesReadyCheckpoint.Stage, token))
+            throw new InvalidOperationException("Correction copied Resource outputs or checkpoint instead of direct original proof.");
+        Console.WriteLine("PASS configured-R08-real-Resources-first-install-correction-exact-UID-no-replay-retirement-Applied");
         return receipt;
+
+        async Task<uint> ReadDatabaseOid()
+        {
+            await using var read = new NpgsqlConnection(fixture.ConnectionString);
+            await read.OpenAsync(token);
+            await using var command = new NpgsqlCommand("SELECT oid FROM pg_database WHERE datname = @database AND pg_get_userbyid(datdba) = @owner", read);
+            command.Parameters.AddWithValue("database", databaseName); command.Parameters.AddWithValue("owner", systemRole);
+            return await command.ExecuteScalarAsync(token) is uint oid ? oid : throw new InvalidOperationException("Actual owned database evidence unavailable.");
+        }
     }
 }

@@ -382,7 +382,7 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS configured-C12-Pod-defaulted-resource-requests',
           'PASS configured-C13-configured-Deployment-Pod-ports-probes-defaults',
           'PASS configured-R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied',
-          'PASS configured-R08-bad-image-first-install-correction-exact-UID-retirement-Applied',
+          'PASS configured-R08-real-Resources-first-install-correction-exact-UID-no-replay-retirement-Applied',
           'PASS configured-U01-public-image-update-plan-and-current-check',
           'PASS configured-U02-new-exact-documents-prepared',
           'PASS configured-U03-stable-account-original-proof-new-generation-use',
