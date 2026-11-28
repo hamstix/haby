@@ -187,7 +187,9 @@ internal static class PostgreSqlProgress
         using var json = JsonDocument.Parse(bytes);
         var allowed = json.RootElement.GetProperty("entries"u8).EnumerateArray().Where(x => x.GetProperty("gate"u8).GetString() == "postgresql-integration")
             .Select(x => x.GetProperty("case"u8).GetString()!).ToHashSet(StringComparer.Ordinal);
-        return (Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), allowed);
+        // Match the committed LF blob across Windows CRLF and hosted LF checkouts.
+        var canonical = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(bytes).Replace("\r\n", "\n", StringComparison.Ordinal));
+        return (Convert.ToHexString(SHA256.HashData(canonical)).ToLowerInvariant(), allowed);
     }
     private static PostgreSqlProgressJournal? Create()
     {
