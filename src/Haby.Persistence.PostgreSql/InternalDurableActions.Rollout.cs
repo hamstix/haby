@@ -34,14 +34,14 @@ internal sealed partial class InternalDurableActions
         await using var tx = await db.Database.BeginTransactionAsync(token);
         await DurableAggregateCompletion.LockAsync(db, Guid.Parse(accepted.DeploymentId.ToString()), token);
         var source = await InternalGenerationAuthority.RequireStageReadAsync(db, accepted, token);
-        if (publicRequest && DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is not null) throw new InvalidDataException("Public UPDATE remains unavailable.");
         var targets = Targets(source);
         var members = resumes ?? targets.Select(x => new RolloutResume(x, Guid.Empty)).ToArray();
         var input = RolloutJson.Encode(new RolloutRequest(resumes is null ? "Observe" : "Resume", actor, options, members, recipientOptions));
         if (Encoding.UTF8.GetByteCount(input) > 131072) throw new InvalidDataException("Observation request too large.");
         var previous = await db.ObservationRecords.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == source.DeploymentId &&
             x.Generation == source.Generation && x.Kind == "Request" && x.Request == request, token);
-        if (previous is not null && await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.AppliedGeneration >= source.Generation, token))
+        if (previous is not null && await db.GenerationStageCheckpoints.AsNoTracking().AnyAsync(x => x.DeploymentId == source.DeploymentId &&
+            x.Generation == source.Generation && x.Stage == InitialRetirementCompletion.Stage, token))
         {
             if (previous.InputJson != input) throw publicRequest ? new RolloutRequestConflictException() : new InvalidDataException("Conflicting observation idempotency request.");
             var completed = await InitialRetirementCompletion.RequireProofAsync(db, source, token);
@@ -61,6 +61,8 @@ internal sealed partial class InternalDurableActions
             var replay = previous.Payload is null ? Result(set, saved?.Id, RolloutStop.Interrupted, new Dictionary<string, RolloutObservation>()) : RolloutJson.Decode(previous.Payload);
             return new(set, previous, replay with { Replayed = true }, 0); // No duplicate network work, including interrupted reservations.
         }
+        if (!await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.DesiredGeneration == source.Generation, token))
+            throw publicRequest ? new RolloutPermissionException() : new InvalidDataException("Superseded generation cannot start observation.");
         var calls = await db.ObservationRecords.CountAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Kind == "Request", token);
         var row = new GenerationObservationRecordRow
         {
@@ -97,6 +99,15 @@ internal sealed partial class InternalDurableActions
         var requestBudget = totalBudget ?? TimeSpan.FromMilliseconds(options.RequestMilliseconds);
         if (clock.GetElapsedTime(started) >= requestBudget) throw new OperationCanceledException(callToken);
         batch?.Start();
+        if (publicRequest && !updateWait)
+        {
+            await using var db = await contexts.CreateDbContextAsync(callToken);
+            var id = Guid.Parse(accepted.DeploymentId.ToString());
+            var graphJson = await db.DeploymentGenerations.AsNoTracking().Where(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value).Select(x => x.GraphJson).SingleAsync(callToken);
+            var graph = DurableOperationGraphCodec.Decode(graphJson);
+            updateWait = graph.WorkloadUpdate is not null || graph.Correction is not null;
+            if (updateWait) { recipientOptions ??= new(); recipientOptions.Validate(); }
+        }
         var call = await BeginObservationCallAsync(accepted, request, options, null, actor, callToken, publicRequest, batch?.Budget, updateWait, recipientOptions);
         if (call.Replay is not null) return call.Replay;
         var set = call.Set;
@@ -224,6 +235,8 @@ internal sealed partial class InternalDurableActions
     {
         await using var db = await contexts.CreateDbContextAsync(token); await using var tx = await db.Database.BeginTransactionAsync(token);
         await DurableAggregateCompletion.LockAsync(db, call.Set.Source.DeploymentId, token);
+        if (!await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == call.Set.Source.DeploymentId && x.DesiredGeneration == call.Set.Source.Generation, token))
+            return new(null, false, false, "generation-superseded");
         var latest = await db.ObservationAttempts.AsNoTracking().Where(x => x.DeploymentId == call.Set.Source.DeploymentId &&
             x.Generation == call.Set.Source.Generation && x.Subject == member.Subject).OrderByDescending(x => x.Ordinal).FirstAsync(token);
         if (latest.Id != member.Attempt.Id)
@@ -300,8 +313,9 @@ internal sealed partial class InternalDurableActions
             throw new InvalidDataException("Stale read reservation.");
         var latest = await db.ObservationAttempts.AsNoTracking().Where(x => x.DeploymentId == call.Set.Source.DeploymentId &&
             x.Generation == call.Set.Source.Generation && x.Subject == member.Subject).OrderByDescending(x => x.Ordinal).FirstAsync(token);
+        var currentOwner = await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == call.Set.Source.DeploymentId && x.DesiredGeneration == call.Set.Source.Generation, token);
         RolloutResult? completed = null;
-        if (latest.Id == member.Attempt.Id)
+        if (latest.Id == member.Attempt.Id && currentOwner)
         {
             samples[member.Subject] = reservation; observations[member.Subject] = observation;
             if (reuse.Status == ResourceReuseValidationStatus.Confirmed && !call.LifecycleToken.IsCancellationRequested)
@@ -309,7 +323,7 @@ internal sealed partial class InternalDurableActions
         }
         await db.SaveChangesAsync(token);
         if (completed?.Applied == true) call.LifecycleToken.ThrowIfCancellationRequested();
-        await CommitRolloutAsync(tx, token, batch); return (latest.Id == member.Attempt.Id, expired, completed);
+        await CommitRolloutAsync(tx, token, batch); return (latest.Id == member.Attempt.Id && currentOwner, expired, completed);
     }
     private async ValueTask<ResourceReuseValidationResult> VerifyReadPromotionAsync(ObservationCall call, CancellationToken lifecycle, CancellationToken closure)
     {
@@ -337,7 +351,7 @@ internal sealed partial class InternalDurableActions
         fault?.Invoke(InternalActionFault.BeforeReadinessCheckpoint);
         var result = Result(current, id, RolloutStop.Complete, observations);
         await db.SaveChangesAsync(token);
-        if (call.PublicWait)
+        if (call.PublicWait && !call.UpdateWait)
         {
             var transaction = db.Database.CurrentTransaction!;
             await transaction.CreateSavepointAsync("initial_completion", token);
@@ -404,10 +418,10 @@ internal sealed partial class InternalDurableActions
                 if (old.InputJson != input || old.Payload is null) throw publicRequest ? new RolloutRequestConflictException() : new InvalidDataException("Conflicting resume request.");
                 return RolloutJson.Decode(old.Payload) with { Replayed = true };
             }
-            try { _ = publicRequest ? await InternalGenerationAuthority.RequireAsync(db, accepted, token) : await InternalGenerationAuthority.RequireStageReadAsync(db, accepted, token); }
+            try { _ = publicRequest ? await InternalGenerationAuthority.RequireStageAsync(db, accepted, token) : await InternalGenerationAuthority.RequireStageReadAsync(db, accepted, token); }
             catch (InvalidDataException) when (publicRequest) { throw new RolloutPermissionException(); }
             if (Encoding.UTF8.GetByteCount(input) > 131072) throw new ArgumentException("Resume request too large.");
-            if (publicRequest || DurableOperationGraphCodec.Decode(set.Source.GraphJson).WorkloadUpdate is not null)
+            if (publicRequest || DurableOperationGraphCodec.Decode(set.Source.GraphJson) is { } graph && (graph.WorkloadUpdate is not null || graph.Correction is not null))
             {
                 try
                 {

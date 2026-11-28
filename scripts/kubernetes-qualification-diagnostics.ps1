@@ -382,7 +382,8 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
           'PASS configured-C12-Pod-defaulted-resource-requests',
           'PASS configured-C13-configured-Deployment-Pod-ports-probes-defaults',
           'PASS configured-R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied',
-          'PASS configured-U01-public-update-remains-closed',
+          'PASS configured-R08-real-Resources-first-install-correction-exact-UID-no-replay-retirement-Applied',
+          'PASS configured-U01-public-image-update-plan-and-current-check',
           'PASS configured-U02-new-exact-documents-prepared',
           'PASS configured-U03-stable-account-original-proof-new-generation-use',
           'PASS configured-U04-new-rights-before-patch-old-rights-retained',
@@ -429,7 +430,14 @@ function Read-QualificationWorkloadEvidence([string]$Mode,[string]$Output,[strin
             if($line.Length -gt 160){return $invalid}
             $parts=$line.Split(' ')
             if($parts.Count -lt 4 -or $parts[1] -cne $Mode){return $invalid}
-            if($parts[2] -ceq 'cli-tail'){
+            if($parts[2] -ceq 'corrective'){
+                if($Mode -cne 'configured' -or $parts.Count -notin @(5,6) -or
+                    $parts[3] -cnotin @('Setup','Preflight','InitialPlanCommit','ExecuteResource','BadSubmitWait','CorrectivePlanCommit','SubmitWait','Retirement','OidProof')){return $invalid}
+                if($parts.Count -eq 5){if($parts[4] -cnotin @('Complete','Failed')){return $invalid}}
+                elseif($parts[4] -cne 'Rejected' -or $parts[5] -cnotin @('Preflight','InitialPlan','InitialCommit','ResourceProof','BadSubmit','BadWait','CorrectivePlan','CorrectiveCommit','CorrectiveSubmit','RetirementProof','OriginalEffects','CopiedProof')){return $invalid}
+                if($parts[4] -cne 'Complete'){$hasFailure=$true}
+                $records.Add('Diagnostic workload: configured corrective '+($parts[3..($parts.Count-1)] -join ' '))
+            }elseif($parts[2] -ceq 'cli-tail'){
                 if($Mode -cne 'configured' -or $parts.Count -ne 4 -or $parts[3] -cnotin @('Output','Termination')){return $invalid}
                 $hasFailure=$true
                 $records.Add('Diagnostic workload: configured cli-tail '+$parts[3])

@@ -15,7 +15,7 @@ internal static class ConfiguredReportingControls
         var root = Environment.GetEnvironmentVariable("HABY_TEST_SOURCE_ROOT");
         if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root)) throw new InvalidOperationException("Explicit source root required.");
         string Source(string file) => File.ReadAllText(Path.Combine(root, "tools/Haby.Kubernetes.Qualification", file + ".cs"));
-        if (Regex.Matches(Source("ConfiguredDeploymentCases"), "await WithHost\\(").Count != 5 ||
+        if (Regex.Matches(Source("ConfiguredDeploymentCases"), "await WithHost\\(").Count != 6 ||
             Regex.Matches(Source("ConfiguredDeploymentCases"), "await Startup\\(").Count != 4 ||
             !Source("ConfiguredUpdateRetirement").Contains("MaximumRounds: 128", StringComparison.Ordinal))
             throw new InvalidOperationException("Configured caller multiplicities changed; re-inventory reporting bounds.");
@@ -29,18 +29,18 @@ internal static class ConfiguredReportingControls
         {
             Console.SetOut(text);
             Console.WriteLine("Q243 configured entry start");
-            foreach (var file in new[] { "ConfiguredDeploymentCases", "ConfiguredDeploymentUpdateCases", "ConfiguredUpdateRetirement", "ConfiguredFixtureDrain" })
+            foreach (var file in new[] { "ConfiguredDeploymentCases", "ConfiguredDeploymentUpdateCases", "ConfiguredCorrectiveCases", "ConfiguredUpdateRetirement", "ConfiguredFixtureDrain" })
             {
                 var source = Source(file);
                 // Every fixed success emission at its actual lexical caller; all
                 // alternate failures are exercised separately below. Host builds
-                // execute five times, Startup four; other fixed sites once.
+                // execute six times, Startup four; other fixed sites once.
                 foreach (Match match in Regex.Matches(source, "Console\\.WriteLine\\(\"((?:Q243 configured|PASS configured-)[^\"]+)\"\\)"))
                 {
                     var line = match.Groups[1].Value;
                     if (line.EndsWith(" failed", StringComparison.Ordinal) || line.Contains("Expired", StringComparison.Ordinal) ||
                         line.Contains("DrainExhausted", StringComparison.Ordinal) || line.Contains("DrainOwnershipRefused", StringComparison.Ordinal)) continue;
-                    var count = line.StartsWith("Q243 configured host-", StringComparison.Ordinal) ? 5 :
+                    var count = line.StartsWith("Q243 configured host-", StringComparison.Ordinal) ? 6 :
                         line.StartsWith("Q243 configured pod-startup", StringComparison.Ordinal) ? 4 : 1;
                     for (var i = 0; i < count; i++) Console.WriteLine(line);
                 }
@@ -51,6 +51,11 @@ internal static class ConfiguredReportingControls
                     else if (file == "ConfiguredDeploymentUpdateCases") ConfiguredDeploymentUpdateCases.Check(true, id);
                     else ConfiguredUpdateRetirement.Check(true, id);
                 }
+            }
+            using (var corrective = new ConfiguredCorrectiveDiagnostics())
+            {
+                foreach (var phase in Enum.GetValues<ConfiguredCorrectiveDiagnostics.Phase>())
+                { corrective.Enter(phase); corrective.Complete(); }
             }
             using (var lifetime = new ConfiguredLifecycle())
             {
@@ -113,6 +118,9 @@ internal static class ConfiguredReportingControls
         Console.WriteLine("CASE negative"); Console.Write(envelope);
         // Worst-case suffix: first failure after all repetitive success callbacks,
         // failed release/namespace/catalog plus CLI termination/output categories.
+        // Worst-case conservative suffix retains all nine successes plus a rejected failure.
+        using (var corrective = new ConfiguredCorrectiveDiagnostics())
+        { corrective.Enter(ConfiguredCorrectiveDiagnostics.Phase.OidProof); corrective.Reject(ConfiguredCorrectiveDiagnostics.Result.CopiedProof); }
         var negative = new ConfiguredRetirementDiagnostics.Output();
         for (var i = 0; i < 256; i++)
         {

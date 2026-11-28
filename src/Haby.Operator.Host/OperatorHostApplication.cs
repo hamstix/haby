@@ -200,7 +200,7 @@ public static class OperatorHostApplication
             p.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(),
             (PostgreSqlDurableDesiredStateCommitter)p.GetRequiredService<IDurableDesiredStateCommitter>(),
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
-            [new InternalDeploymentAction(p.GetRequiredService<ISecretStore>())]));
+            [new InternalDeploymentAction(p.GetRequiredService<ISecretStore>()), new InternalDeploymentAction(p.GetRequiredService<ISecretStore>(), update: true)]));
         var submitText = builder.Configuration["Haby:WorkloadSubmission:RequestMilliseconds"];
         if (submitText is not null && !int.TryParse(submitText, out _))
             throw new InvalidOperationException("Invalid configuration key: Haby:WorkloadSubmission:RequestMilliseconds");
@@ -213,10 +213,10 @@ public static class OperatorHostApplication
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
             p.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(), p.GetRequiredService<PostgreSqlConfigurationDocumentStore>(),
             [p.GetRequiredService<InternalDeploymentAction>()], p.GetServices<IExternalOperationOutputContract>(),
-            p.GetServices<IProviderConfigurationCodec>(), p.GetRequiredService<DurableActionAdmission>(), p.GetServices<IDurableResourceReuseVerifier>()));
+            p.GetServices<IProviderConfigurationCodec>(), p.GetRequiredService<DurableActionAdmission>(), p.GetRequiredService<DurableOperationSerialization>(), p.GetServices<IDurableResourceReuseVerifier>()));
         builder.Services.AddSingleton<InternalDurableActions>(p => new(
             p.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<ManifestCatalogDbContext>>(),
-            [p.GetRequiredService<InternalDeploymentAction>(), p.GetRequiredService<InternalRuntimeIdentityAction>()],
+            [p.GetRequiredService<InternalDeploymentAction>(), p.GetRequiredService<InternalRuntimeIdentityAction>(), new InternalDeploymentAction(p.GetRequiredService<ISecretStore>(), update: true)],
             p.GetServices<IProviderConfigurationCodec>(), p.GetServices<IExternalOperationOutputContract>(), p.GetRequiredService<DurableActionAdmission>(),
             p.GetRequiredService<DurableOperationSerialization>(), p.GetRequiredService<TimeProvider>(),
             configurationPreparation: p.GetRequiredService<InternalWorkloadConfiguration>(), reuseVerifiers: p.GetServices<IDurableResourceReuseVerifier>()));

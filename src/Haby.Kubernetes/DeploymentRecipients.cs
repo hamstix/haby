@@ -29,7 +29,7 @@ internal static class DeploymentRecipients
         try
         {
             _ = DeploymentReadiness.Budget(Encode(intent), Encode(receipt));
-            Need(intent.ExpectedUid == receipt.Uid, "update-uid");
+            Need(ConfirmedUid(intent, receipt), "update-uid");
             Need(sets.Metadata is not null && pods.Metadata is not null &&
                 !string.IsNullOrEmpty(sets.Metadata.ResourceVersion) && !string.IsNullOrEmpty(pods.Metadata.ResourceVersion) &&
                 string.IsNullOrEmpty(sets.Metadata.ContinueProperty) && string.IsNullOrEmpty(pods.Metadata.ContinueProperty) &&
@@ -84,6 +84,11 @@ internal static class DeploymentRecipients
         catch (Exception error) when (error is WorkloadContractException or InvalidOperationException or ArgumentException or NullReferenceException)
         { return new(false, "recipient-evidence-incomplete"); }
     }
+    // Budget validates the exact CREATE/UPDATE intent and confirmed receipt scope.
+    // CREATE learns its UID only from that receipt; UPDATE must retain its expected UID.
+    private static bool ConfirmedUid(DeploymentIntent intent, DeploymentReceipt receipt) =>
+        intent.ExpectedUid is null || intent.ExpectedUid == receipt.Uid;
+
     private static V1OwnerReference? Controller(IList<V1OwnerReference>? owners)
     {
         Need(owners is not null && owners.Count <= 64, "owner-list");
@@ -123,7 +128,7 @@ internal static class DeploymentRecipients
                 evidence.OwnedPods.Count(x => !x.Target) == evidence.OldPods &&
                 evidence is { Version: 1, ReplicaSets: >= 0, Pods: >= 0, OldPods: >= 0 } &&
                 evidence.OldPods <= evidence.Pods && evidence.ReceiptHash == Hash(receipt) && evidence.Uid == saved.Uid &&
-                Decode(intent).ExpectedUid == saved.Uid && evidence.Generation == saved.KubernetesGeneration && !string.IsNullOrEmpty(evidence.ReplicaSetVersion) && !string.IsNullOrEmpty(evidence.PodVersion) &&
+                ConfirmedUid(Decode(intent), saved) && evidence.Generation == saved.KubernetesGeneration && !string.IsNullOrEmpty(evidence.ReplicaSetVersion) && !string.IsNullOrEmpty(evidence.PodVersion) &&
                 observation.Absent == (evidence.OldPods == 0) && observation.Code == (observation.Absent ? "old-recipients-absent" : "old-recipients-present");
         }
         catch (Exception error) when (error is JsonException or WorkloadContractException or InvalidOperationException or ArgumentException) { return false; }

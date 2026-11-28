@@ -56,7 +56,9 @@ internal static class ResourceContinuity
             var inputs = Inputs(source);
             var contexts = await ResourceProviderDispatch.CaptureAsync(db, inputs, codecs, token);
             var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
-            if (!admission.Supports(graph) || !await ResourceProviderDispatch.ValidateCreationAsync(db, inputs, graph, codecs, admission, token)) return false;
+            var resourceInputs = source.InternalEffects ? InternalResourceStage.Project(inputs) : inputs;
+            var resourceGraph = source.InternalEffects ? InternalResourceStage.Project(graph) : graph;
+            if (!admission.Supports(resourceGraph) || !await ResourceProviderDispatch.ValidateCreationAsync(db, resourceInputs, resourceGraph, codecs, admission, token)) return false;
             foreach (var requirement in reuse.ReusedResources.Where(x => x.SourceGeneration == generation))
             {
                 var management = await db.CurrentResourceManagement.AsNoTracking().SingleOrDefaultAsync(x => x.Id == requirement.ManagementId, token);
@@ -68,11 +70,11 @@ internal static class ResourceContinuity
                         a.Type != b.Type || a.ProviderRef != b.ProviderRef || a.DeletionPolicy != b.DeletionPolicy || !a.Properties.Equals(b.Properties)) return false;
                 }
                 var context = contexts[requirement.Resource];
-                if (!admission.CanReuseResource(inputs.Configuration!.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, context.Provider, target, context.Configuration, inputs)) return false;
+                if (!admission.CanReuseResource(resourceInputs.Configuration!.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource, context.Provider, target, context.Configuration, resourceInputs)) return false;
             }
             foreach (var requirement in reuse.RetainedResources.Where(x => x.SourceGeneration == generation))
-                if (!admission.CanRetainResource(inputs.Configuration!.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource,
-                    contexts[requirement.Resource].Provider, target, contexts[requirement.Resource].Configuration, inputs)) return false;
+                if (!admission.CanRetainResource(resourceInputs.Configuration!.Manifest.Spec, target.Configuration!.Manifest.Spec, requirement.Resource,
+                    contexts[requirement.Resource].Provider, target, contexts[requirement.Resource].Configuration, resourceInputs)) return false;
             var all = await db.OperationOutputs.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation).ToArrayAsync(token);
             var references = all.Select(x => new ConfirmedOperationOutput(OperationId.Create(x.OperationId), new(x.Contract, x.Key, x.Payload))).ToArray();
             foreach (var node in graph.Nodes)
@@ -133,7 +135,13 @@ internal static class ResourceContinuity
         {
             if (source.InternalEffects)
             {
-                _ = await InitialRetirementCompletion.RequireProofAsync(db, source, token);
+                if (await db.GenerationStageCheckpoints.AsNoTracking().AnyAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation &&
+                    x.Stage == InitialRetirementCompletion.Stage, token)) _ = await InitialRetirementCompletion.RequireProofAsync(db, source, token);
+                else
+                {
+                    if (!InternalResourceStage.IsInitialCreate(inputs, graph)) return null;
+                    _ = await InternalGenerationAuthority.RequireStageReadAsync(db, source, token);
+                }
                 if (await DurableAggregateCompletion.ReadAsync(db, source, token, internalResourceStage: true, completedRead: true, referenceHistory: referenceHistory) is null) return null;
             }
             else if (!await DurableAggregateCompletion.HasProofAsync(db, management.Deployment, management.SourceGeneration, token, referenceHistory)) return null;
@@ -176,21 +184,23 @@ internal static class ResourceContinuity
     // The caller already validates the complete current corrective capture; this separately
     // binds its Resource entry to the direct original confirmed producer checkpoint.
     internal static async Task<string?> CorrectiveEvidenceAsync(ManifestCatalogDbContext db, ResourceManagementRow management,
-        ResourcesReadyCheckpoint current, CancellationToken token)
+        ResourcesReadyCheckpoint current, CancellationToken token, bool referenceHistory = false)
     {
         var applied = await db.ApplicationDeployments.AsNoTracking().Where(x => x.Id == management.Deployment).Select(x => x.AppliedGeneration).SingleAsync(token);
-        if (applied >= management.SourceGeneration) return await EvidenceAsync(db, management, token);
         var source = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == management.Deployment && x.Generation == management.SourceGeneration, token);
+        if (source is not null && applied >= management.SourceGeneration && (!source.InternalEffects || await db.GenerationStageCheckpoints.AsNoTracking().AnyAsync(x =>
+            x.DeploymentId == management.Deployment && x.Generation == management.SourceGeneration && x.Stage == InitialRetirementCompletion.Stage, token)))
+            return await EvidenceAsync(db, management, token, referenceHistory: referenceHistory);
         if (source is null || !source.InternalEffects || !InternalResourceStage.IsInitialCreate(source.Inputs(), DurableOperationGraphCodec.Decode(source.GraphJson)) ||
             current.DeploymentId != management.Deployment || current.Generation < source.Generation) return null;
-        var proof = await DurableAggregateCompletion.ReadAsync(db, source, token, internalResourceStage: true);
+        var proof = await DurableAggregateCompletion.ReadAsync(db, source, token, internalResourceStage: true, completedRead: true, referenceHistory: referenceHistory);
         var original = proof?.Resources.SingleOrDefault(x => x.ManagementId == management.Id && x.Resource == management.Resource);
         var retained = current.Resources.SingleOrDefault(x => x.ManagementId == management.Id && x.Resource == management.Resource);
         if (original is null || retained is null || original.SourceGeneration != retained.SourceGeneration || original.SourceFingerprint != retained.SourceFingerprint ||
             original.Operations.Count != retained.Operations.Count || original.Operations.Zip(retained.Operations).Any(pair =>
                 pair.First.OperationId != pair.Second.OperationId || pair.First.AttemptId != pair.Second.AttemptId || pair.First.AttemptNumber != pair.Second.AttemptNumber ||
                 pair.First.RecoveryDecisionId != pair.Second.RecoveryDecisionId || !pair.First.Outputs.SequenceEqual(pair.Second.Outputs))) return null;
-        return await EvidenceAsync(db, management, token, requireApplied: false);
+        return await EvidenceAsync(db, management, token, requireApplied: false, referenceHistory: referenceHistory);
     }
 
     internal static async Task<bool> ValidateAsync(ManifestCatalogDbContext db, Guid deployment,
@@ -217,7 +227,7 @@ internal static class ResourceContinuity
             if (managed is null || managed.Deployment != deployment || managed.Environment != owner.EnvironmentRecordId ||
                 managed.Application != owner.ApplicationRecordId || managed.Resource != reuse.Resource.Value || managed.SourceGeneration != reuse.SourceGeneration ||
                 (graph.Correction is { } correction
-                    ? await CorrectiveEvidenceAsync(db, managed, ResourcesReadyCheckpointCodec.Decode(correction.Document.ResourceProof), token)
+                    ? await CorrectiveEvidenceAsync(db, managed, ResourcesReadyCheckpointCodec.Decode(correction.Document.ResourceProof), token, referenceHistory)
                     : await EvidenceAsync(db, managed, token, referenceHistory: referenceHistory)) != reuse.EvidenceFingerprint) return false;
             if (graph.ReusedResources.Contains(reuse) && reuse.Reintroduced != previousGraph.RetainedResources.Any(x => x.Resource == reuse.Resource)) return false;
             var original = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == deployment && x.Generation == reuse.SourceGeneration, token);
@@ -227,7 +237,11 @@ internal static class ResourceContinuity
             if (originalProvider.Instance != previousProvider.Instance || originalProvider.Configuration != previousProvider.Configuration ||
                 originalProvider.Implementation != previousProvider.Implementation) return false;
         }
-        return graph.ReusedResources.Count > 0;
+        // A corrective generation may have an explicitly empty original Resource stage.
+        // Its exact original checkpoint is authenticated by the caller; continuity here
+        // still requires the pinned predecessor and exact empty inventory above.
+        return graph.ReusedResources.Count > 0 ||
+            graph.Correction is not null && inventory.Count == 0 && graph.Nodes.Count == 0;
     }
 
     internal static async Task<DurableOperationKey?> ResolveAsync(ManifestCatalogDbContext db, DurableOperationKey requested,

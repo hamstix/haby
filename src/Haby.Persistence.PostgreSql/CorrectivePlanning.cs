@@ -119,7 +119,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         catch (Exception error) when (error is InvalidDataException or WorkloadUpdateRefusedException or ArgumentException or System.Text.Json.JsonException) { return DurablePlanCurrentStatus.PlanStale; }
     }
 
-    private async Task<(DurablePlanningInputs Inputs, DurableOperationGraph Graph)> CaptureCorrectiveAsync(ManifestCatalogDbContext db,
+    internal async Task<(DurablePlanningInputs Inputs, DurableOperationGraph Graph)> CaptureCorrectiveAsync(ManifestCatalogDbContext db,
         DurableChangeSetRow change, ApplicationDeploymentRow owner, IReadOnlyList<IInternalActionHandler> handlers, CancellationToken token)
     {
         var intent = CorrectiveIntentCodec.Decode(change.CorrectiveIntentJson) ?? throw new InvalidDataException("Explicit corrective intent required.");
@@ -127,7 +127,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             owner.AppliedGeneration >= owner.DesiredGeneration || change.ImportIntentJson is not null || change.ExpectedAbsence || change.ExpectedGeneration != owner.DesiredGeneration)
             throw new InvalidDataException("Exact incomplete desired generation required.");
         // Catalog capture only: this shared lock freezes publication writers, not an executor handoff.
-        // No execution authority is granted here. Activation must add the deployment-wide fence.
+        // No execution authority is granted here. The accepting caller owns the
+        // deployment-wide gate, locked recapture and atomic desired-owner CAS.
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {owner.Id} FOR SHARE", token);
         var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == owner.Id && x.Generation == owner.DesiredGeneration, token);
         source = await InternalGenerationAuthority.RequireStageAsync(db, source, token);
@@ -161,6 +162,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         var objects = await db.OwnedObjects.AsNoTracking().Where(x => x.DeploymentId == owner.Id).OrderBy(x => x.ManagedWorkloadId).ThenBy(x => x.Role).Take(1025).ToArrayAsync(token);
         var states = await db.ManagedObjectStates.AsNoTracking().Where(x => x.DeploymentId == owner.Id).OrderBy(x => x.ManagedWorkloadId).ThenBy(x => x.Role).Take(1025).ToArrayAsync(token);
         var members = new List<CorrectiveMember>();
+        var significantInput = oldVersion != target.ApplicationVersion.Value;
         foreach (var subject in selected.Keys.OrderBy(x => x.Component.Value, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal))
         {
             var exact = previous.Providers.Entries[subject];
@@ -171,7 +173,10 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                 x.Contract.Implementation == exact.Implementation.Value && x.Contract.ProviderKind == providerInstance.ProviderKindId &&
                 x.Contract.Configuration == exactRevision.ConfigurationShapeId).ToArray();
             if (candidates is not [var handler]) throw new InvalidDataException("Exact corrective planning support unavailable.");
+            if (handler is not IInternalReadinessHandler || handler is not IInternalRecipientObserver)
+                throw new InvalidDataException("Complete corrective CREATE continuation unavailable.");
             var image = ((IInternalWorkloadCorrectionPlanner)handler).CaptureCorrection(previous, oldVersion, inputs, target.ApplicationVersion.Value, subject);
+            significantInput |= image.PreviousImage != image.TargetImage;
             var managed = stable.SingleOrDefault(x => x.Component == subject.Component.Value && x.Workload == subject.Id.Value);
             var history = await db.ActionIntents.AsNoTracking().Where(x => x.DeploymentId == owner.Id && x.SubjectKind == "Workload" && x.Component == subject.Component.Value && x.LocalId == subject.Id.Value && x.OutputContract == handler.Contract.OutputContract)
                 .OrderBy(x => x.Generation).ThenBy(x => x.OperationId).Take(257).ToArrayAsync(token);
@@ -189,6 +194,12 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             }
             if (confirmed.Count > 0)
             {
+                var updateHandlers = handlers.Where(x => x.UpdatesObject && x.Contract.Subject == handler.Contract.Subject &&
+                    x.Contract.ProviderKind == handler.Contract.ProviderKind && x.Contract.Configuration == handler.Contract.Configuration &&
+                    x.Contract.Implementation == handler.Contract.Implementation && x.Contract.OutputContract == handler.Contract.OutputContract).ToArray();
+                if (updateHandlers is not [var updateHandler] || updateHandler is not IInternalReadinessHandler || updateHandler is not IInternalRecipientObserver ||
+                    updateHandler is not IInternalWorkloadUpdatePlanner || updateHandler is not IInternalWorkloadCorrectionPlanner)
+                    throw new InvalidDataException("Complete corrective UPDATE continuation unavailable.");
                 var last = confirmed[^1];
                 if (managed is null || last.Intent.ManagedIdentity != managed.Id || last.Operation.CurrentAttemptId is null || last.Output.Contract != last.Intent.OutputContract ||
                     managed.EnvironmentId != source.EnvironmentRecordId || managed.ApplicationId != source.ApplicationRecordId || managed.ProviderId.ToString() != exact.Instance.ToString())
@@ -204,6 +215,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
                 var context = new InternalActionContext(new(ApplicationDeploymentId.Parse(owner.Id.ToString()), DeploymentGeneration.Create(origin.Generation), OperationId.Create(last.Intent.OperationId)),
                     originalInputs, subject, originalProvider, PreparedConfiguration(last.Intent.ProviderKind, providerRevision), originalVersion, last.Intent.Marker,
                     managed.Id, InternalPlacementInput.Decode(originalProvider.Placement!).Declaration);
+                context = await InternalDurableActions.UpdateContextAsync(db, origin, context, (IInternalActionHandler)originalHandler, token);
                 _ = originalHandler.CaptureUpdate(context, inputs, target.ApplicationVersion.Value, last.Intent.Payload, last.Output.Payload);
                 var attempt = await db.DurableOperationAttempts.AsNoTracking().SingleOrDefaultAsync(x => x.AttemptId == last.Operation.CurrentAttemptId && x.DeploymentId == owner.Id &&
                     x.Generation == last.Intent.Generation && x.OperationId == last.Intent.OperationId && x.AttemptNumber == last.Operation.AttemptNumber, token);
@@ -215,14 +227,14 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             else
             {
                 // Positive accepted initial target plus no dispatch anywhere in its complete history.
-                var initial = DurableOperationGraphCodec.Decode(source.GraphJson).Retirement;
-                if (initial is null || !initial.Document.Targets.Any(x => x.Subject == "Workload/" + subject.Component.Value + "/" + subject.Id.Value) ||
+                if (!await HasOriginalInitialTargetAsync(db, source, subject, token) ||
                     managed is not null && objects.Any(x => x.ManagedWorkloadId == managed.Id && !db.RuntimeIdentityBindings.Any(b => b.ManagedWorkloadId == x.ManagedWorkloadId && b.Role == x.Role)) || managed is not null && states.Any(x => x.ManagedWorkloadId == managed.Id))
                     throw new InvalidDataException("Pending initial creation is not proven.");
                 members.Add(new(subject.Component.Value, subject.Id.Value, "NeverConfirmedInitialCreate", managed?.Id, current?.Generation, current?.OperationId,
                     null, current is null ? null : ResourcesReadyCheckpointCodec.Hash(current.Payload), null, null, image, selected[subject].Select(x => x.Value).Order(StringComparer.Ordinal).ToArray()));
             }
         }
+        if (!significantInput) throw new InvalidDataException("Unchanged desired input must resume its generation.");
         if (stable.Any(x => !members.Any(m => m.Component == x.Component && m.Workload == x.Workload))) throw new InvalidDataException("Unexplained managed member.");
         var ids = stable.Select(x => x.Id).ToArray();
         var bindings = await db.RuntimeIdentityBindings.AsNoTracking().Where(x => ids.Contains(x.ManagedWorkloadId)).OrderBy(x => x.Id).Take(513).ToArrayAsync(token);
@@ -261,5 +273,26 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         }
         return (inputs, new DurableOperationGraph([], reuse, new(ApplicationDeploymentId.Parse(owner.Id.ToString()), source.Generation, source.Fingerprint))
         { Acquisitions = previous.Acquisitions }.WithCorrection(inventory));
+    }
+
+    private static async Task<bool> HasOriginalInitialTargetAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
+        ProviderInput.Workload subject, CancellationToken token)
+    {
+        var current = source;
+        for (var count = 0; count < 256; count++)
+        {
+            var graph = DurableOperationGraphCodec.Decode(current.GraphJson);
+            if (graph.Retirement is { } initial)
+            {
+                _ = await InternalGenerationAuthority.RequireStageReadAsync(db, current, token);
+                return initial.Document.Targets.Any(x => x.Subject == "Workload/" + subject.Component.Value + "/" + subject.Id.Value);
+            }
+            if (graph.Correction?.Document is not { } correction || correction.ExpectedDesired >= current.Generation ||
+                correction.Members.SingleOrDefault(x => x.Component == subject.Component.Value && x.Workload == subject.Id.Value)?.State != "NeverConfirmedInitialCreate") return false;
+            var previous = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == correction.ExpectedDesired, token);
+            if (previous.PlanId != correction.OriginalPlan || previous.ChangeSetId != correction.OriginalChangeSet || previous.Fingerprint != correction.OriginalFingerprint) return false;
+            current = previous;
+        }
+        return false;
     }
 }

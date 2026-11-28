@@ -34,6 +34,8 @@ internal sealed class CorrectiveInventory
     {
         if (value.Version != 1 || value.Deployment == Guid.Empty || value.ExpectedDesired < 1 ||
             value.LastApplied >= value.ExpectedDesired || value.OriginalPlan == Guid.Empty || value.OriginalChangeSet == Guid.Empty ||
+            value.OriginalFingerprint is not { Length: 67 } || !value.OriginalFingerprint.StartsWith("v6:", StringComparison.Ordinal) ||
+            value.OriginalFingerprint[3..].Any(c => !char.IsAsciiHexDigit(c)) ||
             value.ResourcesReady == Guid.Empty || value.Members is not { Length: > 0 and <= 512 } ||
             value.Objects is not { Length: <= 1024 } || value.Bindings is not { Length: <= 512 } ||
             value.Publications is not { Length: <= 1024 } || value.Preparations is not { Length: <= 2048 } ||
@@ -48,8 +50,8 @@ internal sealed class CorrectiveInventory
                 x.State == "NeverConfirmedInitialCreate" && (x.Attempt is not null || x.ReceiptHash is not null || x.Confirmation is not null)))
             throw new InvalidDataException("Invalid corrective inventory.");
         var proof = ResourcesReadyCheckpointCodec.Decode(value.ResourceProof);
-        if (proof.Id != value.ResourcesReady || proof.DeploymentId != value.Deployment || proof.Generation != value.ExpectedDesired ||
-            proof.InputFingerprint != value.OriginalFingerprint) throw new InvalidDataException("Corrective Resource proof mismatch.");
+        if (proof.Id != value.ResourcesReady || proof.DeploymentId != value.Deployment || proof.Generation > value.ExpectedDesired ||
+            proof.Generation == value.ExpectedDesired && proof.InputFingerprint != value.OriginalFingerprint) throw new InvalidDataException("Corrective Resource proof mismatch.");
         json = JsonSerializer.Serialize(value, CorrectiveMetadata.Default.CorrectiveDocument);
         if (Encoding.UTF8.GetByteCount(json) > 1_048_576) throw new InvalidDataException("Corrective inventory exceeds bound.");
     }

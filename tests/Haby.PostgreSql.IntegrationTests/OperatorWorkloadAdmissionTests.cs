@@ -71,7 +71,8 @@ public sealed partial class OperatorHostIntegrationTests
                     wire.WriteTag(92, Google.Protobuf.WireFormat.WireType.LengthDelimited); wire.WriteString("forged-internal-receipt");
                     wire.WriteTag(93, Google.Protobuf.WireFormat.WireType.LengthDelimited); wire.WriteString("operator-admin");
                 }
-                Assert.Equal(PlanningStatus.UnsupportedShape, (await client.CreatePlanAsync(ChangeSetRequest.Parser.ParseFrom(bytes.ToArray()))).Status);
+                Assert.Equal(fault == "initial-resource" ? PlanningStatus.AliasNotResolved : PlanningStatus.UnsupportedShape,
+                    (await client.CreatePlanAsync(ChangeSetRequest.Parser.ParseFrom(bytes.ToArray()))).Status);
                 await using var verify = await factory.CreateDbContextAsync();
                 Assert.Equal(initial ? 0 : 1, await verify.DeploymentGenerations.CountAsync());
                 Assert.Empty(await verify.ActionIntents.AsNoTracking().ToArrayAsync());

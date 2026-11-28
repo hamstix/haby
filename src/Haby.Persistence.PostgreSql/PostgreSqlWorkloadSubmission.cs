@@ -113,24 +113,27 @@ internal sealed class PostgreSqlWorkloadSubmission(IDbContextFactory<ManifestCat
             switch (stage)
             {
                 case WorkloadSubmissionStage.Documents:
-                    var prepared = await owner.Configuration.PrepareAsync(accepted, actor, token);
+                    var prepared = await owner.Configuration.PrepareCoreAsync(accepted, actor, token);
                     return prepared.Failure is null && !prepared.Cancelled ? new() : new(prepared.Cancelled ? "cancelled" : "configuration-incomplete", prepared.Failed is { } target ? target.Component.Value + "/" + target.Document.Value : null, true);
                 case WorkloadSubmissionStage.Identity:
                     var identities = await owner.Identity.PrepareCoreAsync(accepted, actor, token);
                     var blocked = identities.FirstOrDefault(x => x.Result.Outcome != InternalActionOutcome.Confirmed);
                     return blocked is null ? new() : new(blocked.Result.Code, Subject(blocked.Workload), true);
                 case WorkloadSubmissionStage.Publication:
-                    var published = await owner.Publication.PrepareAsync(accepted, actor, token);
+                    var published = await owner.Publication.PrepareCoreAsync(accepted, actor, token);
                     return new(published.Reason, published.Failed?.Origin is { } origin ? origin.Component + "/" + origin.Workload + "/" + origin.Document : null, published.RequiresInspection);
                 case WorkloadSubmissionStage.Deployment:
                     foreach (var subject in subjects)
                     {
                         token.ThrowIfCancellationRequested();
                         string request;
+                        string action;
                         await using (var db = await owner.Contexts.CreateDbContextAsync(token))
                         {
+                            var source = await InternalGenerationAuthority.RequireStageAsync(db, accepted, token);
+                            action = await owner.Actions.DeploymentSubmissionActionAsync(db, source, subject, owner.DeploymentAction, token);
                             var existing = await db.ActionIntents.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == Guid.Parse(deployment.ToString()) && x.Generation == generation.Value &&
-                                x.Component == subject.Component.Value && x.LocalId == subject.Id.Value && x.ActionContract == owner.DeploymentAction, token);
+                                x.Component == subject.Component.Value && x.LocalId == subject.Id.Value && x.ActionContract == action, token);
                             if (existing is not null)
                             {
                                 var state = await db.DurableOperations.AsNoTracking().SingleAsync(x => x.DeploymentId == existing.DeploymentId && x.Generation == existing.Generation && x.OperationId == existing.OperationId, token);
@@ -142,7 +145,7 @@ internal sealed class PostgreSqlWorkloadSubmission(IDbContextFactory<ManifestCat
                             }
                             request = existing?.RequestId ?? "submit-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("v1|" + subject.Component.Value + "|" + subject.Id.Value)));
                         }
-                        var key = await owner.Actions.AcceptCoreAsync(accepted, subject, owner.DeploymentAction, request, actor, token);
+                        var key = await owner.Actions.AcceptCoreAsync(accepted, subject, action, request, actor, token);
                         token.ThrowIfCancellationRequested();
                         var result = await owner.Actions.ExecuteCoreAsync(key, false, token, actor);
                         if (result.Outcome != InternalActionOutcome.Confirmed) return new(result.Code, Subject(subject), true);

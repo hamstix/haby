@@ -2,6 +2,29 @@
   "baselineSource": "1720256bd200bf75c67f74829cb3b45afa46651f",
   "baselineCases": 869,
   "classes": {
+    "PostgreSqlProgressTests": {
+      "responsibilities": [
+        "Test infrastructure"
+      ],
+      "isolation": "none",
+      "baselineCases": 0,
+      "gate": "postgresql-integration",
+      "requirements": {
+        "caseOwnedCatalog": false,
+        "globalRoleSensitive": false,
+        "serverSettings": false,
+        "globalClientLogging": false,
+        "restoreUtilities": false,
+        "hostOrNative": false,
+        "conservativeClassUnion": true
+      },
+      "suite": "functional",
+      "triggers": [
+        "relevant-merge",
+        "nightly-full",
+        "release-full"
+      ]
+    },
     "SharedReferenceDeliveryTests": {
       "responsibilities": [
         "Persistence",

@@ -35,6 +35,9 @@ internal sealed partial class InternalDurableActions(
             new(accepted.DeploymentId, accepted.Generation, OperationId.Create("effect-" + request)),
             () => AcceptCoreAsync(accepted, subject, action, request, null, token), token);
 
+    internal ValueTask<T> SerializeDeploymentAsync<T>(ApplicationDeploymentId deployment, Func<ValueTask<T>> call, CancellationToken token) =>
+        serialization.RunDeploymentAsync(deployment, call, token);
+
     // Caller owns the deployment gate. Catalog locks/uniqueness remain mandatory.
     internal async ValueTask<DurableOperationKey> AcceptCoreAsync(DurableChangeSetCommit accepted, ProviderInput subject,
         string action, string request, string? actor, CancellationToken token)
@@ -83,9 +86,11 @@ internal sealed partial class InternalDurableActions(
             _ = await LoadAsync(db, key, token);
             return key;
         }
-        if (DurableOperationGraphCodec.Decode(generation.GraphJson).WorkloadUpdate is not null &&
+        var acceptedGraph = DurableOperationGraphCodec.Decode(generation.GraphJson);
+        var targetActions = handlers.Where(h => h is IInternalReadinessHandler).Select(h => h.Contract.Action).ToArray();
+        if ((acceptedGraph.WorkloadUpdate is not null || acceptedGraph.Correction is not null) &&
             await db.ActionIntents.AsNoTracking().AnyAsync(x => x.DeploymentId == deployment && x.Generation == generation.Generation &&
-                x.SubjectKind == "Workload" && subject is ProviderInput.Workload && x.Component == ((ProviderInput.Workload)subject).Component.Value && x.LocalId == ((ProviderInput.Workload)subject).Id.Value, token))
+                x.SubjectKind == "Workload" && targetActions.Contains(x.ActionContract) && subject is ProviderInput.Workload && x.Component == ((ProviderInput.Workload)subject).Component.Value && x.LocalId == ((ProviderInput.Workload)subject).Id.Value, token))
             throw new InvalidDataException("An update action already owns this generation target.");
         var marker = Guid.CreateVersion7(); var managed = Guid.CreateVersion7();
         var exact = await ContextAsync(db, generation, key, subject, action, marker, managed, token);
@@ -278,7 +283,7 @@ internal sealed partial class InternalDurableActions(
             });
         }
         await db.SaveChangesAsync(token);
-        if (confirmed && loaded.Handler is IInternalReadinessHandler && !loaded.Handler.UpdatesObject)
+        if (confirmed && loaded.Handler is IInternalReadinessHandler)
         {
             var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == loaded.Intent.DeploymentId && x.Generation == key.Generation.Value, token);
             _ = await CaptureSubmittedAsync(db, source, token);

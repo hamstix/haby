@@ -21,7 +21,11 @@ internal sealed class InternalRuntimePublicationPreparation(InternalRuntimePubli
         var text = FormattableString.Invariant($"v1|{origin.Deployment:D}|{origin.Generation}|{origin.Component}|{origin.Workload}|{origin.Document}|{revision:D}");
         return "publication-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
-    internal async Task<RuntimePublicationPreparation> PrepareAsync(Haby.Application.DurableChangeSetCommit accepted, string actor, CancellationToken token)
+    internal async Task<RuntimePublicationPreparation> PrepareAsync(Haby.Application.DurableChangeSetCommit accepted, string actor, CancellationToken token) =>
+        await publication.SerializeDeploymentAsync(accepted.DeploymentId, () => new ValueTask<RuntimePublicationPreparation>(PrepareCoreAsync(accepted, actor, token)), token);
+
+    // Submission already owns the process gate; no owner row transaction crosses these calls.
+    internal async Task<RuntimePublicationPreparation> PrepareCoreAsync(Haby.Application.DurableChangeSetCommit accepted, string actor, CancellationToken token)
     {
         RuntimePublicationRequest[] requests;
         try { requests = await publication.PreparationRequestsAsync(accepted, actor, token); } // Validate all before the first write.
@@ -32,7 +36,7 @@ internal sealed class InternalRuntimePublicationPreparation(InternalRuntimePubli
         {
             try
             {
-                var result = await publication.ApplyAsync(request, token);
+                var result = await publication.ApplyCoreAsync(request, token);
                 if (result.CurrentBinding.Status != "Prepared" || result.CurrentPermission?.Status != "Published")
                     return new(completed.ToArray(), request, "runtime-authority-unavailable");
                 completed.Add(result);

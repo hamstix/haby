@@ -59,7 +59,8 @@ public abstract partial class ApplicationLoginScenario : IDisposable
         if (internalActions)
         {
             services.AddSingleton<IProviderPreflightHandler, PostgreSqlPreflightHandler>();
-            services.AddSingleton<IInternalActionHandler, Haby.Kubernetes.InternalDeploymentAction>()
+            services.AddSingleton<IInternalActionHandler>(p => new Haby.Kubernetes.InternalDeploymentAction(p.GetRequiredService<ISecretStore>(), update: true))
+                .AddSingleton<IInternalActionHandler, Haby.Kubernetes.InternalDeploymentAction>()
                 .AddSingleton<Haby.Kubernetes.KubernetesProviderConfigurationCodec>()
                 .AddSingleton<IProviderConfigurationCodec>(p => p.GetRequiredService<Haby.Kubernetes.KubernetesProviderConfigurationCodec>());
             services.AddInternalKubernetesFixturePreflight(p => new Haby.Tests.InternalKubernetesFixturePreflight(

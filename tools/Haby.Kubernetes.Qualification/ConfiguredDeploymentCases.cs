@@ -134,7 +134,9 @@ internal static class ConfiguredDeploymentCases
             var identity = new InternalRuntimeIdentityAction(secrets, (connection, ct) => KubernetesClientFactory.CreateFixture(connection, secrets, [], ct));
             var deployment = new InternalDeploymentAction(secrets, connection => new DeploymentKernel(connection.Binding,
                 ct => KubernetesClientFactory.CreateFixture(connection, secrets, [new CountCreates(() => Interlocked.Increment(ref deploymentWrites))], ct)));
-            InternalDurableActions CreateActions() => new(contexts, [identity, deployment], services.GetServices<IProviderConfigurationCodec>(), services.GetServices<IExternalOperationOutputContract>(),
+            var correctiveUpdate = new InternalDeploymentAction(secrets, connection => new DeploymentKernel(connection.Binding,
+                ct => KubernetesClientFactory.CreateFixture(connection, secrets, [], ct)), update: true);
+            InternalDurableActions CreateActions() => new(contexts, [identity, deployment, correctiveUpdate], services.GetServices<IProviderConfigurationCodec>(), services.GetServices<IExternalOperationOutputContract>(),
                 services.GetRequiredService<DurableActionAdmission>(), services.GetRequiredService<DurableOperationSerialization>(), observationClock,
                 fault: point =>
                 {
@@ -488,6 +490,16 @@ internal static class ConfiguredDeploymentCases
                     (await finalRead.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == Guid.Parse(blocked.DeploymentId.ToString()), token)).AppliedGeneration is null &&
                     deploymentWrites == 3, "R07-failing-configured-readiness-probe-blocks-fresh-Ready-Applied");
                 confirmedDrain.Add(blockedReceipt ?? throw new InvalidOperationException("Confirmed fixture Deployment receipt required."));
+            });
+            await WithHost(async () =>
+            {
+                using var channel = GrpcChannel.ForAddress(LocalOperatorEndpoint(activeHost!.Urls.Single()), new GrpcChannelOptions
+                { HttpHandler = new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator } });
+                var client = OperatorTestCredentials.Client(channel, OperatorTestCredentials.Credential(activeHost.Urls.Single()));
+                string environment;
+                await using (var read = await contexts.CreateDbContextAsync(token))
+                    environment = (await read.Environments.AsNoTracking().SingleAsync(token)).EnvironmentId;
+                confirmedDrain.Add(await ConfiguredCorrectiveCases.Run(services, client, environment, configuredEnvelope, image, postgres, token));
             });
             await WithHost(() => ConfiguredDeploymentUpdateCases.Run(admin, services, updateBaseline, updateEnvelope, image,
                 identity, deployment, configurationPreparation, requests, async ct =>

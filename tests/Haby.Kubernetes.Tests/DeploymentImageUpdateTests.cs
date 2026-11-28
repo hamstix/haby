@@ -11,6 +11,66 @@ namespace Haby.Kubernetes.Tests;
 
 public sealed class DeploymentImageUpdateTests
 {
+    [Fact]
+    public void Confirmed_UPDATE_can_be_the_original_producer_only_with_its_exact_prior_receipt()
+    {
+        var original = InternalDeploymentPlacementTests.Contexts(false)[0];
+        var created = DeploymentIntents.Prepare(InternalDeploymentAction.Resolve(original), Guid.Parse(original.Key.DeploymentId.ToString()),
+            original.ManagedIdentity, original.Key.Generation.Value, original.Marker);
+        var createdReceipt = Receipt(created);
+        var secondInputs = Target(original, root => Properties(root)["image"]!["members"]!["reference"] = Value("registry.example/app:v2"));
+        var delta = DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(original, secondInputs, "v2", DeploymentIntents.Encode(created), DeploymentIntents.Encode(createdReceipt)));
+        var second = original with
+        {
+            Key = original.Key with { Generation = DeploymentGeneration.Create(original.Key.Generation.Value + 1) },
+            Inputs = secondInputs,
+            Provider = secondInputs.Providers.Entries[original.Subject],
+            ApplicationVersion = "v2",
+            Marker = Guid.NewGuid(),
+            Update = new(original, delta, DeploymentIntents.Encode(created), DeploymentIntents.Encode(createdReceipt))
+        };
+        var updateIntent = new InternalDeploymentAction(null!, update: true).Prepare(second);
+        var updated = DeploymentIntents.Decode(updateIntent);
+        var updatedReceipt = Receipt(updated) with { KubernetesGeneration = 2 };
+        var thirdInputs = Target(second, root => Properties(root)["image"]!["members"]!["reference"] = Value("registry.example/app:v3"));
+        var captured = DeploymentImageUpdate.Capture(second, thirdInputs, "v3", updateIntent, DeploymentIntents.Encode(updatedReceipt));
+        Assert.Equal("original-uid", captured.Uid); Assert.Equal("registry.example/app:v2", captured.PreviousImage); Assert.Equal("registry.example/app:v3", captured.TargetImage);
+        Assert.Throws<InvalidDataException>(() => DeploymentImageUpdate.Capture(second with { Update = null }, thirdInputs, "v3", updateIntent, DeploymentIntents.Encode(updatedReceipt)));
+        var foreign = second with { Update = second.Update! with { Receipt = DeploymentIntents.Encode(createdReceipt with { Uid = "foreign-uid" }) } };
+        Assert.Throws<InvalidDataException>(() => DeploymentImageUpdate.Capture(foreign, thirdInputs, "v3", updateIntent, DeploymentIntents.Encode(updatedReceipt)));
+    }
+    [Theory]
+    [InlineData("confirmed")]
+    [InlineData("ordinary")]
+    [InlineData("foreign-uid")]
+    [InlineData("stale-desired")]
+    [InlineData("invalid-inventory")]
+    public void Corrective_update_keeps_original_confirmed_uid_and_ordinary_generation_guard(string fault)
+    {
+        var original = InternalDeploymentPlacementTests.Contexts(false)[0];
+        var intent = DeploymentIntents.Prepare(InternalDeploymentAction.Resolve(original), Guid.Parse(original.Key.DeploymentId.ToString()),
+            original.ManagedIdentity, original.Key.Generation.Value, original.Marker);
+        var receipt = Receipt(intent);
+        var target = Target(original, root => Properties(root)["image"]!["members"]!["reference"] = Value("registry.example/app:corrected"));
+        var delta = DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(original, target, "corrected", DeploymentIntents.Encode(intent), DeploymentIntents.Encode(receipt)));
+        var expected = original.Key.Generation.Value + 1;
+        InternalCorrectiveUpdateOrigin? correction = fault == "ordinary" ? null : new(fault == "stale-desired" ? expected + 1 : expected,
+            fault == "invalid-inventory" ? new string('z', 64) : new string('a', 64), fault == "foreign-uid" ? "foreign" : receipt.Uid);
+        var current = original with
+        {
+            Key = original.Key with { Generation = DeploymentGeneration.Create(expected + 1) },
+            Inputs = target,
+            Provider = target.Providers.Entries[original.Subject],
+            ApplicationVersion = "corrected",
+            Marker = Guid.NewGuid(),
+            Update = new(original, delta, DeploymentIntents.Encode(intent), DeploymentIntents.Encode(receipt), correction)
+        };
+        var handler = new InternalDeploymentAction(null!, update: true);
+        if (fault != "confirmed") { Assert.Throws<InvalidDataException>(() => handler.Prepare(current)); return; }
+        var prepared = DeploymentIntents.Decode(handler.Prepare(current));
+        Assert.Equal(expected + 1, prepared.TargetGeneration);
+        Assert.Equal("original-uid", prepared.ExpectedUid);
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

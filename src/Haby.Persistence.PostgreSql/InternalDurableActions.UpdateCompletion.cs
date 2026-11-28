@@ -7,7 +7,7 @@ namespace Haby.Persistence.PostgreSql;
 
 internal sealed partial class InternalDurableActions
 {
-    /// <summary>Internal-only completion. Never reachable from public wait or submission composition.</summary>
+    /// <summary>Trusted transition completion; public observation enters the same qualified path.</summary>
     internal async ValueTask<RolloutResult> WaitUpdateAsync(DurableChangeSetCommit accepted, string request, string actor,
         RolloutOptions options, RecipientObservationOptions recipients, CancellationToken token)
     {
@@ -16,7 +16,7 @@ internal sealed partial class InternalDurableActions
         await using (var db = await contexts.CreateDbContextAsync(token))
         {
             var source = await InternalGenerationAuthority.RequireStageReadAsync(db, accepted, token);
-            if (DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null) throw new InvalidDataException("Internal UPDATE completion requires an update inventory.");
+            _ = UpdateRetirementCompletion.Inputs(source);
         }
         var started = clock.GetTimestamp();
         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -51,7 +51,7 @@ internal sealed partial class InternalDurableActions
     {
         Trace(UpdateCompletionStage.Begin);
         var source = call.Set.Source;
-        var inventory = DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate ?? throw new InvalidDataException("UPDATE inventory required.");
+        var inventory = UpdateRetirementCompletion.Inputs(source);
         var observations = new List<RetirementRecipient>();
         var remainingCalls = options.MaximumCalls;
         long retainedEvidenceBytes = 0;
@@ -95,7 +95,7 @@ internal sealed partial class InternalDurableActions
                 await CloseRequestAsync(db, call.Request, result, token); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested();
                 await tx.CommitAsync(CancellationToken.None); return result;
             }
-            if (inventory.Document.ObsoletePublications.Length > 0 && !await db.GenerationStageCheckpoints.AnyAsync(x => x.DeploymentId == source.DeploymentId &&
+            if (inventory.ObsoletePublications.Length > 0 && !await db.GenerationStageCheckpoints.AnyAsync(x => x.DeploymentId == source.DeploymentId &&
                 x.Generation == source.Generation && x.Stage == UpdateRetirementCompletion.Started, token))
             {
                 var start = new RetirementStart(1, source.DeploymentId, source.Generation, inventory.Fingerprint, fresh, call.Request.Request, observations.ToArray());
@@ -105,8 +105,8 @@ internal sealed partial class InternalDurableActions
                 await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested(); await tx.CommitAsync(CancellationToken.None);
             }
         }
-        if (inventory.Document.ObsoletePublications.Length > 0) fault?.Invoke(InternalActionFault.AfterRetirementStart);
-        foreach (var obsolete in inventory.Document.ObsoletePublications)
+        if (inventory.ObsoletePublications.Length > 0) fault?.Invoke(InternalActionFault.AfterRetirementStart);
+        foreach (var obsolete in inventory.ObsoletePublications)
         {
             token.ThrowIfCancellationRequested();
             await using var db = await contexts.CreateDbContextAsync(token);
@@ -139,14 +139,18 @@ internal sealed partial class InternalDurableActions
                 await CloseRequestAsync(db, call.Request, result, token); await db.SaveChangesAsync(token); token.ThrowIfCancellationRequested();
                 await tx.CommitAsync(CancellationToken.None); return result;
             }
-            if (owner.AppliedGeneration != inventory.Document.BaselineGeneration) throw new InvalidDataException("Update expected Applied changed.");
-            var resources = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == "ResourcesReady", token);
+            if (owner.AppliedGeneration != inventory.PriorApplied) throw new InvalidDataException("Update expected Applied changed.");
+            var resourceProof = await DurableAggregateCompletion.ReadAsync(db, source, token, internalResourceStage: true)
+                ?? throw new InvalidDataException("Exact Resource-stage evidence unavailable.");
+            var resources = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Id == resourceProof.Id && x.Stage == "ResourcesReady", token);
             var submitted = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.Id == current.Checkpoint, token);
             var ready = await db.GenerationStageCheckpoints.AsNoTracking().SingleAsync(x => x.Id == result.SavedReady, token);
             Trace(UpdateCompletionStage.Publications);
             var publications = await InitialRetirementCompletion.PublicationsAsync(db, source, token);
+            if (DurableOperationGraphCodec.Decode(source.GraphJson).Correction is not null) await CaptureCorrectiveCompletionObjectsAsync(db, current, token);
+            else await UpdateRetirementCompletion.CaptureObjectsAsync(db, source, Now(), token);
             var proof = new InitialCompletionProof(1, Guid.CreateVersion7(), source.DeploymentId, source.Generation, source.PlanId, source.ChangeSetId,
-                source.Fingerprint, inventory.Fingerprint, inventory.Document.BaselineGeneration, resources.Id, resources.EvidenceFingerprint,
+                source.Fingerprint, inventory.Fingerprint, inventory.PriorApplied, resources.Id, resources.EvidenceFingerprint,
                 submitted.Id, submitted.EvidenceFingerprint, ready.Id, ready.EvidenceFingerprint, fresh, call.Request.Request,
                 JsonSerializer.Deserialize(call.Request.InputJson, RolloutMetadata.Default.RolloutRequest)!.Actor, Now(),
                 await CatalogHash(), await SampleHash(), publications, observations.ToArray());
@@ -177,7 +181,7 @@ internal sealed partial class InternalDurableActions
             token.ThrowIfCancellationRequested();
             Trace(UpdateCompletionStage.AppliedCas);
             if (await db.ApplicationDeployments.Where(x => x.Id == source.DeploymentId && x.DesiredGeneration == source.Generation &&
-                x.AppliedGeneration == inventory.Document.BaselineGeneration && x.ConcurrencyToken == owner.ConcurrencyToken)
+                x.AppliedGeneration == inventory.PriorApplied && x.ConcurrencyToken == owner.ConcurrencyToken)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.AppliedGeneration, source.Generation).SetProperty(x => x.ConcurrencyToken, x => x.ConcurrencyToken + 1), token) != 1)
                 throw new InvalidDataException("Update Applied compare-and-swap failed.");
             result = result with { Applied = true, Retirement = proof.Id, AppliedGeneration = source.Generation, CompletionReason = "applied" };
@@ -204,14 +208,14 @@ internal sealed partial class InternalDurableActions
     {
         Trace(UpdateCompletionStage.ClosureSource);
         var source = await InternalGenerationAuthority.RequireStageReadAsync(db, call.Set.Source, token);
-        var inventory = DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate?.Document ?? throw new InvalidDataException("Update inventory missing.");
+        var inventory = UpdateRetirementCompletion.Inputs(source);
         var owner = await db.ApplicationDeployments.AsNoTracking().SingleAsync(x => x.Id == source.DeploymentId, token);
-        if (owner.DesiredGeneration != source.Generation || owner.AppliedGeneration != inventory.BaselineGeneration && owner.AppliedGeneration != source.Generation)
+        if (owner.DesiredGeneration != source.Generation || owner.AppliedGeneration != inventory.PriorApplied && owner.AppliedGeneration != source.Generation)
             throw new InvalidDataException("Update generation superseded.");
         if (owner.AppliedGeneration != source.Generation) await RequireReuseTransitionAsync(db, source.DeploymentId, source.Generation, token, verification);
         Trace(UpdateCompletionStage.CaptureSubmitted);
         var set = await CaptureSubmittedAsync(db, source, token, completedRead: true);
-        if (set.Members.Length != inventory.Members.Length || set.Members.Any(x => call.Set.Members.Single(m => m.Subject == x.Subject).Attempt.Id != x.Attempt.Id))
+        if (set.Members.Length != inventory.MemberCount || set.Members.Any(x => call.Set.Members.Single(m => m.Subject == x.Subject).Attempt.Id != x.Attempt.Id))
             throw new InvalidDataException("Update attempts changed.");
         Trace(UpdateCompletionStage.ObsoleteProgress);
         foreach (var obsolete in inventory.ObsoletePublications)
@@ -246,7 +250,7 @@ internal sealed partial class InternalDurableActions
             var start = JsonSerializer.Deserialize(marker.EvidenceJson, UpdateCompletionMetadata.Default.RetirementStart);
             if (marker.FormatVersion != 1 || marker.InputFingerprint != source.Fingerprint || marker.EvidenceFingerprint != ResourcesReadyCheckpointCodec.Hash(marker.EvidenceJson) ||
                 start is not { Version: 1 } || start.Deployment != source.DeploymentId || start.Generation != source.Generation ||
-                start.Inventory != DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate!.Fingerprint ||
+                start.Inventory != inventory.Fingerprint ||
                 !start.Recipients.Select(x => x.Subject).SequenceEqual(set.Targets)) throw new InvalidDataException("Retirement-start mismatch.");
             await InitialRetirementCompletion.RequireFreshSamplesAsync(db, source, start.Ready, start.Request, token);
             foreach (var recipient in start.Recipients)
@@ -287,11 +291,19 @@ internal sealed partial class InternalDurableActions
             InternalRuntimePublication.BindingState(binding).Status != "Prepared" || binding.ConcurrencyToken != obsolete.BindingToken)
             throw new InvalidDataException("Frozen obsolete permission mismatch.");
         // Current/other active accepted preparations are checked under the same aggregate lock as preparation acceptance.
-        if (await (from r in db.WorkloadConfigurationRecipients
-                   join owner in db.ApplicationDeployments on r.DeploymentId equals owner.Id
-                   where r.RevisionId == obsolete.Revision && r.Generation <= owner.DesiredGeneration &&
-                       (r.Generation > (owner.AppliedGeneration ?? 0) || r.DeploymentId != source.DeploymentId && r.Generation == owner.AppliedGeneration)
-                   select r).AnyAsync(token)) throw new InvalidDataException("Obsolete publication has an active live reference.");
+        var references = await (from r in db.WorkloadConfigurationRecipients.AsNoTracking()
+                                join owner in db.ApplicationDeployments.AsNoTracking() on r.DeploymentId equals owner.Id
+                                where r.RevisionId == obsolete.Revision && r.Generation <= owner.DesiredGeneration &&
+                                    (r.Generation > (owner.AppliedGeneration ?? 0) || r.DeploymentId != source.DeploymentId && r.Generation == owner.AppliedGeneration)
+                                select new { r.DeploymentId, r.Generation }).Distinct().Take(513).ToArrayAsync(token);
+        if (references.Length > 512) throw new InvalidDataException("Obsolete publication has an active live reference.");
+        foreach (var reference in references)
+        {
+            if (reference.DeploymentId != source.DeploymentId) throw new InvalidDataException("Obsolete publication has an active live reference.");
+            // An incomplete ancestor remains history, but its exact accepted handoff is
+            // no longer a current preparation. Current/foreign/unlinked references still block.
+            await InternalGenerationAuthority.RequireSupersededPreparationAsync(db, source, reference.Generation, token);
+        }
         var saved = await db.RuntimePublicationReceipts.AsNoTracking().SingleOrDefaultAsync(x => x.RequestKey == key, token);
         if (saved is not null)
         {

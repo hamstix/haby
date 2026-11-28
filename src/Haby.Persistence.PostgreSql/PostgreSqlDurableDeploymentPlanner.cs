@@ -196,7 +196,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             spec.Components.Values.Any(x => x.Workloads.Count > 0))) return new(DurablePlanStatus.ImportNotSupported);
         var internalEffects = mode == DeploymentAdmissionMode.Internal || mode == DeploymentAdmissionMode.Operator && spec.Components.Values.Any(x => x.Workloads.Count > 0);
         var workloadUpdate = await HasWorkloadBaselineAsync(context, baseline, cancellationToken);
-        if (workloadUpdate && mode != DeploymentAdmissionMode.Internal) return new(DurablePlanStatus.UnsupportedShape);
+        if (workloadUpdate && mode == DeploymentAdmissionMode.ResourceOnly) return new(DurablePlanStatus.UnsupportedShape);
         if (workloadUpdate)
         {
             // Publication/revocation writers lock this aggregate, too. Freeze one
@@ -207,7 +207,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         }
         if (!internalEffects && !DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
         if (internalEffects && (!spec.Components.Values.Any(x => x.Workloads.Count > 0) ||
-            baseline is null && (!row.ExpectedAbsence || mode == DeploymentAdmissionMode.Operator && spec.Resources.Count != 0) ||
+            baseline is null && !row.ExpectedAbsence ||
             baseline is not null && spec.Resources.Count == 0 && !workloadUpdate))
             return new(DurablePlanStatus.UnsupportedShape);
         var emptyStage = internalEffects && spec.Resources.Count == 0;
@@ -573,6 +573,12 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         if (graph.Baseline is { } baseline)
         {
             var owner = await context.ApplicationDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == Guid.Parse(baseline.Deployment.ToString()), token);
+            if (graph.Correction?.Document is { } correction)
+                return owner is not null && owner.EnvironmentRecordId == Guid.Parse(inputs.Environment.ToString()) &&
+                    owner.ApplicationRecordId == Guid.Parse(inputs.Revision.ApplicationRecordId.ToString()) && owner.DesiredGeneration == correction.ExpectedDesired &&
+                    owner.AppliedGeneration == correction.LastApplied && baseline.Generation == correction.ExpectedDesired && baseline.Fingerprint == correction.OriginalFingerprint &&
+                    graph.Nodes.Count == 0 && graph.RetainedResources.Count == 0 && graph.ReusedResources.Count == spec.Resources.Count &&
+                    !graph.ReusedResources.Any(x => x.Reintroduced) && await ResourceContinuity.ValidateAsync(context, owner.Id, graph, token);
             return owner is not null && owner.EnvironmentRecordId == Guid.Parse(inputs.Environment.ToString()) && owner.ApplicationRecordId == Guid.Parse(inputs.Revision.ApplicationRecordId.ToString()) &&
                 owner.DesiredGeneration == baseline.Generation && owner.AppliedGeneration == baseline.Generation &&
                 (await ReuseGraphAsync(context, owner, spec, revision, inputs, token))?.Equals(new DurableOperationGraph(graph.Nodes, graph.ReusedResources, graph.Baseline, graph.RetainedResources)
@@ -643,29 +649,32 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
             // Missing registrations cannot turn a lost mandatory terminal output into
             // an action that supposedly never required confirmed evidence.
             if (!admission.Supports(original)) throw new InvalidDataException();
-            if (!admission.ValidateCreationGraph(originalInputs.Configuration!.Manifest.Spec, adapter, originalInputs, configuration, original, sourceContexts)) throw new InvalidDataException();
-            var proposedOriginal = originalInputs with
+            var originalResourceInputs = source.InternalEffects ? InternalResourceStage.Project(originalInputs) : originalInputs;
+            var originalResourceGraph = source.InternalEffects ? InternalResourceStage.Project(original) : original;
+            if (!admission.ValidateCreationGraph(originalResourceInputs.Configuration!.Manifest.Spec, adapter, originalResourceInputs, configuration,
+                originalResourceGraph, sourceContexts)) throw new InvalidDataException();
+            var proposedOriginal = originalResourceInputs with
             {
-                Providers = new(originalInputs.Providers.Declaration, originalInputs.Environment,
-                originalInputs.Providers.Entries.Values.Select(x => x.Alias == originalProvider.Alias && x.Instance == originalProvider.Instance &&
+                Providers = new(originalResourceInputs.Providers.Declaration, originalResourceInputs.Environment,
+                originalResourceInputs.Providers.Entries.Values.Select(x => x.Alias == originalProvider.Alias && x.Instance == originalProvider.Instance &&
                     x.Configuration == originalProvider.Configuration && x.Implementation == originalProvider.Implementation ? x with { Naming = targetProvider.Naming } : x))
             };
-            if (!admission.SameResourceNames(originalInputs.Configuration!.Manifest.Spec, resource, adapter, originalInputs, proposedOriginal, configuration)) return null;
+            if (!admission.SameResourceNames(originalResourceInputs.Configuration!.Manifest.Spec, resource, adapter, originalResourceInputs, proposedOriginal, configuration)) return null;
             if (target.Resources.ContainsKey(resource))
             {
                 if (managed.Authority == ResourceLifecycleAuthority.UseAndRetain)
                 {
-                    var a = originalInputs.Configuration.Manifest.Spec.Resources[resource];
+                    var a = originalInputs.Configuration!.Manifest.Spec.Resources[resource];
                     var b = target.Resources[resource];
                     if (a.Type != b.Type || a.ProviderRef != b.ProviderRef || a.DeletionPolicy != b.DeletionPolicy || !a.Properties.Equals(b.Properties)) return null;
                 }
-                if (!admission.CanReuseResource(originalInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration, originalInputs)) return null;
+                if (!admission.CanReuseResource(originalResourceInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration, originalResourceInputs)) return null;
                 reuse.Add(new(resource, managed.Id, managed.SourceGeneration, evidence)
                 { Reintroduced = baselineGraph.RetainedResources.Any(x => x.Resource == resource) });
             }
             else
             {
-                if (!admission.CanRetainResource(originalInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration, originalInputs)) return null;
+                if (!admission.CanRetainResource(originalResourceInputs.Configuration.Manifest.Spec, target, resource, adapter, inputs, configuration, originalResourceInputs)) return null;
                 retained.Add(new(resource, managed.Id, managed.SourceGeneration, evidence));
             }
         }

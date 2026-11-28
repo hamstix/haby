@@ -12,10 +12,11 @@ internal static class DeploymentImageUpdate
 {
     internal const string Format = "haby.kubernetes.deployment-image-update/v1";
     internal static DeploymentImageUpdateDocument Capture(InternalActionContext previous,
-        DurablePlanningInputs target, string targetVersion, string intentJson, string receiptJson)
+        DurablePlanningInputs target, string targetVersion, string intentJson, string receiptJson, int remaining = 256)
     {
         try
         {
+            if (remaining < 1) throw new InvalidDataException("Confirmed update history exceeds bound.");
             if (previous.Subject is not ProviderInput.Workload workload || !WorkloadUpdateInputs.Same(previous.Inputs, target))
                 throw new WorkloadUpdateRefusedException(WorkloadUpdateRefusal.InputChanged);
             var old = InternalDeploymentAction.Resolve(previous);
@@ -25,8 +26,9 @@ internal static class DeploymentImageUpdate
             var receipt = DeploymentIntents.DecodeReceipt(receiptJson);
             // Reconstruct the accepted old managed projection with its original bootstrap.
             // No target revision IDs or generation-specific runtime authority are invented.
+            var previousReceipt = previous.Update is null ? null : InternalDeploymentAction.UpdateReceipt(previous, remaining - 1);
             var expected = DeploymentIntents.Prepare(old, intent.Owner, intent.ManagedWorkload,
-                intent.TargetGeneration, intent.Operation, runtime: receipt.Projection.Runtime);
+                intent.TargetGeneration, intent.Operation, previousReceipt, runtime: receipt.Projection.Runtime);
             if (intent.Owner.ToString() != previous.Key.DeploymentId.ToString() || intent.TargetGeneration != previous.Key.Generation.Value ||
                 intent.Operation != previous.Marker || intent.ManagedWorkload != previous.ManagedIdentity ||
                 DeploymentIntents.Encode(expected) != intentJson || receipt.Binding != intent.Binding ||

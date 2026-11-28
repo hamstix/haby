@@ -15,7 +15,7 @@ internal sealed class PostgreSqlOperatorDeploymentAdmission(
     private static IInternalActionHandler[] Unique(IEnumerable<IInternalActionHandler> registrations)
     {
         var values = registrations.ToArray();
-        if (values.GroupBy(x => (x.Contract.Subject, x.Contract.ProviderKind, x.Contract.Configuration, x.Contract.Implementation)).Any(x => x.Count() != 1))
+        if (values.GroupBy(x => (x.Contract.Subject, x.Contract.ProviderKind, x.Contract.Configuration, x.Contract.Implementation, x.UpdatesObject)).Any(x => x.Count() != 1))
             throw new InvalidOperationException("Ambiguous operator admission registration.");
         return values;
     }
@@ -62,15 +62,23 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         ApplicationDeploymentRow? owner, DurablePlanningInputs inputs, DurableOperationGraph graph, CancellationToken token)
     {
         var spec = inputs.Providers.Declaration.Spec;
-        if (!spec.Components.Values.Any(x => x.Workloads.Count > 0) || graph.Nodes.Count != 0 || graph.RetainedResources.Count != 0) return false;
+        if (!spec.Components.Values.Any(x => x.Workloads.Count > 0) || graph.RetainedResources.Count != 0 || graph.Correction is not null) return false;
         if (owner is null)
-            return change.ExpectedAbsence && change.ExpectedGeneration is null && InternalResourceStage.IsEmpty(inputs, graph) &&
+            return change.ExpectedAbsence && change.ExpectedGeneration is null && (InternalResourceStage.IsEmpty(inputs, graph) || InternalResourceStage.IsInitialCreate(inputs, graph)) &&
                 !await db.CurrentResourceManagement.AnyAsync(x => x.Environment == change.EnvironmentRecordId && x.Application == change.ApplicationRecordId, token);
+        if (graph.Nodes.Count != 0) return false;
         if (change.ExpectedAbsence || change.ExpectedGeneration != owner.DesiredGeneration || owner.AppliedGeneration != owner.DesiredGeneration ||
             graph.Baseline is not { } baseline || baseline.Deployment.ToString() != owner.Id.ToString() || baseline.Generation != owner.DesiredGeneration ||
-            spec.Resources.Count == 0 || graph.ReusedResources.Count != spec.Resources.Count || graph.ReusedResources.Any(x => x.Reintroduced)) return false;
+            graph.ReusedResources.Count != spec.Resources.Count || graph.ReusedResources.Any(x => x.Reintroduced)) return false;
         var previous = await db.DeploymentGenerations.AsNoTracking().SingleOrDefaultAsync(x => x.DeploymentId == owner.Id && x.Generation == owner.DesiredGeneration, token);
-        if (previous is null || previous.InternalEffects || baseline.Fingerprint != previous.Fingerprint) return false;
+        if (previous is null || baseline.Fingerprint != previous.Fingerprint) return false;
+        // Initial planning calls this before the immutable UPDATE inventory is attached.
+        // The exact persisted Applied Workload baseline establishes the mode; the
+        // typed image-only comparator below remains mandatory before storing a Plan.
+        if (previous.InternalEffects)
+            return previous.Inputs().Providers.Declaration.Spec.Resources.Keys.ToHashSet().SetEquals(spec.Resources.Keys) &&
+                await HasAppliedBaselineProofAsync(db, owner.Id, owner.DesiredGeneration, token);
+        if (graph.WorkloadUpdate is not null || spec.Resources.Count == 0) return false;
         var old = previous.Inputs().Providers.Declaration.Spec;
         var oldGraph = DurableOperationGraphCodec.Decode(previous.GraphJson);
         return old.Components.Values.All(x => x.Workloads.Count == 0) && oldGraph.RetainedResources.Count == 0 &&
@@ -104,7 +112,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             if (change.EnvironmentRecordId != row.EnvironmentRecordId || change.ApplicationRecordId != row.ApplicationRecordId || change.RevisionNumber != row.RevisionNumber) return DurablePlanCurrentStatus.PlanInputUnavailable;
             var inputs = plan.Inputs;
             if (!await ValidateOperatorPinsAsync(db, row.Id, inputs, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
-            if (plan.Graph.WorkloadUpdate is not null ? !internalPlanning : !await OperatorWorkloadShapeAsync(db, change, owner, inputs, plan.Graph, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
+            if (!await OperatorWorkloadShapeAsync(db, change, owner, inputs, plan.Graph, token)) return DurablePlanCurrentStatus.PlanInputUnavailable;
             if (plan.Graph.WorkloadUpdate is not null && owner is not null)
                 await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM application_deployments WHERE id = {owner.Id} FOR SHARE", token);
             var revision = await revisions.FindAsync(inputs.Revision, token);

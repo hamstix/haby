@@ -148,7 +148,7 @@ public sealed partial class DurableDeploymentPlanningTests
         var contenderFactory = new ConfigFactory(setup.Connection, signal);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
         var committer = new PostgreSqlDurableDesiredStateCommitter(commitFirst ? factory : contenderFactory,
-            services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(), setup.Time);
+            services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(), setup.Time, services.GetRequiredService<DurableOperationSerialization>());
         var writer = new PostgreSqlProfileAssignmentStore(commitFirst ? contenderFactory : factory);
         var precondition = current is null ? (AssignmentPrecondition)new AssignmentPrecondition.ExpectedAbsence()
             : new AssignmentPrecondition.ExpectedConcurrencyToken(current.Token);

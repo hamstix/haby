@@ -10,7 +10,20 @@ internal sealed class TestTiming : IDisposable
     private readonly string _phase;
     private readonly Stopwatch _timer = Stopwatch.StartNew();
 
-    private TestTiming(string phase) => _phase = phase;
+    private readonly long _progress;
+    private TestTiming(string phase)
+    {
+        _phase = phase;
+        var kind = phase switch
+        {
+            "cluster-ready" => ProgressPhaseKind.ClusterReady,
+            "cluster-cleanup" => ProgressPhaseKind.ClusterCleanup,
+            "operator-catalog-create" => ProgressPhaseKind.CatalogCreate,
+            "operator-host-start-migrate" => ProgressPhaseKind.HostStartMigrate,
+            _ => throw new InvalidOperationException("Unknown fixed timing phase.")
+        };
+        _progress = PostgreSqlProgress.Current?.StartPhase(kind) ?? 0;
+    }
 
     public static TestTiming ClusterReady() => new("cluster-ready");
     public static TestTiming ClusterCleanup() => new("cluster-cleanup");
@@ -19,6 +32,7 @@ internal sealed class TestTiming : IDisposable
 
     public void Dispose()
     {
+        if (_progress != 0) PostgreSqlProgress.Current?.ExitPhase(_progress);
         var directory = Environment.GetEnvironmentVariable("HABY_TEST_TIMING_DIRECTORY");
         if (directory is null) return;
         lock (Gate)

@@ -25,10 +25,34 @@ internal sealed partial class InternalDurableActions
             var subject = source.Inputs().Configuration!.Manifest.Spec.Components[pair.Key.Component].Workloads[pair.Key.Id].Type.Value;
             bool Matches(IInternalActionHandler handler) => handler.Contract.Subject == subject && handler.Contract.ProviderKind == instance.ProviderKindId &&
                 handler.Contract.Configuration == revision.ConfigurationShapeId && handler.Contract.Implementation == exact.Implementation.Value;
-            if (handlers.Count(h => Matches(h) && h is IInternalReadinessHandler && h.Contract.Action == deploymentAction) != 1 ||
-                pair.Value.Count > 0 && handlers.Count(h => Matches(h) && h.EstablishesIdentity && h.Contract.Action == identityAction) != 1)
+            var selected = SubmissionDeploymentHandler(source, pair.Key, deploymentAction, Matches);
+            if (pair.Value.Count > 0 && handlers.Count(h => Matches(h) && h.EstablishesIdentity && h.Contract.Action == identityAction) != 1 ||
+                (DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is not null || DurableOperationGraphCodec.Decode(source.GraphJson).Correction is not null) && selected is not IInternalRecipientObserver)
                 throw new InvalidDataException("Exact submission support unavailable.");
         }
+    }
+
+    private IInternalActionHandler SubmissionDeploymentHandler(DeploymentGenerationRow source, ProviderInput.Workload subject,
+        string initialAction, Func<IInternalActionHandler, bool> matches)
+    {
+        var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        var updating = graph.WorkloadUpdate is not null || graph.Correction?.Document.Members.Single(x =>
+            x.Component == subject.Component.Value && x.Workload == subject.Id.Value).State == "ConfirmedOwned";
+        var candidates = handlers.Where(h => matches(h) && h is IInternalReadinessHandler && h.UpdatesObject == updating &&
+            (updating || h.Contract.Action == initialAction)).ToArray();
+        return candidates is [var handler] ? handler : throw new InvalidDataException("Exact member deployment action unavailable or ambiguous.");
+    }
+
+    internal async Task<string> DeploymentSubmissionActionAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,
+        ProviderInput.Workload subject, string initialAction, CancellationToken token)
+    {
+        var exact = source.Inputs().Providers.Entries[subject];
+        var provider = Guid.Parse(exact.Instance.ToString());
+        var instance = await db.ProviderInstances.AsNoTracking().SingleAsync(x => x.Id == provider, token);
+        var revision = await db.ProviderConfigurationRevisions.AsNoTracking().SingleAsync(x => x.ProviderInstanceId == provider && x.RevisionNumber == exact.Configuration.Value, token);
+        var contract = source.Inputs().Configuration!.Manifest.Spec.Components[subject.Component].Workloads[subject.Id].Type.Value;
+        return SubmissionDeploymentHandler(source, subject, initialAction, h => h.Contract.Subject == contract && h.Contract.ProviderKind == instance.ProviderKindId &&
+            h.Contract.Configuration == revision.ConfigurationShapeId && h.Contract.Implementation == exact.Implementation.Value).Contract.Action;
     }
 
     internal async Task<WorkloadSubmissionProgress> ReadSubmissionAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source,

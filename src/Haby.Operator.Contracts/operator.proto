@@ -311,7 +311,7 @@ enum PlanningPrecondition {
   PLANNING_PRECONDITION_EXPECTED_ABSENCE = 1;
   PLANNING_PRECONDITION_EXPECTED_GENERATION = 2;
 }
-// Explicit planning intent only; accepting Commit remains unavailable until runtime activation.
+// Explicit corrective intent; Plan and Commit validate the current incomplete generation inventory.
 message CreateCorrectiveChangeSetRequest {
   string environment_id = 1;
   RevisionReference reference = 2;

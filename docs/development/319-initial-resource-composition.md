@@ -1,5 +1,9 @@
 # Initial Resource-stage composition for corrective runtime
 
+This document records the prerequisite slice. Its closed public guards are superseded
+by the coupled [corrective runtime integration](319-corrective-runtime.md); its original
+validation statements describe that slice only.
+
 This internal #319 integration composes existing initial Resource Provision actions
 with the first Workload generation. The complete immutable accepted declaration
 retains both stages; adapters receive only the existing Resource graph projection.

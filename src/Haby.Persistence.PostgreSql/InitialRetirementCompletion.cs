@@ -22,9 +22,10 @@ internal static class InitialRetirementCompletion
     {
         var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
         if (graph.Retirement is { } initial) return initial.Document.Targets;
-        var update = graph.WorkloadUpdate?.Document ?? throw new InvalidDataException("Frozen completion inventory required.");
+        var members = graph.WorkloadUpdate?.Document.Members.Select(x => (x.Component, x.Workload, Documents: x.PrepareDocuments)) ??
+            graph.Correction?.Document.Members.Select(x => (x.Component, x.Workload, x.Documents)) ?? throw new InvalidDataException("Frozen completion inventory required.");
         var inputs = source.Inputs();
-        return update.Members.Select(member =>
+        return members.Select(member =>
         {
             var subject = new ProviderInput.Workload(Haby.Domain.ManifestLocalId.Create(member.Component), Haby.Domain.ManifestLocalId.Create(member.Workload));
             var exact = inputs.Providers.Entries[subject];
@@ -32,7 +33,7 @@ internal static class InitialRetirementCompletion
                 inputs.Configuration!.Manifest.Spec.Components[subject.Component].Workloads[subject.Id].Type.Value,
                 Guid.Parse(exact.Instance.ToString()), exact.Configuration.Value,
                 ResourcesReadyCheckpointCodec.Hash(InternalPlacementInput.Decode(exact.Placement!).Declaration.Payload),
-                member.PrepareDocuments, member.PrepareDocuments.Length > 0);
+                member.Documents, member.Documents.Length > 0);
         }).OrderBy(x => x.Subject, StringComparer.Ordinal).ToArray();
     }
 
@@ -40,7 +41,7 @@ internal static class InitialRetirementCompletion
     internal static async Task<InitialCompletionProof> RequireProofAsync(ManifestCatalogDbContext db,
         DeploymentGenerationRow source, CancellationToken token)
     {
-        if (DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is not null)
+        if (DurableOperationGraphCodec.Decode(source.GraphJson) is { } graph && (graph.WorkloadUpdate is not null || graph.Correction is not null))
             return await UpdateRetirementCompletion.RequireProofAsync(db, source, token);
         await InitialRetirementAuthority.ValidateAsync(db, source, token);
         var row = await db.GenerationStageCheckpoints.AsNoTracking().SingleOrDefaultAsync(x =>
@@ -106,6 +107,15 @@ internal static class InitialRetirementCompletion
                 throw new InvalidDataException("Fresh readiness sample origin mismatch.");
             round = sample.Ordinal;
         }
+    }
+
+    internal static async Task RequireResourcesAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, Guid id, string hash, CancellationToken token)
+    {
+        if (DurableOperationGraphCodec.Decode(source.GraphJson).Correction is null)
+        { await RequireCheckpointAsync(db, source, "ResourcesReady", id, hash, token); return; }
+        var proof = await DurableAggregateCompletion.ReadAsync(db, source, token, internalResourceStage: true, completedRead: true);
+        if (proof is null || proof.Id != id || ResourcesReadyCheckpointCodec.Hash(ResourcesReadyCheckpointCodec.Encode(proof)) != hash)
+            throw new InvalidDataException("Corrective original Resource-stage completion proof mismatch.");
     }
 
     internal static async Task<GenerationStageCheckpointRow> RequireCheckpointAsync(ManifestCatalogDbContext db,
@@ -185,7 +195,7 @@ internal static class InitialRetirementCompletion
             .OrderBy(x => x.Component).ThenBy(x => x.Workload).ThenBy(x => x.Document).Take(513).ToArrayAsync(token);
         var documents = await db.ConfigurationDocuments.AsNoTracking().Where(x => x.DeploymentId == deployment && x.Generation == generation)
             .OrderBy(x => x.Id).Select(x => new CompletedDocumentEvidence(x.Id, x.DeploymentId, x.Generation, x.Component, x.Document, x.Fingerprint)).Take(513).ToArrayAsync(token);
-        if (owned.Length > 1024 || recipients.Length > 512 || documents.Length > 512 || owned.Any(x => (DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null && x.Generation != generation) || x.Payload.Length > 1048576)) throw new InvalidDataException("Preparation inventory bound exceeded.");
+        if (owned.Length > 1024 || recipients.Length > 512 || documents.Length > 512 || owned.Any(x => (DurableOperationGraphCodec.Decode(source.GraphJson) is { WorkloadUpdate: null, Correction: null } && x.Generation != generation) || x.Payload.Length > 1048576)) throw new InvalidDataException("Preparation inventory bound exceeded.");
         var managedIds = managed.Select(x => x.Id).ToArray();
         var bindings = await db.RuntimeIdentityBindings.AsNoTracking().Where(x => managedIds.Contains(x.ManagedWorkloadId)).OrderBy(x => x.Id)
             .Select(x => new CompletedBindingEvidence(x.Id, x.InstallationId, x.EnvironmentId, x.ManagedWorkloadId, x.ProviderId, x.ConfigurationRevision,
@@ -230,7 +240,7 @@ internal static class InitialRetirementCompletion
             documents, publications.OrderBy(x => x.Permission).ToArray());
         var json = JsonSerializer.Serialize(evidence, InitialCompletionMetadata.Default.CompletedCatalogEvidence);
         if (Encoding.UTF8.GetByteCount(json) > 16777216) throw new InvalidDataException("Completion evidence exceeds bound.");
-        return ResourcesReadyCheckpointCodec.Hash(DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is null ? json :
+        return ResourcesReadyCheckpointCodec.Hash(DurableOperationGraphCodec.Decode(source.GraphJson) is { WorkloadUpdate: null, Correction: null } ? json :
             json + await UpdateRetirementCompletion.CatalogHashAsync(db, source, token));
     }
 }

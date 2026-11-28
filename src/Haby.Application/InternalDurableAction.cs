@@ -8,7 +8,11 @@ internal sealed record InternalActionContext(DurableOperationKey Key, DurablePla
     ProviderInput Subject, ExactProviderResolution Provider, PreparedProviderConfiguration Configuration,
     string ApplicationVersion, Guid Marker, Guid ManagedIdentity, PlacementDeclaration? Placement, Guid InstallationId = default,
     InternalPreparedRuntime? Runtime = null, InternalUpdatePreparation? Update = null);
-internal sealed record InternalUpdatePreparation(InternalActionContext Original, DurableActionPayload Delta, string Intent, string Receipt);
+internal sealed record InternalUpdatePreparation(InternalActionContext Original, DurableActionPayload Delta, string Intent, string Receipt,
+    InternalCorrectiveUpdateOrigin? Correction = null);
+// Catalog-derived origin for a confirmed member of an explicitly superseded incomplete
+// generation. This is never accepted from an RPC or substituted for the original receipt.
+internal sealed record InternalCorrectiveUpdateOrigin(long ExpectedDesired, string InventoryFingerprint, string ConfirmedIdentity);
 internal enum InternalActionOutcome { Confirmed, Uncertain, Refused, Unavailable, NotConfirmed }
 internal sealed record InternalActionResult(InternalActionOutcome Outcome, string Code, string? Receipt = null);
 

@@ -48,6 +48,8 @@ $packages = [xml](Get-Content (Join-Path $root 'Directory.Packages.props') -Raw)
 $runnerPackages = @($packages.Project.ItemGroup.PackageVersion | Where-Object Include -in @('xunit', 'xunit.runner.visualstudio', 'Microsoft.NET.Test.Sdk', 'Npgsql', 'Testcontainers.PostgreSql') |
     ForEach-Object { [pscustomobject]@{ name = $_.Include; version = $_.Version } })
 $oldTimingDirectory = $env:HABY_TEST_TIMING_DIRECTORY
+$oldProgressSource = $env:HABY_TEST_PROGRESS_SOURCE
+$env:HABY_TEST_PROGRESS_SOURCE = $sha
 $env:HABY_TEST_TIMING_DIRECTORY = $safe
 try {
     $env:HABY_TEST_SOURCE_ROOT = $root
@@ -140,6 +142,7 @@ try {
     Write-Warning 'PostgreSQL runner phase failed; protected exception output withheld. Consult the phase/preflight metadata.'
 } finally {
     $env:HABY_TEST_TIMING_DIRECTORY = $oldTimingDirectory
+    $env:HABY_TEST_PROGRESS_SOURCE = $oldProgressSource
     $env:HABY_TEST_SOURCE_ROOT = $oldSourceRoot
     $env:HABY_COMPOSITION_SAMPLE_PATH = $oldCompositionSample
     try {
