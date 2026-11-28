@@ -135,8 +135,8 @@ legacy-source integration. Document rollout strategy and no unconditional downti
 guarantee. Prove old-source adoption with a ServiceAccount-induced rollout as well
 as no unnecessary rollout for operational metadata alone. Selecting that account
 must not by itself publish documents or grant Haby configuration access. Preserve
-existing source connectivity across the approved Pod-template change. No downtime
-guarantee. Complete required retirement before Applied; unsupported correction is
+existing source connectivity across the approved Pod-template change. Complete
+required retirement before Applied; unsupported correction is
 explicit rather than silently widening image-only correction.
 
 Review focus: full public path rather than accepted-row seeding, actual standard
