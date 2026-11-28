@@ -49,6 +49,13 @@ these restrictions both during planning and execution, including subsequent
 update, removal and deletion paths after persistence/restart. Retained association
 does not imply shared access, transfer or general adoption authority.
 
+[ADR-066](0066-workload-adoption-and-explicit-resource-authority.md) adds an explicit
+capability-checked management-authority transition, including a same-migration-Plan
+request. It preserves Imported provenance and observational import; deletion remains
+separately authorized and default-retained. Without that explicit transition these
+use-and-retain restrictions remain unchanged. Architecture acceptance does not
+implement additional mutation or deletion capabilities.
+
 ### PostgreSQL existing database-owner compatibility
 
 The first adapter path accepts an existing database owned by the selected
