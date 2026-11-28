@@ -149,17 +149,23 @@ application's configuration client:
 1. Direct migration: adopt objects, prepare exact Haby configuration and runtime
    authorization, then update the image and supported startup settings. Configuration
    is available BEFORE new Pods start; readiness completes afterward.
-2. Two-stage migration: adopt with the existing image, Pod configuration and previous
-   configuration source, then use an explicit Application update to move image and
+2. Two-stage migration: adopt with the existing image and previous configuration
+   source, allowing explicitly planned Pod-template changes such as selecting the
+   new ServiceAccount, then use an explicit Application update to move image and
    startup settings to Haby runtime delivery. The old source stays available until
    consumers move. Haby does not administer or automatically migrate that source.
 
 The second path needs an explicit typed configuration-source selection in accepted
 Workload inputs. Do not infer mode from missing proof, a failed delivery request or
-image name. Legacy-source adoption must not inject runtime bootstrap or change the
-Pod template merely for service metadata or creation of the new ServiceAccount.
-The stable account may be prepared while unused. Activate Runtime Identity and
-Haby configuration access at the explicit transition, not by adoption alone.
+image name. Legacy-source adoption must not inject Haby configuration bootstrap or
+switch the source implicitly. It MAY change the Pod template, including
+serviceAccountName, and consequently roll Pods under the selected strategy. Show
+these changes in Plan and require target readiness before completion. Creating a
+ServiceAccount object alone does not change the Deployment; selecting it in the Pod
+template does. Operational metadata alone must not create an unnecessary rollout.
+Selecting the ServiceAccount does not itself publish configuration or grant delivery
+access. Activate Haby configuration access at the explicit source transition, not
+merely because adoption or account selection succeeded.
 
 For Haby delivery retain ADR-050's projected Pod-bound token, exact ServiceAccount
 UID/audience/Provider, per-document publication and independent authorization.

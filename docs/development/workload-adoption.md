@@ -109,8 +109,11 @@ Workload and reach truthful completion. Provide the exact generated API sequence
 and API-only CLI operator instructions without inventing undocumented endpoint names.
 
 Direct mode prepares exact configuration and authorized runtime access before new
-Pods start. Two-stage mode first adopts the old image/source without changing Pod
-template merely for bootstrap; a subsequent ordinary Application update changes
+Pods start. Two-stage mode first adopts the old image/source; explicitly planned
+Pod-template changes, including serviceAccountName, may cause rollout and require
+target readiness. Preserve the old source across that rollout, without implicitly
+injecting Haby configuration bootstrap or granting delivery access. A subsequent
+ordinary Application update changes
 image and supported startup settings to Haby delivery. This explicitly extends the
 necessary bounded update contract for that transition, not arbitrary PodSpec UPDATE.
 Coordinate this work with #321's settings/configuration seam; implement/reuse the
@@ -129,6 +132,10 @@ identity, failures/drift/revocation before advance, restart/replay/partial progr
 no premature Applied or delivery grant and ordinary create/update regressions.
 Use a supported controlled old-source fixture without introducing a production
 legacy-source integration. Document rollout strategy and no unconditional downtime
+guarantee. Prove old-source adoption with a ServiceAccount-induced rollout as well
+as no unnecessary rollout for operational metadata alone. Selecting that account
+must not by itself publish documents or grant Haby configuration access. Preserve
+existing source connectivity across the approved Pod-template change. No downtime
 guarantee. Complete required retirement before Applied; unsupported correction is
 explicit rather than silently widening image-only correction.
 
