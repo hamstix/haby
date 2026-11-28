@@ -164,7 +164,7 @@ Exit evidence:
 - Limited updates preserve existing data and credentials, create only admitted new Resources, retain external resources under explicit ownership when their declarations are removed, and accept configuration-only generations without changing ManifestRevision.
 
 P2's first executable path remains static JSON/local Bindings. Profile parameters,
-Liquid/parameter execution (priority to be reconsidered after P3), YAML/text execution, selectors, broad rollout and
+Liquid/parameter execution (subject to the mandatory pre-P4 architecture checkpoint below), YAML/text execution, selectors, broad rollout and
 cross-Application exports are later slices unless a concrete pilot requirement
 explicitly changes that scope. Kubernetes Runtime Identity is not required to
 prove the initial separately scoped retrieval route. The authenticated
@@ -289,6 +289,12 @@ capabilities, not prerequisites for this milestone.
 
 - [x] Accept [ADR-061](docs/adr/0061-focused-development-and-final-qualification.md): focused development; the 2026-11-24 amendment below replaces full merge qualification with targeted checks, nightly regression and full release qualification.
 - [ ] Frozen historical [#263](https://github.com/hamstix/haby/issues/263): preserve its provenance lessons; it is not an execution prerequisite. The accepted #297 amendment below replaces its former full-before-every-merge policy after safe deployment.
+
+### Accepted staged acquisition and pre-P4 architecture checkpoint
+
+- [x] Accept [ADR-065](docs/adr/0065-explicit-resource-stage-before-workload-advance.md): one full immutable Application revision, one deployment/generation and full frozen Plan; explicit protected Import/Reference Resource stage, then separately authorized Workload advance of that same generation. ResourcesReady is not Applied. Architecture acceptance is not implementation.
+- [ ] After verified #319 completion, implement [#325](https://github.com/hamstix/haby/issues/325) using the [staged acquisition slice and review card](docs/development/staged-resource-acquisition.md) before #320 CLI and integrated operator rehearsal. Do not extend #319 silently or require a copied/stripped manifest workaround. Reuse existing checkpoints, projection, Submit and fences; keep current #319 work unblocked.
+- [ ] Before transition to P4, complete an **architecture checkpoint with the user for Application manifest parameters**. Inventory current declarations/normalization and actual adoption needs: types, defaults, overrides, Environment context, Plan freezing, secret boundaries, determinism and validation. Agree options and which implementation is required before P4/full adoption in the architecture chat. No Liquid/defaultExpression or other expression engine is authorized by this checkpoint; parameters remain outside #319/#320 and ADR-065 runtime scope.
 
 ### Accepted P3 execution order
 
