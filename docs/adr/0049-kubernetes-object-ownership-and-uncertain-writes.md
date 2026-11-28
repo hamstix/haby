@@ -76,6 +76,10 @@ An occupied creation name without confirmed ownership is a conflict. Initially d
 not adopt, replace, delete or force ownership of that object. Registering existing
 objects requires a separate explicit migration/adoption decision.
 
+[ADR-066](0066-workload-adoption-and-explicit-resource-authority.md) accepts that
+separate typed migration capability. It does not relax ordinary CREATE conflicts
+or authorize automatic adoption; its implementation remains a separate P3 slice.
+
 ### 6. Explicit top-level inventory
 
 Track Deployment, ordinary Service, headless Service and Ingress individually.
