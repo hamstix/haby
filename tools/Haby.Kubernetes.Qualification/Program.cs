@@ -2,6 +2,17 @@ using System.Security.Cryptography.X509Certificates;
 using Haby.Kubernetes.Qualification;
 using k8s;
 
+if (args is ["--postgresql-progress-controls"] or ["--postgresql-progress-verify"])
+{
+    try
+    {
+        if (args[0] == "--postgresql-progress-controls") await PostgreSqlProgressControls.Run();
+        else PostgreSqlProgressControls.Verify();
+        return 0;
+    }
+    catch (Exception) { Console.Error.WriteLine("Progress control refused; content withheld."); return 1; }
+}
+
 if (args is ["--configured-reporting-controls"])
 {
     ConfiguredReportingControls.Run();

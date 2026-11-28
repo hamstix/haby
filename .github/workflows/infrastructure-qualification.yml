@@ -100,6 +100,7 @@ jobs:
             .artifacts/qualification/safe/results.trx
             .artifacts/qualification/safe/infrastructure-qualification/setup.csv
             .artifacts/qualification/safe/infrastructure-qualification/resources.json
+            .artifacts/qualification/safe/infrastructure-qualification/progress.json
             .artifacts/qualification/safe/infrastructure-qualification/failure-evidence.json
           if-no-files-found: error
           retention-days: 14

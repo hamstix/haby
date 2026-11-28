@@ -376,12 +376,14 @@ jobs:
             .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/failure-evidence.json
             .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/results.trx
             .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/host-diagnostics.csv
+            .artifacts/postgresql-measurement/safe/anonymous-reflection-precheck/progress.json
             .artifacts/postgresql-measurement/safe/functional/cases.json
             .artifacts/postgresql-measurement/safe/functional/counts.json
             .artifacts/postgresql-measurement/safe/functional/failure-evidence.json
             .artifacts/postgresql-measurement/safe/functional/resources.json
             .artifacts/postgresql-measurement/safe/functional/setup.csv
             .artifacts/postgresql-measurement/safe/functional/host-diagnostics.csv
+            .artifacts/postgresql-measurement/safe/functional/progress.json
             .artifacts/postgresql-measurement/safe/functional/composition-*.identity.json
             .artifacts/postgresql-measurement/safe/functional/composition-*.exceptions.jsonl
             .artifacts/postgresql-measurement/safe/functional/protected-reflection-diagnostics.csv
@@ -389,6 +391,7 @@ jobs:
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/counts.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/failure-evidence.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/resources.json
+            .artifacts/postgresql-measurement/safe/infrastructure-qualification/progress.json
             .artifacts/postgresql-measurement/safe/infrastructure-qualification/setup.csv
           if-no-files-found: error
           retention-days: 14

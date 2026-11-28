@@ -95,6 +95,7 @@ internal static class PostgreSqlResources
             Directory.CreateDirectory(directory);
             var value = new ResourceCounts(Limit, active, peak, attempts, ready, cleaned, startupFailed, cleanupFailed, databasesCreated, databasesDropped, capacityRefused, suitePeak, controlPeak,
                 readyActive, readyPeak, readySuitePeak, readyControlPeak, HostLimit, hostActive, hostPeak, hostRefused);
+            PostgreSqlProgress.Current?.ResourceSnapshot(value);
             File.WriteAllText(Path.Combine(directory, "resources.json"), JsonSerializer.Serialize(value, ResourceJson.Default.ResourceCounts));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
