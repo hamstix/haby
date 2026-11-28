@@ -115,6 +115,23 @@ internal static partial class DurableAggregateCompletion
     internal static async Task<ResourcesReadyCheckpoint?> ReadAsync(ManifestCatalogDbContext context, DeploymentGenerationRow source, CancellationToken token, bool internalResourceStage = false, bool completedRead = false, bool referenceHistory = false)
     {
         if (source.InternalEffects && !internalResourceStage) throw new InvalidDataException("Internal generation is not publicly admitted.");
+        var acceptedGraph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        if (internalResourceStage && acceptedGraph.Correction is { } correction)
+        {
+            // This is immutable catalog evidence, not current effect authority. Calling full
+            // retirement validation here would recurse through its Resource-proof reference.
+            var storedSource = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation, token);
+            if (!source.InternalEffects || storedSource.GraphJson != source.GraphJson || storedSource.Fingerprint != source.Fingerprint ||
+                DurableOperationGraphCodec.Fingerprint(source.Inputs(), acceptedGraph) != source.Fingerprint)
+                throw new InvalidDataException("Corrective Resource-stage source mismatch.");
+            var retained = ResourcesReadyCheckpointCodec.Decode(correction.Document.ResourceProof);
+            var original = await context.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == source.DeploymentId && x.Generation == retained.Generation, token);
+            var actual = await ReadAsync(context, original, token, internalResourceStage: true, completedRead: true, referenceHistory: referenceHistory);
+            if (actual is null || ResourcesReadyCheckpointCodec.Encode(actual) != correction.Document.ResourceProof ||
+                !await ResourceContinuity.ValidateAsync(context, source.DeploymentId, acceptedGraph, token, referenceHistory))
+                throw new InvalidDataException("Corrective original Resource-stage evidence mismatch.");
+            return actual; // Direct original evidence; no copied checkpoint or fabricated completion.
+        }
         var rows = await context.GenerationStageCheckpoints.AsNoTracking().Where(x => x.DeploymentId == source.DeploymentId && x.Generation == source.Generation && x.Stage == ResourcesReadyCheckpoint.Stage).ToArrayAsync(token);
         if (rows.Length == 0) return null;
         if (rows is not [var row] || row.Stage != ResourcesReadyCheckpoint.Stage || row.FormatVersion != ResourcesReadyCheckpoint.FormatVersion ||

@@ -65,7 +65,16 @@ internal static partial class InternalGenerationAuthority
             return verified;
         }
         var applied = await db.ApplicationDeployments.AsNoTracking().Where(x => x.Id == id).Select(x => x.AppliedGeneration).SingleOrDefaultAsync(token);
-        if (applied < accepted.Generation.Value || applied is null) return await RequireAsync(db, accepted, token);
+        if (applied < accepted.Generation.Value || applied is null || !await db.GenerationStageCheckpoints.AsNoTracking().AnyAsync(x =>
+            x.DeploymentId == id && x.Generation == accepted.Generation.Value && x.Stage == InitialRetirementCompletion.Stage, token))
+        {
+            var source = await db.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.DeploymentId == id && x.Generation == accepted.Generation.Value, token);
+            var desired = await db.ApplicationDeployments.AsNoTracking().Where(x => x.Id == id).Select(x => x.DesiredGeneration).SingleAsync(token);
+            if (desired == source.Generation) return DurableOperationGraphCodec.Decode(source.GraphJson).Correction is null
+                ? await RequireAsync(db, accepted, token) : await RequireStageAsync(db, accepted, token);
+            await RequireAcceptedWorkloadDescendantAsync(db, source, desired, token);
+            return await RequireCoreAsync(db, accepted, true, token, true, referenceHistory: true);
+        }
         var row = await RequireCoreAsync(db, accepted, true, token);
         _ = await InitialRetirementCompletion.RequireProofAsync(db, row, token);
         if (db.Database.CurrentTransaction is not null) db.CompletedInitialReads[(db.Database.CurrentTransaction.TransactionId, id, accepted.Generation.Value)] = row;
@@ -78,8 +87,7 @@ internal static partial class InternalGenerationAuthority
         DurableChangeSetCommit accepted, CancellationToken token)
     {
         var verified = await RequireCoreAsync(db, accepted, true, token, true, referenceHistory: true);
-        var applied = await db.ApplicationDeployments.Where(x => x.Id == verified.DeploymentId).Select(x => x.AppliedGeneration).SingleAsync(token);
-        if (applied >= verified.Generation) _ = await InitialRetirementCompletion.RequireProofAsync(db, verified, token);
+        await RequireCompletionOrCorrectiveDescendantAsync(db, verified, token);
         return verified;
     }
 
@@ -109,9 +117,10 @@ internal static partial class InternalGenerationAuthority
         var graph = DurableOperationGraphCodec.Decode(row.GraphJson); graph.ValidateReferences(inputs);
         if (DurableOperationGraphCodec.Fingerprint(inputs, graph) != row.Fingerprint) throw new InvalidDataException("Accepted generation fingerprint mismatch.");
         var update = stage || readOnly ? graph.WorkloadUpdate?.Document : null;
+        var correction = stage || readOnly ? graph.Correction?.Document : null;
         var retirement = graph.Retirement?.Document;
-        if (retirement is null && update is null) throw new InvalidDataException("Frozen stage authority required.");
-        var priorApplied = readOnly ? retirement?.PriorApplied ?? update?.BaselineGeneration : owner?.AppliedGeneration;
+        if (retirement is null && update is null && correction is null) throw new InvalidDataException("Frozen stage authority required.");
+        var priorApplied = readOnly ? retirement?.PriorApplied ?? update?.BaselineGeneration ?? correction?.LastApplied : owner?.AppliedGeneration;
         var initialResources = InternalResourceStage.IsInitialCreate(inputs, graph);
         var initial = (InternalResourceStage.IsEmpty(inputs, graph) || initialResources) && row.Generation == 1 && priorApplied is null &&
             change is { ExpectedAbsence: true, ExpectedGeneration: null };
@@ -119,7 +128,7 @@ internal static partial class InternalGenerationAuthority
             priorApplied < row.Generation && graph.Nodes.Count == 0 && graph.RetainedResources.Count == 0 &&
             graph.ReusedResources.Count == inputs.Configuration!.Manifest.Spec.Resources.Count && graph.ReusedResources.Count > 0 &&
             change is { ExpectedAbsence: false } && change.ExpectedGeneration == graph.Baseline.Generation;
-        if ((!initial && !mixed && update is null) || !row.InternalEffects || row.Presence != nameof(DesiredPresence.Present) || owner is null || (readOnly ? owner.DesiredGeneration < row.Generation : owner.DesiredGeneration != row.Generation) ||
+        if ((!initial && !mixed && update is null && correction is null) || !row.InternalEffects || row.Presence != nameof(DesiredPresence.Present) || owner is null || (readOnly ? owner.DesiredGeneration < row.Generation : owner.DesiredGeneration != row.Generation) ||
             owner.EnvironmentRecordId != row.EnvironmentRecordId || owner.ApplicationRecordId != row.ApplicationRecordId ||
             plan is null || !plan.InternalEffects || plan.ChangeSetId != row.ChangeSetId || plan.EnvironmentRecordId != row.EnvironmentRecordId ||
             plan.ApplicationRecordId != row.ApplicationRecordId || plan.RevisionNumber != row.RevisionNumber || plan.EnvironmentKey != row.EnvironmentKey ||
@@ -131,6 +140,7 @@ internal static partial class InternalGenerationAuthority
             commit.ActorId != accepted.ActorId || commit.CommittedAt != accepted.CommittedAt || row.AcceptedAt != commit.CommittedAt || row.ActorId != commit.ActorId)
             throw new InvalidDataException("Accepted internal authority mismatch.");
         if (update is not null) await RequireUpdateBaselineAsync(db, row, owner, graph, update, token, readOnly);
+        if (correction is not null) await RequireCorrectiveBaselineAsync(db, row, owner, graph, correction, token, readOnly);
         var revision = await db.Revisions.AsNoTracking().SingleOrDefaultAsync(x => x.ApplicationRecordId == row.ApplicationRecordId && x.LocalRevisionNumber == row.RevisionNumber, token)
             ?? throw new InvalidDataException("Accepted declaration unavailable.");
         var manifest = NormalizedSnapshotCodec.Decode(revision.Snapshot, revision.InputApiVersion, revision.NormalizedModelVersion, revision.ApplicationId, revision.SnapshotFormatVersion);

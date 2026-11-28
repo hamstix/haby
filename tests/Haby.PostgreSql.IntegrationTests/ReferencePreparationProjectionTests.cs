@@ -72,7 +72,7 @@ public sealed partial class SharedReferenceDeliveryTests
             .CommitInternalAsync(change.Id, plan.Plan.Id, "operator", default, services.GetServices<IInternalActionHandler>().ToArray())).Commit;
         var preparation = new InternalWorkloadConfiguration(contexts, planner, services.GetRequiredService<PostgreSqlConfigurationDocumentStore>(),
             services.GetServices<IInternalActionHandler>().ToArray(), services.GetServices<IExternalOperationOutputContract>(),
-            services.GetServices<IProviderConfigurationCodec>(), services.GetRequiredService<DurableActionAdmission>(), services.GetServices<IDurableResourceReuseVerifier>());
+            services.GetServices<IProviderConfigurationCodec>(), services.GetRequiredService<DurableActionAdmission>(), services.GetRequiredService<DurableOperationSerialization>(), services.GetServices<IDurableResourceReuseVerifier>());
         Assert.Null((await preparation.PrepareAsync(commit, "operator", default)).Failure);
         var handler = DurableDeploymentPlanningTests.ImportedWorkloadHandlers().Identity;
         var actions = new InternalDurableActions(contexts, [handler], services.GetServices<IProviderConfigurationCodec>(),

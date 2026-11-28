@@ -13,9 +13,14 @@ internal sealed record WorkloadConfigurationPreparation(IReadOnlyList<WorkloadCo
 internal sealed class InternalWorkloadConfiguration(IDbContextFactory<ManifestCatalogDbContext> contexts,
     PostgreSqlDurableDeploymentPlanner planner, PostgreSqlConfigurationDocumentStore documents,
     IReadOnlyList<IInternalActionHandler> handlers, IEnumerable<IExternalOperationOutputContract> outputs,
-    IEnumerable<IProviderConfigurationCodec> codecs, DurableActionAdmission admission, IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null)
+    IEnumerable<IProviderConfigurationCodec> codecs, DurableActionAdmission admission, DurableOperationSerialization serialization,
+    IEnumerable<IDurableResourceReuseVerifier>? reuseVerifiers = null)
 {
-    internal async ValueTask<WorkloadConfigurationPreparation> PrepareAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token)
+    internal ValueTask<WorkloadConfigurationPreparation> PrepareAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token) =>
+        serialization.RunDeploymentAsync(accepted.DeploymentId, () => PrepareCoreAsync(accepted, actor, token), token);
+
+    // Submission already owns the same singleton deployment gate.
+    internal async ValueTask<WorkloadConfigurationPreparation> PrepareCoreAsync(DurableChangeSetCommit accepted, string actor, CancellationToken token)
     {
         PostgreSqlDurableDeploymentPlanner.ValidateActor(actor);
         using var reuse = await new PostgreSqlDurableOperationJournal(contexts, outputs, codecs, reuseVerifiers)

@@ -71,17 +71,29 @@ internal sealed class InternalDeploymentAction(ISecretStore secrets,
         DeploymentReceipt? previous = null;
         if (update)
         {
-            var authority = context.Update ?? throw new InvalidDataException("Verified update preparation required.");
-            var captured = DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(authority.Original, context.Inputs,
-                context.ApplicationVersion, authority.Intent, authority.Receipt));
-            if (captured != authority.Delta || authority.Original.ManagedIdentity != context.ManagedIdentity ||
-                authority.Original.Key.DeploymentId != context.Key.DeploymentId || authority.Original.Key.Generation.Value + 1 != context.Key.Generation.Value)
-                throw new InvalidDataException("Frozen update delta mismatch.");
-            previous = DeploymentIntents.DecodeReceipt(authority.Receipt);
+            previous = UpdateReceipt(context);
         }
         else if (context.Update is not null) throw new InvalidDataException("CREATE cannot consume update authority.");
         return DeploymentIntents.Encode(DeploymentIntents.Prepare(workload, Guid.Parse(context.Key.DeploymentId.ToString()),
             context.ManagedIdentity, context.Key.Generation.Value, context.Marker, previous, runtime));
+    }
+
+    internal static DeploymentReceipt UpdateReceipt(InternalActionContext context, int remaining = 256)
+    {
+        if (remaining < 1) throw new InvalidDataException("Update origin history exceeds bound.");
+        var authority = context.Update ?? throw new InvalidDataException("Verified update preparation required.");
+        var captured = DeploymentImageUpdate.Payload(DeploymentImageUpdate.Capture(authority.Original, context.Inputs,
+            context.ApplicationVersion, authority.Intent, authority.Receipt, remaining));
+        var previous = DeploymentIntents.DecodeReceipt(authority.Receipt);
+        var generationMatches = authority.Correction is null
+            ? authority.Original.Key.Generation.Value + 1 == context.Key.Generation.Value
+            : authority.Correction is { ExpectedDesired: > 0, InventoryFingerprint.Length: 64 } correction &&
+                correction.InventoryFingerprint.All(char.IsAsciiHexDigit) && correction.ExpectedDesired + 1 == context.Key.Generation.Value &&
+                authority.Original.Key.Generation.Value <= correction.ExpectedDesired && correction.ConfirmedIdentity == previous.Uid;
+        if (captured != authority.Delta || authority.Original.ManagedIdentity != context.ManagedIdentity ||
+            authority.Original.Key.DeploymentId != context.Key.DeploymentId || !generationMatches)
+            throw new InvalidDataException("Frozen update delta mismatch.");
+        return previous;
     }
     public InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt)
     {

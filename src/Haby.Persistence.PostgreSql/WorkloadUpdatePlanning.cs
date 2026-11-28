@@ -64,6 +64,7 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
             var provider = await db.ProviderConfigurationRevisions.AsNoTracking().SingleAsync(x => x.ProviderInstanceId == intent.ProviderId && x.RevisionNumber == intent.ConfigurationRevision, token);
             var oldContext = new InternalActionContext(new(ApplicationDeploymentId.Parse(owner.Id.ToString()), DeploymentGeneration.Create(source.Generation), OperationId.Create(intent.OperationId)),
                 previous, subject, previous.Providers.Entries[subject], PreparedConfiguration(intent.ProviderKind, provider), previousVersion, intent.Marker, stable.Id, InternalPlacementInput.Decode(exact.Placement!).Declaration);
+            oldContext = await InternalDurableActions.UpdateContextAsync(db, source, oldContext, match.Handler, token);
             if (match.Handler.ManagedTarget(oldContext) != new InternalManagedTarget(stable.TargetContract, stable.TargetFormat, stable.TargetPayload) ||
                 output.Contract != intent.OutputContract) throw new WorkloadUpdateRefusedException(WorkloadUpdateRefusal.EvidenceUnavailable);
             var delta = ((IInternalWorkloadUpdatePlanner)match.Handler).CaptureUpdate(oldContext, inputs, version, intent.Payload, output.Payload);
@@ -84,7 +85,11 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner
         // Every current permission for the retained identities must be represented. Refuse
         // unexplained live rights rather than silently dropping retirement obligations.
         var bindingIds = bindings.Select(x => x.Id).ToArray();
-        var permissions = await db.RuntimeConfigurationPermissions.AsNoTracking().Where(x => bindingIds.Contains(x.BindingId)).Select(x => x.Id).ToArrayAsync(token);
+        // Revoked rows are immutable history, not live retirement obligations.
+        // The baseline completion proof above authenticates their retirement; every
+        // still-Published permission must remain represented exactly.
+        var permissions = await db.RuntimeConfigurationPermissions.AsNoTracking().Where(x => bindingIds.Contains(x.BindingId) && x.Status == "Published")
+            .Select(x => x.Id).ToArrayAsync(token);
         if (!permissions.ToHashSet().SetEquals(publications.Select(x => x.Permission)))
             throw new WorkloadUpdateRefusedException(WorkloadUpdateRefusal.EvidenceUnavailable);
         var publicationInventory = publications.Select(x => new WorkloadUpdatePublication(x.Permission, x.Binding, x.Revision, x.PermissionToken,

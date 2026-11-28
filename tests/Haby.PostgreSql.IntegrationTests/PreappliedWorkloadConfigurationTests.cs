@@ -41,7 +41,7 @@ public sealed partial class DurableDeploymentPlanningTests
             services.GetRequiredService<TimeProvider>());
         return (new(contexts, services.GetRequiredService<PostgreSqlDurableDeploymentPlanner>(), store,
             services.GetServices<IInternalActionHandler>().ToArray(), services.GetServices<IExternalOperationOutputContract>(),
-            services.GetServices<IProviderConfigurationCodec>(), services.GetRequiredService<DurableActionAdmission>(), services.GetServices<IDurableResourceReuseVerifier>()), store);
+            services.GetServices<IProviderConfigurationCodec>(), services.GetRequiredService<DurableActionAdmission>(), services.GetRequiredService<DurableOperationSerialization>(), services.GetServices<IDurableResourceReuseVerifier>()), store);
     }
 
     [Fact]

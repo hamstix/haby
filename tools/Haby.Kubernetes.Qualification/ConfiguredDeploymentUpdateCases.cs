@@ -73,12 +73,14 @@ internal static class ConfiguredDeploymentUpdateCases
             var change = (await planner.CreateChangeSetAsync(environment, revision.ApplicationRecordId, revision,
                 new DeploymentPrecondition.ExpectedGeneration(baseline.Generation), "qualification", token)).ChangeSet!;
             Console.WriteLine("Q243 configured update-plan completed");
-            Check((await planner.CreateOperatorPlanAsync(change.Id, "qualification", token, handlers)).Status == DurablePlanStatus.UnsupportedShape,
-                "U01-public-update-remains-closed");
-            var plan = (await planner.CreateInternalPlanAsync(change.Id, "qualification", token, handlers)).Plan!;
+            var planned = await planner.CreateOperatorPlanAsync(change.Id, "qualification", token, handlers);
+            Check(planned.Status == DurablePlanStatus.Planned && planned.Plan is not null &&
+                await planner.CheckOperatorPlanAsync(planned.Plan.Id, handlers, token) == DurablePlanCurrentStatus.Current,
+                "U01-public-image-update-plan-and-current-check");
+            var plan = planned.Plan!;
             var accepted = (await ((PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>())
-                .CommitInternalAsync(change.Id, plan.Id, "qualification", token, handlers) as DurableCommitResult.Committed)?.Commit
-                ?? throw new InvalidOperationException("Internal update acceptance refused.");
+                .CommitOperatorAsync(change.Id, plan.Id, "qualification", token, handlers) as DurableCommitResult.Committed)?.Commit
+                ?? throw new InvalidOperationException("Public image update acceptance refused.");
             // Simulate permitted foreign fields after the accepted baseline. The sidecar
             // uses the original reference; the target Pod must resolve the :443 reference.
             var foreignPatch = new JsonArray(

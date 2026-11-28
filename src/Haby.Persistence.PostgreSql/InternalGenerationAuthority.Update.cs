@@ -16,14 +16,34 @@ internal static partial class InternalGenerationAuthority
         if (verified.GraphJson != source.GraphJson || verified.Fingerprint != source.Fingerprint || verified.PlanId != source.PlanId ||
             verified.ConfigurationJson != source.ConfigurationJson || verified.ProviderInputsJson != source.ProviderInputsJson || !source.InternalEffects)
             throw new InvalidDataException("Update read source mismatch.");
-        var applied = await db.ApplicationDeployments.Where(x => x.Id == source.DeploymentId).Select(x => x.AppliedGeneration).SingleAsync(token);
-        if (applied >= source.Generation) _ = await InitialRetirementCompletion.RequireProofAsync(db, verified, token);
+        await RequireCompletionOrCorrectiveDescendantAsync(db, verified, token);
         return verified;
     }
 
     internal static async Task RequireCurrentStageAsync(ManifestCatalogDbContext db, DeploymentGenerationRow source, CancellationToken token)
     {
-        var inventory = DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate?.Document;
+        if (!await db.ApplicationDeployments.AsNoTracking().AnyAsync(x => x.Id == source.DeploymentId && x.DesiredGeneration == source.Generation, token))
+            throw new InvalidDataException("Superseded generation cannot authorize current effects.");
+        var graph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        if (graph.Correction is { } correction)
+        {
+            foreach (var retained in correction.Document.Bindings)
+            {
+                var binding = await db.RuntimeIdentityBindings.AsNoTracking().SingleAsync(x => x.Id == retained.Id, token);
+                if (InternalRuntimePublication.BindingState(binding).Status != "Prepared" || binding.ConcurrencyToken != retained.Token ||
+                    binding.ManagedWorkloadId != retained.ManagedIdentity || binding.Contract != retained.Contract || binding.Format != retained.Format || binding.ValidationPayload != retained.Payload)
+                    throw new InvalidDataException("Corrective runtime binding no longer authorizes preparation.");
+            }
+            foreach (var retained in correction.Document.Publications)
+            {
+                var permission = await db.RuntimeConfigurationPermissions.AsNoTracking().SingleAsync(x => x.Id == retained.Permission, token);
+                if (InternalRuntimePublication.PermissionState(permission)?.Status != retained.Status || permission.ConcurrencyToken != retained.Token ||
+                    permission.BindingId != retained.Binding || permission.RevisionId != retained.Revision || permission.LastRequest != retained.LastRequest ||
+                    ResourcesReadyCheckpointCodec.Hash(permission.OriginPayload) != retained.OriginHash)
+                    throw new InvalidDataException("Corrective runtime permission no longer authorizes preparation.");
+            }
+        }
+        var inventory = graph.WorkloadUpdate?.Document;
         if (inventory is null) return;
         foreach (var retained in inventory.RetainedBindings)
         {

@@ -217,6 +217,20 @@ public sealed class DeploymentRecipientTests
         Assert.False(DeploymentRecipients.Evaluate(f.Intent, f.Receipt, f.Sets, f.Pods, new(), value => seen = value).Absent);
         Assert.Equal(new(1, 1, 1, RecipientProjectionFailure.None, RecipientProjectionFailure.RuntimeMount), seen);
     }
+    [Fact]
+    public void Confirmed_CREATE_recipient_proof_uses_actual_receipt_UID_without_relaxing_UPDATE_identity()
+    {
+        var f = Fixture();
+        var create = f.Intent with { ExpectedUid = null, LastConfirmed = null };
+        var observed = DeploymentRecipients.Evaluate(create, f.Receipt, f.Sets, f.Pods, new());
+        Assert.True(observed.Absent, observed.Code);
+        Assert.True(DeploymentRecipients.Validate(DeploymentIntents.Encode(create), DeploymentIntents.Encode(f.Receipt), observed));
+        Assert.False(DeploymentRecipients.Validate(DeploymentIntents.Encode(create), DeploymentIntents.Encode(f.Receipt with { Uid = "replacement" }), observed));
+        var wrongUpdate = f.Intent with { ExpectedUid = "foreign-confirmed-uid" };
+        Assert.False(DeploymentRecipients.Evaluate(wrongUpdate, f.Receipt, f.Sets, f.Pods, new()).Absent);
+        Assert.False(DeploymentRecipients.Validate(DeploymentIntents.Encode(wrongUpdate), DeploymentIntents.Encode(f.Receipt), observed));
+    }
+
     private sealed class RecipientResponse : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>

@@ -2,7 +2,7 @@
 
 Issue #227 opens the existing authenticated ChangeSet -> Plan -> Commit path for
 two bounded Workload shapes. Commit accepts desired state only. Explicit submission is provided by the [issue #229 path](229-operator-workload-submission.md).
-Public wait/resume, retirement and Applied completion remain unavailable. The existing Resource-only workflow remains supported.
+Public wait/resume, retirement and Applied completion use the shared execution pipeline. The existing Resource-only workflow remains supported. See the [corrective runtime boundary](319-corrective-runtime.md) for later supported transitions.
 
 ## Supported shapes
 
@@ -17,7 +17,7 @@ Every declared Workload must have exact registered preparation support. The
 current Kubernetes adapter retains its bounded Deployment settings; unsupported
 container settings and companion objects refuse. Selected ordinary configuration
 documents are planned but never materialized by admission. Static Profile secret
-projections (#209), Workload updates and corrective generations remain closed.
+projections (#209) retain their separate admission rules. Bounded Workload updates and corrective generations follow the [corrective runtime boundary](319-corrective-runtime.md).
 
 ## Operator example
 

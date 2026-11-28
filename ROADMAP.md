@@ -423,6 +423,12 @@ Redis implementation is admitted by this decision. P3 remains incomplete.
 
 ## P4 - Standard Providers
 
+Before starting P4, discuss Application manifest parameters in the architecture chat
+and record the user's chosen scope in an explicit decision packet. Cover the current
+inventory, types, defaults, overrides, Environment interaction, Plan freezing, secrets,
+determinism and validation. This checkpoint is separate from runtime readiness; it
+does not authorize parameter implementation or an expression engine.
+
 Status: planned. Goal: cover the external systems needed by real Applications
 through complete Provider scenarios, preserving the shared Provider-neutral model.
 

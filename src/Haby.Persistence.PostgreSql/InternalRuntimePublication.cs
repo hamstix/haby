@@ -1,5 +1,6 @@
 using System.Data;
 using Haby.Application;
+using Haby.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Haby.Persistence.PostgreSql;
@@ -111,12 +112,34 @@ internal sealed class InternalRuntimePublication(IDbContextFactory<ManifestCatal
 
     internal async Task<RuntimePublicationResult> ApplyAsync(RuntimePublicationRequest request, CancellationToken token)
     {
-        try { return await ApplyCoreAsync(request, token); }
+        try
+        {
+            RuntimePublicationCodec.Validate(request);
+            Guid deployment;
+            await using (var db = await contexts.CreateDbContextAsync(token))
+                deployment = await (from binding in db.RuntimeIdentityBindings.AsNoTracking()
+                                    join workload in db.ManagedWorkloads.AsNoTracking() on binding.ManagedWorkloadId equals workload.Id
+                                    where binding.Id == request.Binding
+                                    select workload.DeploymentId).SingleOrDefaultAsync(token);
+            if (deployment == Guid.Empty) throw new InvalidDataException("Runtime binding unavailable.");
+            return await SerializeDeploymentAsync(ApplicationDeploymentId.Parse(deployment.ToString()), () => new ValueTask<RuntimePublicationResult>(ApplyCoreAsync(request, token)), token);
+        }
         catch (Exception error) when (error is Npgsql.NpgsqlException or DbUpdateException)
         { throw new IOException("Runtime publication storage unavailable."); }
     }
 
-    private async Task<RuntimePublicationResult> ApplyCoreAsync(RuntimePublicationRequest request, CancellationToken token)
+    internal ValueTask<T> SerializeDeploymentAsync<T>(ApplicationDeploymentId deployment, Func<ValueTask<T>> call, CancellationToken token) =>
+        identities.SerializeDeploymentAsync(deployment, call, token);
+
+    // Caller owns the process gate; this transaction retains request-key then owner lock order.
+    internal async Task<RuntimePublicationResult> ApplyCoreAsync(RuntimePublicationRequest request, CancellationToken token)
+    {
+        try { return await ApplyTransactionAsync(request, token); }
+        catch (Exception error) when (error is Npgsql.NpgsqlException or DbUpdateException)
+        { throw new IOException("Runtime publication storage unavailable."); }
+    }
+
+    private async Task<RuntimePublicationResult> ApplyTransactionAsync(RuntimePublicationRequest request, CancellationToken token)
     {
         RuntimePublicationCodec.Validate(request);
         await using var db = await contexts.CreateDbContextAsync(token);

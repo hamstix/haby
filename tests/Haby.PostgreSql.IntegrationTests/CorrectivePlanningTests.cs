@@ -15,7 +15,7 @@ public sealed partial class DurableDeploymentPlanningTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(false, false)]
-    public async Task Corrective_capture_preserves_incomplete_original_proofs_and_cannot_accept_desired_state(bool initial, bool mixed)
+    public async Task Corrective_capture_is_read_only_and_stale_runtime_authority_blocks_acceptance(bool initial, bool mixed)
     {
         JsonNode? envelope = null;
         var scenario = await InternalScenarioAsync(initialOnly: initial, twoComponents: mixed, configureManifest: e =>
@@ -77,9 +77,6 @@ public sealed partial class DurableDeploymentPlanningTests
         var saved = (await restarted.GetRequiredService<IDurableDeploymentPlanner>().FindPlanAsync(plan.Id, default))!;
         Assert.Equal(plan.Fingerprint, saved.Fingerprint); Assert.Equal(plan.Graph.Correction.Fingerprint, saved.Graph.Correction!.Fingerprint);
         Assert.Equal(intent, (await planner.FindChangeSetAsync(change.Id, default))!.Correction);
-        var committer = (PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>();
-        Assert.IsType<DurableCommitResult.UnsupportedShape>(await committer.CommitOperatorAsync(change.Id, plan.Id, "operator", default, handlers));
-        Assert.IsType<DurableCommitResult.UnsupportedShape>(await committer.CommitInternalAsync(change.Id, plan.Id, "internal", default, handlers));
         await using (var verify = await contexts.CreateDbContextAsync())
         {
             var owner = await verify.ApplicationDeployments.AsNoTracking().SingleAsync();
@@ -96,6 +93,16 @@ public sealed partial class DurableDeploymentPlanningTests
             await mutate.SaveChangesAsync();
         }
         Assert.Equal(DurablePlanCurrentStatus.PlanStale, await planner.CheckOperatorPlanAsync(plan.Id, handlers, default));
+        var committer = (PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>();
+        Assert.IsType<DurableCommitResult.PlanStale>(await committer.CommitOperatorAsync(change.Id, plan.Id, "operator", default, handlers));
+        Assert.IsType<DurableCommitResult.PlanStale>(await committer.CommitInternalAsync(change.Id, plan.Id, "internal", default, handlers));
+        await using (var verify = await contexts.CreateDbContextAsync())
+        {
+            var owner = await verify.ApplicationDeployments.AsNoTracking().SingleAsync();
+            Assert.Equal(scenario.Commit.Generation.Value, owner.DesiredGeneration); Assert.Equal(captured.LastApplied, owner.AppliedGeneration);
+            Assert.Equal(beforeOperations, await verify.DurableOperations.CountAsync());
+            Assert.False(await verify.ChangeSetCommits.AnyAsync(x => x.ChangeSetId.ToString() == change.Id.ToString()));
+        }
         Assert.Equal(plan.Fingerprint, (await planner.FindPlanAsync(plan.Id, default))!.Fingerprint);
     }
     [Theory]

@@ -1,5 +1,9 @@
 # Deployment serialization foundation for corrective runtime
 
+This document records the prerequisite slice. Its closed public guards are superseded
+by the coupled [corrective runtime integration](319-corrective-runtime.md); its original
+validation statements describe that slice only.
+
 This first internal #319 slice changes the existing single-Host
 `DurableOperationSerialization` gate from generation identity to Deployment
 identity. Existing `RunAsync(DurableOperationKey, ...)` callers keep their exact

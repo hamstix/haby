@@ -10,7 +10,8 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
-    private sealed partial class UpdateSubmissionFixture : IInternalActionHandler, IInternalReadinessHandler, IInternalRecipientObserver
+    private sealed partial class UpdateSubmissionFixture : IInternalActionHandler, IInternalReadinessHandler, IInternalRecipientObserver,
+        IInternalWorkloadUpdatePlanner, IInternalWorkloadCorrectionPlanner
     {
         private readonly InternalDeploymentAction adapter = new(null!, update: true);
         internal int Writes, Reads;
@@ -26,6 +27,11 @@ public sealed partial class DurableDeploymentPlanningTests
         public bool Validate(InternalActionContext context, string payload) => !Refuse && adapter.Validate(context, payload);
         public bool ValidateReceipt(InternalActionContext context, string payload, string receipt, bool observation) => adapter.ValidateReceipt(context, payload, receipt, observation);
         public InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt) => adapter.ObjectConfirmation(context, payload, receipt);
+        public DurableActionPayload CaptureUpdate(InternalActionContext previous, DurablePlanningInputs target, string version, string intent, string receipt) =>
+            adapter.CaptureUpdate(previous, target, version, intent, receipt);
+        public CorrectiveConfirmedObject CaptureConfirmedObject(InternalActionContext previous, string intent, string receipt) => adapter.CaptureConfirmedObject(previous, intent, receipt);
+        public CorrectiveImageDelta CaptureCorrection(DurablePlanningInputs previous, string previousVersion, DurablePlanningInputs target, string version, ProviderInput.Workload subject) =>
+            adapter.CaptureCorrection(previous, previousVersion, target, version, subject);
         private static InternalActionResult Confirm(string payload, bool observation)
         {
             var intent = DeploymentIntents.Decode(payload);

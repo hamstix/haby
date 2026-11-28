@@ -71,7 +71,12 @@ public sealed class WorkloadUpdateInventoryTests
         Assert.Equal(inventory.Fingerprint, read.Correction.Fingerprint);
         Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { Members = [member with { State = "ConfirmedOwned" }] }));
         Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { Members = [member with { Confirmation = new("foreign-uid", "registry.example/app:bad") }] }));
-        Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { ExpectedDesired = 2 }));
+        // Shape decoding permits a direct older Resource producer. Catalog capture,
+        // accepting CAS and historical reads authenticate the exact accepted chain.
+        var descendant = new CorrectiveInventory(document with { ExpectedDesired = 2 });
+        Assert.Equal(proof, descendant.Document.ResourceProof);
+        Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { ExpectedDesired = 0 }));
+        Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { ResourcesReady = Guid.CreateVersion7() }));
         Assert.Throws<InvalidDataException>(() => new CorrectiveInventory(document with { LastApplied = 1 }));
     }
 

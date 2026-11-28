@@ -62,7 +62,7 @@ public sealed partial class DurableDeploymentPlanningTests
         Assert.Equal(ConfigurationPlanningSnapshotCodec.Encode(plan.Inputs.Configuration), ConfigurationPlanningSnapshotCodec.Encode(loaded.Inputs.Configuration!));
         Assert.Equal(plan.Graph.WorkloadUpdate.Fingerprint, loaded.Graph.WorkloadUpdate!.Fingerprint);
         Assert.Equal(DurablePlanCurrentStatus.Current, await restarted.GetRequiredService<PostgreSqlDurableDeploymentPlanner>().CheckInternalPlanAsync(plan.Id, handlers, default));
-        Assert.Equal(DurablePlanStatus.UnsupportedShape, (await planner.CreateOperatorPlanAsync(change.Id, "operator", default, handlers)).Status);
+        Assert.Equal(DurablePlanStatus.Planned, (await planner.CreateOperatorPlanAsync(change.Id, "operator", default, handlers)).Status);
     }
     private async Task<(InternalScenario Scenario, JsonNode Envelope)> AppliedUpdateBaseline(bool initial, bool configured, bool multiple = false)
     {
@@ -112,7 +112,7 @@ public sealed partial class DurableDeploymentPlanningTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(false, false)]
-    public async Task Update_foundation_roundtrips_original_inventory_and_cannot_execute_or_complete(bool initial, bool configured)
+    public async Task Public_image_UPDATE_roundtrips_inventory_executes_shared_pipeline_and_keeps_CREATE_refusal(bool initial, bool configured)
     {
         var (scenario, envelope) = await AppliedUpdateBaseline(initial, configured);
         await using var services = InternalServices(scenario.Connection, scenario.Time);
@@ -122,7 +122,7 @@ public sealed partial class DurableDeploymentPlanningTests
         var committer = (PostgreSqlDurableDesiredStateCommitter)services.GetRequiredService<IDurableDesiredStateCommitter>();
         var handlers = services.GetServices<IInternalActionHandler>().ToArray();
         var change = await UpdateChange(services, scenario, reference);
-        Assert.Equal(DurablePlanStatus.UnsupportedShape, (await planner.CreateOperatorPlanAsync(change.Id, "operator", default, handlers)).Status);
+        Assert.Equal(DurablePlanStatus.Planned, (await planner.CreateOperatorPlanAsync(change.Id, "operator", default, handlers)).Status);
         var result = await planner.CreateInternalPlanAsync(change.Id, "tester", default, handlers);
         Assert.Equal(DurablePlanStatus.Planned, result.Status);
         var plan = result.Plan!;
@@ -138,12 +138,11 @@ public sealed partial class DurableDeploymentPlanningTests
         Assert.Equal(configured ? 1 : 0, update.RetainedBindings.Length);
         Assert.All(update.RetainedObjects, x => Assert.Equal(scenario.Commit.Generation.Value, x.OriginGeneration));
         Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckInternalPlanAsync(plan.Id, handlers, default));
-        Assert.NotEqual(DurablePlanCurrentStatus.Current, await planner.CheckOperatorPlanAsync(plan.Id, handlers, default));
-        Assert.IsType<DurableCommitResult.UnsupportedShape>(await committer.CommitOperatorAsync(change.Id, plan.Id, "operator", default, handlers));
-        var accepted = Assert.IsType<DurableCommitResult.Committed>(await committer.CommitInternalAsync(change.Id, plan.Id, "tester", default, handlers)).Commit;
+        Assert.Equal(DurablePlanCurrentStatus.Current, await planner.CheckOperatorPlanAsync(plan.Id, handlers, default));
+        var accepted = Assert.IsType<DurableCommitResult.Committed>(await committer.CommitOperatorAsync(change.Id, plan.Id, "operator", default, handlers)).Commit;
         Assert.Equal(scenario.Commit.Generation.Value + 1, accepted.Generation.Value);
         Assert.Equal(accepted, Assert.IsType<DurableCommitResult.Committed>(await committer.CommitInternalAsync(change.Id, plan.Id, "retry", default, handlers)).Commit);
-        Assert.IsType<DurableCommitResult.UnsupportedShape>(await committer.CommitOperatorAsync(change.Id, plan.Id, "operator", default, handlers));
+        Assert.Equal(accepted, Assert.IsType<DurableCommitResult.Committed>(await committer.CommitOperatorAsync(change.Id, plan.Id, "operator", default, handlers)).Commit);
         await using var restarted = InternalServices(scenario.Connection, scenario.Time);
         var loaded = (await restarted.GetRequiredService<IDurableDeploymentPlanner>().FindPlanAsync(plan.Id, default))!;
         Assert.Equal(DurableOperationGraphCodec.Encode(plan.Graph), DurableOperationGraphCodec.Encode(loaded.Graph));
@@ -156,7 +155,7 @@ public sealed partial class DurableDeploymentPlanningTests
             var source = await act.DeploymentGenerations.AsNoTracking().SingleAsync(x => x.Generation == accepted.Generation.Value);
             await Assert.ThrowsAsync<InvalidDataException>(() => InitialRetirementAuthority.ValidateAsync(act, source, default));
         }
-        var actions = Actions(restarted, handlers.Single());
+        var actions = Actions(restarted, handlers.Single(x => !x.UpdatesObject));
         await Assert.ThrowsAsync<InvalidDataException>(() => actions.AcceptAsync(accepted, new ProviderInput.Workload(ManifestLocalId.Create("api"), ManifestLocalId.Create("main")),
             InternalDeploymentAction.Create, "forbidden-update", default).AsTask());
         await using var verify = await contexts.CreateDbContextAsync();
@@ -166,6 +165,25 @@ public sealed partial class DurableDeploymentPlanningTests
         Assert.False(await verify.ActionIntents.AnyAsync(x => x.Generation == accepted.Generation.Value));
         Assert.False(await verify.GenerationStageCheckpoints.AnyAsync(x => x.Generation == accepted.Generation.Value));
         Assert.All(await verify.OwnedObjects.AsNoTracking().ToArrayAsync(), x => Assert.Equal(scenario.Commit.Generation.Value, x.Generation));
+        await verify.DisposeAsync();
+        var configuration = ConfigurationPreparation(restarted).Preparation;
+        var updateHandler = new UpdateSubmissionFixture(); var identity = new IdentityFixture { Exists = true }; var create = new ConfiguredSubmissionFixture();
+        var continuation = new InternalDurableActions(contexts, [create, identity, updateHandler], restarted.GetServices<IProviderConfigurationCodec>(),
+            restarted.GetServices<IExternalOperationOutputContract>(), restarted.GetRequiredService<DurableActionAdmission>(),
+            restarted.GetRequiredService<DurableOperationSerialization>(), scenario.Time, configurationPreparation: configuration);
+        var publication = new InternalRuntimePublication(contexts, configuration, continuation, scenario.Time);
+        var submitter = new PostgreSqlWorkloadSubmission(contexts, configuration, continuation, new(contexts, configuration, continuation, identity.Contract.Action),
+            new(publication), restarted.GetRequiredService<DurableOperationSerialization>(), new(), InternalDeploymentAction.Create);
+        var submitted = await submitter.SubmitAsync(accepted.DeploymentId, accepted.Generation, "operator", default);
+        Assert.True(submitted.Outcome == "submitted", submitted.Outcome + "/" + submitted.Stage + "/" + submitted.Reason);
+        var completed = await BatchFacade(restarted, scenario, continuation, create, identity).WaitAsync(accepted.DeploymentId, accepted.Generation,
+            "public-image-update-complete", "operator", new(MaximumRounds: 1), null, default);
+        Assert.True(completed.CurrentReady); Assert.True(completed.CurrentApplied, completed.CompletionReason);
+        Assert.Equal(1, updateHandler.Writes); Assert.Equal(0, create.Writes);
+        await using var final = await contexts.CreateDbContextAsync();
+        Assert.Equal(accepted.Generation.Value, (await final.ApplicationDeployments.AsNoTracking().SingleAsync()).AppliedGeneration);
+        Assert.All(await final.OwnedObjects.AsNoTracking().ToArrayAsync(), x => Assert.Equal(scenario.Commit.Generation.Value, x.Generation));
+        Assert.Equal(initial ? 0 : 1, await final.ResourceManagement.CountAsync());
     }
 
     [Theory]

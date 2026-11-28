@@ -2,6 +2,8 @@ using Haby.Application;
 using Haby.Domain;
 using Haby.Kubernetes;
 using Haby.Persistence.PostgreSql;
+using k8s;
+using k8s.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -10,14 +12,18 @@ namespace Haby.PostgreSql.IntegrationTests;
 
 public sealed partial class DurableDeploymentPlanningTests
 {
-    private sealed class ConfiguredSubmissionFixture : IInternalActionHandler, IInternalReadinessHandler
+    private sealed class ConfiguredSubmissionFixture : IInternalActionHandler, IInternalReadinessHandler, IInternalRecipientObserver,
+        IInternalWorkloadUpdatePlanner, IInternalWorkloadCorrectionPlanner
     {
         private readonly InternalDeploymentAction adapter = new(null!);
         internal int Writes, Reads;
         internal bool LoseResponse;
         internal bool Pending;
+        internal bool ProgressDeadlineExceeded;
         internal bool DistinctOwnedUids;
         internal int ReadinessReads;
+        internal bool OldRecipients { get; set; }
+        internal int RecipientReads;
         internal Func<CancellationToken, Task>? BeforeRead;
         public int ObservationSeconds(string intent, string receipt) => adapter.ObservationSeconds(intent, receipt);
         public bool ValidateObservation(string intent, string receipt, RolloutObservation observation) => adapter.ValidateObservation(intent, receipt, observation);
@@ -31,6 +37,9 @@ public sealed partial class DurableDeploymentPlanningTests
             var count = Pending ? 0 : intent.Target.Replicas;
             obj["status"] = new System.Text.Json.Nodes.JsonObject { ["observedGeneration"] = saved.KubernetesGeneration,
                 ["replicas"] = count, ["updatedReplicas"] = count, ["readyReplicas"] = count, ["availableReplicas"] = count };
+            if (ProgressDeadlineExceeded)
+                obj["status"]!["conditions"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+                { ["type"] = "Progressing", ["status"] = "False", ["reason"] = "ProgressDeadlineExceeded" });
             return DeploymentReadiness.Evaluate(obj, intent, saved);
         }
         public InternalActionContract Contract => adapter.Contract;
@@ -42,6 +51,38 @@ public sealed partial class DurableDeploymentPlanningTests
         public bool Validate(InternalActionContext context, string payload) => adapter.Validate(context, payload);
         public bool ValidateReceipt(InternalActionContext context, string payload, string receipt, bool observation) => adapter.ValidateReceipt(context, payload, receipt, observation);
         public InternalObjectConfirmation? ObjectConfirmation(InternalActionContext context, string payload, string receipt) => adapter.ObjectConfirmation(context, payload, receipt);
+        public DurableActionPayload CaptureUpdate(InternalActionContext previous, DurablePlanningInputs target, string version, string intent, string receipt) =>
+            adapter.CaptureUpdate(previous, target, version, intent, receipt);
+        public CorrectiveConfirmedObject CaptureConfirmedObject(InternalActionContext previous, string intent, string receipt) => adapter.CaptureConfirmedObject(previous, intent, receipt);
+        public CorrectiveImageDelta CaptureCorrection(DurablePlanningInputs previous, string previousVersion, DurablePlanningInputs target, string version, ProviderInput.Workload subject) =>
+            adapter.CaptureCorrection(previous, previousVersion, target, version, subject);
+        public int MaximumObservationCalls => 5;
+        public ValueTask<RecipientObservation> ObserveRecipientsAsync(InternalActionContext context, string intent, string receipt, RecipientObservationOptions options, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested(); RecipientReads++;
+            var accepted = DeploymentIntents.Decode(intent); var confirmed = DeploymentIntents.DecodeReceipt(receipt);
+            var body = DeploymentObjects.Read(DeploymentObjects.Create(accepted));
+            var target = KubernetesJson.Deserialize<V1PodTemplateSpec>(body["spec"]!["template"]!.ToJsonString());
+            var sets = new V1ReplicaSetList { Metadata = new() { ResourceVersion = "create-sets" }, Items = [] };
+            var pods = new V1PodList { Metadata = new() { ResourceVersion = "create-pods" }, Items = [] };
+            void Add(string name, V1PodTemplateSpec template)
+            {
+                sets.Items.Add(new() { Metadata = new() { Name = name, Uid = name, NamespaceProperty = accepted.Namespace,
+                    OwnerReferences = [new() { ApiVersion = "apps/v1", Kind = "Deployment", Name = confirmed.Name, Uid = confirmed.Uid, Controller = true }] },
+                    Spec = new() { Template = template } });
+                pods.Items.Add(new() { Metadata = new() { Name = name + "-pod", Uid = name + "-pod", NamespaceProperty = accepted.Namespace,
+                    OwnerReferences = [new() { ApiVersion = "apps/v1", Kind = "ReplicaSet", Name = name, Uid = name, Controller = true }] }, Spec = template.Spec });
+            }
+            Add("create-target", target);
+            if (OldRecipients)
+            {
+                var old = KubernetesJson.Deserialize<V1PodTemplateSpec>(KubernetesJson.Serialize(target));
+                old.Spec.Containers.Single(x => x.Name == accepted.Target.Container).Image = "registry.example/app:old-recipient";
+                Add("create-old", old);
+            }
+            return ValueTask.FromResult(DeploymentRecipients.Evaluate(accepted, confirmed, sets, pods, options));
+        }
+        public bool ValidateRecipients(string intent, string receipt, RecipientObservation observation) => adapter.ValidateRecipients(intent, receipt, observation);
         private InternalActionResult Confirm(string payload, bool observation)
         {
             var i = DeploymentIntents.Decode(payload);

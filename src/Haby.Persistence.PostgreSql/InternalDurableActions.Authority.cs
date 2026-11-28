@@ -37,7 +37,12 @@ internal sealed partial class InternalDurableActions
         var matches = handlers.Where(x => x.Contract.Subject == contract && x.Contract.ProviderKind == instance.ProviderKindId &&
             x.Contract.Configuration == revision.ConfigurationShapeId && x.Contract.Implementation == revision.ImplementationId && x.Contract.Action == action).ToArray();
         if (matches is not [var handler]) throw new InvalidDataException("Exact action handler unavailable or ambiguous.");
-        if ((DurableOperationGraphCodec.Decode(source.GraphJson).WorkloadUpdate is not null) != handler.UpdatesObject)
+        var stageGraph = DurableOperationGraphCodec.Decode(source.GraphJson);
+        var correctionMember = subject is ProviderInput.Workload correctiveSubject ? stageGraph.Correction?.Document.Members
+            .Single(x => x.Component == correctiveSubject.Component.Value && x.Workload == correctiveSubject.Id.Value) : null;
+        var updatesObject = correctionMember is null ? stageGraph.WorkloadUpdate is not null :
+            correctionMember.State == "ConfirmedOwned" && !handler.EstablishesIdentity;
+        if (updatesObject != handler.UpdatesObject)
             throw new InvalidDataException("Action is not authorized for this generation stage.");
         var readers = typedCodecs.Where(x => x.ProviderKindId == instance.ProviderKindId && x.ShapeId == revision.ConfigurationShapeId && x.PayloadFormatVersion == revision.PayloadFormatVersion).ToArray();
         if (readers is not [var codec]) throw new InvalidDataException("Exact action configuration codec unavailable.");

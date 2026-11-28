@@ -11,8 +11,26 @@ public sealed partial class ManifestCatalogDbContext
     {
         if (ChangeTracker.Entries<DurableOperationAttemptRow>().Any(x => x.State == EntityState.Modified && x.Property(p => p.Actor).IsModified))
             throw new InvalidOperationException("Action audit is immutable.");
-        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or ManagedObjectStateRow or RuntimePublicationReceiptRow &&
+        if (ChangeTracker.Entries().Any(x => x.Entity is DurableActionIntentRow or DurableActionObservationRow or InternalPlanInputRow or WorkloadConfigurationRecipientRow or InstallationIdentityRow or ManagedWorkloadRow or OwnedObjectRow or RuntimePublicationReceiptRow &&
             x.State is EntityState.Modified or EntityState.Deleted)) throw new InvalidOperationException("Action history is immutable.");
+        foreach (var entry in ChangeTracker.Entries<ManagedObjectStateRow>())
+        {
+            // The immutable intent/output/attempt and ObjectTransitions checkpoint keep
+            // historical confirmation. This one projection may advance only from its
+            // exact prior current operation; its target identity and role never move.
+            if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified &&
+                (entry.Properties.Any(p => p.IsModified && p.Metadata.Name is not (nameof(ManagedObjectStateRow.OriginGeneration) or
+                    nameof(ManagedObjectStateRow.OriginOperation) or nameof(ManagedObjectStateRow.Generation) or
+                    nameof(ManagedObjectStateRow.OperationId) or nameof(ManagedObjectStateRow.Payload))) ||
+                 entry.Entity.Generation <= entry.OriginalValues.GetValue<long>(nameof(ManagedObjectStateRow.Generation)) ||
+                 entry.Entity.OriginGeneration != entry.OriginalValues.GetValue<long>(nameof(ManagedObjectStateRow.Generation)) ||
+                 entry.Entity.OriginOperation != entry.OriginalValues.GetValue<string>(nameof(ManagedObjectStateRow.OperationId))))
+                throw new InvalidOperationException("Current object projection requires an exact forward transition.");
+            if (entry.State == EntityState.Modified && (Database.CurrentTransaction is null ||
+                !ChangeTracker.Entries<OperationOutputRow>().Any(output => output.State == EntityState.Added &&
+                    output.Entity.DeploymentId == entry.Entity.DeploymentId && output.Entity.Generation == entry.Entity.Generation && output.Entity.OperationId == entry.Entity.OperationId)))
+                throw new InvalidOperationException("Current object projection must accompany its confirmed receipt transaction.");
+        }
         foreach (var entry in ChangeTracker.Entries<RuntimeIdentityBindingRow>())
         {
             if (entry.State == EntityState.Deleted || entry.State == EntityState.Modified &&

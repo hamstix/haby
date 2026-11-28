@@ -18,12 +18,12 @@ foreach($name in @('full','negative')){
     if($parsed.Status -cne 'valid' -or $parsed.HasFailure -ne ($name -ceq 'negative')){throw 'Whole configured caller envelope exceeds diagnostic budget or loses failure.'}
     if($parsed.Records.Count -gt 256 -or $bytes -gt 1048576){throw 'Configured envelope budget widened.'}
     if(($parsed.Records -join "`n") -match 'protected-secret'){throw 'Protected text survived.'}
-    $actual=@($parsed.Records | Where-Object {$_ -cmatch '^PASS configured-[CRABU][0-9]{2}-'})
+    $actual=@($parsed.Records | Where-Object {$_ -cmatch '^PASS configured-[CRABUX][0-9]{2}-'})
     $ledger=Get-Content "$PSScriptRoot/../tests/Haby.PostgreSql.IntegrationTests/suite-gate-map.json" -Raw | ConvertFrom-Json
     $expected=@($ledger.entries | Where-Object { $_.gate -ceq 'kubernetes-configured-deployment' -and $_.suite -ceq 'api-consumer' })
     $cases=@(foreach($pass in $actual){[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("Haby.Kubernetes.Qualification.ConfiguredDeploymentCases.Run`n"+$pass.Substring(16)))).ToLowerInvariant()})
-    if($cases.Count -ne 39 -or @($cases | Select-Object -Unique).Count -ne 39 -or
-        @($expected | Where-Object {$_.case -cnotin $cases}).Count -or $expected.Count -ne 39){throw 'Source caller envelope lost or duplicated mandatory case coverage.'}
+    if($cases.Count -ne 40 -or @($cases | Select-Object -Unique).Count -ne 40 -or
+        @($expected | Where-Object {$_.case -cnotin $cases}).Count -or $expected.Count -ne 40){throw 'Source caller envelope lost or duplicated mandatory case coverage.'}
     foreach($proof in @('PASS configured-owned-namespace-absent','PASS configured-owned-catalog-cleanup','Diagnostic workload: configured retirement DrainComplete')){
         if($proof -cnotin $parsed.Records){throw 'Whole configured envelope lost mandatory cleanup proof.'}
     }
