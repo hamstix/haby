@@ -207,7 +207,8 @@ public sealed partial class PostgreSqlDurableDeploymentPlanner(
         }
         if (!internalEffects && !DurableActionAdmission.SupportsPilotShape(spec)) return new(DurablePlanStatus.UnsupportedShape);
         if (internalEffects && (!spec.Components.Values.Any(x => x.Workloads.Count > 0) ||
-            baseline is null && !row.ExpectedAbsence || baseline is not null && spec.Resources.Count == 0 && !workloadUpdate))
+            baseline is null && (!row.ExpectedAbsence || mode == DeploymentAdmissionMode.Operator && spec.Resources.Count != 0) ||
+            baseline is not null && spec.Resources.Count == 0 && !workloadUpdate))
             return new(DurablePlanStatus.UnsupportedShape);
         var emptyStage = internalEffects && spec.Resources.Count == 0;
         ProviderConfigurationRevisionRow? revisionRow = null;
