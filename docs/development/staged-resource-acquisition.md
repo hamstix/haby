@@ -2,13 +2,15 @@
 
 Authority: [ADR-065](../adr/0065-explicit-resource-stage-before-workload-advance.md),
 [issue #325](https://github.com/hamstix/haby/issues/325), ADRs 033/035/052/062/063/064
-and current CONTRIBUTING. Queue: verified #319 merge -> #325 -> #320 CLI and
-integrated operator rehearsal. The decision is accepted; runtime is not implemented
+and current CONTRIBUTING. Queue: verified completion and merge of the full #319 runtime activation (not an
+internal prerequisite PR) -> completed #325 -> #320 CLI and integrated operator
+rehearsal. The decision is accepted; runtime is not implemented
 by these documents. Current #319 work continues unchanged.
 
 ## Code-agent task
 
-Start an isolated topic branch from verified main after #319 is merged. Preserve
+Start an isolated topic branch from verified main after verified completion and
+merge of the full #319 runtime activation (not an internal prerequisite PR). Preserve
 other agents' work and the existing exact-SHA evidence. Inventory public protected
 acquisition intake, SupportsInitialObservationComposition, the PostgreSQL protected
 preparer, InternalResourceStage.IsInitialCreate, initial shape admission, Commit,

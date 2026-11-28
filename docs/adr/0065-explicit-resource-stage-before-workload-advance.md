@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-11-28
 - Extends: [ADR-052](0052-corrective-generations-for-incomplete-workload-rollout.md), [ADR-062](0062-existing-resource-import-and-attachment.md), [ADR-063](0063-resource-capabilities-rendering-and-provider-status.md) and [ADR-064](0064-composable-resource-acquisition-transitions.md)
-- Implementation: [#325](https://github.com/hamstix/haby/issues/325), a separate P3 slice after verified completion of #319 and before #320; this decision does not claim runtime support or expand #319.
+- Implementation: [#325](https://github.com/hamstix/haby/issues/325), a separate P3 slice after verified completion and merge of the full #319 runtime activation (not an internal prerequisite PR) and before #320; this decision does not claim runtime support or expand #319.
 
 ## Context
 
@@ -77,8 +77,9 @@ is authorized by this decision.
 
 ## Delivery and evidence
 
-Implement after verified #319 merge and before #320 CLI and integrated operator
-rehearsal. Do not interrupt #319 or duplicate its author/reviewer. Code and review
+Implement after verified completion and merge of the full #319 runtime activation
+(not an internal prerequisite PR), then complete #325 before #320 CLI and integrated
+operator rehearsal. Do not interrupt #319 or duplicate its author/reviewer. Code and review
 cards are in [the staged acquisition guide](../development/staged-resource-acquisition.md).
 Use existing fixtures and CI venues, relevant real PostgreSQL tests and fixed
 smokes, current mandatory checks and real Kubernetes evidence; no load or new
