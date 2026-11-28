@@ -135,4 +135,3 @@ internal static partial class UpdateRetirementCompletion
             throw new InvalidDataException("Unexplained corrective CREATE inventory.");
     }
 }
-
